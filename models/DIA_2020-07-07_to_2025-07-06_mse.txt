@@ -1,0 +1,3 @@
+Mean Squared Error: 0.000121
+Trained on: DIA_2020-07-07_to_2025-07-06.csv
+Date: 2025-07-08 16:04:14

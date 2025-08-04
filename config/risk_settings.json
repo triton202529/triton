@@ -1,0 +1,5 @@
+{
+  "max_allocation_per_trade": 0.05,
+  "max_open_positions": 15,
+  "restricted_tickers": ["GME", "AMC", "PENN"]
+}

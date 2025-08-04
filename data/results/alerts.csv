@@ -1,0 +1,4 @@
+date,ticker,alert_type,description
+2025-07-27,AAPL,Volatility Spike,AAPL had a 5% move today with high volume.
+2025-07-27,TSLA,Earnings Alert,TSLA is reporting earnings after market close.
+2025-07-27,NVDA,Price Breakout,NVDA broke above 52-week high resistance.
