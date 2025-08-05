@@ -4,9 +4,10 @@ import time
 import random
 import pandas as pd
 from tqdm import tqdm
+import yfinance as yf
 from pathlib import Path
 from datetime import datetime, timedelta
-import yfinance as yf
+import shutil
 
 # Allow importing from the parent directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -22,10 +23,21 @@ TICKERS = [
     "WMT", "HD", "DIS", "T", "PFE", "ABBV", "MRK"
 ]
 
-OUTPUT_FILE = "data/processed/stock_data.parquet"
+PROCESSED_FILE = "data/processed/stock_data.parquet"
 FAILED_LOG = "data/logs/failed_tickers.txt"
-os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+RESULTS_DIR = "data/results"
+
+# Ensure folders exist
+os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
 os.makedirs(os.path.dirname(FAILED_LOG), exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# 🔹 Clear old files in data/results/
+for file in os.listdir(RESULTS_DIR):
+    file_path = os.path.join(RESULTS_DIR, file)
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+print("🧹 Cleared old files from data/results/")
 
 def fetch_data(ticker, retries=3, wait=2):
     for attempt in range(1, retries + 1):
@@ -81,6 +93,10 @@ def main():
         try:
             df = add_technical_indicators(df, spy_df)
             enhanced_frames.append(df)
+
+            # Save each ticker's file to data/results/
+            output_path = os.path.join(RESULTS_DIR, f"{ticker}.parquet")
+            df.to_parquet(output_path, index=False)
         except Exception as e:
             print(f"⚠️ Skipping {ticker} due to indicator error: {e}")
 
@@ -89,8 +105,9 @@ def main():
         return
 
     final_df = pd.concat(enhanced_frames).dropna()
-    final_df.to_parquet(OUTPUT_FILE, index=False)
-    print(f"✅ Saved processed data to: {OUTPUT_FILE}")
+    final_df.to_parquet(PROCESSED_FILE, index=False)
+    print(f"✅ Saved merged dataset to: {PROCESSED_FILE}")
+    print(f"✅ Saved individual ticker files to: {RESULTS_DIR}")
 
 if __name__ == "__main__":
     main()
