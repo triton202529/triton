@@ -1,13 +1,9 @@
-# services/train_model.py
-
 import pandas as pd
 import os
-import subprocess
 from sklearn.ensemble import RandomForestRegressor
 
 # Paths
 RESULTS_DIR = "data/results"
-PROCESSED_DIR = "data/processed"
 PREDICTIONS_DIR = "data/predictions"
 FUNDAMENTALS_PATH = os.path.join(RESULTS_DIR, "fundamentals.csv")
 SCORES_PATH = os.path.join(RESULTS_DIR, "stock_scores.csv")  # ✅ fixed filename
@@ -18,58 +14,30 @@ os.makedirs(PREDICTIONS_DIR, exist_ok=True)
 
 print("🧠 Starting model training with feature importance extraction...")
 
-# 🔹 Step 1: Ensure price data exists
-if not any(f.endswith(".parquet") and f != "stock_data.parquet" for f in os.listdir(RESULTS_DIR) if os.path.exists(RESULTS_DIR)):
-    print(f"⚠️ No ticker .parquet files found in {RESULTS_DIR} — running fetch_and_prepare.py...")
-    try:
-        subprocess.run(["python", "scripts/fetch_and_prepare.py"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to run fetch_and_prepare.py: {e}")
-        exit(1)
-
-# 🔹 Step 2: Ensure fundamentals.csv exists
+# Load fundamentals
 if not os.path.exists(FUNDAMENTALS_PATH):
-    print(f"⚠️ {FUNDAMENTALS_PATH} not found — running fetch_fundamentals.py...")
-    try:
-        subprocess.run(["python", "services/fetch_fundamentals.py"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to run fetch_fundamentals.py: {e}")
-        exit(1)
-
-if not os.path.exists(FUNDAMENTALS_PATH):
-    print(f"❌ fundamentals.csv still not found at {FUNDAMENTALS_PATH} after running fetch_fundamentals.py")
+    print(f"❌ fundamentals.csv not found at {FUNDAMENTALS_PATH}")
     exit(1)
-
 fundamentals_df = pd.read_csv(FUNDAMENTALS_PATH)
 fundamentals_df["ticker"] = fundamentals_df["ticker"].str.upper()
 
-# 🔹 Step 3: Ensure stock_scores.csv exists
+# Load scores
 if not os.path.exists(SCORES_PATH):
-    print(f"⚠️ {SCORES_PATH} not found — running score_stocks.py...")
-    try:
-        subprocess.run(["python", "services/score_stocks.py"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to run score_stocks.py: {e}")
-        exit(1)
-
-if not os.path.exists(SCORES_PATH):
-    print(f"❌ stock_scores.csv still not found at {SCORES_PATH} after running score_stocks.py")
+    print(f"❌ stock_scores.csv not found at {SCORES_PATH} — run score_stocks.py first")
     exit(1)
-
 scores_df = pd.read_csv(SCORES_PATH)
 scores_df["ticker"] = scores_df["ticker"].str.upper()
 
-# 🔹 Step 4: Get all per-ticker .parquet files
+# Collect all ticker parquet files
 parquet_files = [
     f for f in os.listdir(RESULTS_DIR)
     if f.endswith(".parquet") and f != "stock_data.parquet"
 ]
 
 if not parquet_files:
-    print(f"❌ No .parquet files found in {RESULTS_DIR} even after running fetch_and_prepare.py")
+    print(f"❌ No .parquet files found in {RESULTS_DIR} — run fetch_and_prepare.py first")
     exit(1)
 
-# 🔹 Step 5: Train model for each ticker
 all_feature_importance = []
 
 for file in parquet_files:
@@ -80,20 +48,30 @@ for file in parquet_files:
         df = pd.read_parquet(file_path)
 
         if df.empty or len(df) < 30:
-            print(f"⚠️ Skipping {ticker} — not enough data")
-            continue
+            print(f"⚠️ {ticker}: not enough data, but proceeding with available records")
 
         df = df.sort_values("date")
         df["target"] = df["close"].shift(-1)
         df.dropna(inplace=True)
 
-        # Merge fundamental + score data
+        # Merge fundamentals (fill defaults if missing)
         fund_row = fundamentals_df[fundamentals_df["ticker"] == ticker]
-        score_row = scores_df[scores_df["ticker"] == ticker]
+        if fund_row.empty:
+            print(f"⚠️ Missing fundamentals for {ticker} — using defaults")
+            fund_row = pd.DataFrame([{
+                "ticker": ticker,
+                "pe_ratio": 15,
+                "eps": 5,
+                "market_cap": 1e10,
+                "pb_ratio": 1.5,
+                "dividend_yield": 0
+            }])
 
-        if fund_row.empty or score_row.empty:
-            print(f"⚠️ Skipping {ticker} — missing fundamentals or score")
-            continue
+        # Merge scores (fill defaults if missing)
+        score_row = scores_df[scores_df["ticker"] == ticker]
+        if score_row.empty:
+            print(f"⚠️ Missing score for {ticker} — using default score=50")
+            score_row = pd.DataFrame([{"ticker": ticker, "total_score": 50}])
 
         # Add fundamentals + score to dataset
         for col in ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield"]:
@@ -106,13 +84,15 @@ for file in parquet_files:
             "pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield", "total_score"
         ]
 
-        if not all(col in df.columns for col in base_cols):
-            print(f"⚠️ Skipping {ticker} — missing OHLCV columns")
-            continue
+        # Fill missing OHLCV columns with zeros
+        for col in base_cols:
+            if col not in df.columns:
+                print(f"⚠️ {ticker}: Missing {col}, filling with 0")
+                df[col] = 0
 
         # Train model
         X = df[feature_cols].fillna(0)
-        y = df["target"]
+        y = df["target"].fillna(df["target"].median())  # fill missing targets with median
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X, y)
         df["predicted_close"] = model.predict(X)
@@ -136,12 +116,12 @@ for file in parquet_files:
         })
         all_feature_importance.append(importance_df)
 
-        print(f"✅ Trained + feature importance extracted for {ticker}")
+        print(f"✅ Trained {ticker} + feature importance extracted")
 
     except Exception as e:
         print(f"❌ Error processing {ticker}: {e}")
 
-# 🔹 Step 6: Save all feature importances combined
+# Save all feature importances combined
 if all_feature_importance:
     combined = pd.concat(all_feature_importance, ignore_index=True)
     combined.to_csv(FEATURES_OUT_PATH, index=False)

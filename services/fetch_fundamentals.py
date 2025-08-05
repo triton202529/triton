@@ -3,38 +3,15 @@ import pandas as pd
 import numpy as np
 import os
 
-processed_path = "data/processed/stock_data.parquet"
+processed_path = "data/results"  # now reading tickers from results dir
 output_path = "data/results/fundamentals.csv"
 
-# Ensure directories exist
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-# Load tickers from processed data or fallback list
-tickers = []
-if os.path.exists(processed_path):
-    df = pd.read_parquet(processed_path)
-
-    # Try common column names
-    possible_cols = ["ticker", "Ticker", "symbol", "Symbol"]
-    found_col = None
-    for col in possible_cols:
-        if col in df.columns:
-            found_col = col
-            break
-
-    # If still no ticker column, try to get from index or multi-index
-    if found_col:
-        tickers = df[found_col].unique().tolist()
-    elif isinstance(df.index, pd.MultiIndex) and "ticker" in df.index.names:
-        tickers = df.index.get_level_values("ticker").unique().tolist()
-    else:
-        print("⚠️ No ticker column found — using fallback list.")
-        tickers = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "META", "NVDA", "JPM", "BRK-B"]
-else:
-    tickers = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "META", "NVDA", "JPM", "BRK-B"]
+# Get tickers from per-ticker parquet files in results dir
+tickers = [f.replace(".parquet", "") for f in os.listdir(processed_path) if f.endswith(".parquet")]
 
 fundamentals = []
-
 print(f"📡 Fetching fundamentals for {len(tickers)} tickers...")
 
 for ticker in tickers:
@@ -50,26 +27,25 @@ for ticker in tickers:
         pb_ratio = info.get("priceToBook")
         dividend_yield = info.get("dividendYield")
 
-        # Synthetic values if missing
-        if all(v is None for v in [pe_ratio, eps, revenue, market_cap, pb_ratio, dividend_yield]):
-            print(f"⚠️ No fundamentals for {ticker} — using synthetic placeholders")
-            pe_ratio = np.random.uniform(5, 25)
-            eps = np.random.uniform(1, 8)
-            revenue = np.random.uniform(1e8, 5e11)
-            market_cap = np.random.uniform(1e9, 1e12)
-            pb_ratio = np.random.uniform(0.5, 4)
-            dividend_yield = np.random.uniform(0, 4)
+        # Fill defaults if missing
+        if any(v is None for v in [pe_ratio, eps, revenue, market_cap, pb_ratio, dividend_yield]):
+            print(f"⚠️ Missing fundamentals for {ticker} — using defaults")
+            pe_ratio = pe_ratio if pe_ratio is not None else 15
+            eps = eps if eps is not None else 5
+            revenue = revenue if revenue is not None else 1e9
+            market_cap = market_cap if market_cap is not None else 1e10
+            pb_ratio = pb_ratio if pb_ratio is not None else 1.5
+            dividend_yield = dividend_yield if dividend_yield is not None else 0
 
-        # Generate a multi-factor score
         score = (
-            (1 / pe_ratio if pe_ratio else 0) * 0.25 +
-            (eps if eps else 0) * 0.25 +
-            (revenue / 1e9 if revenue else 0) * 0.25 +
-            (dividend_yield if dividend_yield else 0) * 0.25
+            (1 / pe_ratio) * 0.25 +
+            eps * 0.25 +
+            (revenue / 1e9) * 0.25 +
+            dividend_yield * 0.25
         )
 
         fundamentals.append({
-            "ticker": ticker,
+            "ticker": ticker.upper(),
             "pe_ratio": pe_ratio,
             "eps": eps,
             "revenue": revenue,
@@ -82,7 +58,6 @@ for ticker in tickers:
     except Exception as e:
         print(f"❌ Error fetching {ticker}: {e}")
 
-# Save
 df_out = pd.DataFrame(fundamentals)
 df_out.to_csv(output_path, index=False)
 print(f"✅ Fundamentals saved to {output_path}")
