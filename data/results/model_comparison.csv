@@ -1,0 +1,7 @@
+ticker,model,rmse,r2
+AAPL,"LinearRegression",3.21,0.89
+AAPL,"RandomForest",2.97,0.91
+AAPL,"XGBoost",2.85,0.92
+GOOGL,"LinearRegression",5.12,0.84
+GOOGL,"RandomForest",4.75,0.88
+GOOGL,"XGBoost",4.43,0.90

@@ -5,12 +5,14 @@ import os
 from sklearn.ensemble import RandomForestRegressor
 
 # Paths
-INPUT_DIR = "data/processed"
-OUTPUT_DIR = "data/predictions"
-FUNDAMENTALS_PATH = os.path.join(INPUT_DIR, "fundamentals.csv")
-SCORES_PATH = "data/results/scored_stocks.csv"
-FEATURES_OUT_PATH = "data/results/feature_importance.csv"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+RESULTS_DIR = "data/results"
+PREDICTIONS_DIR = "data/predictions"
+FUNDAMENTALS_PATH = os.path.join(RESULTS_DIR, "fundamentals.csv")
+SCORES_PATH = os.path.join(RESULTS_DIR, "scored_stocks.csv")
+FEATURES_OUT_PATH = os.path.join(RESULTS_DIR, "feature_importance.csv")
+
+# Ensure output directory exists
+os.makedirs(PREDICTIONS_DIR, exist_ok=True)
 
 print("🧠 Starting model training with feature importance extraction...")
 
@@ -28,17 +30,21 @@ if not os.path.exists(SCORES_PATH):
 scores_df = pd.read_csv(SCORES_PATH)
 scores_df["ticker"] = scores_df["ticker"].str.upper()
 
-# Collect all ticker files (excluding merged parquet)
-parquet_files = [f for f in os.listdir(INPUT_DIR) if f.endswith(".parquet") and f != "stock_data.parquet"]
+# Collect all ticker parquet files (predictions use stock_data split per ticker)
+parquet_files = [
+    f for f in os.listdir(RESULTS_DIR)
+    if f.endswith(".parquet") and f != "stock_data.parquet"
+]
+
 if not parquet_files:
-    print(f"❌ No .parquet files found in {INPUT_DIR}")
+    print(f"❌ No .parquet files found in {RESULTS_DIR}")
     exit(1)
 
 all_feature_importance = []
 
 for file in parquet_files:
     ticker = file.replace(".parquet", "").upper()
-    file_path = os.path.join(INPUT_DIR, file)
+    file_path = os.path.join(RESULTS_DIR, file)
 
     try:
         df = pd.read_parquet(file_path)
@@ -66,7 +72,9 @@ for file in parquet_files:
 
         # Define features
         base_cols = ["open", "high", "low", "close", "volume"]
-        feature_cols = base_cols + ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield", "total_score"]
+        feature_cols = base_cols + [
+            "pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield", "total_score"
+        ]
 
         if not all(col in df.columns for col in base_cols):
             print(f"⚠️ Skipping {ticker} — missing OHLCV columns")
@@ -79,7 +87,7 @@ for file in parquet_files:
         model.fit(X, y)
         df["predicted_close"] = model.predict(X)
 
-        # Generate signal
+        # Generate signals
         df["signal"] = "HOLD"
         df.loc[df["predicted_close"] > df["close"], "signal"] = "BUY"
         df.loc[df["predicted_close"] < df["close"], "signal"] = "SELL"
@@ -87,7 +95,7 @@ for file in parquet_files:
         # Save predictions
         output_df = df[["date", "close", "predicted_close", "signal"]].copy()
         output_df["ticker"] = ticker
-        output_path = os.path.join(OUTPUT_DIR, f"{ticker}_predictions.parquet")
+        output_path = os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet")
         output_df.to_parquet(output_path, index=False)
 
         # Save feature importances
@@ -103,7 +111,7 @@ for file in parquet_files:
     except Exception as e:
         print(f"❌ Error processing {ticker}: {e}")
 
-# Save feature importances
+# Save all feature importances combined
 if all_feature_importance:
     combined = pd.concat(all_feature_importance, ignore_index=True)
     combined.to_csv(FEATURES_OUT_PATH, index=False)
