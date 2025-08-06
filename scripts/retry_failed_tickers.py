@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from services.feature_generator import add_technical_indicators
 
 # Paths
-FAILED_INPUT_FILE = "data/logs/failed_tickers.unique.txt"
+FAILED_INPUT_FILE = "data/logs/failed_tickers_unique.txt"
 PROCESSED_FILE = "data/processed/retried_stock_data.parquet"
 RETRY_FAILED_LOG = "data/logs/failed_tickers_retry.txt"
 RESULTS_DIR = "data/results"
