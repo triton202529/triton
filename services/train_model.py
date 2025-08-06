@@ -8,88 +8,125 @@ PREDICTIONS_DIR = "data/predictions"
 FUNDAMENTALS_PATH = os.path.join(RESULTS_DIR, "fundamentals.csv")
 SCORES_PATH = os.path.join(RESULTS_DIR, "stock_scores.csv")
 FEATURES_OUT_PATH = os.path.join(RESULTS_DIR, "feature_importance.csv")
+SKIPPED_TICKERS_LOG = os.path.join(RESULTS_DIR, "skipped_tickers.csv")
 
+# Ensure output directory exists
 os.makedirs(PREDICTIONS_DIR, exist_ok=True)
 
 print("🧠 Starting model training with feature importance extraction...")
 
+# Prepare skipped tickers list
+skipped_tickers = []
+
 # Load fundamentals
-fundamentals_df = pd.read_csv(FUNDAMENTALS_PATH) if os.path.exists(FUNDAMENTALS_PATH) else pd.DataFrame()
-fundamentals_df["ticker"] = fundamentals_df.get("ticker", pd.Series()).str.upper()
+if not os.path.exists(FUNDAMENTALS_PATH) or os.path.getsize(FUNDAMENTALS_PATH) == 0:
+    print(f"❌ fundamentals.csv missing or empty at {FUNDAMENTALS_PATH}")
+    exit(1)
+fundamentals_df = pd.read_csv(FUNDAMENTALS_PATH)
+fundamentals_df["ticker"] = fundamentals_df["ticker"].str.upper()
 
 # Load scores
-scores_df = pd.read_csv(SCORES_PATH) if os.path.exists(SCORES_PATH) else pd.DataFrame()
-scores_df["ticker"] = scores_df.get("ticker", pd.Series()).str.upper()
+if not os.path.exists(SCORES_PATH) or os.path.getsize(SCORES_PATH) == 0:
+    print(f"❌ stock_scores.csv missing or empty at {SCORES_PATH} — run score_stocks.py first")
+    exit(1)
+scores_df = pd.read_csv(SCORES_PATH)
+scores_df["ticker"] = scores_df["ticker"].str.upper()
 
-# Ticker files
-parquet_files = [f for f in os.listdir(RESULTS_DIR) if f.endswith(".parquet") and f != "stock_data.parquet"]
+# Collect all ticker parquet files
+parquet_files = [
+    f for f in os.listdir(RESULTS_DIR)
+    if f.endswith(".parquet") and f != "stock_data.parquet"
+]
+
+if not parquet_files:
+    print(f"❌ No .parquet files found in {RESULTS_DIR} — run fetch_and_prepare.py first")
+    exit(1)
 
 all_feature_importance = []
 
 for file in parquet_files:
     ticker = file.replace(".parquet", "").upper()
     file_path = os.path.join(RESULTS_DIR, file)
+
     try:
-        df = pd.read_parquet(file_path).sort_values("date")
-        if df.empty:
-            print(f"⚠️ {ticker}: Empty dataset, skipping.")
+        df = pd.read_parquet(file_path)
+
+        if df.empty or len(df) < 30:
+            print(f"⚠️ {ticker}: Empty dataset or too few rows, skipping.")
+            skipped_tickers.append({"ticker": ticker, "reason": "Empty or insufficient data"})
             continue
 
-        df["target"] = df["close"].shift(-1).fillna(method="ffill")
+        df = df.sort_values("date")
+        df["target"] = df["close"].shift(-1)
+        df.dropna(inplace=True)
 
-        # Fundamentals defaults
+        # Merge fundamental + score data
         fund_row = fundamentals_df[fundamentals_df["ticker"] == ticker]
-        if fund_row.empty:
-            print(f"⚠️ Missing fundamentals for {ticker} — using defaults")
-            fund_row = pd.DataFrame([{
-                "ticker": ticker, "pe_ratio": 15, "eps": 5,
-                "market_cap": 1e10, "pb_ratio": 1.5, "dividend_yield": 0
-            }])
-
-        # Score defaults
         score_row = scores_df[scores_df["ticker"] == ticker]
-        if score_row.empty:
-            print(f"⚠️ Missing score for {ticker} — using default=50")
-            score_row = pd.DataFrame([{"ticker": ticker, "total_score": 50}])
 
-        # Add features
+        if fund_row.empty or score_row.empty:
+            print(f"⚠️ {ticker}: Missing fundamentals or score, skipping.")
+            skipped_tickers.append({"ticker": ticker, "reason": "Missing fundamentals or score"})
+            continue
+
+        # Add fundamentals + score to dataset
         for col in ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield"]:
             df[col] = fund_row.iloc[0][col]
         df["total_score"] = score_row.iloc[0]["total_score"]
 
+        # Define features
         base_cols = ["open", "high", "low", "close", "volume"]
-        for col in base_cols:
-            if col not in df.columns:
-                df[col] = 0
+        feature_cols = base_cols + [
+            "pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield", "total_score"
+        ]
 
-        X = df[base_cols + ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield", "total_score"]].fillna(0)
-        y = df["target"].fillna(df["target"].median())
+        if not all(col in df.columns for col in base_cols):
+            print(f"⚠️ {ticker}: Missing OHLCV columns, skipping.")
+            skipped_tickers.append({"ticker": ticker, "reason": "Missing OHLCV columns"})
+            continue
 
+        # Train model
+        X = df[feature_cols].fillna(0)
+        y = df["target"]
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X, y)
         df["predicted_close"] = model.predict(X)
 
+        # Generate signals
         df["signal"] = "HOLD"
         df.loc[df["predicted_close"] > df["close"], "signal"] = "BUY"
         df.loc[df["predicted_close"] < df["close"], "signal"] = "SELL"
 
         # Save predictions
-        df[["date", "close", "predicted_close", "signal"]].assign(ticker=ticker).to_parquet(
-            os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet"), index=False
-        )
+        output_df = df[["date", "close", "predicted_close", "signal"]].copy()
+        output_df["ticker"] = ticker
+        output_path = os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet")
+        output_df.to_parquet(output_path, index=False)
 
-        all_feature_importance.append(pd.DataFrame({
-            "ticker": ticker, "feature": X.columns, "importance": model.feature_importances_
-        }))
+        # Save feature importances
+        importance_df = pd.DataFrame({
+            "ticker": ticker,
+            "feature": feature_cols,
+            "importance": model.feature_importances_
+        })
+        all_feature_importance.append(importance_df)
 
         print(f"✅ Trained {ticker}")
 
     except Exception as e:
-        print(f"❌ Error processing {ticker}: {e}")
+        print(f"❌ {ticker}: Error processing — {e}")
+        skipped_tickers.append({"ticker": ticker, "reason": f"Error: {e}"})
 
-# Save feature importances
+# Save all feature importances combined
 if all_feature_importance:
-    pd.concat(all_feature_importance, ignore_index=True).to_csv(FEATURES_OUT_PATH, index=False)
-    print(f"📊 Feature importance saved to {FEATURES_OUT_PATH}")
+    combined = pd.concat(all_feature_importance, ignore_index=True)
+    combined.to_csv(FEATURES_OUT_PATH, index=False)
+    print(f"\n📊 Feature importance saved to: {FEATURES_OUT_PATH}")
 
-print("\n🏁 All models trained with feature importance extracted.")
+# Save skipped tickers log
+if skipped_tickers:
+    skipped_df = pd.DataFrame(skipped_tickers)
+    skipped_df.to_csv(SKIPPED_TICKERS_LOG, index=False)
+    print(f"📄 Skipped tickers log saved to: {SKIPPED_TICKERS_LOG}")
+
+print("\n🏁 All models trained with feature importance extraction.")

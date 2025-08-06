@@ -39,12 +39,17 @@ for file in os.listdir(RESULTS_DIR):
         os.remove(file_path)
 print("🧹 Cleared old files from data/results/")
 
+# Clear old failed tickers log
+with open(FAILED_LOG, "w") as log:
+    log.write("")
+
 def fetch_data(ticker, retries=3, wait=2):
     for attempt in range(1, retries + 1):
         try:
             print(f"\n📥 Fetching {ticker} (Attempt {attempt})...")
             ticker_obj = yf.Ticker(ticker)
-            df = ticker_obj.history(period="1y", interval="1d", auto_adjust=False)
+            # 🔹 Fetch 10 years of daily data
+            df = ticker_obj.history(period="10y", interval="1d", auto_adjust=False)
 
             if df.empty or df.isna().all().all():
                 raise ValueError("Empty or invalid DataFrame")
@@ -99,6 +104,8 @@ def main():
             df.to_parquet(output_path, index=False)
         except Exception as e:
             print(f"⚠️ Skipping {ticker} due to indicator error: {e}")
+            with open(FAILED_LOG, "a") as log:
+                log.write(f"{ticker} (indicator error)\n")
 
     if not enhanced_frames:
         print("❌ All feature generation failed. Nothing to save.")
@@ -108,6 +115,8 @@ def main():
     final_df.to_parquet(PROCESSED_FILE, index=False)
     print(f"✅ Saved merged dataset to: {PROCESSED_FILE}")
     print(f"✅ Saved individual ticker files to: {RESULTS_DIR}")
+
+    print("\n📄 Failed tickers log saved to:", FAILED_LOG)
 
 if __name__ == "__main__":
     main()
