@@ -1,7 +1,8 @@
 import pandas as pd
 import os
 
-signals_file = "data/results/signals.csv"
+# ✅ Use correct signal file
+signals_file = "data/results/signals_with_rationale.csv"
 output_dir = "data/results"
 os.makedirs(output_dir, exist_ok=True)
 
