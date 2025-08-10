@@ -1,3 +1,4 @@
+# services/backtest_signals.py
 import pandas as pd
 import os
 
@@ -111,14 +112,25 @@ for ticker in tickers:
         "return_pct": round(total_return, 2)
     })
 
-# Save results
-pd.DataFrame(trade_log).to_csv(f"{output_dir}/trade_log.csv", index=False)
-pd.DataFrame(portfolio_history).to_csv(f"{output_dir}/portfolio_history.csv", index=False)
-pd.DataFrame(summary).to_csv(f"{output_dir}/backtest_summary.csv", index=False)
+# Convert to DataFrames
+trade_log_df = pd.DataFrame(trade_log)
+portfolio_history_df = pd.DataFrame(portfolio_history)
+summary_df = pd.DataFrame(summary)
+
+# Save results with both backtest_ prefix and default dashboard files
+trade_log_df.to_csv(f"{output_dir}/backtest_trade_log.csv", index=False)
+portfolio_history_df.to_csv(f"{output_dir}/backtest_portfolio_history.csv", index=False)
+summary_df.to_csv(f"{output_dir}/backtest_summary.csv", index=False)
 df.to_csv(f"{output_dir}/strategy_vs_market.csv", index=False)
 
-print("✅ Backtest completed. Results saved to:")
-print("   📄 trade_log.csv")
-print("   📄 portfolio_history.csv")
+# ✅ Also overwrite main dashboard files
+trade_log_df.to_csv(f"{output_dir}/trade_log.csv", index=False)
+portfolio_history_df.to_csv(f"{output_dir}/portfolio_history.csv", index=False)
+
+print("✅ Backtest completed. Saved:")
+print("   📄 backtest_trade_log.csv")
+print("   📄 backtest_portfolio_history.csv")
 print("   📄 backtest_summary.csv")
 print("   📄 strategy_vs_market.csv")
+print("   📄 trade_log.csv (for dashboard)")
+print("   📄 portfolio_history.csv (for dashboard)")
