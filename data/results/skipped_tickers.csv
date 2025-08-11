@@ -1,41 +1,41 @@
 ticker,reason
-^GSPC,Empty or insufficient data
-MA,Empty or insufficient data
-GE,Empty or insufficient data
-C,Empty or insufficient data
-PEP,Empty or insufficient data
-JPM,Empty or insufficient data
-BAC,Empty or insufficient data
-GOOGL,Empty or insufficient data
-WMT,Empty or insufficient data
-^IXIC,Empty or insufficient data
-PG,Empty or insufficient data
-XOM,Empty or insufficient data
-^VIX,Empty or insufficient data
-AMD,Empty or insufficient data
-MRK,Empty or insufficient data
-AAPL,Empty or insufficient data
-BRK-B,Empty or insufficient data
-BLK,Empty or insufficient data
-UNH,Empty or insufficient data
-KO,Empty or insufficient data
-TSLA,Empty or insufficient data
-HD,Empty or insufficient data
-SCHW,Empty or insufficient data
-PFE,Empty or insufficient data
-DIS,Empty or insufficient data
-ABBV,Empty or insufficient data
-NFLX,Empty or insufficient data
-INTC,Empty or insufficient data
-MS,Empty or insufficient data
-WFC,Empty or insufficient data
-T,Empty or insufficient data
-GS,Empty or insufficient data
-META,Empty or insufficient data
-NVDA,Empty or insufficient data
-V,Empty or insufficient data
-MSFT,Empty or insufficient data
-CVX,Empty or insufficient data
-AMZN,Empty or insufficient data
-JNJ,Empty or insufficient data
-^DJI,Empty or insufficient data
+AAPL,Empty dataset or < 30 rows
+ABBV,Empty dataset or < 30 rows
+AMD,Empty dataset or < 30 rows
+AMZN,Empty dataset or < 30 rows
+BAC,Empty dataset or < 30 rows
+BLK,Empty dataset or < 30 rows
+BRK-B,Empty dataset or < 30 rows
+C,Empty dataset or < 30 rows
+CVX,Empty dataset or < 30 rows
+DIS,Empty dataset or < 30 rows
+GE,Empty dataset or < 30 rows
+GOOGL,Empty dataset or < 30 rows
+GS,Empty dataset or < 30 rows
+HD,Empty dataset or < 30 rows
+INTC,Empty dataset or < 30 rows
+JNJ,Empty dataset or < 30 rows
+JPM,Empty dataset or < 30 rows
+KO,Empty dataset or < 30 rows
+MA,Empty dataset or < 30 rows
+META,Empty dataset or < 30 rows
+MRK,Empty dataset or < 30 rows
+MS,Empty dataset or < 30 rows
+MSFT,Empty dataset or < 30 rows
+NFLX,Empty dataset or < 30 rows
+NVDA,Empty dataset or < 30 rows
+PEP,Empty dataset or < 30 rows
+PFE,Empty dataset or < 30 rows
+PG,Empty dataset or < 30 rows
+SCHW,Empty dataset or < 30 rows
+T,Empty dataset or < 30 rows
+TSLA,Empty dataset or < 30 rows
+UNH,Empty dataset or < 30 rows
+V,Empty dataset or < 30 rows
+WFC,Empty dataset or < 30 rows
+WMT,Empty dataset or < 30 rows
+XOM,Empty dataset or < 30 rows
+^DJI,Empty dataset or < 30 rows
+^GSPC,Empty dataset or < 30 rows
+^IXIC,Empty dataset or < 30 rows
+^VIX,Empty dataset or < 30 rows

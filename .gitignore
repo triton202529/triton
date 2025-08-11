@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+.env
+.DS_Store
+Thumbs.db
+
+# Outputs (don’t track)
+data/results/*.csv
+data/results/*.parquet
+data/predictions/*.parquet
+data/processed/*.parquet
+data/logs/*.txt
+
+# Keep folders
+!data/results/.gitkeep
+!data/predictions/.gitkeep
+!data/processed/.gitkeep
+!data/logs/.gitkeep
+!notebooks/.gitkeep
+
