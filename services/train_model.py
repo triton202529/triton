@@ -1,18 +1,14 @@
 # services/train_model.py
 # Multi-model training + Trade Rationale 2.0 (+ Confidence & Position Sizing)
-# Built-in retry pass:
-#   1) Rebuild from stock_data.parquet
-#   2) Optional live fetch via yfinance + feature generation (merged from your retry script)
+# NOTE: This version intentionally has **NO retry** and **NO live fetch**.
+# It only trains on tickers that already have valid per‑ticker parquet files
+# in data/results/{TICKER}.parquet. Any failures are logged to skipped_tickers.csv.
 
 import os
 import sys
-import math
 import argparse
-import time
-import random
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
 
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
@@ -25,29 +21,17 @@ try:
 except Exception:
     HAS_XGB = False
 
-# Optional yfinance (only used if --live-fetch)
-try:
-    import yfinance as yf  # type: ignore
-    HAS_YF = True
-except Exception:
-    HAS_YF = False
-
-# Allow importing from project root for feature generator
+# Allow importing from project root for feature generator (not used here, features are already in parquet)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from services.feature_generator import add_technical_indicators  # your existing helper
 
 # ---------- Paths ----------
 RESULTS_DIR = "data/results"
 PREDICTIONS_DIR = "data/predictions"
 LOGS_DIR = "data/logs"
-FAILED_LIST_DEFAULT = os.path.join(LOGS_DIR, "failed_tickers_unique.txt")
-RETRY_FAILED_LOG = os.path.join(LOGS_DIR, "failed_tickers_retry.txt")
-RETRIED_MERGED_OUT = "data/processed/retried_stock_data.parquet"
 
 FUNDAMENTALS_PATH = os.path.join(RESULTS_DIR, "fundamentals.csv")
 SCORES_PATH = os.path.join(RESULTS_DIR, "stock_scores.csv")
 NEWS_SENTIMENT_PATH = os.path.join(RESULTS_DIR, "news_sentiment.csv")  # optional
-STOCK_DATA_MERGED = os.path.join(RESULTS_DIR, "stock_data.parquet")    # optional backfill source
 
 FEATURES_OUT_PATH = os.path.join(RESULTS_DIR, "feature_importance.csv")
 SKIPPED_TICKERS_LOG = os.path.join(RESULTS_DIR, "skipped_tickers.csv")
@@ -59,23 +43,16 @@ LEGACY_SIGNALS_PATH = os.path.join(RESULTS_DIR, "signals.csv")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(PREDICTIONS_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
-os.makedirs(os.path.dirname(RETRIED_MERGED_OUT), exist_ok=True)
 
 # ---------- CLI ----------
 def parse_args():
-    p = argparse.ArgumentParser(description="Train models + rationale with built-in retry and optional live fetch.")
-    p.add_argument("--min-rows", type=int, default=30, help="Minimum rows on first pass")
-    p.add_argument("--retry-min-rows", type=int, default=20, help="Minimum rows on retry")
-    p.add_argument("--retry", action="store_true", help="Force a retry pass even if nothing skipped")
-    p.add_argument("--live-fetch", action="store_true", help="Enable yfinance fallback to fetch missing tickers")
-    p.add_argument("--failed-list", type=str, default=FAILED_LIST_DEFAULT, help="Path to failed tickers list")
-    p.add_argument("--sleep-min", type=float, default=0.5, help="Min sleep between live fetches (anti-rate-limit)")
-    p.add_argument("--sleep-max", type=float, default=2.5, help="Max sleep between live fetches")
+    p = argparse.ArgumentParser(description="Train models + rationale (no retry).")
+    p.add_argument("--min-rows", type=int, default=30, help="Minimum rows required per ticker parquet.")
     return p.parse_args()
 
 args = parse_args()
 
-print("🧠 Starting multi-model training with feature importance, model comparison, and Trade Rationale 2.0...")
+print("🧠 Starting multi-model training with feature importance, model comparison, and Trade Rationale 2.0 (no-retry)…")
 
 # ---------- Helpers ----------
 def compute_sma(series: pd.Series, window: int) -> pd.Series:
@@ -108,29 +85,37 @@ def pct_diff(a, b):
 
 def build_rationale_row(row, score_pct, sentiment_val):
     parts = []
+    # Trend
     if pd.notna(row.get("sma20")) and pd.notna(row.get("sma50")):
         parts.append("Uptrend (SMA20 > SMA50)" if row["sma20"] > row["sma50"] else "Downtrend (SMA20 < SMA50)")
+    # RSI
     rsi = row.get("rsi14")
     if pd.notna(rsi):
         if rsi <= 30: parts.append(f"RSI {rsi:.0f} (oversold)")
         elif rsi >= 70: parts.append(f"RSI {rsi:.0f} (overbought)")
         else: parts.append(f"RSI {rsi:.0f}")
+    # Volatility
     if pd.notna(row.get("atr14")) and pd.notna(row.get("close")) and row["close"] != 0:
         parts.append(f"Volatility {(row['atr14']/row['close']):.1%} (ATR/Price)")
+    # Fundamentals
     if pd.notna(row.get("pe_ratio")): parts.append(f"P/E {row['pe_ratio']:.1f}")
     if pd.notna(row.get("dividend_yield")) and row["dividend_yield"] > 0: parts.append(f"Dividend {row['dividend_yield']:.2%}")
+    # Score percentile
     if pd.notna(score_pct): parts.append(f"Score pct {score_pct:.0%}")
+    # Sentiment
     if pd.notna(sentiment_val): parts.append(f"Sentiment {sentiment_val:+.2f}")
+    # Pred edge
     if pd.notna(row.get("predicted_close")) and pd.notna(row.get("close")) and row["close"] != 0:
         parts.append(f"Predicted edge {pct_diff(row['predicted_close'], row['close']):.2%}")
     sig = row.get("signal", "HOLD")
     return f"{sig}: " + ", ".join(parts)
 
 def safe_percentile_rank(series: pd.Series, value):
-    if len(series) < 2 or pd.isna(value): return np.nan
+    if len(series) < 2 or pd.isna(value):
+        return np.nan
     return (series < value).mean()
 
-# ---------- Confidence & Position Size ----------
+# Confidence & position sizing (deterministic)
 def _nz(x, default=0.0):
     try:
         xv = float(x)
@@ -166,6 +151,7 @@ def compute_confidence_row(row):
     sent_norm  = (sent + 1.0) / 2.0
     score_norm = score / 100.0 if score > 1.0 else score
     qual = (0.5 * sent_norm + 0.5 * score_norm) if row.get("signal") == "BUY" else (0.5 * (1 - sent_norm) + 0.5 * (1 - score_norm))
+
     conf_raw = (0.45 * w_edge + 0.30 * trend + 0.10 * rsi_conf + 0.10 * qual) * vol_factor
     confidence = float(np.clip(conf_raw, 0.0, 1.0))
 
@@ -173,6 +159,7 @@ def compute_confidence_row(row):
     risk = max(atrp_clamped, 0.005)
     kelly_like = np.clip((k_edge / (2 * risk)), -0.10, 0.10)
     pos_size = float(np.clip(confidence * max(kelly_like, 0.0) * 0.5, 0.0, 0.05))
+
     return confidence, pos_size, edge
 
 # ---------- I/O helpers ----------
@@ -191,70 +178,6 @@ def load_ticker_parquet(ticker: str) -> pd.DataFrame:
             print(f"⚠️ {ticker}: could not read parquet ({e})")
     return pd.DataFrame()
 
-def rebuild_from_merged_stockdata(ticker: str) -> pd.DataFrame:
-    if not os.path.exists(STOCK_DATA_MERGED) or os.path.getsize(STOCK_DATA_MERGED) == 0:
-        return pd.DataFrame()
-    try:
-        merged = pd.read_parquet(STOCK_DATA_MERGED)
-    except Exception as e:
-        print(f"⚠️ Could not open stock_data.parquet: {e}")
-        return pd.DataFrame()
-    if "ticker" not in merged.columns:
-        tick_col = [c for c in merged.columns if c.lower() == "ticker"]
-        if tick_col: merged = merged.rename(columns={tick_col[0]: "ticker"})
-        else: return pd.DataFrame()
-    sub = merged[merged["ticker"].astype(str).str.upper() == ticker].copy()
-    return sub
-
-# ---------- Live fetch (from your retry script) ----------
-def fetch_yf_raw(ticker: str, retries=3, wait=2):
-    if not HAS_YF:
-        return None, "yfinance not installed"
-    for attempt in range(1, retries + 1):
-        try:
-            print(f"\n📥 Fetching {ticker} (Attempt {attempt})...")
-            df = yf.Ticker(ticker).history(period="10y", interval="1d", auto_adjust=False)
-            if df.empty or df.isna().all().all():
-                raise ValueError("Empty or invalid DataFrame")
-            df = df.reset_index()
-            df.columns = [c.lower().replace(" ", "_") for c in df.columns]
-            if "close" not in df.columns:
-                raise ValueError("Missing 'close' column")
-            df["ticker"] = ticker
-            return df, ""
-        except Exception as e:
-            print(f"⚠️ Error fetching {ticker}: {e}")
-            if attempt < retries:
-                print(f"⏳ Retrying in {wait} sec...")
-                time.sleep(wait)
-            else:
-                return None, str(e)
-
-def add_features_and_save(df: pd.DataFrame, ticker: str, spy_df: pd.DataFrame | None) -> pd.DataFrame:
-    try:
-        out = add_technical_indicators(df.copy(), spy_df if spy_df is not None else pd.DataFrame())
-        out_path = os.path.join(RESULTS_DIR, f"{ticker}.parquet")
-        out.to_parquet(out_path, index=False)
-        return out
-    except Exception as e:
-        print(f"⚠️ Skipping {ticker} (indicator error): {e}")
-        with open(RETRY_FAILED_LOG, "a") as log:
-            log.write(f"{ticker} (indicator error)\n")
-        return pd.DataFrame()
-
-def get_spy_ref_df(existing_results_universe):
-    # Prefer local SPY parquet; else try from merged; else fetch if allowed
-    spy = "SPY"
-    df = load_ticker_parquet(spy)
-    if not df.empty: return df
-    df = rebuild_from_merged_stockdata(spy)
-    if not df.empty: return df
-    if args.live_fetch and spy not in existing_results_universe:
-        raw, _ = fetch_yf_raw(spy)
-        if raw is not None:
-            return raw
-    return pd.DataFrame()
-
 # ---------- Load core inputs ----------
 fundamentals_df = must_load_csv(FUNDAMENTALS_PATH, "fundamentals.csv")
 fundamentals_df["ticker"] = fundamentals_df["ticker"].astype(str).str.upper()
@@ -262,6 +185,7 @@ fundamentals_df["ticker"] = fundamentals_df["ticker"].astype(str).str.upper()
 scores_df = must_load_csv(SCORES_PATH, "stock_scores.csv")
 scores_df["ticker"] = scores_df["ticker"].astype(str).str.upper()
 
+# Optional: daily news sentiment
 sent_df = pd.DataFrame()
 if os.path.exists(NEWS_SENTIMENT_PATH) and os.path.getsize(NEWS_SENTIMENT_PATH) > 0:
     try:
@@ -275,10 +199,10 @@ if os.path.exists(NEWS_SENTIMENT_PATH) and os.path.getsize(NEWS_SENTIMENT_PATH) 
     except Exception as e:
         print(f"⚠️ Could not parse news_sentiment.csv: {e} — continuing without sentiment")
 
+# Universe = intersection of those that have a parquet and appear in inputs
+available_parquets = {fn.replace(".parquet", "").upper()
+                      for fn in os.listdir(RESULTS_DIR) if fn.endswith(".parquet")}
 universe = sorted(set(fundamentals_df["ticker"]).union(set(scores_df["ticker"])))
-existing_results_universe = {fn.replace(".parquet", "").upper()
-                             for fn in os.listdir(RESULTS_DIR) if fn.endswith(".parquet")}
-spy_ref_df = get_spy_ref_df(existing_results_universe)
 
 # ---------- Model zoo ----------
 models = {
@@ -298,21 +222,23 @@ all_feature_importance = []
 all_model_comparison = []
 signals_with_rationale_rows = []
 legacy_signals_rows = []
-retried_frames = []
 
 score_values = scores_df[["ticker", "total_score"]].dropna()["total_score"]
 
 # ---------- Core trainer ----------
-def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int, reason_prefix="") -> tuple:
+def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int) -> bool:
     try:
         df = raw_df.copy()
         if df.empty or len(df) < min_rows:
-            return False, f"{reason_prefix}Empty dataset or < {min_rows} rows"
+            skipped_tickers.append({"ticker": ticker, "reason": f"Empty dataset or < {min_rows} rows"})
+            return False
         if "date" not in df.columns:
-            return False, f"{reason_prefix}Missing 'date' column"
+            skipped_tickers.append({"ticker": ticker, "reason": "Missing 'date' column"})
+            return False
         for required in ["open", "high", "low", "close", "volume"]:
             if required not in df.columns:
-                return False, f"{reason_prefix}Missing OHLCV columns"
+                skipped_tickers.append({"ticker": ticker, "reason": "Missing OHLCV columns"})
+                return False
 
         df = df.sort_values("date").reset_index(drop=True)
         df["target"] = df["close"].shift(-1)
@@ -321,41 +247,53 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int, reason_pr
         fund_row = fundamentals_df[fundamentals_df["ticker"] == ticker]
         score_row = scores_df[scores_df["ticker"] == ticker]
         if fund_row.empty or score_row.empty:
-            return False, f"{reason_prefix}Missing fundamentals or score"
+            skipped_tickers.append({"ticker": ticker, "reason": "Missing fundamentals or score"})
+            return False
 
         for col in ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield"]:
             df[col] = fund_row.iloc[0][col]
         df["total_score"] = score_row.iloc[0]["total_score"]
 
-        df["sma20"] = compute_sma(df["close"], 20)
-        df["sma50"] = compute_sma(df["close"], 50)
-        df["rsi14"] = compute_rsi(df["close"], 14)
-        df["atr14"] = compute_atr(df["high"], df["low"], df["close"], 14)
+        # Compute light tech (in case parquet didn't have them)
+        if "sma20" not in df.columns:
+            df["sma20"] = compute_sma(df["close"], 20)
+        if "sma50" not in df.columns:
+            df["sma50"] = compute_sma(df["close"], 50)
+        if "rsi14" not in df.columns:
+            df["rsi14"] = compute_rsi(df["close"], 14)
+        if "atr14" not in df.columns:
+            df["atr14"] = compute_atr(df["high"], df["low"], df["close"], 14)
 
+        # Features
         base_cols = ["open", "high", "low", "close", "volume"]
         feature_cols = base_cols + ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield", "total_score"]
         X = df[feature_cols].fillna(0)
         y = df["target"]
 
+        # Baseline RF predictions
         rf_model = models["RandomForest"]
         rf_model.fit(X, y)
         df["predicted_close"] = rf_model.predict(X)
 
+        # Signals
         df["signal"] = "HOLD"
         df.loc[df["predicted_close"] > df["close"], "signal"] = "BUY"
         df.loc[df["predicted_close"] < df["close"], "signal"] = "SELL"
 
+        # Confidence / pos size / edge
         conf_df = df.apply(lambda r: pd.Series(
             compute_confidence_row(r), index=["confidence", "position_size", "delta_pct"]), axis=1)
         df["confidence"] = conf_df["confidence"].fillna(0.0)
         df["position_size"] = conf_df["position_size"].fillna(0.0)
         df["delta_pct"] = conf_df["delta_pct"].fillna(0.0)
 
+        # Save per‑ticker RF predictions
         output_df = df[["date", "close", "predicted_close", "signal"]].copy()
         output_df["ticker"] = ticker
         output_path = os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet")
         output_df.to_parquet(output_path, index=False)
 
+        # RF feature importance
         fi = getattr(rf_model, "feature_importances_", None)
         if fi is not None:
             all_feature_importance.append(pd.DataFrame({
@@ -363,6 +301,7 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int, reason_pr
                 "feature": feature_cols, "importance": fi
             }))
 
+        # Model comparison
         for name, model in models.items():
             try:
                 model.fit(X, y)
@@ -396,6 +335,7 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int, reason_pr
                 print(f"⚠️ {ticker} / {name}: model failed — {me}")
                 continue
 
+        # Sentiment merge (optional)
         df_dates = pd.to_datetime(df["date"], errors="coerce").dt.date
         if not sent_df.empty:
             merged = pd.DataFrame({"date": df_dates, "idx": df.index})
@@ -405,9 +345,11 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int, reason_pr
         else:
             df["sentiment"] = np.nan
 
+        # Score percentile
         t_score = df["total_score"].iloc[0] if "total_score" in df.columns and not df.empty else np.nan
         score_pct = safe_percentile_rank(score_values, t_score)
 
+        # Export rationale rows
         for _, row in df.iterrows():
             rationale = build_rationale_row(row, score_pct, row.get("sentiment", np.nan))
             signals_with_rationale_rows.append({
@@ -441,74 +383,21 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int, reason_pr
             })
 
         print(f"✅ Trained {ticker} ({', '.join(models.keys())})")
-        return True, ""
+        return True
 
     except Exception as e:
-        return False, f"Error processing — {e}"
+        skipped_tickers.append({"ticker": ticker, "reason": f"Error processing — {e}"})
+        return False
 
-# ---------- First pass ----------
-first_pass_skips = []
+# ---------- Train ONLY on tickers with an existing parquet ----------
+trained = 0
 for ticker in sorted(universe):
+    if ticker not in available_parquets:
+        skipped_tickers.append({"ticker": ticker, "reason": "No parquet data (data/results/{TICKER}.parquet)"})
+        continue
     df_t = load_ticker_parquet(ticker)
-    ok, reason = train_one_ticker(ticker, df_t, min_rows=args.min_rows)
-    if not ok:
-        first_pass_skips.append((ticker, reason))
-
-# ---------- Optional failed list (to prioritize live fetch) ----------
-failed_set = set()
-if os.path.exists(args.failed_list):
-    with open(args.failed_list, "r") as f:
-        failed_set = {line.strip().upper() for line in f if line.strip()}
-
-# ---------- Retry pass ----------
-need_retry = args.retry or len(first_pass_skips) > 0
-retry_results = []
-if need_retry:
-    print("\n🔁 Retry pass: rebuild from stock_data.parquet, then optional live fetch…")
-    # Build SPY reference if we only had raw prices (for feature generation)
-    full_retried = []
-
-    for ticker, prev_reason in first_pass_skips:
-        # 1) Try merged stock_data.parquet
-        rebuilt = rebuild_from_merged_stockdata(ticker)
-        tried_live = False
-        if rebuilt.empty and args.live_fetch:
-            # 2) Live fetch via yfinance if allowed (and either on failed_list or generally allowed)
-            tried_live = True
-            raw, err = fetch_yf_raw(ticker)
-            if raw is None:
-                with open(RETRY_FAILED_LOG, "a") as log:
-                    log.write(f"{ticker} (fetch error: {err})\n")
-            else:
-                # add features + save per-ticker parquet
-                raw_feat = add_features_and_save(raw, ticker, spy_ref_df)
-                if not raw_feat.empty:
-                    rebuilt = raw_feat
-                time.sleep(random.uniform(args.sleep_min, args.sleep_max))
-
-        if rebuilt.empty:
-            skipped_tickers.append({"ticker": ticker, "reason": prev_reason})
-            retry_results.append((ticker, False, f"{'fetch failed; ' if tried_live else ''}{prev_reason}"))
-            continue
-
-        ok, reason = train_one_ticker(ticker, rebuilt, min_rows=args.retry_min_rows, reason_prefix="(retry) ")
-        if not ok:
-            skipped_tickers.append({"ticker": ticker, "reason": reason})
-            retry_results.append((ticker, False, reason))
-        else:
-            retry_results.append((ticker, True, ""))
-            # keep for optional merged output
-            full_retried.append(rebuilt)
-
-    # Save merged retried parquet for audit
-    if full_retried:
-        try:
-            merged_out = pd.concat(full_retried, ignore_index=True)
-            merged_out.dropna(subset=["close"], inplace=True)
-            merged_out.to_parquet(RETRIED_MERGED_OUT, index=False)
-            print(f"✅ Retrained data saved to: {RETRIED_MERGED_OUT}")
-        except Exception as e:
-            print(f"⚠️ Could not save merged retried parquet: {e}")
+    ok = train_one_ticker(ticker, df_t, min_rows=args.min_rows)
+    trained += int(ok)
 
 # ---------- Save combined feature importances ----------
 if all_feature_importance:
@@ -548,9 +437,4 @@ if skipped_tickers:
     skipped_df.to_csv(SKIPPED_TICKERS_LOG, index=False)
     print(f"📄 Skipped tickers log saved to: {SKIPPED_TICKERS_LOG}")
 
-# ---------- Summary ----------
-if first_pass_skips:
-    n_retry_ok = sum(1 for _, ok, _ in retry_results if ok)
-    n_retry_fail = sum(1 for _, ok, _ in retry_results if not ok)
-    print(f"\n🔚 Retry summary: {n_retry_ok} fixed, {n_retry_fail} still skipped.")
-print("\n🏁 All models trained. RF predictions written per ticker, model comparison & feature importances exported, rationales generated.")
+print(f"\n🏁 Done. Trained {trained} tickers. For the rest, run your retry script AFTER rebuilding/fetching parquets.")
