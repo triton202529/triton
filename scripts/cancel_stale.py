@@ -1,5 +1,9 @@
 # scripts/cancel_stale.py
-import argparse, json
+import argparse, json, os, sys
+
+# Ensure project root is on sys.path so "services" is importable when run from scripts/
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from services.broker_alpaca import AlpacaBroker
 
 def main():
@@ -14,7 +18,13 @@ def main():
 
     wl = [s.strip().upper() for s in args.whitelist.split(",") if s.strip()] or None
     b = AlpacaBroker(args.mode)
-    out = b.cancel_open_orders(whitelist=wl, cutoff=args.cutoff, older_than_days=args.older, limit=args.limit, dry_run=args.dry_run)
+    out = b.cancel_open_orders(
+        whitelist=wl,
+        cutoff=args.cutoff,
+        older_than_days=args.older,
+        limit=args.limit,
+        dry_run=args.dry_run,
+    )
     print(json.dumps(out, indent=2))
 
 if __name__ == "__main__":
