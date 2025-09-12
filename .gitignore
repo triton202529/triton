@@ -53,3 +53,8 @@ __pycache__/
 *.pyd
 *.so
 *.egg-info/
+# virtual envs & local stuff
+.venv/
+venv/
+.env
+.env.*
