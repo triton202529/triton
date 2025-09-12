@@ -1,19 +1,48 @@
-# generated data
+# ===== Generated data & artifacts =====
 /data/results/*.parquet
+/data/results/*.csv
+/data/results/*.json
+/data/results/*.jsonl
+/data/results/reports/
 /data/predictions/*.parquet
-/data/parquet/
+/data/predictions/*.csv
 /data/orders/
 /data/run/
-/logs/
+/data/processed/
+/data/raw/
+/data/parquet/              # if ever created
+/data/logs/
+ /logs/
 *.log
 
-# reports/output blobs (keep if you truly want them)
-/data/results/*.csv
+# ===== Python caches =====
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.cache/
+.ipynb_checkpoints/
 
-# secrets/config locals
+# ===== Virtual environments =====
+/venv/
+/.venv/
+/env/
+
+# ===== Local secrets & machine-specific config =====
 /config/*.json
 /config/*.yaml
 /data/secrets/
+overrides.json
+risk.json
 
-# keep directory placeholders when empty
+# ===== OS / editor junk =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# ===== Keep directory placeholders when empty =====
 !.gitkeep
