@@ -46,3 +46,10 @@ Thumbs.db
 
 # ===== Keep directory placeholders when empty =====
 !.gitkeep
+# Python bytecode & build
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
