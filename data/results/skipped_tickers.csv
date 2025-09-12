@@ -1,5 +1,0 @@
-ticker,reason
-^DJI,Empty dataset or < 30 rows
-^GSPC,Empty dataset or < 30 rows
-^IXIC,Empty dataset or < 30 rows
-^VIX,Empty dataset or < 30 rows
