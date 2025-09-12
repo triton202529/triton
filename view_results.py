@@ -2,40 +2,65 @@
 
 import os
 import re
+import glob
+import json
 import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
 
 st.set_page_config(page_title="Triton AI Unified Dashboard", layout="wide")
 st.title("📊 Triton AI Unified Dashboard")
 
-RESULTS_DIR = "data/results"
-PRED_DIR = "data/predictions"
+# ──────────────────────────────
+# Paths (absolute, robust)
+# ──────────────────────────────
+THIS_FILE = Path(__file__).resolve()
+# If this file lives inside /scripts, use parent.parent; otherwise parent.
+# Adjust ONE of the two lines below to match your repo layout.
+PROJECT_ROOT = THIS_FILE.parent       # <- if view_results.py is in repo root
+# PROJECT_ROOT = THIS_FILE.parent.parent  # <- if view_results.py is in /scripts
 
-# ---------- helpers ----------
+DATA_ROOT   = PROJECT_ROOT / "data"
+RESULTS_DIR = DATA_ROOT / "results"
+ORDERS_DIR  = DATA_ROOT / "orders"
+PRED_DIR    = DATA_ROOT / "predictions"
+
+for p in (RESULTS_DIR, ORDERS_DIR, PRED_DIR):
+    p.mkdir(parents=True, exist_ok=True)
+
+# ──────────────────────────────
+# Helpers
+# ──────────────────────────────
 @st.cache_data(show_spinner=False)
-def load_csv(filename: str) -> pd.DataFrame:
-    """Load a CSV from data/results with friendly errors and caching."""
-    path = os.path.join(RESULTS_DIR, filename)
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
+def load_csv(filename: str, folder: Path = RESULTS_DIR) -> pd.DataFrame:
+    """Load a CSV with friendly errors and caching."""
+    path = (folder / filename)
+    if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
     try:
         return pd.read_csv(path)
     except Exception as e:
-        st.error(f"❌ Could not load {filename}: {e}")
+        st.error(f"❌ Could not load {path}: {e}")
         return pd.DataFrame()
 
+def load_csv_from(folder: Path, filename: str) -> pd.DataFrame:
+    return load_csv(filename, folder)
+
 @st.cache_data(show_spinner=False)
-def load_parquet(path: str) -> pd.DataFrame:
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
+def load_parquet(path: str | Path) -> pd.DataFrame:
+    path = Path(path)
+    if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
     try:
         return pd.read_parquet(path)
     except Exception as e:
-        st.warning(f"⚠️ Could not read {os.path.basename(path)}: {e}")
+        st.warning(f"⚠️ Could not read {path.name}: {e}")
         return pd.DataFrame()
 
 def parse_dates_inplace(df: pd.DataFrame, cols=("date",), normalize=False):
@@ -70,18 +95,14 @@ def r2_score(y_true, y_pred):
     return 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
 
 def mae(y_true, y_pred):
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-    mask = np.isfinite(y_true) & np.isfinite(y_pred)
-    y_true = y_true[mask]; y_pred = y_pred[mask]
+    y_true = np.asarray(y_true, dtype=float); y_pred = np.asarray(y_pred, dtype=float)
+    mask = np.isfinite(y_true) & np.isfinite(y_pred); y_true = y_true[mask]; y_pred = y_pred[mask]
     if y_true.size == 0: return np.nan
     return float(np.mean(np.abs(y_true - y_pred)))
 
 def rmse(y_true, y_pred):
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-    mask = np.isfinite(y_true) & np.isfinite(y_pred)
-    y_true = y_true[mask]; y_pred = y_pred[mask]
+    y_true = np.asarray(y_true, dtype=float); y_pred = np.asarray(y_pred, dtype=float)
+    mask = np.isfinite(y_true) & np.isfinite(y_pred); y_true = y_true[mask]; y_pred = y_pred[mask]
     if y_true.size == 0: return np.nan
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
@@ -103,21 +124,303 @@ def make_clickable(title, url):
     safe_title = str(title) if not pd.isna(title) and str(title).strip() else "Link"
     return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{safe_title}</a>'
 
-# ---------- tabs ----------
+def sum_safe(s, default=0.0):
+    try:
+        s = pd.to_numeric(pd.Series(s), errors="coerce")
+        return float(s.fillna(0).sum())
+    except Exception:
+        return float(default)
+
+@st.cache_data(show_spinner=False)
+def load_jsonl(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    rows: List[Dict[str, Any]] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                pass
+    return rows
+
+# ──────────────────────────────
+# Diagnostics (super helpful!)
+# ──────────────────────────────
+with st.expander("🛠 Diagnostics (paths & files)"):
+    st.write("**Project root**:", PROJECT_ROOT)
+    st.write("**RESULTS_DIR**:", RESULTS_DIR)
+    st.write("**ORDERS_DIR**:", ORDERS_DIR)
+    st.write("**PRED_DIR**:", PRED_DIR)
+    cols = st.columns(3)
+    with cols[0]:
+        st.caption("results/*.csv")
+        st.write([p.name for p in sorted(RESULTS_DIR.glob("*.csv"))])
+    with cols[1]:
+        st.caption("orders/*.csv")
+        st.write([p.name for p in sorted(ORDERS_DIR.glob("*.csv"))])
+    with cols[2]:
+        st.caption("predictions/*.csv")
+        st.write([p.name for p in sorted(PRED_DIR.glob("*.csv"))])
+    if st.button("↻ Clear cache & rescan"):
+        st.cache_data.clear()
+        st.rerun()
+
+# ──────────────────────────────
+# Tabs
+# ──────────────────────────────
 tabs = st.tabs([
+    "🔍 Portfolio Drilldown",
     "📈 Portfolio History", "📋 Trade Log", "📊 Strategy vs Market", "🧠 AI Signals",
     "📁 Raw CSV", "📋 Backtest Summary", "📉 Risk Report", "📊 Strategy Diagnostics",
     "🏦 Portfolio Allocations", "📽️ Trade Replay", "📘 Fundamentals", "📈 Stock Scores",
     "🎯 Top Picks", "📰 News Sentiment", "🚨 Smart Alerts", "📆 Economic Calendar",
     "🔬 Feature Importance", "🎯 SL/TP Performance", "💬 Sentiment + Signal Fusion",
-    "📊 Model Comparison", "🧠 AI Learning Lab"
+    "📊 Model Comparison", "🧠 AI Learning Lab",
+    "🧾 Buffett Orders", "🗂️ Consolidated Orders", "🤖 AI Feedback"
 ])
-#                ^ index 18                      ^ index 19            ^ index 20
 
-# Tab 0 — Portfolio History
+# ──────────────────────────────
+# Tab 0 — Portfolio Drilldown (new)
+# ──────────────────────────────
 with tabs[0]:
+    st.subheader("🔍 Portfolio Drilldown")
+
+    # Load sources
+    tl = load_csv("trade_log.csv", RESULTS_DIR)                    # expected: date, ticker, action/side, price, quantity, profit
+    sig = load_csv("signals_with_rationale.csv", RESULTS_DIR)      # expected: date, ticker, close, predicted_close, signal, confidence, rationale
+    ns  = load_csv("news_sentiment.csv", RESULTS_DIR)              # expected: date or publishedAt, ticker, title/url/sentiment
+    cur_orders = load_csv("orders_today.csv", ORDERS_DIR)          # optional
+    bo = load_csv("buffett_orders.csv", ORDERS_DIR)                # optional
+
+    # Build ticker universe from what we have
+    tickers = set()
+    for df in (tl, sig, ns, cur_orders, bo):
+        if not df.empty and "ticker" in df.columns:
+            tickers.update([t for t in df["ticker"].dropna().astype(str).unique()])
+    tickers = sorted(tickers)
+
+    if not tickers:
+        st.info("No tickers found across trade logs / signals / news / orders.")
+    else:
+        c1, c2, c3 = st.columns([1.2, 1, 1])
+        with c1:
+            sel = st.selectbox("Ticker", tickers, index=0)
+        with c2:
+            lookback_days = st.slider("Lookback (days)", 30, 365, 180, 15)
+        with c3:
+            show_candles = st.selectbox("Price View", ["Line", "Candlestick"], index=0)
+
+        # Slice data for selected ticker and window
+        cutoff = pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=lookback_days)
+
+        # Trades
+        tl_t = pd.DataFrame()
+        if not tl.empty:
+            tl_t = tl.copy()
+            if "date" in tl_t.columns:
+                parse_dates_inplace(tl_t, ("date",))
+                tl_t = tl_t[tl_t["ticker"] == sel]
+                tl_t = tl_t[tl_t["date"] >= cutoff]
+            to_numeric(tl_t, ["price", "quantity", "profit"])
+            # Harmonize action column name
+            if "action" not in tl_t.columns and "side" in tl_t.columns:
+                tl_t["action"] = tl_t["side"].str.upper()
+            if "action" in tl_t.columns:
+                tl_t["action"] = tl_t["action"].astype(str).str.upper()
+
+        # Signals
+        sig_t = pd.DataFrame()
+        if not sig.empty:
+            sig_t = sig.copy()
+            parse_dates_inplace(sig_t, ("date",), normalize=False)
+            sig_t = sig_t[sig_t["ticker"] == sel]
+            sig_t = sig_t.dropna(subset=["date"]).sort_values("date")
+            sig_t = sig_t[sig_t["date"] >= cutoff]
+            to_numeric(sig_t, ["close","predicted_close","confidence","total_score"])
+            if {"predicted_close","close"}.issubset(sig_t.columns):
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    sig_t["edge_pct"] = (sig_t["predicted_close"] - sig_t["close"]) / sig_t["close"]
+
+        # News
+        ns_t = pd.DataFrame()
+        if not ns.empty:
+            ns_t = ns.copy()
+            if "date" in ns_t.columns:
+                parse_dates_inplace(ns_t, ("date",), normalize=True)
+            elif "publishedAt" in ns_t.columns:
+                ns_t["date"] = pd.to_datetime(ns_t["publishedAt"], errors="coerce").dt.normalize()
+            ns_t = ns_t[(ns_t.get("ticker","") == sel) & ns_t["date"].notna()]
+            ns_t = ns_t[ns_t["date"] >= cutoff].sort_values("date", ascending=False)
+            # clickable title
+            title_col = "title" if "title" in ns_t.columns else None
+            url_col   = "url" if "url" in ns_t.columns else None
+            if title_col or url_col:
+                ns_t["news"] = ns_t.apply(lambda r: make_clickable(r.get(title_col,""), r.get(url_col,"")), axis=1)
+
+        # Orders context (consolidated + buffett)
+        ord_t = pd.DataFrame()
+        if not cur_orders.empty:
+            ord_t = cur_orders.copy()
+            if "ticker" in ord_t.columns:
+                ord_t = ord_t[ord_t["ticker"] == sel]
+        bo_t = pd.DataFrame()
+        if not bo.empty:
+            bo_t = bo.copy()
+            if "ticker" in bo_t.columns:
+                bo_t = bo_t[bo_t["ticker"] == sel]
+
+        # ── KPIs
+        k1, k2, k3, k4, k5 = st.columns(5)
+
+        # Trades KPIs
+        total_trades = int(len(tl_t)) if not tl_t.empty else 0
+        wins = int((tl_t.get("profit", pd.Series(dtype=float)) > 0).sum()) if not tl_t.empty and "profit" in tl_t.columns else 0
+        win_rate = (wins / total_trades) if total_trades > 0 else 0.0
+        avg_pnl = float(tl_t["profit"].mean()) if not tl_t.empty and "profit" in tl_t.columns else 0.0
+        cum_pnl = float(tl_t["profit"].sum()) if not tl_t.empty and "profit" in tl_t.columns else 0.0
+
+        # Signal KPI
+        last_sig = None; last_conf = None
+        if not sig_t.empty and {"signal","confidence","date"}.issubset(sig_t.columns):
+            row = sig_t.sort_values("date").iloc[-1]
+            last_sig = str(row.get("signal",""))
+            last_conf = float(row.get("confidence", np.nan))
+
+        with k1: st.metric("Trades", total_trades)
+        with k2: st.metric("Win Rate", f"{win_rate:.0%}")
+        with k3: st.metric("Avg P&L", f"{avg_pnl:,.2f}")
+        with k4: st.metric("Cum P&L", f"{cum_pnl:,.2f}")
+        with k5:
+            if last_sig is not None:
+                st.metric("Last Signal", f"{last_sig} ({(last_conf or 0):.2f})")
+            else:
+                st.metric("Last Signal", "—")
+
+        # ── Chart: Price + signals + trade markers
+        st.markdown("#### Price, Signals & Trades")
+        base = sig_t.copy() if not sig_t.empty else pd.DataFrame()
+        price_added = False
+        fig = go.Figure()
+
+        if show_candles == "Candlestick":
+            ohlc_path = RESULTS_DIR / f"{sel}.parquet"
+            ohlc = load_parquet(ohlc_path)
+            if not ohlc.empty and {"date","open","high","low","close"}.issubset(ohlc.columns):
+                parse_dates_inplace(ohlc, ("date",))
+                ohlc = ohlc.dropna(subset=["date"])
+                ohlc = ohlc[ohlc["date"] >= cutoff].sort_values("date")
+                fig.add_trace(go.Candlestick(
+                    x=ohlc["date"], open=ohlc["open"], high=ohlc["high"],
+                    low=ohlc["low"], close=ohlc["close"], name="Price"
+                ))
+                price_added = True
+
+        if not price_added and not base.empty and "close" in base.columns:
+            fig.add_trace(go.Scatter(x=base["date"], y=base["close"], mode="lines", name="Close", opacity=0.6))
+
+        # Overlay predictions if available
+        if not base.empty and "predicted_close" in base.columns:
+            fig.add_trace(go.Scatter(x=base["date"], y=base["predicted_close"], mode="lines", name="Predicted", opacity=0.8))
+
+        # Signal markers sized by confidence
+        if not sig_t.empty and {"signal","confidence","close"}.issubset(sig_t.columns):
+            conf = sig_t["confidence"].fillna(0.0)
+            if len(conf) > 0 and conf.max() > conf.min():
+                conf_norm = (conf - conf.min()) / (conf.max() - conf.min() + 1e-9)
+                sizes = conf_norm * (24 - 6) + 8
+            else:
+                sizes = np.full(len(sig_t), 10)
+
+            for sig_name, dfg in sig_t.groupby("signal"):
+                fig.add_trace(go.Scatter(
+                    x=dfg["date"], y=dfg["close"], mode="markers", name=f"Sig: {sig_name}",
+                    marker=dict(size=sizes[dfg.index]),
+                    hovertemplate=(
+                        "<b>%{x|%Y-%m-%d}</b><br>"
+                        "Close: %{y:.2f}<br>"
+                        "Pred: %{customdata[0]:.2f}<br>"
+                        "Conf: %{customdata[1]:.2f}<br>"
+                        "Edge: %{customdata[2]:.2%}<br>"
+                        "<br><i>%{customdata[3]}</i><extra></extra>"
+                    ),
+                    customdata=np.stack([
+                        dfg.get("predicted_close", pd.Series(np.nan, index=dfg.index)).fillna(0).values,
+                        dfg["confidence"].fillna(0).values,
+                        dfg.get("edge_pct", pd.Series(0, index=dfg.index)).fillna(0).values,
+                        dfg.get("rationale", pd.Series("", index=dfg.index)).fillna("").values
+                    ], axis=-1)
+                ))
+
+        # Trade markers
+        if not tl_t.empty and {"date","action","price"}.issubset(tl_t.columns):
+            buys  = tl_t[tl_t["action"] == "BUY"]
+            sells = tl_t[tl_t["action"] == "SELL"]
+            if not buys.empty:
+                fig.add_trace(go.Scatter(
+                    x=buys["date"], y=buys["price"], mode="markers", name="BUY",
+                    marker=dict(symbol="triangle-up", size=12),
+                    hovertemplate="BUY @ %{y:.2f} (%{x|%Y-%m-%d})<extra></extra>"
+                ))
+            if not sells.empty:
+                fig.add_trace(go.Scatter(
+                    x=sells["date"], y=sells["price"], mode="markers", name="SELL",
+                    marker=dict(symbol="triangle-down", size=12),
+                    hovertemplate="SELL @ %{y:.2f} (%{x|%Y-%m-%d})<extra></extra>"
+                ))
+
+        fig.update_layout(
+            title=f"{sel} — Price, Signals & Trades",
+            xaxis_title="Date", yaxis_title="Price",
+            xaxis_rangeslider_visible=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ── Rationale / signals table
+        with st.expander("Signals & Rationale (latest 200 rows)"):
+            if not sig_t.empty:
+                cols_show = [c for c in [
+                    "date","ticker","close","predicted_close","edge_pct",
+                    "signal","confidence","total_score","rationale"
+                ] if c in sig_t.columns]
+                st.dataframe(sig_t.sort_values("date", ascending=False).head(200)[cols_show],
+                             use_container_width=True)
+            else:
+                st.info("No signals for this ticker in the selected window.")
+
+        # ── News table
+        with st.expander("Related News"):
+            if not ns_t.empty:
+                show_cols = [c for c in ["date","ticker","sentiment","news","description"] if c in ns_t.columns or c=="news"]
+                disp = ns_t[show_cols] if show_cols else ns_t
+                st.markdown(disp.to_html(escape=False, index=False), unsafe_allow_html=True)
+            else:
+                st.info("No recent news rows for this ticker.")
+
+        # ── Orders context
+        cL, cR = st.columns(2)
+        with cL:
+            st.markdown("**Consolidated Orders (today) for this ticker**")
+            if not ord_t.empty:
+                st.dataframe(ord_t, use_container_width=True, height=240)
+            else:
+                st.caption("No rows in data/orders/orders_today.csv for this ticker.")
+        with cR:
+            st.markdown("**Buffett Orders (current) for this ticker**")
+            if not bo_t.empty:
+                st.dataframe(bo_t, use_container_width=True, height=240)
+            else:
+                st.caption("No rows in data/orders/buffett_orders.csv for this ticker.")
+
+# ──────────────────────────────
+# Tab 1 — Portfolio History
+# ──────────────────────────────
+with tabs[1]:
     st.subheader("📈 Portfolio Value Over Time")
-    df = load_csv("portfolio_history.csv")
+    df = load_csv("portfolio_history.csv", RESULTS_DIR)
     if df.empty:
         st.info("No portfolio_history.csv yet.")
     else:
@@ -130,17 +433,17 @@ with tabs[0]:
         fig.update_layout(title="Portfolio Equity Curve", xaxis_title="Date", yaxis_title="Portfolio Value")
         st.plotly_chart(fig, use_container_width=True)
 
-# Tab 1 — Trade Log
-with tabs[1]:
-    st.subheader("📋 Trade Log")
-    df = load_csv("trade_log.csv")
-    if df.empty: st.info("No trade_log.csv yet.")
-    else: st.dataframe(df)
-
-# Tab 2 — Strategy vs Market
+# Tab 2 — Trade Log
 with tabs[2]:
+    st.subheader("📋 Trade Log")
+    df = load_csv("trade_log.csv", RESULTS_DIR)
+    if df.empty: st.info("No trade_log.csv yet.")
+    else: st.dataframe(df, use_container_width=True)
+
+# Tab 3 — Strategy vs Market
+with tabs[3]:
     st.subheader("📊 Strategy vs Market")
-    df = load_csv("strategy_vs_market.csv")
+    df = load_csv("strategy_vs_market.csv", RESULTS_DIR)
     if df.empty:
         st.info("No strategy_vs_market.csv yet.")
     else:
@@ -159,11 +462,10 @@ with tabs[2]:
                               xaxis_title="Date", yaxis_title="Cumulative Return")
             st.plotly_chart(fig, use_container_width=True)
 
-# Tab 3 — AI Signals (candlestick toggle + confidence sizing + hover rationale)
-with tabs[3]:
+# Tab 4 — AI Signals
+with tabs[4]:
     st.subheader("🧠 AI Signals + Rationale")
-
-    df = load_csv("signals_with_rationale.csv")
+    df = load_csv("signals_with_rationale.csv", RESULTS_DIR)
     if df.empty:
         st.info("No signals_with_rationale.csv yet.")
     else:
@@ -171,11 +473,9 @@ with tabs[3]:
         df = df.dropna(subset=["ticker", "date"]).sort_values(["ticker", "date"])
         to_numeric(df, ["close","predicted_close","confidence","rsi14","sma20","sma50",
                         "atr14","sentiment","total_score","pe_ratio","dividend_yield"])
-
         if {"close","predicted_close"}.issubset(df.columns):
             with np.errstate(divide="ignore", invalid="ignore"):
-                df["edge_pct"] = ((df["predicted_close"] - df["close"]) / df["close"])\
-                                    .replace([np.inf, -np.inf], np.nan)
+                df["edge_pct"] = ((df["predicted_close"] - df["close"]) / df["close"]).replace([np.inf, -np.inf], np.nan)
 
         c1, c2, c3, c4, c5 = st.columns([1,1,1,1,1])
         with c1:
@@ -201,18 +501,14 @@ with tabs[3]:
         else:
             base = df[df["ticker"] == selected_ticker].copy().sort_values("date")
             base["sma20_calc"] = base["close"].rolling(20).mean()
-
-            # Marker size mapping
             conf = f["confidence"].fillna(0.0)
             conf_norm = (conf - conf.min()) / (conf.max() - conf.min() + 1e-9)
             f["conf_size"] = conf_norm * (size_max - size_min) + size_min
 
             fig = go.Figure()
-
-            # Overlay price (line or candle)
             added_price = False
             if chart_type == "Candlestick":
-                ohlc_path = os.path.join(RESULTS_DIR, f"{selected_ticker}.parquet")
+                ohlc_path = RESULTS_DIR / f"{selected_ticker}.parquet"
                 ohlc = load_parquet(ohlc_path)
                 if not ohlc.empty and {"date","open","high","low","close"}.issubset(ohlc.columns):
                     parse_dates_inplace(ohlc, ("date",))
@@ -223,27 +519,20 @@ with tabs[3]:
                     ))
                     added_price = True
             if not added_price:
-                fig.add_trace(go.Scatter(
-                    x=base["date"], y=base["close"], mode="lines", name="Price", opacity=0.55
-                ))
+                fig.add_trace(go.Scatter(x=base["date"], y=base["close"], mode="lines", name="Price", opacity=0.55))
 
             if show_sma:
-                fig.add_trace(go.Scatter(
-                    x=base["date"], y=base["sma20_calc"], mode="lines",
-                    name="SMA(20)", opacity=0.85
-                ))
+                fig.add_trace(go.Scatter(x=base["date"], y=base["sma20_calc"], mode="lines", name="SMA(20)", opacity=0.85))
 
-            # BUY/SELL markers with rationale hover (includes predicted price)
-            for sig, dfg in f.groupby("signal"):
+            for sig_name, dfg in f.groupby("signal"):
                 fig.add_trace(go.Scatter(
-                    x=dfg["date"], y=dfg["close"], mode="markers",
-                    name=sig,
+                    x=dfg["date"], y=dfg["close"], mode="markers", name=sig_name,
                     marker=dict(size=dfg["conf_size"]),
                     hovertemplate=(
                         "<b>%{x|%Y-%m-%d}</b><br>"
                         "Close: %{y:.2f}<br>"
                         "Predicted: %{customdata[2]:.2f}<br>"
-                        f"Signal: {sig}<br>"
+                        f"Signal: {sig_name}<br>"
                         "Confidence: %{customdata[0]:.2f}<br>"
                         "Edge: %{customdata[1]:.2%}<br>"
                         "<br><i>%{customdata[3]}</i><extra></extra>"
@@ -255,11 +544,8 @@ with tabs[3]:
                         dfg["rationale"].fillna("").values
                     ], axis=-1)
                 ))
-
-            fig.update_layout(
-                title=f"{selected_ticker} — Signals over time (hover for rationale)",
-                xaxis_title="date", yaxis_title="close", xaxis_rangeslider_visible=False
-            )
+            fig.update_layout(title=f"{selected_ticker} — Signals over time (hover for rationale)",
+                              xaxis_title="date", yaxis_title="close", xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
 
             with st.expander("Show table"):
@@ -269,26 +555,48 @@ with tabs[3]:
                 cols = [c for c in cols if c in f.columns]
                 st.dataframe(f[cols], use_container_width=True)
 
-# Tab 4 — Raw CSV Browser
-with tabs[4]:
-    st.subheader("📁 Browse Any CSV in data/results")
-    files = sorted([f for f in os.listdir(RESULTS_DIR) if f.endswith(".csv")])
-    if not files: st.info("No CSV files found in data/results.")
-    else:
-        selected = st.selectbox("Select a file", files)
-        df = load_csv(selected); st.dataframe(df)
-
-# Tab 5 — Backtest Summary
+# Tab 5 — Raw CSV Browser (multi-folder)
 with tabs[5]:
-    st.subheader("📋 Backtest Summary")
-    df = load_csv("backtest_summary.csv")
-    if df.empty: st.info("No backtest_summary.csv yet.")
-    else: st.dataframe(df)
+    st.subheader("📁 Browse Any CSV")
+    def _list_csvs(root: Path):
+        return sorted([p for p in root.glob("*.csv")], key=lambda p: p.name.lower())
 
-# Tab 6 — Risk Report (Drawdown)
+    c1, c2, c3, _ = st.columns([2,2,2,1])
+    with c1:
+        which_dir = st.selectbox("Folder", [RESULTS_DIR, ORDERS_DIR, PRED_DIR], format_func=lambda p: str(p))
+    with c2:
+        if st.button("↻ Refresh list"):
+            st.cache_data.clear()
+            st.rerun()
+    with c3:
+        files = _list_csvs(which_dir)
+        st.caption(f"Found {len(files)} CSVs")
+
+    if not files:
+        st.info(f"No CSV files found in {which_dir}.")
+    else:
+        names = [p.name for p in files]
+        selected = st.selectbox("Select a file", names, key=f"csv_sel_{which_dir}")
+        df = load_csv_from(which_dir, selected)
+        st.dataframe(df, use_container_width=True)
+        st.download_button(
+            "⬇️ Download this CSV",
+            data=df.to_csv(index=False).encode("utf-8"),
+            file_name=selected,
+            mime="text/csv"
+        )
+
+# Tab 6 — Backtest Summary
 with tabs[6]:
+    st.subheader("📋 Backtest Summary")
+    df = load_csv("backtest_summary.csv", RESULTS_DIR)
+    if df.empty: st.info("No backtest_summary.csv yet.")
+    else: st.dataframe(df, use_container_width=True)
+
+# Tab 7 — Risk Report (Drawdown)
+with tabs[7]:
     st.subheader("📉 Risk: Portfolio Drawdown")
-    df = load_csv("portfolio_history.csv")
+    df = load_csv("portfolio_history.csv", RESULTS_DIR)
     if df.empty:
         st.info("No portfolio_history.csv yet.")
     else:
@@ -304,10 +612,10 @@ with tabs[6]:
             fig = px.area(df, x="date", y="drawdown", title="Drawdown (relative to running peak)")
             st.plotly_chart(fig, use_container_width=True)
 
-# Tab 7 — Strategy Diagnostics
-with tabs[7]:
+# Tab 8 — Strategy Diagnostics
+with tabs[8]:
     st.subheader("📊 Strategy Diagnostics")
-    df = load_csv("trade_log.csv")
+    df = load_csv("trade_log.csv", RESULTS_DIR)
     if df.empty:
         st.info("No trade_log.csv yet.")
     else:
@@ -320,10 +628,10 @@ with tabs[7]:
             st.write("Average Profit per Trade:",
                      round(pd.to_numeric(df["profit"], errors="coerce").mean(), 2))
 
-# Tab 8 — Portfolio Allocations
-with tabs[8]:
+# Tab 9 — Portfolio Allocations
+with tabs[9]:
     st.subheader("🏦 Portfolio Allocations")
-    df = load_csv("trade_log.csv")
+    df = load_csv("trade_log.csv", RESULTS_DIR)
     if df.empty:
         st.info("No trade_log.csv yet.")
     else:
@@ -340,10 +648,10 @@ with tabs[8]:
                 st.plotly_chart(fig, use_container_width=True)
                 st.dataframe(latest.reset_index().rename(columns={"quantity":"shares"}))
 
-# Tab 9 — Trade Replay
-with tabs[9]:
+# Tab 10 — Trade Replay
+with tabs[10]:
     st.subheader("📽️ Trade Replay")
-    df = load_csv("trade_log.csv")
+    df = load_csv("trade_log.csv", RESULTS_DIR)
     if df.empty: st.info("No trade_log.csv yet.")
     else:
         if "ticker" not in df.columns: st.warning("Missing 'ticker' column.")
@@ -351,44 +659,44 @@ with tabs[9]:
             ticker = st.selectbox("Select ticker", sorted(df["ticker"].dropna().unique()))
             trades = df[df["ticker"] == ticker]
             cols = ["date","action","price","quantity"]
-            st.dataframe(trades[cols] if set(cols).issubset(trades.columns) else trades)
+            st.dataframe(trades[cols] if set(cols).issubset(trades.columns) else trades, use_container_width=True)
 
-# Tab 10 — Fundamentals
-with tabs[10]:
-    st.subheader("📘 Fundamental Data")
-    df = load_csv("fundamentals.csv")
-    if df.empty: st.info("No fundamentals.csv yet.")
-    else: st.dataframe(df)
-
-# Tab 11 — Stock Scores
+# Tab 11 — Fundamentals
 with tabs[11]:
+    st.subheader("📘 Fundamental Data")
+    df = load_csv("fundamentals.csv", RESULTS_DIR)
+    if df.empty: st.info("No fundamentals.csv yet.")
+    else: st.dataframe(df, use_container_width=True)
+
+# Tab 12 — Stock Scores
+with tabs[12]:
     st.subheader("📈 Stock Scores")
-    df = load_csv("stock_scores.csv")
+    df = load_csv("stock_scores.csv", RESULTS_DIR)
     if df.empty: st.info("No stock_scores.csv yet.")
     else:
         score_col = get_score_col(df)
-        if score_col: st.dataframe(df.sort_values(score_col, ascending=False))
+        if score_col: st.dataframe(df.sort_values(score_col, ascending=False), use_container_width=True)
         else:
             st.warning("No score column found (expected 'total_score' or 'score'). Showing raw data.")
-            st.dataframe(df)
+            st.dataframe(df, use_container_width=True)
 
-# Tab 12 — Top Picks
-with tabs[12]:
+# Tab 13 — Top Picks
+with tabs[13]:
     st.subheader("🎯 Top Fundamental Picks")
-    df = load_csv("stock_scores.csv")
+    df = load_csv("stock_scores.csv", RESULTS_DIR)
     if df.empty: st.info("No stock_scores.csv yet.")
     else:
         score_col = get_score_col(df)
         if score_col:
-            top = df.sort_values(score_col, ascending=False).head(10); st.dataframe(top)
+            top = df.sort_values(score_col, ascending=False).head(10); st.dataframe(top, use_container_width=True)
         else:
             st.warning("No score column found (expected 'total_score' or 'score'). Showing first 10 rows.")
-            st.dataframe(df.head(10))
+            st.dataframe(df.head(10), use_container_width=True)
 
-# Tab 13 — News Sentiment (clickable links)
-with tabs[13]:
+# Tab 14 — News Sentiment
+with tabs[14]:
     st.subheader("📰 News Sentiment")
-    df = load_csv("news_sentiment.csv")
+    df = load_csv("news_sentiment.csv", RESULTS_DIR)
     if df.empty: st.info("No news_sentiment.csv yet.")
     else:
         parse_dates_inplace(df, ("publishedAt","date"))
@@ -403,11 +711,11 @@ with tabs[13]:
         disp = df[show_cols] if show_cols else df
         st.markdown(disp.to_html(escape=False, index=False), unsafe_allow_html=True)
 
-# Tab 14 — Smart Alerts
-with tabs[14]:
+# Tab 15 — Smart Alerts
+with tabs[15]:
     st.subheader("🚨 Smart Alerts")
-    df = load_csv("alerts.csv")
-    if df.empty: df = load_csv("smart_alerts.csv")
+    df = load_csv("alerts.csv", RESULTS_DIR)
+    if df.empty: df = load_csv("smart_alerts.csv", RESULTS_DIR)
     if df.empty:
         st.info("No alerts CSV found.")
     else:
@@ -462,18 +770,19 @@ with tabs[14]:
             mime="text/csv",
         )
 
-# Tab 15 — Economic Calendar
-with tabs[15]:
+# Tab 16 — Economic Calendar
+with tabs[16]:
     st.subheader("📆 Economic Calendar")
-    df = load_csv("economic_calendar.csv")
+    df = load_csv("economic_calendar.csv", RESULTS_DIR)
     if df.empty: st.info("No economic_calendar.csv yet.")
     else:
-        parse_dates_inplace(df, ("date",)); st.dataframe(df)
+        parse_dates_inplace(df, ("date",))
+        st.dataframe(df, use_container_width=True)
 
-# Tab 16 — Feature Importance
-with tabs[16]:
+# Tab 17 — Feature Importance
+with tabs[17]:
     st.subheader("🔬 Feature Importance")
-    df = load_csv("feature_importance.csv")
+    df = load_csv("feature_importance.csv", RESULTS_DIR)
     if df.empty: st.info("No feature_importance.csv yet.")
     else:
         if not {"ticker","feature","importance"}.issubset(df.columns):
@@ -483,18 +792,18 @@ with tabs[16]:
             filtered = df[df["ticker"] == ticker].sort_values("importance", ascending=False)
             fig = px.bar(filtered, x="feature", y="importance", title=f"Feature Importance: {ticker}")
             st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(filtered)
+            st.dataframe(filtered, use_container_width=True)
 
-# Tab 17 — SL/TP Performance
-with tabs[17]:
+# Tab 18 — SL/TP Performance
+with tabs[18]:
     st.subheader("🎯 SL/TP Performance Analysis")
-    df = load_csv("trade_log.csv")
+    df = load_csv("trade_log.csv", RESULTS_DIR)
     if df.empty:
         st.info("No trade_log.csv yet.")
     else:
         to_numeric(df, ["profit","stop_loss","take_profit","exit_price","entry_price"])
         if "profit" in df.columns:
-            df = df[df["profit"].between(-1e6, 1e6)]  # clamp absurd values
+            df = df[df["profit"].between(-1e9, 1e9)]  # clamp absurd values
         st.metric("Total Trades", len(df))
         if "profit" in df.columns:
             tp_trades = df[df["profit"] > 0]
@@ -502,11 +811,11 @@ with tabs[17]:
             st.metric("Avg Profit (TP)", round(tp_trades["profit"].mean(), 2) if not tp_trades.empty else 0.0)
             st.metric("Avg Loss (SL)", round(sl_trades["profit"].mean(), 2) if not sl_trades.empty else 0.0)
 
-# Tab 18 — Sentiment + Signal Fusion
-with tabs[18]:
+# Tab 19 — Sentiment + Signal Fusion
+with tabs[19]:
     st.subheader("💬 Sentiment + Signal Fusion")
-    sig = load_csv("signals_with_rationale.csv")
-    sns = load_csv("news_sentiment.csv")
+    sig = load_csv("signals_with_rationale.csv", RESULTS_DIR)
+    sns = load_csv("news_sentiment.csv", RESULTS_DIR)
     if sig.empty or sns.empty:
         st.info("Need both signals_with_rationale.csv and news_sentiment.csv.")
     else:
@@ -535,10 +844,10 @@ with tabs[18]:
             if "news" not in tidy_cols: tidy_cols.insert(2, "news")
             st.markdown(merged[tidy_cols].to_html(escape=False, index=False), unsafe_allow_html=True)
 
-# Tab 19 — Model Comparison
-with tabs[19]:
+# Tab 20 — Model Comparison
+with tabs[20]:
     st.subheader("📊 Model Comparison")
-    mc = load_csv("model_comparison.csv")
+    mc = load_csv("model_comparison.csv", RESULTS_DIR)
     if mc.empty:
         st.info("No model_comparison.csv yet. Expected columns: ['ticker','date','model','close','predicted_close'].")
     else:
@@ -591,8 +900,8 @@ with tabs[19]:
                     mime="text/csv"
                 )
 
-# Tab 20 — AI Learning Lab
-with tabs[20]:
+# Tab 21 — AI Learning Lab
+with tabs[21]:
     st.subheader("🧠 AI Learning Lab")
     st.markdown("""
     Upload custom OHLC CSV and prototype quick strategies:
@@ -644,6 +953,88 @@ with tabs[20]:
                 ax.set_xlabel("Date"); ax.set_ylabel("Cumulative Return"); ax.legend()
                 st.pyplot(fig)
 
-                st.dataframe(df.tail(20))
+                st.dataframe(df.tail(20), use_container_width=True)
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
+
+# Tab 22 — Buffett Orders
+with tabs[22]:
+    st.subheader("🧾 Buffett Orders (current)")
+    cur = load_csv("buffett_orders.csv", ORDERS_DIR)
+    if cur.empty:
+        st.info("No current buffett_orders.csv in data/orders yet.")
+    else:
+        to_numeric(cur, ["target_weight","current_weight","current_value","target_value","delta_notional","buffett_score"])
+        n_syms = cur["ticker"].nunique() if "ticker" in cur.columns else len(cur)
+        tw_sum = float(cur["target_weight"].fillna(0).sum()) if "target_weight" in cur.columns else np.nan
+        buys = cur[cur["action"] == "BUY"]
+        sells = cur[cur["action"] == "SELL"]
+        c1, c2, c3a, c3b = st.columns([1,1,1,1])
+        with c1: st.metric("Symbols", n_syms)
+        with c2: st.metric("Sum target weights", f"{tw_sum:0.3f}" if np.isfinite(tw_sum) else "—")
+        with c3a: st.metric("Total BUY $", f"{sum_safe(buys['delta_notional']):,.0f}")
+        with c3b: st.metric("Total SELL $", f"{sum_safe(sells['delta_notional']):,.0f}")
+
+        st.write("**Top BUYS by notional**")
+        st.dataframe(buys.sort_values("delta_notional", ascending=False).head(10), use_container_width=True)
+        st.write("**Top SELLS by notional**")
+        st.dataframe(sells.sort_values("delta_notional", ascending=True).head(10), use_container_width=True)
+
+        with st.expander("All Orders"):
+            st.dataframe(cur, use_container_width=True)
+
+        hist = sorted((RESULTS_DIR).glob("buffett_orders_*.csv"))
+        if hist:
+            st.caption(f"Latest history file: {hist[-1].name} (in {RESULTS_DIR})")
+
+# Tab 23 — Consolidated Orders
+with tabs[23]:
+    st.subheader("🗂️ Consolidated Orders (ML × Buffett blend)")
+    con = load_csv("orders_today.csv", ORDERS_DIR)
+    if con.empty:
+        st.info("No orders_today.csv in data/orders yet.")
+    else:
+        to_numeric(con, ["target_weight"])
+        n_syms = con["ticker"].nunique() if "ticker" in con.columns else len(con)
+        tw_sum = float(con["target_weight"].fillna(0).sum()) if "target_weight" in con.columns else np.nan
+        c1, c2 = st.columns(2)
+        with c1: st.metric("Symbols", n_syms)
+        with c2: st.metric("Sum target weights", f"{tw_sum:0.3f}" if np.isfinite(tw_sum) else "—")
+        st.dataframe(con, use_container_width=True)
+
+# Tab 24 — AI Feedback
+with tabs[24]:
+    st.subheader("🤖 AI Feedback (allocator runs)")
+    rows = load_jsonl(RESULTS_DIR / "ai_feedback.jsonl")
+    if not rows:
+        st.info("No ai_feedback.jsonl yet.")
+    else:
+        last = rows[-1]
+        runs = len(rows)
+        total_buy = last.get("orders", {}).get("total_buy_notional", 0) or 0
+        total_sell = last.get("orders", {}).get("total_sell_notional", 0) or 0
+        uni_size = last.get("universe", {}).get("count", None)
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.metric("Runs", runs)
+        with c2: st.metric("Total BUY $ (last)", f"{total_buy:,.0f}")
+        with c3: st.metric("Total SELL $ (last)", f"{total_sell:,.0f}")
+        with c4: st.metric("Universe size (last)", uni_size if uni_size is not None else "—")
+
+        with st.expander("Latest run — details"):
+            st.json(last)
+
+        def flatten(d, prefix=""):
+            out = {}
+            for k, v in d.items():
+                kk = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
+                if isinstance(v, dict):
+                    out.update(flatten(v, kk))
+                else:
+                    out[kk] = v
+            return out
+        table = pd.DataFrame([flatten(r) for r in rows])
+        st.write("All feedback records")
+        st.dataframe(table, use_container_width=True)
+
+# footer
+st.caption("Tip: If new files aren’t appearing, use the Diagnostics expander or click ↻ in Raw CSV to clear cache and rescan.")

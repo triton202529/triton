@@ -1,8 +1,7 @@
 # services/train_model.py
 # Multi-model training + Trade Rationale 2.0 (+ Confidence & Position Sizing)
-# NOTE: This version intentionally has **NO retry** and **NO live fetch**.
-# It only trains on tickers that already have valid per‑ticker parquet files
-# in data/results/{TICKER}.parquet. Any failures are logged to skipped_tickers.csv.
+# LEAKAGE-SAFE: Predict today's close (t) using only lagged features from (t-1).
+# No retries, no live fetch. Trains only on tickers with data/results/{TICKER}.parquet.
 
 import os
 import sys
@@ -13,7 +12,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 
-# Optional XGBoost
+# ----- Optional XGBoost -----
 HAS_XGB = False
 try:
     from xgboost import XGBRegressor  # type: ignore
@@ -21,7 +20,7 @@ try:
 except Exception:
     HAS_XGB = False
 
-# Allow importing from project root for feature generator (not used here, features are already in parquet)
+# Allow importing from project root if ever needed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # ---------- Paths ----------
@@ -46,13 +45,13 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 
 # ---------- CLI ----------
 def parse_args():
-    p = argparse.ArgumentParser(description="Train models + rationale (no retry).")
-    p.add_argument("--min-rows", type=int, default=30, help="Minimum rows required per ticker parquet.")
+    p = argparse.ArgumentParser(description="Train models + rationale (no retry, leakage-safe).")
+    p.add_argument("--min-rows", type=int, default=30, help="Minimum rows required per ticker parquet (pre-lag).")
     return p.parse_args()
 
 args = parse_args()
 
-print("🧠 Starting multi-model training with feature importance, model comparison, and Trade Rationale 2.0 (no-retry)…")
+print("🧠 Starting multi-model training (lagged features), feature importance, model comparison, Trade Rationale 2.0…")
 
 # ---------- Helpers ----------
 def compute_sma(series: pd.Series, window: int) -> pd.Series:
@@ -66,7 +65,7 @@ def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.ewm(alpha=1/period, adjust=False).mean()
     rs = avg_gain / (avg_loss.replace(0, np.nan))
     rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)
+    return rsi.fillna(50.0)
 
 def compute_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     prev_close = close.shift(1)
@@ -97,7 +96,7 @@ def build_rationale_row(row, score_pct, sentiment_val):
     # Volatility
     if pd.notna(row.get("atr14")) and pd.notna(row.get("close")) and row["close"] != 0:
         parts.append(f"Volatility {(row['atr14']/row['close']):.1%} (ATR/Price)")
-    # Fundamentals
+    # Fundamentals (static)
     if pd.notna(row.get("pe_ratio")): parts.append(f"P/E {row['pe_ratio']:.1f}")
     if pd.notna(row.get("dividend_yield")) and row["dividend_yield"] > 0: parts.append(f"Dividend {row['dividend_yield']:.2%}")
     # Score percentile
@@ -115,7 +114,7 @@ def safe_percentile_rank(series: pd.Series, value):
         return np.nan
     return (series < value).mean()
 
-# Confidence & position sizing (deterministic)
+# Confidence & position sizing
 def _nz(x, default=0.0):
     try:
         xv = float(x)
@@ -199,7 +198,7 @@ if os.path.exists(NEWS_SENTIMENT_PATH) and os.path.getsize(NEWS_SENTIMENT_PATH) 
     except Exception as e:
         print(f"⚠️ Could not parse news_sentiment.csv: {e} — continuing without sentiment")
 
-# Universe = intersection of those that have a parquet and appear in inputs
+# Universe = those present in inputs and with a parquet
 available_parquets = {fn.replace(".parquet", "").upper()
                       for fn in os.listdir(RESULTS_DIR) if fn.endswith(".parquet")}
 universe = sorted(set(fundamentals_df["ticker"]).union(set(scores_df["ticker"])))
@@ -223,6 +222,7 @@ all_model_comparison = []
 signals_with_rationale_rows = []
 legacy_signals_rows = []
 
+# For score percentile
 score_values = scores_df[["ticker", "total_score"]].dropna()["total_score"]
 
 # ---------- Core trainer ----------
@@ -232,29 +232,37 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int) -> bool:
         if df.empty or len(df) < min_rows:
             skipped_tickers.append({"ticker": ticker, "reason": f"Empty dataset or < {min_rows} rows"})
             return False
+
         if "date" not in df.columns:
             skipped_tickers.append({"ticker": ticker, "reason": "Missing 'date' column"})
             return False
+
         for required in ["open", "high", "low", "close", "volume"]:
             if required not in df.columns:
                 skipped_tickers.append({"ticker": ticker, "reason": "Missing OHLCV columns"})
                 return False
 
+        # Sort by date
         df = df.sort_values("date").reset_index(drop=True)
-        df["target"] = df["close"].shift(-1)
-        df.dropna(inplace=True)
 
+        # Attach static fundamentals / score
         fund_row = fundamentals_df[fundamentals_df["ticker"] == ticker]
         score_row = scores_df[scores_df["ticker"] == ticker]
         if fund_row.empty or score_row.empty:
             skipped_tickers.append({"ticker": ticker, "reason": "Missing fundamentals or score"})
             return False
 
-        for col in ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield"]:
-            df[col] = fund_row.iloc[0][col]
+        fund_cols = ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield"]
+        for col in fund_cols:
+            df[col] = fund_row.iloc[0][col] if col in fund_row.columns else np.nan
+
+        # NEUTRAL-FILL FUNDAMENTALS so they don't nuke rows during lag masking (ETFs often NaN here)
+        df[fund_cols] = df[fund_cols].fillna(0.0)
+
+        # Score (static per ticker)
         df["total_score"] = score_row.iloc[0]["total_score"]
 
-        # Compute light tech (in case parquet didn't have them)
+        # Compute light tech (if not present)
         if "sma20" not in df.columns:
             df["sma20"] = compute_sma(df["close"], 20)
         if "sma50" not in df.columns:
@@ -264,63 +272,93 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int) -> bool:
         if "atr14" not in df.columns:
             df["atr14"] = compute_atr(df["high"], df["low"], df["close"], 14)
 
-        # Features
+        # -----------------------------
+        # LEAKAGE-SAFE FEATURE MATRIX
+        # Predict today's close (t) using features from (t-1)
+        # -----------------------------
         base_cols = ["open", "high", "low", "close", "volume"]
-        feature_cols = base_cols + ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield", "total_score"]
-        X = df[feature_cols].fillna(0)
-        y = df["target"]
+        tech_cols = ["sma20", "sma50", "rsi14", "atr14"]
+        feature_cols = base_cols + tech_cols + fund_cols + ["total_score"]
 
-        # Baseline RF predictions
+        # Use lagged features only
+        X_raw = df[feature_cols].copy()
+        X = X_raw.shift(1)     # t-1 inputs
+        y = df["close"]        # predict close at t
+
+        # Only require non-NaNs for lagged base+tech; fundamentals already neutral-filled
+        required_for_mask = base_cols + tech_cols + ["total_score"]  # fund cols are 0.0 now
+        mask = X[required_for_mask].notna().all(axis=1) & y.notna()
+
+        if mask.sum() < min_rows:
+            skipped_tickers.append({"ticker": ticker, "reason": f"Too few rows after lagging (have {int(mask.sum())})"})
+            return False
+
+        X = X.loc[mask]
+        y = y.loc[mask]
+        df_model = df.loc[mask].copy()  # rows aligned to y (date t)
+
+        # ----- Fit + baseline predictions with RF -----
         rf_model = models["RandomForest"]
         rf_model.fit(X, y)
-        df["predicted_close"] = rf_model.predict(X)
+        df_model["predicted_close"] = rf_model.predict(X)
 
-        # Signals
-        df["signal"] = "HOLD"
-        df.loc[df["predicted_close"] > df["close"], "signal"] = "BUY"
-        df.loc[df["predicted_close"] < df["close"], "signal"] = "SELL"
+        # ----- Signals -----
+        df_model["signal"] = "HOLD"
+        df_model.loc[df_model["predicted_close"] > df_model["close"], "signal"] = "BUY"
+        df_model.loc[df_model["predicted_close"] < df_model["close"], "signal"] = "SELL"
 
-        # Confidence / pos size / edge
-        conf_df = df.apply(lambda r: pd.Series(
+        # ----- Optional sentiment merge on aligned dates -----
+        df_model_dates = pd.to_datetime(df_model["date"], errors="coerce").dt.date
+        if not sent_df.empty:
+            merged = pd.DataFrame({"date": df_model_dates, "idx": df_model.index})
+            merged["ticker"] = ticker
+            merged = merged.merge(sent_df, on=["ticker", "date"], how="left")
+            df_model["sentiment"] = merged.set_index("idx")["sentiment"].reindex(df_model.index)
+        else:
+            df_model["sentiment"] = np.nan
+
+        # ----- Confidence / pos size / edge -----
+        conf_df = df_model.apply(lambda r: pd.Series(
             compute_confidence_row(r), index=["confidence", "position_size", "delta_pct"]), axis=1)
-        df["confidence"] = conf_df["confidence"].fillna(0.0)
-        df["position_size"] = conf_df["position_size"].fillna(0.0)
-        df["delta_pct"] = conf_df["delta_pct"].fillna(0.0)
+        df_model["confidence"] = conf_df["confidence"].fillna(0.0)
+        df_model["position_size"] = conf_df["position_size"].fillna(0.0)
+        df_model["delta_pct"] = conf_df["delta_pct"].fillna(0.0)
 
-        # Save per‑ticker RF predictions
-        output_df = df[["date", "close", "predicted_close", "signal"]].copy()
+        # ----- Save per-ticker RF predictions (aligned rows only) -----
+        output_df = df_model[["date", "close", "predicted_close", "signal"]].copy()
         output_df["ticker"] = ticker
         output_path = os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet")
         output_df.to_parquet(output_path, index=False)
 
-        # RF feature importance
+        # ----- RF feature importance -----
         fi = getattr(rf_model, "feature_importances_", None)
-        if fi is not None:
+        if fi is not None and len(fi) == len(feature_cols):
             all_feature_importance.append(pd.DataFrame({
                 "ticker": ticker, "model": "RandomForest",
                 "feature": feature_cols, "importance": fi
             }))
 
-        # Model comparison
+        # ----- Model comparison (aligned, in-sample) -----
         for name, model in models.items():
             try:
                 model.fit(X, y)
                 preds = model.predict(X)
                 temp = pd.DataFrame({
                     "ticker": ticker,
-                    "date": df["date"],
+                    "date": df_model["date"].values,
                     "model": name,
-                    "close": df["close"].values,
-                    "predicted_close": preds
+                    "close": df_model["close"].values,            # actual t
+                    "predicted_close": preds                      # pred for t using t-1 features
                 })
                 all_model_comparison.append(temp)
 
                 if hasattr(model, "feature_importances_"):
                     imp_vals = model.feature_importances_
-                    all_feature_importance.append(pd.DataFrame({
-                        "ticker": ticker, "model": name,
-                        "feature": feature_cols, "importance": imp_vals
-                    }))
+                    if len(imp_vals) == len(feature_cols):
+                        all_feature_importance.append(pd.DataFrame({
+                            "ticker": ticker, "model": name,
+                            "feature": feature_cols, "importance": imp_vals
+                        }))
                 elif hasattr(model, "coef_"):
                     coef = model.coef_
                     coef = coef.ravel() if hasattr(coef, "ravel") else coef
@@ -335,22 +373,12 @@ def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int) -> bool:
                 print(f"⚠️ {ticker} / {name}: model failed — {me}")
                 continue
 
-        # Sentiment merge (optional)
-        df_dates = pd.to_datetime(df["date"], errors="coerce").dt.date
-        if not sent_df.empty:
-            merged = pd.DataFrame({"date": df_dates, "idx": df.index})
-            merged["ticker"] = ticker
-            merged = merged.merge(sent_df, on=["ticker", "date"], how="left")
-            df["sentiment"] = merged.set_index("idx")["sentiment"].reindex(df.index)
-        else:
-            df["sentiment"] = np.nan
-
-        # Score percentile
-        t_score = df["total_score"].iloc[0] if "total_score" in df.columns and not df.empty else np.nan
+        # ----- Score percentile (static by ticker) -----
+        t_score = df_model["total_score"].iloc[0] if "total_score" in df_model.columns and not df_model.empty else np.nan
         score_pct = safe_percentile_rank(score_values, t_score)
 
-        # Export rationale rows
-        for _, row in df.iterrows():
+        # ----- Export rationale rows -----
+        for _, row in df_model.iterrows():
             rationale = build_rationale_row(row, score_pct, row.get("sentiment", np.nan))
             signals_with_rationale_rows.append({
                 "date": pd.to_datetime(row["date"]).date(),
