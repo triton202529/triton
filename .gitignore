@@ -58,3 +58,13 @@ __pycache__/
 venv/
 .env
 .env.*
+# IDE/OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python tooling
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
