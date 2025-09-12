@@ -1,26 +1,19 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.ipynb_checkpoints/
-.venv/
-venv/
-env/
-.env
-.DS_Store
-Thumbs.db
+# generated data
+/data/results/*.parquet
+/data/predictions/*.parquet
+/data/parquet/
+/data/orders/
+/data/run/
+/logs/
+*.log
 
-# Outputs (don’t track)
-data/results/*.csv
-data/results/*.parquet
-data/predictions/*.parquet
-data/processed/*.parquet
-data/logs/*.txt
+# reports/output blobs (keep if you truly want them)
+/data/results/*.csv
 
-# Keep folders
-!data/results/.gitkeep
-!data/predictions/.gitkeep
-!data/processed/.gitkeep
-!data/logs/.gitkeep
-!notebooks/.gitkeep
+# secrets/config locals
+/config/*.json
+/config/*.yaml
+/data/secrets/
 
+# keep directory placeholders when empty
+!.gitkeep
