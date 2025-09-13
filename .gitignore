@@ -68,3 +68,10 @@ Thumbs.db
 .ipynb_checkpoints/
 .pytest_cache/
 .mypy_cache/
+# project configs (locals)
+ /config/*.json
+ /config/*.yaml
+ /config/*.txt
+ /config/*.csv
+ # just in case any script uses root-level
+ /risk.json
