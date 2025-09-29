@@ -1,0 +1,13 @@
+{
+  "baseline": "smart_weight",
+  "smart_weight": {
+    "score_column": "confidence",
+    "alpha": 0.30,
+    "max_weight_cap": 0.15,
+    "trading_cost_bps": 5,
+    "ema_smoothing_days": 1,
+    "min_hold_days": 1
+  },
+  "benchmark": "avg_market",
+  "chart_normalize_to_one": true
+}
