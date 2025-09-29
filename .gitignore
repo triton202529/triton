@@ -1,19 +1,17 @@
 # ===== Generated data & artifacts =====
-/data/results/*.parquet
-/data/results/*.csv
-/data/results/*.json
-/data/results/*.jsonl
-/data/results/reports/
-/data/predictions/*.parquet
-/data/predictions/*.csv
-/data/orders/
-/data/run/
-/data/processed/
-/data/raw/
-/data/parquet/              # if ever created
-/data/logs/
- /logs/
+/data/results/*
+/data/predictions/*
+/data/orders/*
+/data/run/*
+/data/processed/*
+/data/raw/*
+/data/parquet/*
+/data/logs/*
+/logs/*
 *.log
+
+# If you ever need to keep empty folders:
+!**/.gitkeep
 
 # ===== Python caches =====
 **/__pycache__/
@@ -34,44 +32,18 @@
 # ===== Local secrets & machine-specific config =====
 /config/*.json
 /config/*.yaml
+/config/*.yml
+/config/*.txt
+/config/*.csv
 /data/secrets/
 overrides.json
 risk.json
+
+# Keep the shared baseline config under version control
+!config/baseline.smart_weight.json
 
 # ===== OS / editor junk =====
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
-
-# ===== Keep directory placeholders when empty =====
-!.gitkeep
-# Python bytecode & build
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
-# virtual envs & local stuff
-.venv/
-venv/
-.env
-.env.*
-# IDE/OS cruft
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Python tooling
-.ipynb_checkpoints/
-.pytest_cache/
-.mypy_cache/
-# project configs (locals)
- /config/*.json
- /config/*.yaml
- /config/*.txt
- /config/*.csv
- # just in case any script uses root-level
- /risk.json
