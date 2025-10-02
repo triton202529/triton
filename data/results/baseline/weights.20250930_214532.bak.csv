@@ -1,0 +1,21 @@
+ticker,target_weight,source_weights,notes
+AAPL,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+ABBV,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+AMD,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+AMZN,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+ARKK,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+BAC,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+BITO,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+BLK,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+BRK-B,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+C,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+CVX,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+DBA,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+DIA,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+DIS,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+GBTC,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+GLD,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+GOOGL,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+GS,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+HD,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47
+INTC,0.05,0.0500,baseline method=cap ts=2025-09-30T20:57:47

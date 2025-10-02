@@ -1,0 +1,21 @@
+ticker,target_weight,source_weights,notes
+NVDA,0.1250,0.1250,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+MSFT,0.1250,0.1250,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+AAPL,0.1250,0.1250,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+GOOGL,0.1250,0.1250,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+AMZN,0.1250,0.1250,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+BRK-B,0.1188,0.1188,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+ABBV,0.0429,0.0429,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+BAC,0.0427,0.0427,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+CVX,0.0305,0.0305,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+AMD,0.0285,0.0285,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+GS,0.0268,0.0268,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+DIS,0.0224,0.0224,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+C,0.0210,0.0210,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+BLK,0.0200,0.0200,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+GLD,0.0137,0.0137,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+DIA,0.0043,0.0043,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+GBTC,0.0021,0.0021,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+ARKK,0.0008,0.0008,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+BITO,0.0004,0.0004,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known
+DBA,0.0001,0.0001,baseline method=cap top=20 keep-missing-equal=0 missing-share=0.00 max-weight=0.125 known=20 missing=0 cap-effective=0.1250 ts=2025-10-02T00:09:26 group=known

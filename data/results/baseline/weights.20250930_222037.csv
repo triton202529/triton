@@ -1,0 +1,21 @@
+ticker,target_weight,source_weights,notes
+NVDA,0.2000,0.2000,baseline method=cap ts=2025-09-30T22:20:37
+MSFT,0.2000,0.2000,baseline method=cap ts=2025-09-30T22:20:37
+AAPL,0.2000,0.2000,baseline method=cap ts=2025-09-30T22:20:37
+GOOGL,0.2000,0.2000,baseline method=cap ts=2025-09-30T22:20:37
+AMZN,0.2000,0.2000,baseline method=cap ts=2025-09-30T22:20:37
+ABBV,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+AMD,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+ARKK,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+BAC,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+BITO,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+BLK,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+BRK-B,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+C,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+CVX,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+DBA,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+DIA,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+DIS,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+GBTC,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+GLD,0.0133,0.0133,baseline method=cap ts=2025-09-30T22:20:37
+GS,0.0000,0.0000,baseline method=cap ts=2025-09-30T22:20:37
