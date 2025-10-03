@@ -28,8 +28,7 @@ from . import (
 
 
 class TestFind(SoupTest):
-    """Basic tests of the find() method.
-    """
+    """Basic tests of the find() method."""
 
     def test_find_tag(self):
         soup = self.soup("<a>1</a><b>2</b><a>3</a><b>4</b>")
@@ -68,8 +67,9 @@ class TestFind(SoupTest):
 
     def test_find_with_function_can_only_find_tags(self):
         soup = self.soup("text<div>text</div>text<p>text</p>")
-        assert "p" == soup.find(lambda t: t.name=="p").name
-        assert None == soup.find(lambda t: t=="text")
+        assert "p" == soup.find(lambda t: t.name == "p").name
+        assert None == soup.find(lambda t: t == "text")
+
 
 class TestFindAll(SoupTest):
     """Basic tests of the find_all() method."""
@@ -152,9 +152,11 @@ class TestFindAllByName(SoupTest):
     """Test ways of finding tags by tag name."""
 
     def setup_method(self) -> None:
-        self.tree = self.soup("""<a>First tag.</a>
+        self.tree = self.soup(
+            """<a>First tag.</a>
                                   <b>Second tag.</b>
-                                  <c>Third <a>Nested tag.</a> tag.</c>""")
+                                  <c>Third <a>Nested tag.</a> tag.</c>"""
+        )
 
     def test_find_all_by_tag_name(self):
         # Find all the <a> tags.
@@ -209,9 +211,11 @@ class TestFindAllByName(SoupTest):
         def id_matches_name(tag):
             return tag.name == tag.get("id")
 
-        tree = self.soup("""<a id="a">Match 1.</a>
+        tree = self.soup(
+            """<a id="a">Match 1.</a>
                             <a id="1">Does not match.</a>
-                            <b id="b">Match 2.</a>""")
+                            <b id="b">Match 2.</a>"""
+        )
 
         self.assert_selects(tree.find_all(id_matches_name), ["Match 1.", "Match 2."])
 
@@ -232,11 +236,13 @@ class TestFindAllByAttribute(SoupTest):
     def test_find_all_by_attribute_name(self):
         # You can pass in keyword arguments to find_all to search by
         # attribute.
-        tree = self.soup("""
+        tree = self.soup(
+            """
                          <a id="first">Matching a.</a>
                          <a id="second">
                           Non-matching <b id="first">Matching b.</b>a.
-                         </a>""")
+                         </a>"""
+        )
         self.assert_selects(tree.find_all(id="first"), ["Matching a.", "Matching b."])
 
     def test_find_all_by_utf8_attribute_value(self):
@@ -251,12 +257,14 @@ class TestFindAllByAttribute(SoupTest):
         # You can pass in a dictionary as the argument 'attrs'. This
         # lets you search for attributes like 'name' (a fixed argument
         # to find_all) and 'class' (a reserved word in Python.)
-        tree = self.soup("""
+        tree = self.soup(
+            """
                          <a name="name1" class="class1">Name match.</a>
                          <a name="name2" class="class2">Class match.</a>
                          <a name="name3" class="class3">Non-match.</a>
                          <name1>A tag called 'name1'.</name1>
-                         """)
+                         """
+        )
 
         # This doesn't do what you want.
         self.assert_selects(tree.find_all(name="name1"), ["A tag called 'name1'."])
@@ -266,12 +274,14 @@ class TestFindAllByAttribute(SoupTest):
         self.assert_selects(tree.find_all(attrs={"class": "class2"}), ["Class match."])
 
     def test_find_all_by_class(self):
-        tree = self.soup("""
+        tree = self.soup(
+            """
                          <a class="1">Class 1.</a>
                          <a class="2">Class 2.</a>
                          <b class="1">Class 1.</b>
                          <c class="3 4">Class 3 and 4.</c>
-                         """)
+                         """
+        )
 
         # Passing in the class_ keyword argument will search against
         # the 'class' attribute.
@@ -327,9 +337,11 @@ class TestFindAllByAttribute(SoupTest):
         assert [] == soup.find_all("a", "bar foo")
 
     def test_find_all_by_attribute_soupstrainer(self):
-        tree = self.soup("""
+        tree = self.soup(
+            """
                          <a id="first">Match.</a>
-                         <a id="second">Non-match.</a>""")
+                         <a id="second">Non-match.</a>"""
+        )
 
         strainer = SoupStrainer(attrs={"id": "first"})
         self.assert_selects(tree.find_all(strainer), ["Match."])
@@ -337,23 +349,29 @@ class TestFindAllByAttribute(SoupTest):
     def test_find_all_with_missing_attribute(self):
         # You can pass in None as the value of an attribute to find_all.
         # This will match tags that do not have that attribute set.
-        tree = self.soup("""<a id="1">ID present.</a>
+        tree = self.soup(
+            """<a id="1">ID present.</a>
                             <a>No ID present.</a>
-                            <a id="">ID is empty.</a>""")
+                            <a id="">ID is empty.</a>"""
+        )
         self.assert_selects(tree.find_all("a", id=None), ["No ID present."])
 
     def test_find_all_with_defined_attribute(self):
         # You can pass in None as the value of an attribute to find_all.
         # This will match tags that have that attribute set to any value.
-        tree = self.soup("""<a id="1">ID present.</a>
+        tree = self.soup(
+            """<a id="1">ID present.</a>
                             <a>No ID present.</a>
-                            <a id="">ID is empty.</a>""")
+                            <a id="">ID is empty.</a>"""
+        )
         self.assert_selects(tree.find_all(id=True), ["ID present.", "ID is empty."])
 
     def test_find_all_with_numeric_attribute(self):
         # If you search for a number, it's treated as a string.
-        tree = self.soup("""<a id=1>Unquoted attribute.</a>
-                            <a id="1">Quoted attribute.</a>""")
+        tree = self.soup(
+            """<a id=1>Unquoted attribute.</a>
+                            <a id="1">Quoted attribute.</a>"""
+        )
 
         expected = ["Unquoted attribute.", "Quoted attribute."]
         self.assert_selects(tree.find_all(id=1), expected)
@@ -362,10 +380,12 @@ class TestFindAllByAttribute(SoupTest):
     def test_find_all_with_list_attribute_values(self):
         # You can pass a list of attribute values instead of just one,
         # and you'll get tags that match any of the values.
-        tree = self.soup("""<a id="1">1</a>
+        tree = self.soup(
+            """<a id="1">1</a>
                             <a id="2">2</a>
                             <a id="3">3</a>
-                            <a>No ID.</a>""")
+                            <a>No ID.</a>"""
+        )
         self.assert_selects(tree.find_all(id=["1", "3", "4"]), ["1", "3"])
 
         # If you pass in an empty list, you get nothing.
@@ -375,11 +395,13 @@ class TestFindAllByAttribute(SoupTest):
         # You can pass a regular expression as an attribute value, and
         # you'll get tags whose values for that attribute match the
         # regular expression.
-        tree = self.soup("""<a id="a">One a.</a>
+        tree = self.soup(
+            """<a id="a">One a.</a>
                             <a id="aa">Two as.</a>
                             <a id="ab">Mixed as and bs.</a>
                             <a id="b">One b.</a>
-                            <a>No ID.</a>""")
+                            <a>No ID.</a>"""
+        )
 
         self.assert_selects(tree.find_all(id=re.compile("^a+$")), ["One a.", "Two as."])
 
@@ -450,7 +472,8 @@ class TestIndex(SoupTest):
     """Test Tag.index"""
 
     def test_index(self):
-        tree = self.soup("""<div>
+        tree = self.soup(
+            """<div>
                             <a>Identical</a>
                             <b>Not identical</b>
                             <a>Identical</a>
@@ -458,7 +481,8 @@ class TestIndex(SoupTest):
                             <c><d>Identical with child</d></c>
                             <b>Also not identical</b>
                             <c><d>Identical with child</d></c>
-                            </div>""")
+                            </div>"""
+        )
         div = tree.div
         for i, element in enumerate(div.contents):
             assert i == div.index(element)
@@ -470,13 +494,15 @@ class TestParentOperations(SoupTest):
     """Test navigation and searching through an element's parents."""
 
     def setup_method(self) -> None:
-        self.tree = self.soup("""<ul id="empty"></ul>
+        self.tree = self.soup(
+            """<ul id="empty"></ul>
                                  <ul id="top">
                                   <ul id="middle">
                                    <ul id="bottom">
                                     <b id="start">Start here</b>
                                    </ul>
-                                  </ul>""")
+                                  </ul>"""
+        )
         self.start = self.tree.b
 
     def test_parent(self):
@@ -615,8 +641,12 @@ class TestPreviousOperations(ProximityTest):
 
     def test_previous_generators(self):
         start = self.tree.find("b", string="One")
-        self.assert_selects_ids(start.previous_elements, ["bodytag", "headtag", 'start'])
-        self.assert_selects_ids(start.self_and_previous_elements, ["1", "bodytag", "headtag", "start"])
+        self.assert_selects_ids(
+            start.previous_elements, ["bodytag", "headtag", "start"]
+        )
+        self.assert_selects_ids(
+            start.self_and_previous_elements, ["1", "bodytag", "headtag", "start"]
+        )
 
 
 class SiblingTest(SoupTest):
@@ -722,7 +752,9 @@ class TestPreviousSibling(SiblingTest):
 
     def test_previous_siblings_generators(self):
         self.assert_selects_ids(self.end.previous_siblings, ["3", "2", "1"])
-        self.assert_selects_ids(self.end.self_and_previous_siblings, ["4", "3", "2", "1"])
+        self.assert_selects_ids(
+            self.end.self_and_previous_siblings, ["4", "3", "2", "1"]
+        )
 
     def test_previous_sibling_for_text_element(self):
         soup = self.soup("Foo<b>bar</b>baz")
@@ -777,22 +809,22 @@ class TestTreeModification(SoupTest):
 
     def test_insertion_returns_inserted_things(self):
         soup = self.soup("<html></html>")
-        html = soup.find('html')
-        head = html.append(soup.new_tag('head'))
-        assert head.name == 'head'
+        html = soup.find("html")
+        head = html.append(soup.new_tag("head"))
+        assert head.name == "head"
 
-        [title] = head.insert(0, soup.new_tag('title'))
-        assert title.name == 'title'
+        [title] = head.insert(0, soup.new_tag("title"))
+        assert title.name == "title"
 
-        text5 = title.append('5')
-        assert text5 == '5'
-        text34 = text5.insert_before('3', '4')
-        assert text34 == ['3', '4']
-        text67 = text5.insert_after('6', '7')
-        assert text67 == ['6', '7']
-        text89 = title.extend(['8', '9'])
-        assert text89 == ['8', '9']
-        assert title.get_text() == '3456789'
+        text5 = title.append("5")
+        assert text5 == "5"
+        text34 = text5.insert_before("3", "4")
+        assert text34 == ["3", "4"]
+        text67 = text5.insert_after("6", "7")
+        assert text67 == ["6", "7"]
+        text89 = title.extend(["8", "9"])
+        assert text89 == ["8", "9"]
+        assert title.get_text() == "3456789"
 
     def test_replace_with_returns_thing_that_was_replaced(self):
         text = "<a></a><b><c></c></b>"
@@ -840,7 +872,9 @@ class TestTreeModification(SoupTest):
 
     def test_insert_multiple_elements(self):
         soup = self.soup("<p>And now, a word:</p><p>And we're back.</p>")
-        p2, p3 = soup.insert(1, soup.new_tag("p", string="p2"), soup.new_tag("p", string="p3"))
+        p2, p3 = soup.insert(
+            1, soup.new_tag("p", string="p2"), soup.new_tag("p", string="p3")
+        )
         assert "p2" == p2.string
         assert "p3" == p3.string
 
@@ -1224,9 +1258,11 @@ class TestTreeModification(SoupTest):
         assert g_tag.previous_sibling == to_text
 
     def test_unwrap(self):
-        tree = self.soup("""
+        tree = self.soup(
+            """
             <p>Unneeded <em>formatting</em> is unneeded</p>
-            """)
+            """
+        )
         tree.em.unwrap()
         assert tree.em is None
         assert tree.p.text == "Unneeded formatting is unneeded"
@@ -1292,7 +1328,8 @@ class TestTreeModification(SoupTest):
         assert bar_2 == soup.b.string
 
     def test_extract_multiples_of_same_tag(self):
-        soup = self.soup("""
+        soup = self.soup(
+            """
 <html>
 <head>
 <script>foo</script>
@@ -1302,7 +1339,8 @@ class TestTreeModification(SoupTest):
  <a></a>
 </body>
 <script>baz</script>
-</html>""")
+</html>"""
+        )
         [soup.script.extract() for i in soup.find_all("script")]
         assert "<body>\n\n<a></a>\n</body>" == str(soup.body)
 

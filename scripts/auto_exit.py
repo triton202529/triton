@@ -17,10 +17,11 @@ CONFIDENCE_THRESHOLD = 0.5  # Minimum to trust signal
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
+
 def load_sell_signals():
     print("📉 Loading SELL signals...")
     df = pd.read_csv(SIGNALS_FILE, parse_dates=["date"])
-    
+
     # Fallback if 'confidence' is missing
     if "confidence" not in df.columns:
         print("⚠️ No 'confidence' column found. Generating from price delta...")
@@ -30,29 +31,27 @@ def load_sell_signals():
     df_today = df[df["date"] == today]
 
     sell_signals = df_today[
-        (df_today["signal"] == "SELL") &
-        (df_today["confidence"] >= CONFIDENCE_THRESHOLD)
+        (df_today["signal"] == "SELL") & (df_today["confidence"] >= CONFIDENCE_THRESHOLD)
     ]
     return sell_signals.set_index("ticker")
+
 
 def get_open_positions():
     positions = api.list_positions()
     return {p.symbol: int(float(p.qty)) for p in positions if float(p.qty) > 0}
 
+
 def submit_exit(ticker, qty, rationale, confidence):
     try:
         print(f"💼 Closing {qty} shares of {ticker} | 🧠 {rationale} (conf: {confidence})")
         order = api.submit_order(
-            symbol=ticker,
-            qty=qty,
-            side="sell",
-            type="market",
-            time_in_force="gtc"
+            symbol=ticker, qty=qty, side="sell", type="market", time_in_force="gtc"
         )
         return "submitted"
     except Exception as e:
         print(f"❌ Exit failed for {ticker}: {e}")
         return "failed"
+
 
 def log_exit(ticker, qty, rationale, confidence, status):
     timestamp = datetime.utcnow().isoformat()
@@ -62,13 +61,14 @@ def log_exit(ticker, qty, rationale, confidence, status):
         "qty": qty,
         "rationale": rationale,
         "confidence": confidence,
-        "status": status
+        "status": status,
     }
     df_log = pd.DataFrame([row])
     if not os.path.exists(EXIT_LOG_FILE):
         df_log.to_csv(EXIT_LOG_FILE, index=False)
     else:
         df_log.to_csv(EXIT_LOG_FILE, mode="a", header=False, index=False)
+
 
 def main():
     sell_signals = load_sell_signals()
@@ -88,6 +88,7 @@ def main():
             log_exit(ticker, qty, rationale, confidence, status)
         else:
             print(f"⏳ No SELL signal for {ticker}, holding position...")
+
 
 if __name__ == "__main__":
     main()

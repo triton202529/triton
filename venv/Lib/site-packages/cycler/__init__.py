@@ -40,7 +40,6 @@ Results in::
     {'color': 'b', 'linestyle': '-.'}
 """
 
-
 from __future__ import annotations
 
 from collections.abc import Hashable, Iterable, Generator
@@ -48,6 +47,7 @@ import copy
 from functools import reduce
 from itertools import product, cycle
 from operator import mul, add
+
 # Dict, List, Union required for runtime cast calls
 from typing import TypeVar, Generic, Callable, Union, Dict, List, Any, overload, cast
 
@@ -199,13 +199,9 @@ class Cycler(Generic[K, V]):
         if old == new:
             return
         if new in self._keys:
-            raise ValueError(
-                f"Can't replace {old} with {new}, {new} is already a key"
-            )
+            raise ValueError(f"Can't replace {old} with {new}, {new} is already a key")
         if old not in self._keys:
-            raise KeyError(
-                f"Can't replace {old} with {new}, {old} is not a key"
-            )
+            raise KeyError(f"Can't replace {old} with {new}, {old} is not a key")
 
         self._keys.remove(old)
         self._keys.add(new)
@@ -286,16 +282,14 @@ class Cycler(Generic[K, V]):
         return Cycler(
             cast(Cycler[Union[K, L], Union[V, U]], self),
             cast(Cycler[Union[K, L], Union[V, U]], other),
-            zip
+            zip,
         )
 
     @overload
-    def __mul__(self, other: Cycler[L, U]) -> Cycler[K | L, V | U]:
-        ...
+    def __mul__(self, other: Cycler[L, U]) -> Cycler[K | L, V | U]: ...
 
     @overload
-    def __mul__(self, other: int) -> Cycler[K, V]:
-        ...
+    def __mul__(self, other: int) -> Cycler[K, V]: ...
 
     def __mul__(self, other):
         """
@@ -310,23 +304,19 @@ class Cycler(Generic[K, V]):
             return Cycler(
                 cast(Cycler[Union[K, L], Union[V, U]], self),
                 cast(Cycler[Union[K, L], Union[V, U]], other),
-                product
+                product,
             )
         elif isinstance(other, int):
             trans = self.by_key()
-            return reduce(
-                add, (_cycler(k, v * other) for k, v in trans.items())
-            )
+            return reduce(add, (_cycler(k, v * other) for k, v in trans.items()))
         else:
             return NotImplemented
 
     @overload
-    def __rmul__(self, other: Cycler[L, U]) -> Cycler[K | L, V | U]:
-        ...
+    def __rmul__(self, other: Cycler[L, U]) -> Cycler[K | L, V | U]: ...
 
     @overload
-    def __rmul__(self, other: int) -> Cycler[K, V]:
-        ...
+    def __rmul__(self, other: int) -> Cycler[K, V]: ...
 
     def __rmul__(self, other):
         return self * other
@@ -465,18 +455,15 @@ class Cycler(Generic[K, V]):
 
 
 @overload
-def cycler(arg: Cycler[K, V]) -> Cycler[K, V]:
-    ...
+def cycler(arg: Cycler[K, V]) -> Cycler[K, V]: ...
 
 
 @overload
-def cycler(**kwargs: Iterable[V]) -> Cycler[str, V]:
-    ...
+def cycler(**kwargs: Iterable[V]) -> Cycler[str, V]: ...
 
 
 @overload
-def cycler(label: K, itr: Iterable[V]) -> Cycler[K, V]:
-    ...
+def cycler(label: K, itr: Iterable[V]) -> Cycler[K, V]: ...
 
 
 def cycler(*args, **kwargs):

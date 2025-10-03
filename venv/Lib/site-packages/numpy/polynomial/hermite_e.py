@@ -75,6 +75,7 @@ See also
 `numpy.polynomial`
 
 """
+
 import numpy as np
 import numpy.linalg as la
 from numpy.lib.array_utils import normalize_axis_index
@@ -83,13 +84,38 @@ from . import polyutils as pu
 from ._polybase import ABCPolyBase
 
 __all__ = [
-    'hermezero', 'hermeone', 'hermex', 'hermedomain', 'hermeline',
-    'hermeadd', 'hermesub', 'hermemulx', 'hermemul', 'hermediv',
-    'hermepow', 'hermeval', 'hermeder', 'hermeint', 'herme2poly',
-    'poly2herme', 'hermefromroots', 'hermevander', 'hermefit', 'hermetrim',
-    'hermeroots', 'HermiteE', 'hermeval2d', 'hermeval3d', 'hermegrid2d',
-    'hermegrid3d', 'hermevander2d', 'hermevander3d', 'hermecompanion',
-    'hermegauss', 'hermeweight']
+    "hermezero",
+    "hermeone",
+    "hermex",
+    "hermedomain",
+    "hermeline",
+    "hermeadd",
+    "hermesub",
+    "hermemulx",
+    "hermemul",
+    "hermediv",
+    "hermepow",
+    "hermeval",
+    "hermeder",
+    "hermeint",
+    "herme2poly",
+    "poly2herme",
+    "hermefromroots",
+    "hermevander",
+    "hermefit",
+    "hermetrim",
+    "hermeroots",
+    "HermiteE",
+    "hermeval2d",
+    "hermeval3d",
+    "hermegrid2d",
+    "hermegrid3d",
+    "hermevander2d",
+    "hermevander3d",
+    "hermecompanion",
+    "hermegauss",
+    "hermeweight",
+]
 
 hermetrim = pu.trimcoef
 
@@ -204,7 +230,7 @@ def herme2poly(c):
 #
 
 # Hermite
-hermedomain = np.array([-1., 1.])
+hermedomain = np.array([-1.0, 1.0])
 
 # Hermite coefficients representing zero.
 hermezero = np.array([0])
@@ -647,7 +673,7 @@ def hermeder(c, m=1, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     cnt = pu._as_int(m, "the order of derivation")
     iaxis = pu._as_int(axis, "the axis")
@@ -756,7 +782,7 @@ def hermeint(c, m=1, k=[], lbnd=0, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if not np.iterable(k):
         k = [k]
@@ -862,7 +888,7 @@ def hermeval(x, c, tensor=True):
 
     """
     c = np.array(c, ndmin=1, copy=None)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if isinstance(x, (tuple, list)):
         x = np.asarray(x)
@@ -1129,7 +1155,7 @@ def hermevander(x, deg):
     if ideg > 0:
         v[1] = x
         for i in range(2, ideg + 1):
-            v[i] = (v[i - 1] * x - v[i - 2] * (i - 1))
+            v[i] = v[i - 1] * x - v[i - 2] * (i - 1)
     return np.moveaxis(v, 0, -1)
 
 
@@ -1386,16 +1412,16 @@ def hermecompanion(c):
     # c is a trimmed copy
     [c] = pu.as_series([c])
     if len(c) < 2:
-        raise ValueError('Series must have maximum degree of at least 1.')
+        raise ValueError("Series must have maximum degree of at least 1.")
     if len(c) == 2:
         return np.array([[-c[0] / c[1]]])
 
     n = len(c) - 1
     mat = np.zeros((n, n), dtype=c.dtype)
-    scl = np.hstack((1., 1. / np.sqrt(np.arange(n - 1, 0, -1))))
+    scl = np.hstack((1.0, 1.0 / np.sqrt(np.arange(n - 1, 0, -1))))
     scl = np.multiply.accumulate(scl)[::-1]
-    top = mat.reshape(-1)[1::n + 1]
-    bot = mat.reshape(-1)[n::n + 1]
+    top = mat.reshape(-1)[1 :: n + 1]
+    bot = mat.reshape(-1)[n :: n + 1]
     top[...] = np.sqrt(np.arange(1, n))
     bot[...] = top
     mat[:, -1] -= scl * c[:-1] / c[-1]
@@ -1496,13 +1522,13 @@ def _normed_hermite_e_n(x, n):
     if n == 0:
         return np.full(x.shape, 1 / np.sqrt(np.sqrt(2 * np.pi)))
 
-    c0 = 0.
-    c1 = 1. / np.sqrt(np.sqrt(2 * np.pi))
+    c0 = 0.0
+    c1 = 1.0 / np.sqrt(np.sqrt(2 * np.pi))
     nd = float(n)
     for i in range(n - 1):
         tmp = c0
-        c0 = -c1 * np.sqrt((nd - 1.) / nd)
-        c1 = tmp + c1 * x * np.sqrt(1. / nd)
+        c0 = -c1 * np.sqrt((nd - 1.0) / nd)
+        c1 = tmp + c1 * x * np.sqrt(1.0 / nd)
         nd = nd - 1.0
     return c0 + c1 * x
 
@@ -1588,13 +1614,14 @@ def hermeweight(x):
     w : ndarray
        The weight function at `x`.
     """
-    w = np.exp(-.5 * x**2)
+    w = np.exp(-0.5 * x**2)
     return w
 
 
 #
 # HermiteE series class
 #
+
 
 class HermiteE(ABCPolyBase):
     """An HermiteE series class.
@@ -1622,6 +1649,7 @@ class HermiteE(ABCPolyBase):
         .. versionadded:: 1.24
 
     """
+
     # Virtual Functions
     _add = staticmethod(hermeadd)
     _sub = staticmethod(hermesub)
@@ -1639,4 +1667,4 @@ class HermiteE(ABCPolyBase):
     # Virtual properties
     domain = np.array(hermedomain)
     window = np.array(hermedomain)
-    basis_name = 'He'
+    basis_name = "He"

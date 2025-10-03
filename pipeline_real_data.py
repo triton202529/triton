@@ -6,11 +6,12 @@ import pandas as pd
 import yfinance as yf
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DATA_DIR     = PROJECT_ROOT / "data"
-RESULTS_DIR  = DATA_DIR / "results"
-ORDERS_DIR   = DATA_DIR / "orders"
+DATA_DIR = PROJECT_ROOT / "data"
+RESULTS_DIR = DATA_DIR / "results"
+ORDERS_DIR = DATA_DIR / "orders"
 for p in (RESULTS_DIR, ORDERS_DIR):
     p.mkdir(parents=True, exist_ok=True)
+
 
 def _flatten_columns(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     """Make sure columns are single-level and canonical: open, high, low, close, adj_close, volume."""
@@ -20,8 +21,7 @@ def _flatten_columns(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
             df.columns = [str(l0) for l0, _ in df.columns]
         else:
             df.columns = [
-                "_".join([str(x) for x in tup if x not in (None, "", "nan")])
-                for tup in df.columns
+                "_".join([str(x) for x in tup if x not in (None, "", "nan")]) for tup in df.columns
             ]
 
     # lower + underscores
@@ -61,6 +61,7 @@ def _flatten_columns(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
     return df
 
+
 def fetch_prices(ticker: str, days: int) -> pd.DataFrame:
     """Fetch daily OHLCV and save to parquet for candlesticks."""
     df = yf.download(ticker, period=f"{days}d", interval="1d", auto_adjust=False, progress=False)
@@ -88,6 +89,7 @@ def fetch_prices(ticker: str, days: int) -> pd.DataFrame:
     df[keep_cols].to_parquet(RESULTS_DIR / f"{ticker}.parquet", index=False)
     return df
 
+
 def compute_signals(prices: pd.DataFrame) -> pd.DataFrame:
     """Toy signals + predictions for every row (deterministic, robust)."""
     if prices.empty or "close" not in prices.columns:
@@ -104,9 +106,9 @@ def compute_signals(prices: pd.DataFrame) -> pd.DataFrame:
 
     # RSI(14)
     delta = close_series.diff()
-    gain  = delta.clip(lower=0).rolling(14, min_periods=14).mean()
-    loss  = (-delta.clip(upper=0)).rolling(14, min_periods=14).mean()
-    rs    = gain / loss.replace(0, np.nan)
+    gain = delta.clip(lower=0).rolling(14, min_periods=14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14, min_periods=14).mean()
+    rs = gain / loss.replace(0, np.nan)
     out["rsi14"] = 100 - (100 / (1 + rs))
 
     # Predicted close: EMA(10) shifted 1 forward, then safely filled
@@ -116,7 +118,7 @@ def compute_signals(prices: pd.DataFrame) -> pd.DataFrame:
 
     # SAFE 1-D arrays for edge
     close_np = close_series.to_numpy(dtype=float)
-    pred_np  = pd.to_numeric(out["predicted_close"], errors="coerce").to_numpy(dtype=float)
+    pred_np = pd.to_numeric(out["predicted_close"], errors="coerce").to_numpy(dtype=float)
 
     mask = np.isfinite(close_np) & np.isfinite(pred_np) & (close_np != 0.0)
     edge = np.full_like(close_np, np.nan, dtype=float)
@@ -130,19 +132,33 @@ def compute_signals(prices: pd.DataFrame) -> pd.DataFrame:
 
     # signal + rationale
     def classify(e):
-        if not np.isfinite(e): return "HOLD", "No strong edge"
-        if e > 0.01:          return "BUY",  "Positive price edge vs EMA"
-        if e < -0.01:         return "SELL", "Negative price edge vs EMA"
+        if not np.isfinite(e):
+            return "HOLD", "No strong edge"
+        if e > 0.01:
+            return "BUY", "Positive price edge vs EMA"
+        if e < -0.01:
+            return "SELL", "Negative price edge vs EMA"
         return "HOLD", "No strong edge"
 
     sigs, rats = zip(*[classify(v) for v in edge])
-    out["signal"]    = list(sigs)
+    out["signal"] = list(sigs)
     out["rationale"] = list(rats)
 
-    return out[[
-        "date", "close", "predicted_close", "signal", "confidence",
-        "rsi14", "sma20", "sma50", "edge_pct", "rationale"
-    ]]
+    return out[
+        [
+            "date",
+            "close",
+            "predicted_close",
+            "signal",
+            "confidence",
+            "rsi14",
+            "sma20",
+            "sma50",
+            "edge_pct",
+            "rationale",
+        ]
+    ]
+
 
 def main(tickers: list[str], days: int):
     all_rows = []
@@ -171,6 +187,7 @@ def main(tickers: list[str], days: int):
     signals.to_csv(out_csv, index=False)
     signals.drop(columns=["rationale"]).to_csv(RESULTS_DIR / "signals.csv", index=False)
     print(f"Wrote {len(signals):,} rows -> {out_csv}")
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

@@ -22,7 +22,7 @@ try:
         qty=qty,
         side="buy",
         type="market",
-        time_in_force="gtc"  # Using string instead of TimeInForce.GTC
+        time_in_force="gtc",  # Using string instead of TimeInForce.GTC
     )
     print(f"✅ Order placed: BUY {qty} x {symbol}")
     print(f"📄 Order ID: {order.id}")

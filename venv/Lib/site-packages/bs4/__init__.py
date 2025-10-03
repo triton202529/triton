@@ -36,12 +36,10 @@ __all__ = [
     "UnicodeDammit",
     "CData",
     "Doctype",
-
     # Exceptions
     "FeatureNotFound",
     "ParserRejectedMarkup",
     "StopParsing",
-
     # Warnings
     "AttributeResemblesVariableWarning",
     "GuessedAtParserWarning",

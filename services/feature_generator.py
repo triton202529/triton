@@ -17,6 +17,7 @@ SEARCH_DIRS = [
 # Preferred benchmark symbols to try locally (we'll pick the first found)
 BENCHMARK_CANDIDATES = ["SPY", "^GSPC", "^SPX", "^SP500"]
 
+
 def _find_local_file(symbol: str) -> Path | None:
     """Return the first existing parquet/csv path for a symbol across SEARCH_DIRS."""
     for folder in SEARCH_DIRS:
@@ -27,6 +28,7 @@ def _find_local_file(symbol: str) -> Path | None:
         if p_csv.exists():
             return p_csv
     return None
+
 
 def _read_price_df(path: Path) -> pd.DataFrame:
     """Read a local parquet/csv and return a DataFrame with ['date','close'] sorted by date."""
@@ -70,6 +72,7 @@ def _read_price_df(path: Path) -> pd.DataFrame:
     out = out.dropna(subset=["close"]).reset_index(drop=True)
     return out
 
+
 def load_benchmark_df() -> pd.DataFrame | None:
     """Try to load a local benchmark (SPY preferred). Returns ['date','spy_close'] or None."""
     for sym in BENCHMARK_CANDIDATES:
@@ -84,16 +87,18 @@ def load_benchmark_df() -> pd.DataFrame | None:
             continue
     return None
 
+
 def _rsi_wilder(close: pd.Series, period: int = 14) -> pd.Series:
     """Wilder RSI with EWM for stability."""
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
-    avg_loss = loss.ewm(alpha=1/period, adjust=False, min_periods=period).mean()
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
     return rsi
+
 
 def add_technical_indicators(
     df: pd.DataFrame,
@@ -112,7 +117,9 @@ def add_technical_indicators(
     # Normalize column names presence
     cols_lower = {c.lower(): c for c in df.columns}
     if "date" not in cols_lower or "close" not in cols_lower:
-        raise ValueError(f"DataFrame must include 'date' and 'close' columns. Got: {df.columns.tolist()}")
+        raise ValueError(
+            f"DataFrame must include 'date' and 'close' columns. Got: {df.columns.tolist()}"
+        )
 
     date_col = cols_lower["date"]
     close_col = cols_lower["close"]
@@ -128,7 +135,7 @@ def add_technical_indicators(
     df["returns"] = df[close_col].pct_change(fill_method=None)
 
     # Simple MAs with min_periods
-    df["ma7"]  = df[close_col].rolling(window=7,  min_periods=3).mean()
+    df["ma7"] = df[close_col].rolling(window=7, min_periods=3).mean()
     df["ma21"] = df[close_col].rolling(window=21, min_periods=7).mean()
 
     # EMAs
@@ -179,8 +186,19 @@ def add_technical_indicators(
 
     # === Final tidy ===
     # Fill engineered columns only (leave raw OHLC as-is if present)
-    engineered = ["returns", "ma7", "ma21", "ema12", "ema26", "rsi14",
-                  "macd", "macd_signal", "macd_hist", "vol10", "spy_returns"]
+    engineered = [
+        "returns",
+        "ma7",
+        "ma21",
+        "ema12",
+        "ema26",
+        "rsi14",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "vol10",
+        "spy_returns",
+    ]
     for c in engineered:
         if c in df.columns:
             df[c] = df[c].fillna(0.0)

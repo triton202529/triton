@@ -38,14 +38,16 @@ for current_date in unique_dates:
             shares = positions[ticker]["shares"]
             proceeds = shares * price
             cash += proceeds
-            trade_log.append({
-                "date": current_date.date(),
-                "ticker": ticker,
-                "action": "SELL",
-                "shares": shares,
-                "price": price,
-                "value": proceeds
-            })
+            trade_log.append(
+                {
+                    "date": current_date.date(),
+                    "ticker": ticker,
+                    "action": "SELL",
+                    "shares": shares,
+                    "price": price,
+                    "value": proceeds,
+                }
+            )
             del positions[ticker]
 
         # BUY logic
@@ -58,16 +60,18 @@ for current_date in unique_dates:
                 positions[ticker] = {
                     "entry_price": price,
                     "shares": shares,
-                    "entry_date": current_date.date()
+                    "entry_date": current_date.date(),
                 }
-                trade_log.append({
-                    "date": current_date.date(),
-                    "ticker": ticker,
-                    "action": "BUY",
-                    "shares": shares,
-                    "price": price,
-                    "value": cost
-                })
+                trade_log.append(
+                    {
+                        "date": current_date.date(),
+                        "ticker": ticker,
+                        "action": "BUY",
+                        "shares": shares,
+                        "price": price,
+                        "value": cost,
+                    }
+                )
 
     # Calculate daily portfolio value
     market_value = 0
@@ -78,12 +82,14 @@ for current_date in unique_dates:
             market_value += pos["shares"] * current_price
 
     total_value = cash + market_value
-    portfolio_history.append({
-        "date": current_date.date(),
-        "cash": round(cash, 2),
-        "market_value": round(market_value, 2),
-        "total_value": round(total_value, 2)
-    })
+    portfolio_history.append(
+        {
+            "date": current_date.date(),
+            "cash": round(cash, 2),
+            "market_value": round(market_value, 2),
+            "total_value": round(total_value, 2),
+        }
+    )
 
 # === Save Results ===
 os.makedirs("data/results", exist_ok=True)

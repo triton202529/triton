@@ -1,6 +1,7 @@
 """
 Helpers for embarrassingly parallel code.
 """
+
 # Author: Gael Varoquaux < gael dot varoquaux at normalesup dot org >
 # Copyright: 2010, Gael Varoquaux
 # License: BSD 3 clause
@@ -680,7 +681,7 @@ def delayed(function):
     try:
         delayed_function = functools.wraps(function)(delayed_function)
     except AttributeError:
-        " functools.wraps fails on some callable objects "
+        "functools.wraps fails on some callable objects"
     return delayed_function
 
 

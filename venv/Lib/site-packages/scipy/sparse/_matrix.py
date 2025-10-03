@@ -3,41 +3,49 @@ class spmatrix:
 
     It cannot be instantiated.  Most of the work is provided by subclasses.
     """
+
     _allow_nd = (2,)
 
     @property
     def _bsr_container(self):
         from ._bsr import bsr_matrix
+
         return bsr_matrix
 
     @property
     def _coo_container(self):
         from ._coo import coo_matrix
+
         return coo_matrix
 
     @property
     def _csc_container(self):
         from ._csc import csc_matrix
+
         return csc_matrix
 
     @property
     def _csr_container(self):
         from ._csr import csr_matrix
+
         return csr_matrix
 
     @property
     def _dia_container(self):
         from ._dia import dia_matrix
+
         return dia_matrix
 
     @property
     def _dok_container(self):
         from ._dok import dok_matrix
+
         return dok_matrix
 
     @property
     def _lil_container(self):
         from ._lil import lil_matrix
+
         return lil_matrix
 
     # Restore matrix multiplication
@@ -66,8 +74,7 @@ class spmatrix:
         """Get the shape of the matrix"""
         return self._shape
 
-    shape = property(fget=get_shape, fset=set_shape,
-                     doc="Shape of the matrix")
+    shape = property(fget=get_shape, fset=set_shape, doc="Shape of the matrix")
 
     def asfptype(self):
         """Upcast matrix to a floating point format (if necessary)"""
@@ -166,4 +173,5 @@ class spmatrix:
         scipy.sparse._coo.coo_matrix[numpy.int8]
         """
         from types import GenericAlias
+
         return GenericAlias(cls, arg)

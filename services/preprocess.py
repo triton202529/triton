@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 
+
 def preprocess_stock_csv(file_path: str) -> pd.DataFrame:
     print(f"\n🔍 Preprocessing {file_path}...")
 
@@ -11,7 +12,7 @@ def preprocess_stock_csv(file_path: str) -> pd.DataFrame:
         return pd.DataFrame()
 
     # Flatten multi-level columns: ("Close", "AAPL") => "close_aapl"
-    df.columns = ['_'.join(col).lower().strip() for col in df.columns]
+    df.columns = ["_".join(col).lower().strip() for col in df.columns]
 
     # Attempt to find the close column automatically
     close_cols = [col for col in df.columns if col.startswith("close_")]

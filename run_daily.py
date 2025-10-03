@@ -58,7 +58,14 @@ def ensure_date(df: pd.DataFrame, candidates=None, normalize=True) -> pd.DataFra
     """Coerce a best-effort date column; normalize to midnight if requested."""
     if df.empty:
         return df
-    candidates = candidates or ["date", "as_of", "timestamp", "time", "datetime", "Date"]
+    candidates = candidates or [
+        "date",
+        "as_of",
+        "timestamp",
+        "time",
+        "datetime",
+        "Date",
+    ]
     date_col = next((c for c in candidates if c in df.columns), None)
     if date_col is None:
         return df
@@ -104,10 +111,10 @@ def _load_baseline_cfg(cfg_path: Path) -> Dict:
         "smart_weight": {
             "score_column": "confidence",
             "alpha": 0.30,
-            "max_weight_cap": 0.15,           # 15%
-            "trading_cost_bps": 5,            # 5 bps per $ traded
-            "ema_smoothing_days": 1,          # 1 = off
-            "min_hold_days": 1                # 1 = off
+            "max_weight_cap": 0.15,  # 15%
+            "trading_cost_bps": 5,  # 5 bps per $ traded
+            "ema_smoothing_days": 1,  # 1 = off
+            "min_hold_days": 1,  # 1 = off
         },
         "benchmark": "avg_market",
         "chart_normalize_to_one": True,
@@ -215,12 +222,12 @@ def build_and_save_baseline(results_dir: Path, cfg_path: Path) -> None:
         print("[warn] Config 'baseline' is not 'smart_weight'; proceeding anyway.")
 
     sw = cfg["smart_weight"]
-    score_col   = sw.get("score_column", "confidence")
-    alpha       = float(sw.get("alpha", 0.30))
-    max_cap     = float(sw.get("max_weight_cap", 0.15))
-    cost_bps    = float(sw.get("trading_cost_bps", 5)) / 1e4
-    ema_span    = int(sw.get("ema_smoothing_days", 1))
-    min_hold    = int(sw.get("min_hold_days", 1))
+    score_col = sw.get("score_column", "confidence")
+    alpha = float(sw.get("alpha", 0.30))
+    max_cap = float(sw.get("max_weight_cap", 0.15))
+    cost_bps = float(sw.get("trading_cost_bps", 5)) / 1e4
+    ema_span = int(sw.get("ema_smoothing_days", 1))
+    min_hold = int(sw.get("min_hold_days", 1))
 
     # signals
     sig = load_csv("signals_with_rationale.csv", results_dir)
@@ -230,7 +237,11 @@ def build_and_save_baseline(results_dir: Path, cfg_path: Path) -> None:
         print("[baseline] No signals available; skipping baseline build.")
         return
 
-    sig = ensure_date(sig, candidates=["date", "as_of", "timestamp", "time", "datetime", "Date"], normalize=True)
+    sig = ensure_date(
+        sig,
+        candidates=["date", "as_of", "timestamp", "time", "datetime", "Date"],
+        normalize=True,
+    )
     to_numeric(sig, [score_col])
     sig = sig.dropna(subset=["date", "ticker"])
     sig["ticker"] = sig["ticker"].astype(str)
@@ -256,13 +267,19 @@ def build_and_save_baseline(results_dir: Path, cfg_path: Path) -> None:
     # overlap
     cols = sorted(set(sc.columns) & set(R.columns))
     if not cols:
-        print("[baseline] No overlap between signals and returns universe; skipping baseline build.")
+        print(
+            "[baseline] No overlap between signals and returns universe; skipping baseline build."
+        )
         return
     sc = sc[cols]
-    R  = R[cols]
+    R = R[cols]
 
     # equal weights for blend
-    eq = pd.DataFrame(np.full((len(sc.index), len(cols)), 1.0 / len(cols)), index=sc.index, columns=cols)
+    eq = pd.DataFrame(
+        np.full((len(sc.index), len(cols)), 1.0 / len(cols)),
+        index=sc.index,
+        columns=cols,
+    )
 
     # smart weights
     W_s = _stabilize_weights(sc, max_cap)
@@ -286,11 +303,13 @@ def build_and_save_baseline(results_dir: Path, cfg_path: Path) -> None:
     net_ret = gross_ret - cost
     bench_ret = Rt.mean(axis=1).fillna(0.0)
 
-    curves = pd.DataFrame({
-        "portfolio_gross": (1.0 + gross_ret).cumprod(),
-        "portfolio_net":   (1.0 + net_ret).cumprod(),
-        "benchmark":       (1.0 + bench_ret).cumprod(),
-    })
+    curves = pd.DataFrame(
+        {
+            "portfolio_gross": (1.0 + gross_ret).cumprod(),
+            "portfolio_net": (1.0 + net_ret).cumprod(),
+            "benchmark": (1.0 + bench_ret).cumprod(),
+        }
+    )
     curves.index.name = "date"
 
     out_dir = results_dir / "baseline"
@@ -306,12 +325,23 @@ def build_and_save_baseline(results_dir: Path, cfg_path: Path) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser(description="Minimal daily runner for Triton.")
-    ap.add_argument("--results-dir", type=str, default=str(DEFAULT_RESULTS_DIR),
-                    help="Path to results directory (default: data/results)")
-    ap.add_argument("--config", type=str, default=str(DEFAULT_CFG_PATH),
-                    help="Path to baseline config JSON (default: config/baseline.smart_weight.json)")
-    ap.add_argument("--rebuild-market", action="store_true",
-                    help="If set, rebuild market_by_ticker.csv from per-ticker parquet files.")
+    ap.add_argument(
+        "--results-dir",
+        type=str,
+        default=str(DEFAULT_RESULTS_DIR),
+        help="Path to results directory (default: data/results)",
+    )
+    ap.add_argument(
+        "--config",
+        type=str,
+        default=str(DEFAULT_CFG_PATH),
+        help="Path to baseline config JSON (default: config/baseline.smart_weight.json)",
+    )
+    ap.add_argument(
+        "--rebuild-market",
+        action="store_true",
+        help="If set, rebuild market_by_ticker.csv from per-ticker parquet files.",
+    )
     args = ap.parse_args()
 
     results_dir = Path(args.results_dir).resolve()

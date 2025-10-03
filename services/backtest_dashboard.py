@@ -43,7 +43,12 @@ try:
         st.subheader("📊 Portfolio Simulation Performance")
 
         fig, ax = plt.subplots()
-        ax.plot(df[date_col[0]], df["Portfolio Value"], label="Portfolio Value", color="blue")
+        ax.plot(
+            df[date_col[0]],
+            df["Portfolio Value"],
+            label="Portfolio Value",
+            color="blue",
+        )
         ax.set_xlabel("Date")
         ax.set_ylabel("Portfolio Value ($)")
         ax.set_title("Portfolio Simulation Over Time")
@@ -60,14 +65,21 @@ try:
         df_sorted["cumulative_pnl"] = df_sorted["pnl"].cumsum()
 
         fig, ax = plt.subplots()
-        ax.plot(df_sorted["date"], df_sorted["cumulative_pnl"], label="Cumulative PnL", color="green")
+        ax.plot(
+            df_sorted["date"],
+            df_sorted["cumulative_pnl"],
+            label="Cumulative PnL",
+            color="green",
+        )
         ax.set_xlabel("Date")
         ax.set_ylabel("Cumulative PnL ($)")
         ax.set_title("Signal Strategy Performance")
         ax.legend()
         st.pyplot(fig)
 
-        st.download_button("📥 Download PnL Chart", file_name="pnl_chart.png", data=fig_to_image(fig))
+        st.download_button(
+            "📥 Download PnL Chart", file_name="pnl_chart.png", data=fig_to_image(fig)
+        )
 
         # Optional comparison dropdown
         st.subheader("📊 Market Comparison (Optional)")
@@ -77,11 +89,17 @@ try:
         symbol_df = df[df["symbol"] == selected_symbol]
         if not symbol_df.empty:
             strategy = symbol_df["pnl"].cumsum()
-            market = (symbol_df["actual_price"] - symbol_df["actual_price"].iloc[0])
+            market = symbol_df["actual_price"] - symbol_df["actual_price"].iloc[0]
 
             fig2, ax2 = plt.subplots()
             ax2.plot(symbol_df["date"], strategy, label="Strategy PnL", color="green")
-            ax2.plot(symbol_df["date"], market, label="Market Move", linestyle="--", color="gray")
+            ax2.plot(
+                symbol_df["date"],
+                market,
+                label="Market Move",
+                linestyle="--",
+                color="gray",
+            )
             ax2.set_title(f"{selected_symbol}: Strategy vs. Market")
             ax2.set_xlabel("Date")
             ax2.set_ylabel("PnL / Price Change")
@@ -89,7 +107,9 @@ try:
             st.pyplot(fig2)
 
     else:
-        st.warning("⚠️ No recognized data columns. Ensure the file contains either portfolio or signal data.")
+        st.warning(
+            "⚠️ No recognized data columns. Ensure the file contains either portfolio or signal data."
+        )
 
 except Exception as e:
     st.error(f"❌ Failed to load CSV: {e}")
@@ -98,6 +118,7 @@ except Exception as e:
 # Helper to convert matplotlib figure to PNG for download
 def fig_to_image(fig):
     import io
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     buf.seek(0)

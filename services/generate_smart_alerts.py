@@ -11,6 +11,7 @@ SIGNALS_FILE = os.path.join(RESULTS_DIR, "signals_with_rationale.csv")
 NEWS_FILE = os.path.join(RESULTS_DIR, "news_sentiment.csv")
 OUT_FILE = os.path.join(RESULTS_DIR, "alerts.csv")
 
+
 def load_csv(path):
     if os.path.exists(path):
         df = pd.read_csv(path)
@@ -18,6 +19,7 @@ def load_csv(path):
     else:
         print(f"⚠ File not found: {path}")
         return pd.DataFrame()
+
 
 def make_alerts(lookback_days=30):
     sig = load_csv(SIGNALS_FILE)
@@ -44,7 +46,7 @@ def make_alerts(lookback_days=30):
             sig,
             news[["ticker", "date", "sentiment", "title", "url"]],
             on=["ticker", "date"],
-            how="left"
+            how="left",
         )
     else:
         merged = sig.copy()
@@ -67,25 +69,39 @@ def make_alerts(lookback_days=30):
 
     # Clickable link formatting
     if "url" in merged.columns:
-        merged["url"] = merged["url"].fillna("").apply(
-            lambda x: f'<a href="{x}" target="_blank">Link</a>' if x else ""
+        merged["url"] = (
+            merged["url"]
+            .fillna("")
+            .apply(lambda x: f'<a href="{x}" target="_blank">Link</a>' if x else "")
         )
 
     # Message column
     merged["message"] = merged.apply(
         lambda r: f"{r['ticker']}: {r['type']} | Δ={r.get('price_change',''):.2%} | conf={r.get('confidence',0):.2f}",
-        axis=1
+        axis=1,
     )
 
     # Timestamp
     merged["timestamp"] = datetime.now(timezone.utc).isoformat()
 
-    cols = ["date", "ticker", "type", "priority", "confidence", "sentiment", "title", "url", "message", "timestamp"]
+    cols = [
+        "date",
+        "ticker",
+        "type",
+        "priority",
+        "confidence",
+        "sentiment",
+        "title",
+        "url",
+        "message",
+        "timestamp",
+    ]
     final_df = merged[cols].sort_values(["priority", "confidence"], ascending=[False, False])
 
     final_df.to_csv(OUT_FILE, index=False)
     print(f"✅ Saved {len(final_df)} alerts → {OUT_FILE}")
     return final_df
+
 
 if __name__ == "__main__":
     df = make_alerts(lookback_days=30)

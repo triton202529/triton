@@ -29,7 +29,9 @@ df["signal_numeric"] = df["signal"].map(signal_map)
 df["position"] = df.groupby("ticker")["signal_numeric"].shift(1).fillna(0)
 df["strategy_return"] = df["returns"] * df["position"]
 df["cumulative_market"] = df.groupby("ticker")["returns"].transform(lambda x: (1 + x).cumprod())
-df["cumulative_strategy"] = df.groupby("ticker")["strategy_return"].transform(lambda x: (1 + x).cumprod())
+df["cumulative_strategy"] = df.groupby("ticker")["strategy_return"].transform(
+    lambda x: (1 + x).cumprod()
+)
 
 # Backtest loop
 for ticker in tickers:
@@ -55,62 +57,70 @@ for ticker in tickers:
                 entry_price = price
                 balance -= quantity * price
                 trades += 1
-                trade_log.append({
-                    "date": date,
-                    "ticker": ticker,
-                    "action": "BUY",
-                    "price": price,
-                    "quantity": quantity,
-                    "entry_price": entry_price,
-                    "exit_price": None,
-                    "signal": "BUY",
-                    "profit": None,
-                    "stop_loss": price * 0.95,
-                    "take_profit": price * 1.05
-                })
+                trade_log.append(
+                    {
+                        "date": date,
+                        "ticker": ticker,
+                        "action": "BUY",
+                        "price": price,
+                        "quantity": quantity,
+                        "entry_price": entry_price,
+                        "exit_price": None,
+                        "signal": "BUY",
+                        "profit": None,
+                        "stop_loss": price * 0.95,
+                        "take_profit": price * 1.05,
+                    }
+                )
 
         elif signal == "SELL" and position > 0:
             exit_price = price
             trade_profit = (exit_price - entry_price) * position
             balance += position * exit_price
             profit += trade_profit
-            trade_log.append({
-                "date": date,
-                "ticker": ticker,
-                "action": "SELL",
-                "price": price,
-                "quantity": position,
-                "entry_price": entry_price,
-                "exit_price": exit_price,
-                "signal": "SELL",
-                "profit": trade_profit,
-                "stop_loss": entry_price * 0.95,
-                "take_profit": entry_price * 1.05
-            })
+            trade_log.append(
+                {
+                    "date": date,
+                    "ticker": ticker,
+                    "action": "SELL",
+                    "price": price,
+                    "quantity": position,
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "signal": "SELL",
+                    "profit": trade_profit,
+                    "stop_loss": entry_price * 0.95,
+                    "take_profit": entry_price * 1.05,
+                }
+            )
             position = 0
 
         # Save portfolio snapshot
         market_value = position * price
         total_value = balance + market_value
-        portfolio_history.append({
-            "date": date,
-            "cash": balance,
-            "market_value": market_value,
-            "total_value": total_value
-        })
+        portfolio_history.append(
+            {
+                "date": date,
+                "cash": balance,
+                "market_value": market_value,
+                "total_value": total_value,
+            }
+        )
 
     # Final portfolio summary
     final_price = data.iloc[-1]["close"]
     ending_value = balance + position * final_price
     total_return = (ending_value - initial_balance) / initial_balance * 100
 
-    summary.append({
-        "ticker": ticker,
-        "trades": trades,
-        "profit": round(profit, 2),
-        "final_value": round(ending_value, 2),
-        "return_pct": round(total_return, 2)
-    })
+    summary.append(
+        {
+            "ticker": ticker,
+            "trades": trades,
+            "profit": round(profit, 2),
+            "final_value": round(ending_value, 2),
+            "return_pct": round(total_return, 2),
+        }
+    )
 
 # Convert to DataFrames
 trade_log_df = pd.DataFrame(trade_log)

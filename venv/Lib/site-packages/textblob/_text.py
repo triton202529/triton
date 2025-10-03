@@ -3,6 +3,7 @@
 URL: http://www.clips.ua.ac.be/pages/pattern-web
 Licence: BSD
 """
+
 import codecs
 import os
 import re
@@ -295,9 +296,7 @@ RE_ABBR1 = re.compile(r"^[A-Za-z]\.$")  # single letter, "T. De Smedt"
 RE_ABBR2 = re.compile(r"^([A-Za-z]\.)+$")  # alternating letters, "U.S."
 RE_ABBR3 = re.compile(
     "^[A-Z]["
-    + "|".join(  # capital followed by consonants, "Mr."
-        "bcdfghjklmnpqrstvwxz"
-    )
+    + "|".join("bcdfghjklmnpqrstvwxz")  # capital followed by consonants, "Mr."
     + "]+.$"
 )
 
@@ -1557,9 +1556,7 @@ class Parser:
                 s[i][j] = "/".join(s[i][j])
             s[i] = " ".join(s[i])
         s = "\n".join(s)
-        s = TaggedString(
-            str(s), format, language=kwargs.get("language", self.language)
-        )
+        s = TaggedString(str(s), format, language=kwargs.get("language", self.language))
         return s
 
 

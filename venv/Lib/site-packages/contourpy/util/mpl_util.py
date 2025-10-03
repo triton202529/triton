@@ -15,10 +15,17 @@ if TYPE_CHECKING:
 
 def filled_to_mpl_paths(filled: FillReturn, fill_type: FillType) -> list[mpath.Path]:
     if fill_type in (FillType.OuterCode, FillType.ChunkCombinedCode):
-        paths = [mpath.Path(points, codes) for points, codes in zip(*filled) if points is not None]
+        paths = [
+            mpath.Path(points, codes)
+            for points, codes in zip(*filled)
+            if points is not None
+        ]
     elif fill_type in (FillType.OuterOffset, FillType.ChunkCombinedOffset):
-        paths = [mpath.Path(points, codes_from_offsets(offsets))
-                 for points, offsets in zip(*filled) if points is not None]
+        paths = [
+            mpath.Path(points, codes_from_offsets(offsets))
+            for points, offsets in zip(*filled)
+            if points is not None
+        ]
     elif fill_type == FillType.ChunkCombinedCodeOffset:
         paths = []
         for points, codes, outer_offsets in zip(*filled):
@@ -32,12 +39,14 @@ def filled_to_mpl_paths(filled: FillReturn, fill_type: FillType) -> list[mpath.P
         for points, offsets, outer_offsets in zip(*filled):
             if points is None:
                 continue
-            for i in range(len(outer_offsets)-1):
-                offs = offsets[outer_offsets[i]:outer_offsets[i+1]+1]
-                pts = points[offs[0]:offs[-1]]
+            for i in range(len(outer_offsets) - 1):
+                offs = offsets[outer_offsets[i] : outer_offsets[i + 1] + 1]
+                pts = points[offs[0] : offs[-1]]
                 paths += [mpath.Path(pts, codes_from_offsets(offs - offs[0]))]
     else:
-        raise RuntimeError(f"Conversion of FillType {fill_type} to MPL Paths is not implemented")
+        raise RuntimeError(
+            f"Conversion of FillType {fill_type} to MPL Paths is not implemented"
+        )
     return paths
 
 
@@ -51,14 +60,18 @@ def lines_to_mpl_paths(lines: LineReturn, line_type: LineType) -> list[mpath.Pat
             closed = line[0, 0] == line[-1, 0] and line[0, 1] == line[-1, 1]
             paths.append(mpath.Path(line, closed=closed))
     elif line_type in (LineType.SeparateCode, LineType.ChunkCombinedCode):
-        paths = [mpath.Path(points, codes) for points, codes in zip(*lines) if points is not None]
+        paths = [
+            mpath.Path(points, codes)
+            for points, codes in zip(*lines)
+            if points is not None
+        ]
     elif line_type == LineType.ChunkCombinedOffset:
         paths = []
         for points, offsets in zip(*lines):
             if points is None:
                 continue
-            for i in range(len(offsets)-1):
-                line = points[offsets[i]:offsets[i+1]]
+            for i in range(len(offsets) - 1):
+                line = points[offsets[i] : offsets[i + 1]]
                 closed = line[0, 0] == line[-1, 0] and line[0, 1] == line[-1, 1]
                 paths.append(mpath.Path(line, closed=closed))
     elif line_type == LineType.ChunkCombinedNan:
@@ -69,9 +82,11 @@ def lines_to_mpl_paths(lines: LineReturn, line_type: LineType) -> list[mpath.Pat
             nan_offsets = np.nonzero(np.isnan(points[:, 0]))[0]
             nan_offsets = np.concatenate([[-1], nan_offsets, [len(points)]])
             for s, e in pairwise(nan_offsets):
-                line = points[s+1:e]
+                line = points[s + 1 : e]
                 closed = line[0, 0] == line[-1, 0] and line[0, 1] == line[-1, 1]
                 paths.append(mpath.Path(line, closed=closed))
     else:
-        raise RuntimeError(f"Conversion of LineType {line_type} to MPL Paths is not implemented")
+        raise RuntimeError(
+            f"Conversion of LineType {line_type} to MPL Paths is not implemented"
+        )
     return paths

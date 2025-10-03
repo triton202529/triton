@@ -26,17 +26,17 @@ for file_path in prediction_files:
         df = pd.read_csv(file_path)
 
         # Ensure required columns exist
-        if not {'date', 'close', 'predicted_close'}.issubset(df.columns):
+        if not {"date", "close", "predicted_close"}.issubset(df.columns):
             print(f"⚠️ Skipping {filename} — missing required columns.")
             continue
 
         # Drop rows with missing values
-        df = df.dropna(subset=['date', 'close', 'predicted_close'])
+        df = df.dropna(subset=["date", "close", "predicted_close"])
 
         # Generate BUY/HOLD/SELL signal
         df["signal"] = df.apply(
             lambda row: "BUY" if row["predicted_close"] > row["close"] else "SELL",
-            axis=1
+            axis=1,
         )
 
         df["ticker"] = ticker

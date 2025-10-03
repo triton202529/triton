@@ -37,13 +37,15 @@ for ticker in TICKERS:
 
             sentiment_score = TextBlob(content).sentiment.polarity
 
-            all_data.append({
-                "ticker": ticker,
-                "title": title,
-                "description": description,
-                "publishedAt": article.get("publishedAt"),
-                "sentiment": sentiment_score
-            })
+            all_data.append(
+                {
+                    "ticker": ticker,
+                    "title": title,
+                    "description": description,
+                    "publishedAt": article.get("publishedAt"),
+                    "sentiment": sentiment_score,
+                }
+            )
 
     except Exception as e:
         print(f"❌ Error fetching for {ticker}: {e}")

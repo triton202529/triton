@@ -33,7 +33,6 @@ def as_strided(
     subok: bool = ...,
     writeable: bool = ...,
 ) -> NDArray[Any]: ...
-
 @overload
 def sliding_window_view(
     x: _ArrayLike[_ScalarT],
@@ -52,7 +51,6 @@ def sliding_window_view(
     subok: bool = ...,
     writeable: bool = ...,
 ) -> NDArray[Any]: ...
-
 @overload
 def broadcast_to(
     array: _ArrayLike[_ScalarT],
@@ -65,9 +63,7 @@ def broadcast_to(
     shape: int | Iterable[int],
     subok: bool = ...,
 ) -> NDArray[Any]: ...
-
 def broadcast_shapes(*args: _ShapeLike) -> _AnyShape: ...
-
 def broadcast_arrays(
     *args: ArrayLike,
     subok: bool = ...,

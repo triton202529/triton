@@ -1,4 +1,4 @@
-'''
+"""
 This is a module defining exit flags.
 
 Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
@@ -6,7 +6,7 @@ Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
 Dedicated to late Professor M. J. D. Powell FRS (1936--2015).
 
 Python translation by Nickolai Belakovski.
-'''
+"""
 
 INFO_DEFAULT = 0
 SMALL_TR_RADIUS = 0

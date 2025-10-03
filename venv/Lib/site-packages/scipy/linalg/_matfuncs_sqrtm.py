@@ -4,6 +4,7 @@ Matrix square root for general matrices and for upper triangular matrices.
 This module exists to avoid cyclic imports.
 
 """
+
 __all__ = []
 
 import numpy as np
@@ -11,8 +12,10 @@ import numpy as np
 # Local imports
 from .lapack import ztrsyl, dtrsyl
 
+
 class SqrtmError(np.linalg.LinAlgError):
     pass
+
 
 from ._matfuncs_sqrtm_triu import within_block_loop  # noqa: E402
 
@@ -44,7 +47,7 @@ def _sqrtm_triu(T, blocksize=64):
 
     """
     T_diag = np.diag(T)
-    keep_it_real = np.isrealobj(T) and np.min(T_diag, initial=0.) >= 0
+    keep_it_real = np.isrealobj(T) and np.min(T_diag, initial=0.0) >= 0
 
     # Cast to complex as necessary + ensure double precision
     if not keep_it_real:
@@ -66,7 +69,7 @@ def _sqrtm_triu(T, blocksize=64):
     blarge = bsmall + 1
     nsmall = nblocks - nlarge
     if nsmall * bsmall + nlarge * blarge != n:
-        raise Exception('internal inconsistency')
+        raise Exception("internal inconsistency")
 
     # Define the index range covered by each block.
     start_stop_pairs = []
@@ -85,12 +88,11 @@ def _sqrtm_triu(T, blocksize=64):
     # Between-block interactions (Cython would give no significant speedup)
     for j in range(nblocks):
         jstart, jstop = start_stop_pairs[j]
-        for i in range(j-1, -1, -1):
+        for i in range(j - 1, -1, -1):
             istart, istop = start_stop_pairs[i]
             S = T[istart:istop, jstart:jstop]
             if j - i > 1:
-                S = S - R[istart:istop, istop:jstart].dot(R[istop:jstart,
-                                                            jstart:jstop])
+                S = S - R[istart:istop, istop:jstart].dot(R[istop:jstart, jstart:jstop])
 
             # Invoke LAPACK.
             # For more details, see the solve_sylvester implementation

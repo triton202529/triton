@@ -200,7 +200,9 @@ def test_resource_tracker_retries_when_permissionerror(tmpdir):
     # Wait for the resource_tracker to process the maybe_unlink before cleaning
     # up the memmap
     time.sleep(2)
-    """.format(filename=filename)
+    """.format(
+        filename=filename
+    )
     p = subprocess.Popen(
         [sys.executable, "-c", cmd], stderr=subprocess.PIPE, stdout=subprocess.PIPE
     )
@@ -424,7 +426,9 @@ def test_permission_error_windows_reference_cycle(backend):
             results = Parallel(n_jobs=2, backend="{b}")(
                 delayed(len)(current_list) for i in range(10))
             assert results == [1] * 10
-    """.format(b=backend)
+    """.format(
+        b=backend
+    )
     p = subprocess.Popen(
         [sys.executable, "-c", cmd], stderr=subprocess.PIPE, stdout=subprocess.PIPE
     )
@@ -463,7 +467,9 @@ def test_permission_error_windows_memmap_sent_to_parent(backend):
 
             slice_of_data = Parallel(n_jobs=2, verbose=5, backend='{b}')(
                 delayed(return_slice_of_data)(data, 0, 20) for _ in range(10))
-    """.format(b=backend)
+    """.format(
+        b=backend
+    )
 
     for _ in range(3):
         env = os.environ.copy()
@@ -649,7 +655,9 @@ def test_many_parallel_calls_on_same_object(backend):
                         delayed(return_slice_of_data)(data, 0, 20)
                         for _ in range(10)
                     )
-    """.format(b=backend)
+    """.format(
+        b=backend
+    )
     env = os.environ.copy()
     env["PYTHONPATH"] = os.path.dirname(__file__)
     p = subprocess.Popen(
@@ -721,7 +729,9 @@ def test_resource_tracker_silent_when_reference_cycles(backend):
             results = Parallel(n_jobs=2, backend="{b}")(
                 delayed(len)(current_list) for i in range(10))
             assert results == [1] * 10
-    """.format(b=backend)
+    """.format(
+        b=backend
+    )
     p = subprocess.Popen(
         [sys.executable, "-c", cmd], stderr=subprocess.PIPE, stdout=subprocess.PIPE
     )
@@ -866,7 +876,9 @@ def test_child_raises_parent_exits_cleanly(backend):
                     raise AssertionError(
                         str(temp_folder) + " was not deleted"
                     ) from e
-    """.format(b=backend)
+    """.format(
+        b=backend
+    )
     env = os.environ.copy()
     env["PYTHONPATH"] = os.path.dirname(__file__)
     p = subprocess.Popen(

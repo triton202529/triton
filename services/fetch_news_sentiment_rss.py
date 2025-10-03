@@ -22,9 +22,12 @@ NAME_SYNONYMS = {
     "TSLA": ["TSLA", "Tesla"],
 }
 
+
 def analyze(text: str) -> float:
-    if not isinstance(text, str): return 0.0
+    if not isinstance(text, str):
+        return 0.0
     return analyzer.polarity_scores(text)["compound"]
+
 
 def google_news_rss_url(query: str, window_days: int | None):
     # Google News RSS search. If window_days is provided, add when:dN
@@ -32,10 +35,12 @@ def google_news_rss_url(query: str, window_days: int | None):
     qp = quote_plus(q)
     return f"https://news.google.com/rss/search?q={qp}&hl=en-US&gl=US&ceid=US:en"
 
+
 def yahoo_finance_rss_url(ticker: str):
     # Yahoo Finance RSS (not rate-limited like NewsAPI; works for many tickers)
     # If this ever fails, try feeds.finance.yahoo.com variant.
     return f"https://finance.yahoo.com/rss/headline?s={quote_plus(ticker)}"
+
 
 def parse_entries(feed):
     rows = []
@@ -45,15 +50,18 @@ def parse_entries(feed):
         pub = getattr(e, "published", "") or getattr(e, "updated", "") or ""
         link = getattr(e, "link", "") or ""
         pub_dt = pd.to_datetime(pub, utc=True, errors="coerce")
-        rows.append({
-            "title": title,
-            "description": desc,
-            "publishedAt": pub,
-            "published_dt": pub_dt,
-            "link": link,
-            "text": f"{title} {desc}",
-        })
+        rows.append(
+            {
+                "title": title,
+                "description": desc,
+                "publishedAt": pub,
+                "published_dt": pub_dt,
+                "link": link,
+                "text": f"{title} {desc}",
+            }
+        )
     return rows
+
 
 def tag_mentions(text: str, ticker: str) -> bool:
     lower = (text or "").lower()
@@ -62,6 +70,7 @@ def tag_mentions(text: str, ticker: str) -> bool:
             return True
     return False
 
+
 def fetch_for_ticker(ticker: str, window: int, sleep_s: float = 0.8):
     """Try Google (with window) → Google (no window) → Yahoo Finance; return rows tagged with ticker."""
     rows = []
@@ -69,7 +78,7 @@ def fetch_for_ticker(ticker: str, window: int, sleep_s: float = 0.8):
     # 1) Google News RSS — with date window
     synonyms = NAME_SYNONYMS.get(ticker, [ticker])
     # Build a query like: "AAPL" OR Apple (quotes help exact tickers/names)
-    quoted = [f"\"{s}\"" for s in synonyms]
+    quoted = [f'"{s}"' for s in synonyms]
     query = " OR ".join(quoted)
 
     url_g_with = google_news_rss_url(query, window_days=window)
@@ -92,20 +101,25 @@ def fetch_for_ticker(ticker: str, window: int, sleep_s: float = 0.8):
         if tag_mentions(it["text"], ticker):
             sent = analyze(it["text"])
             # Default date if missing
-            row_date = (it["published_dt"].date()
-                        if pd.notna(it["published_dt"])
-                        else datetime.now(timezone.utc).date())
-            rows.append({
-                "ticker": ticker,
-                "title": it["title"],
-                "description": it["description"],
-                "publishedAt": it["publishedAt"],
-                "sentiment": sent,
-                "date": row_date
-            })
+            row_date = (
+                it["published_dt"].date()
+                if pd.notna(it["published_dt"])
+                else datetime.now(timezone.utc).date()
+            )
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "title": it["title"],
+                    "description": it["description"],
+                    "publishedAt": it["publishedAt"],
+                    "sentiment": sent,
+                    "date": row_date,
+                }
+            )
 
     time.sleep(sleep_s)
     return rows
+
 
 def main(tickers: list[str], window: int, out_path: str, per_ticker_sleep: float):
     all_rows = []
@@ -120,7 +134,7 @@ def main(tickers: list[str], window: int, out_path: str, per_ticker_sleep: float
         if rows:
             all_rows.extend(rows)
             # incremental save
-            dfp = pd.DataFrame(all_rows).drop_duplicates(subset=["ticker","title","publishedAt"])
+            dfp = pd.DataFrame(all_rows).drop_duplicates(subset=["ticker", "title", "publishedAt"])
             dfp.to_csv(out_path, index=False)
             print(f"💾 Progress → {out_path} (rows: {len(dfp)})")
 
@@ -128,15 +142,21 @@ def main(tickers: list[str], window: int, out_path: str, per_ticker_sleep: float
         print("🚫 No news from RSS. Try a smaller window (e.g., 7) or different tickers.")
         return
 
-    df = pd.DataFrame(all_rows).drop_duplicates(subset=["ticker","title","publishedAt"])
+    df = pd.DataFrame(all_rows).drop_duplicates(subset=["ticker", "title", "publishedAt"])
     df.to_csv(out_path, index=False)
     print(f"✅ Saved news sentiment to: {out_path}")
     print(df.head(8))
 
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--tickers", default="AAPL,MSFT,NVDA,AMZN,META")
-    p.add_argument("--window", type=int, default=14, help="Days back for Google News filter (best-effort)")
+    p.add_argument(
+        "--window",
+        type=int,
+        default=14,
+        help="Days back for Google News filter (best-effort)",
+    )
     p.add_argument("--out", default=os.path.join(RESULTS_DIR, "news_sentiment.csv"))
     p.add_argument("--sleep", type=float, default=0.8, help="Seconds to sleep per ticker")
     args = p.parse_args()

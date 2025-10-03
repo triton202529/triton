@@ -19,6 +19,7 @@ from bs4 import (
 
 try:
     from soupsieve.util import SelectorSyntaxError
+
     has_lxml = importlib.util.find_spec("lxml")
     has_html5lib = importlib.util.find_spec("html5lib")
     fully_fuzzable = has_lxml != None and has_html5lib != None

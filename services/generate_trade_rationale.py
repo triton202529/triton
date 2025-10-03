@@ -11,6 +11,7 @@ merged = signals.merge(fundamentals, on="ticker", how="left")
 merged = merged.merge(scores[["ticker", "total_score"]], on="ticker", how="left")
 merged = merged.merge(news[["ticker", "sentiment"]], on="ticker", how="left")
 
+
 # Define rationale logic
 def get_rationale(row):
     reasons = []
@@ -32,6 +33,7 @@ def get_rationale(row):
             reasons.append("weak fundamentals")
 
     return "; ".join(reasons) if reasons else "N/A"
+
 
 # Apply rationale logic
 merged["rationale"] = merged.apply(get_rationale, axis=1)

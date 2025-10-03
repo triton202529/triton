@@ -14,8 +14,12 @@ from typing import cast, Any
 import numpy as np
 import numpy.typing as npt
 
+
 class SubClass(npt.NDArray[np.float64]): ...
+
+
 class IntSubClass(npt.NDArray[np.intp]): ...
+
 
 i4 = np.int32(1)
 A: np.ndarray[Any, np.dtype[np.int32]] = np.array([[1]], dtype=np.int32)

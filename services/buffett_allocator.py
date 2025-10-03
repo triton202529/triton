@@ -26,7 +26,15 @@ COLMAP = {
     "eps_growth": ["eps_growth", "eps_growth_yoy", "eps_growth_ttm"],
 }
 
-PERCENT_LIKE = {"roe", "roa", "margin", "op_margin", "rev_growth", "eps_growth", "fcf_yield"}
+PERCENT_LIKE = {
+    "roe",
+    "roa",
+    "margin",
+    "op_margin",
+    "rev_growth",
+    "eps_growth",
+    "fcf_yield",
+}
 
 
 def _coalesce(df: pd.DataFrame, name: str) -> Optional[str]:
@@ -81,7 +89,7 @@ def _zscore_safe(series: pd.Series) -> pd.Series:
     mu = s.mean()
     sd = s.std(ddof=0)
     if pd.isna(sd) or sd == 0:
-        return s*0  # all zeros; avoids NaNs
+        return s * 0  # all zeros; avoids NaNs
     return (s - mu) / (sd + 1e-9)
 
 
@@ -111,12 +119,12 @@ class BuffettAllocator:
         roe_col = _coalesce(df, "roe")
         if roe_col:
             roe = _autoscale_percent(df[roe_col].map(_to_float))
-            m &= (roe > 5)  # >5% ROE
+            m &= roe > 5  # >5% ROE
 
         margin_col = _coalesce(df, "margin")
         if margin_col:
             nm = _autoscale_percent(df[margin_col].map(_to_float))
-            m &= (nm > 0)  # positive net margins
+            m &= nm > 0  # positive net margins
 
         de_col = _coalesce(df, "de_ratio")
         if de_col:
@@ -130,8 +138,16 @@ class BuffettAllocator:
         pe_col = _coalesce(df, "pe")
         pb_col = _coalesce(df, "pb")
 
-        pe = pd.to_numeric(df[pe_col].map(_to_float), errors="coerce") if pe_col else pd.Series(np.nan, index=df.index)
-        pb = pd.to_numeric(df[pb_col].map(_to_float), errors="coerce") if pb_col else pd.Series(np.nan, index=df.index)
+        pe = (
+            pd.to_numeric(df[pe_col].map(_to_float), errors="coerce")
+            if pe_col
+            else pd.Series(np.nan, index=df.index)
+        )
+        pb = (
+            pd.to_numeric(df[pb_col].map(_to_float), errors="coerce")
+            if pb_col
+            else pd.Series(np.nan, index=df.index)
+        )
 
         inv_pe = 1.0 / pe.replace(0, np.nan)
         inv_pb = 1.0 / pb.replace(0, np.nan)
@@ -207,7 +223,9 @@ class BuffettAllocator:
             df = df[~df["ticker"].isin(self.excludes)]
 
         # Optional fundamentals join
-        fpath = fundamentals_path if (fundamentals_path and os.path.exists(fundamentals_path)) else None
+        fpath = (
+            fundamentals_path if (fundamentals_path and os.path.exists(fundamentals_path)) else None
+        )
         if fpath:
             fdf = pd.read_csv(fpath)
             if "ticker" in fdf.columns:
@@ -215,11 +233,19 @@ class BuffettAllocator:
                 df = df.merge(fdf, on="ticker", how="left")
 
         # Guardrails
-        mask = self._quality_mask(df) if self.guardrails == "strict" else pd.Series(True, index=df.index)
+        mask = (
+            self._quality_mask(df)
+            if self.guardrails == "strict"
+            else pd.Series(True, index=df.index)
+        )
         df = df[mask].copy()
 
         # Compose final score: if fundamentals are present, add value/growth boosts
-        final_score = self._compose_score(df, score_col) if fpath else self._normalize_base_score(df[score_col])
+        final_score = (
+            self._compose_score(df, score_col)
+            if fpath
+            else self._normalize_base_score(df[score_col])
+        )
         df["buffett_score"] = pd.to_numeric(final_score, errors="coerce").fillna(0.0)
 
         # Rank and cap
@@ -236,10 +262,12 @@ class BuffettAllocator:
         w = np.minimum(w, self.max_weight)
         w = w / w.sum()  # re-normalize after cap
 
-        weights = pd.DataFrame({
-            "ticker": df["ticker"].values,
-            "target_weight": w,
-        })
+        weights = pd.DataFrame(
+            {
+                "ticker": df["ticker"].values,
+                "target_weight": w,
+            }
+        )
 
         preview_cols = [c for c in ["ticker", score_col, "buffett_score"] if c in df.columns]
         preview = df[preview_cols].copy()

@@ -7,13 +7,14 @@ Run: python _download_all.py <download_dir>
 """
 
 import argparse
+
 try:
     import pooch
 except ImportError:
     pooch = None
 
 
-if __package__ is None or __package__ == '':
+if __package__ is None or __package__ == "":
     # Running as python script, use absolute import
     import _registry  # type: ignore
 else:
@@ -31,7 +32,7 @@ def download_all(path=None):
     path : str, optional
         Directory path to download all the dataset files.
         If None, default to the system cache_dir detected by pooch.
-    
+
     Examples
     --------
     Download the datasets to the default cache location:
@@ -42,27 +43,37 @@ def download_all(path=None):
     Download the datasets to the current directory:
 
     >>> datasets.download_all(".")
-    
+
     """
     if pooch is None:
-        raise ImportError("Missing optional dependency 'pooch' required "
-                          "for scipy.datasets module. Please use pip or "
-                          "conda to install 'pooch'.")
+        raise ImportError(
+            "Missing optional dependency 'pooch' required "
+            "for scipy.datasets module. Please use pip or "
+            "conda to install 'pooch'."
+        )
     if path is None:
-        path = pooch.os_cache('scipy-data')
+        path = pooch.os_cache("scipy-data")
     # https://github.com/scipy/scipy/issues/21879
     downloader = pooch.HTTPDownloader(headers={"User-Agent": "SciPy"})
     for dataset_name, dataset_hash in _registry.registry.items():
-        pooch.retrieve(url=_registry.registry_urls[dataset_name],
-                       known_hash=dataset_hash,
-                       fname=dataset_name, path=path, downloader=downloader)
+        pooch.retrieve(
+            url=_registry.registry_urls[dataset_name],
+            known_hash=dataset_hash,
+            fname=dataset_name,
+            path=path,
+            downloader=downloader,
+        )
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Download SciPy data files.')
-    parser.add_argument("path", nargs='?', type=str,
-                        default=pooch.os_cache('scipy-data'),
-                        help="Directory path to download all the data files.")
+    parser = argparse.ArgumentParser(description="Download SciPy data files.")
+    parser.add_argument(
+        "path",
+        nargs="?",
+        type=str,
+        default=pooch.os_cache("scipy-data"),
+        help="Directory path to download all the data files.",
+    )
     args = parser.parse_args()
     download_all(args.path)
 

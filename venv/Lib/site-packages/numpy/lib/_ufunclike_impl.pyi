@@ -33,7 +33,6 @@ def fix(
     x: _ArrayLikeFloat_co | _ArrayLikeObject_co,
     out: _ArrayT,
 ) -> _ArrayT: ...
-
 @overload
 def isposinf(  # type: ignore[misc]
     x: _FloatLike_co,
@@ -49,7 +48,6 @@ def isposinf(
     x: _ArrayLikeFloat_co,
     out: _ArrayT,
 ) -> _ArrayT: ...
-
 @overload
 def isneginf(  # type: ignore[misc]
     x: _FloatLike_co,

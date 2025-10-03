@@ -24,4 +24,6 @@ assert_type(ar_iter[0], np.lib.Arrayterator[tuple[Any, ...], np.dtype[np.int64]]
 assert_type(ar_iter[...], np.lib.Arrayterator[tuple[Any, ...], np.dtype[np.int64]])
 assert_type(ar_iter[:], np.lib.Arrayterator[tuple[Any, ...], np.dtype[np.int64]])
 assert_type(ar_iter[0, 0, 0], np.lib.Arrayterator[tuple[Any, ...], np.dtype[np.int64]])
-assert_type(ar_iter[..., 0, :], np.lib.Arrayterator[tuple[Any, ...], np.dtype[np.int64]])
+assert_type(
+    ar_iter[..., 0, :], np.lib.Arrayterator[tuple[Any, ...], np.dtype[np.int64]]
+)

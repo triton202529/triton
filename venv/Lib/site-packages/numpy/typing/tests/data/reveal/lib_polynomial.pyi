@@ -136,9 +136,20 @@ assert_type(np.polymul(AR_O, AR_O), npt.NDArray[np.object_])
 
 assert_type(np.polydiv(poly_obj, AR_i8), tuple[np.poly1d, np.poly1d])
 assert_type(np.polydiv(AR_f8, poly_obj), tuple[np.poly1d, np.poly1d])
-assert_type(np.polydiv(AR_b, AR_b), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]])
-assert_type(np.polydiv(AR_u4, AR_b), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]])
-assert_type(np.polydiv(AR_i8, AR_i8), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]])
-assert_type(np.polydiv(AR_f8, AR_i8), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]])
-assert_type(np.polydiv(AR_i8, AR_c16), tuple[npt.NDArray[np.complexfloating], npt.NDArray[np.complexfloating]])
+assert_type(
+    np.polydiv(AR_b, AR_b), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
+)
+assert_type(
+    np.polydiv(AR_u4, AR_b), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
+)
+assert_type(
+    np.polydiv(AR_i8, AR_i8), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
+)
+assert_type(
+    np.polydiv(AR_f8, AR_i8), tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]
+)
+assert_type(
+    np.polydiv(AR_i8, AR_c16),
+    tuple[npt.NDArray[np.complexfloating], npt.NDArray[np.complexfloating]],
+)
 assert_type(np.polydiv(AR_O, AR_O), tuple[npt.NDArray[Any], npt.NDArray[Any]])

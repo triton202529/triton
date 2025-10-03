@@ -40,7 +40,6 @@ class ChunkParser(nltk.ChunkParserI):
 
 
 class ConllExtractor(BaseNPExtractor):
-
     """A noun phrase extractor that uses chunk parsing trained with the
     ConLL-2000 training corpus.
     """
@@ -89,7 +88,6 @@ class ConllExtractor(BaseNPExtractor):
 
 
 class FastNPExtractor(BaseNPExtractor):
-
     """A fast and simple noun phrase extractor.
 
     Credit to Shlomi Babluk. Link to original blog post:

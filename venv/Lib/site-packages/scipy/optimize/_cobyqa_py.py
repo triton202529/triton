@@ -7,11 +7,23 @@ from ._optimize import _check_unknown_options
 COBYQA_LOCK = Lock()
 
 
-def _minimize_cobyqa(fun, x0, args=(), bounds=None, constraints=(),
-                     callback=None, disp=False, maxfev=None, maxiter=None,
-                     f_target=-np.inf, feasibility_tol=1e-8,
-                     initial_tr_radius=1.0, final_tr_radius=1e-6, scale=False,
-                     **unknown_options):
+def _minimize_cobyqa(
+    fun,
+    x0,
+    args=(),
+    bounds=None,
+    constraints=(),
+    callback=None,
+    disp=False,
+    maxfev=None,
+    maxiter=None,
+    f_target=-np.inf,
+    feasibility_tol=1e-8,
+    initial_tr_radius=1.0,
+    final_tr_radius=1e-6,
+    scale=False,
+    **unknown_options
+):
     """
     Minimize a scalar function of one or more variables using the
     Constrained Optimization BY Quadratic Approximations (COBYQA) algorithm [1]_.
@@ -59,14 +71,14 @@ def _minimize_cobyqa(fun, x0, args=(), bounds=None, constraints=(),
 
     _check_unknown_options(unknown_options)
     options = {
-        'disp': bool(disp),
-        'maxfev': int(maxfev) if maxfev is not None else 500 * len(x0),
-        'maxiter': int(maxiter) if maxiter is not None else 1000 * len(x0),
-        'target': float(f_target),
-        'feasibility_tol': float(feasibility_tol),
-        'radius_init': float(initial_tr_radius),
-        'radius_final': float(final_tr_radius),
-        'scale': bool(scale),
+        "disp": bool(disp),
+        "maxfev": int(maxfev) if maxfev is not None else 500 * len(x0),
+        "maxiter": int(maxiter) if maxiter is not None else 1000 * len(x0),
+        "target": float(f_target),
+        "feasibility_tol": float(feasibility_tol),
+        "radius_init": float(initial_tr_radius),
+        "radius_final": float(final_tr_radius),
+        "scale": bool(scale),
     }
     with COBYQA_LOCK:
         return minimize(fun, x0, args, bounds, constraints, callback, options)

@@ -48,7 +48,15 @@ def simulate_portfolio(
     """
     if trades_df is None or trades_df.empty:
         ph_cols = ["date", "cash", "market_value", "total_value"]
-        tl_cols = ["date", "action", "ticker", "price", "quantity", "cash_after", "total_value"]
+        tl_cols = [
+            "date",
+            "action",
+            "ticker",
+            "price",
+            "quantity",
+            "cash_after",
+            "total_value",
+        ]
         return pd.DataFrame(columns=ph_cols), pd.DataFrame(columns=tl_cols)
 
     df = trades_df.copy()
@@ -75,7 +83,15 @@ def simulate_portfolio(
     df = df.dropna(subset=["date", "ticker", "signal", "price"])
     if df.empty:
         ph_cols = ["date", "cash", "market_value", "total_value"]
-        tl_cols = ["date", "action", "ticker", "price", "quantity", "cash_after", "total_value"]
+        tl_cols = [
+            "date",
+            "action",
+            "ticker",
+            "price",
+            "quantity",
+            "cash_after",
+            "total_value",
+        ]
         return pd.DataFrame(columns=ph_cols), pd.DataFrame(columns=tl_cols)
 
     df = df.sort_values(["date", "ticker"]).reset_index(drop=True)
@@ -106,15 +122,17 @@ def simulate_portfolio(
                 cash += proceeds
                 positions.pop(tkr, None)
                 total_value = cash + _mark_to_market(positions, last_price_for_day)
-                trade_log_rows.append({
-                    "date": day,
-                    "action": "SELL",
-                    "ticker": tkr,
-                    "price": px,
-                    "quantity": -qty,
-                    "cash_after": round(cash, 2),
-                    "total_value": round(total_value, 2),
-                })
+                trade_log_rows.append(
+                    {
+                        "date": day,
+                        "action": "SELL",
+                        "ticker": tkr,
+                        "price": px,
+                        "quantity": -qty,
+                        "cash_after": round(cash, 2),
+                        "total_value": round(total_value, 2),
+                    }
+                )
 
         # 2) Buys — only if no existing position
         for row in day_df[day_df["signal"] == "BUY"].itertuples():
@@ -134,27 +152,33 @@ def simulate_portfolio(
             cash -= cost
             positions[tkr] = {"shares": qty, "avg_price": px}
             total_value = cash + _mark_to_market(positions, last_price_for_day)
-            trade_log_rows.append({
-                "date": day,
-                "action": "BUY",
-                "ticker": tkr,
-                "price": px,
-                "quantity": qty,
-                "cash_after": round(cash, 2),
-                "total_value": round(total_value, 2),
-            })
+            trade_log_rows.append(
+                {
+                    "date": day,
+                    "action": "BUY",
+                    "ticker": tkr,
+                    "price": px,
+                    "quantity": qty,
+                    "cash_after": round(cash, 2),
+                    "total_value": round(total_value, 2),
+                }
+            )
 
         # 3) End-of-day snapshot
         mv = _mark_to_market(positions, last_price_for_day)
         tv = cash + mv
-        portfolio_history_rows.append({
-            "date": day,
-            "cash": round(cash, 2),
-            "market_value": round(mv, 2),
-            "total_value": round(tv, 2),
-        })
+        portfolio_history_rows.append(
+            {
+                "date": day,
+                "cash": round(cash, 2),
+                "market_value": round(mv, 2),
+                "total_value": round(tv, 2),
+            }
+        )
 
-    portfolio_history = pd.DataFrame(portfolio_history_rows).sort_values("date").reset_index(drop=True)
+    portfolio_history = (
+        pd.DataFrame(portfolio_history_rows).sort_values("date").reset_index(drop=True)
+    )
     trade_log = pd.DataFrame(trade_log_rows).sort_values("date").reset_index(drop=True)
     return portfolio_history, trade_log
 
@@ -179,7 +203,11 @@ if __name__ == "__main__":
     signals_df["date"] = pd.to_datetime(signals_df["date"], errors="coerce")
     signals_df = signals_df.rename(columns={"close": "price"})
 
-    ph, tl = simulate_portfolio(signals_df, starting_cash=DEFAULT_INITIAL_BALANCE, position_size=DEFAULT_POSITION_SIZE)
+    ph, tl = simulate_portfolio(
+        signals_df,
+        starting_cash=DEFAULT_INITIAL_BALANCE,
+        position_size=DEFAULT_POSITION_SIZE,
+    )
 
     os.makedirs(DEFAULT_RESULTS_DIR, exist_ok=True)
     ph.to_csv(DEFAULT_PORTFOLIO_HISTORY_FILE, index=False)

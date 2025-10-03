@@ -2,6 +2,7 @@
 
 .. versionadded:: 0.5.0
 """
+
 from collections import namedtuple
 
 import nltk

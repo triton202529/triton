@@ -1,6 +1,7 @@
 """This file is based on pattern.en. See the bundled NOTICE file for
 license information.
 """
+
 import os
 
 from textblob._text import CHUNK, PENN, PNP, POS, UNIVERSAL, WORD, Lexicon, Spelling

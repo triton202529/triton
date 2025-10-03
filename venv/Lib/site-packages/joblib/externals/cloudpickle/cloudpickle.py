@@ -193,9 +193,12 @@ def _is_registered_pickle_by_value(module):
 
 
 if sys.version_info >= (3, 14):
+
     def _getattribute(obj, name):
-        return _pickle_getattribute(obj, name.split('.'))
+        return _pickle_getattribute(obj, name.split("."))
+
 else:
+
     def _getattribute(obj, name):
         return _pickle_getattribute(obj, name)[0]
 

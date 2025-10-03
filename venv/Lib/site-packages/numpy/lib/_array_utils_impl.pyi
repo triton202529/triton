@@ -11,14 +11,12 @@ __all__ = ["byte_bounds", "normalize_axis_tuple", "normalize_axis_index"]
 # that certain keys, marked as optional in the spec, must be present for
 #  `byte_bounds`. This concerns `"strides"` and `"data"`.
 def byte_bounds(a: generic | NDArray[Any]) -> tuple[int, int]: ...
-
 def normalize_axis_tuple(
     axis: int | Iterable[int],
     ndim: int = ...,
     argname: str | None = ...,
     allow_duplicate: bool | None = ...,
 ) -> tuple[int, int]: ...
-
 def normalize_axis_index(
     axis: int = ...,
     ndim: int = ...,

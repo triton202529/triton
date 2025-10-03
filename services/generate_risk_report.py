@@ -29,11 +29,13 @@ for file in os.listdir(DATA_DIR):
             drawdown = (df["cumulative"] - peak) / peak
             max_drawdown = drawdown.min()
 
-            records.append({
-                "ticker": ticker,
-                "volatility": volatility,
-                "max_drawdown": max_drawdown
-            })
+            records.append(
+                {
+                    "ticker": ticker,
+                    "volatility": volatility,
+                    "max_drawdown": max_drawdown,
+                }
+            )
 
         except Exception as e:
             print(f"⚠️ Failed to process {ticker}: {e}")
@@ -43,8 +45,12 @@ risk_df = pd.DataFrame(records)
 
 # Normalize for risk score (lower vol & drawdown = higher score)
 risk_df["risk_score"] = 100 - (
-    50 * (risk_df["volatility"] - risk_df["volatility"].min()) / (risk_df["volatility"].max() - risk_df["volatility"].min()) +
-    50 * (risk_df["max_drawdown"].abs() - risk_df["max_drawdown"].abs().min()) / (risk_df["max_drawdown"].abs().max() - risk_df["max_drawdown"].abs().min())
+    50
+    * (risk_df["volatility"] - risk_df["volatility"].min())
+    / (risk_df["volatility"].max() - risk_df["volatility"].min())
+    + 50
+    * (risk_df["max_drawdown"].abs() - risk_df["max_drawdown"].abs().min())
+    / (risk_df["max_drawdown"].abs().max() - risk_df["max_drawdown"].abs().min())
 )
 
 risk_df["risk_score"] = risk_df["risk_score"].round(2)

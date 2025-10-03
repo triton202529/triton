@@ -28,6 +28,7 @@ LOG_PATH = os.path.join(RESULTS_DIR, "live_orders.csv")
 _fq_re = re.compile(r"filled_qty=([0-9.]+)")
 _fa_re = re.compile(r"filled_avg=([0-9.]+)")
 
+
 def _parse_note_fill(note: str):
     s = str(note) if isinstance(note, str) else ""
     fq = _fq_re.search(s)
@@ -36,10 +37,17 @@ def _parse_note_fill(note: str):
     fav = float(fa.group(1)) if fa else None
     return fqv, fav
 
+
 def parse_args():
     p = argparse.ArgumentParser(description="Daily fills summary from live_orders.csv")
-    p.add_argument("--date", type=str, default=None, help="YYYY-MM-DD (defaults to 'today' from UTC timestamps)")
+    p.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="YYYY-MM-DD (defaults to 'today' from UTC timestamps)",
+    )
     return p.parse_args()
+
 
 def main():
     if not os.path.exists(LOG_PATH) or os.path.getsize(LOG_PATH) == 0:
@@ -62,12 +70,7 @@ def main():
         day = datetime.now(timezone.utc).date()
 
     # restrict to orders where their latest row is from that date
-    latest = (
-        d.sort_values("ts")
-         .groupby("broker_order_id", dropna=True)
-         .tail(1)
-         .copy()
-    )
+    latest = d.sort_values("ts").groupby("broker_order_id", dropna=True).tail(1).copy()
     latest["ts_date"] = latest["ts"].dt.date
     day_latest = latest[latest["ts_date"] == day].copy()
     if day_latest.empty:
@@ -83,15 +86,29 @@ def main():
     # basic aggregates
     by_status = day_latest["status"].value_counts(dropna=False)
     total_orders = len(day_latest)
-    filled_rows = day_latest[day_latest["status"].isin(["FILLED","PARTIALLY_FILLED"])]
-    est_filled_notional = (filled_rows["filled_qty"].fillna(0) * filled_rows["filled_avg"].fillna(0)).sum()
+    filled_rows = day_latest[day_latest["status"].isin(["FILLED", "PARTIALLY_FILLED"])]
+    est_filled_notional = (
+        filled_rows["filled_qty"].fillna(0) * filled_rows["filled_avg"].fillna(0)
+    ).sum()
 
     # outputs
     ymd = day.strftime("%Y%m%d")
     out_txt = os.path.join(RESULTS_DIR, f"daily_report_{ymd}.txt")
     out_csv = os.path.join(RESULTS_DIR, f"daily_report_{ymd}.csv")
 
-    cols = ["session","ticker","side","qty","price","status","broker_order_id","filled_qty","filled_avg","fill_pct","timestamp"]
+    cols = [
+        "session",
+        "ticker",
+        "side",
+        "qty",
+        "price",
+        "status",
+        "broker_order_id",
+        "filled_qty",
+        "filled_avg",
+        "fill_pct",
+        "timestamp",
+    ]
     detail = day_latest.reindex(columns=[c for c in cols if c in day_latest.columns]).copy()
     detail.to_csv(out_csv, index=False)
 
@@ -106,7 +123,9 @@ def main():
     lines.append(f"Estimated filled notional (qty*avg): {est_filled_notional:,.2f}")
     lines.append("")
     lines.append("Latest status per order id:")
-    lines.append("session                ticker side qty   price   status            order_id                               filled_qty filled_avg fill_%")
+    lines.append(
+        "session                ticker side qty   price   status            order_id                               filled_qty filled_avg fill_%"
+    )
     for _, r in detail.iterrows():
         lines.append(
             f"{str(r.get('session','')):22} "
@@ -126,6 +145,7 @@ def main():
 
     print(f"Wrote {out_txt}")
     print(f"Wrote {out_csv}")
+
 
 if __name__ == "__main__":
     main()

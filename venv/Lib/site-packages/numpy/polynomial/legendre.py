@@ -79,6 +79,7 @@ See also
 numpy.polynomial
 
 """
+
 import numpy as np
 import numpy.linalg as la
 from numpy.lib.array_utils import normalize_axis_index
@@ -87,12 +88,38 @@ from . import polyutils as pu
 from ._polybase import ABCPolyBase
 
 __all__ = [
-    'legzero', 'legone', 'legx', 'legdomain', 'legline', 'legadd',
-    'legsub', 'legmulx', 'legmul', 'legdiv', 'legpow', 'legval', 'legder',
-    'legint', 'leg2poly', 'poly2leg', 'legfromroots', 'legvander',
-    'legfit', 'legtrim', 'legroots', 'Legendre', 'legval2d', 'legval3d',
-    'leggrid2d', 'leggrid3d', 'legvander2d', 'legvander3d', 'legcompanion',
-    'leggauss', 'legweight']
+    "legzero",
+    "legone",
+    "legx",
+    "legdomain",
+    "legline",
+    "legadd",
+    "legsub",
+    "legmulx",
+    "legmul",
+    "legdiv",
+    "legpow",
+    "legval",
+    "legder",
+    "legint",
+    "leg2poly",
+    "poly2leg",
+    "legfromroots",
+    "legvander",
+    "legfit",
+    "legtrim",
+    "legroots",
+    "Legendre",
+    "legval2d",
+    "legval3d",
+    "leggrid2d",
+    "leggrid3d",
+    "legvander2d",
+    "legvander3d",
+    "legcompanion",
+    "leggauss",
+    "legweight",
+]
 
 legtrim = pu.trimcoef
 
@@ -214,7 +241,7 @@ def leg2poly(c):
 #
 
 # Legendre
-legdomain = np.array([-1., 1.])
+legdomain = np.array([-1.0, 1.0])
 
 # Legendre coefficients representing zero.
 legzero = np.array([0])
@@ -670,7 +697,7 @@ def legder(c, m=1, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     cnt = pu._as_int(m, "the order of derivation")
     iaxis = pu._as_int(axis, "the axis")
@@ -785,7 +812,7 @@ def legint(c, m=1, k=[], lbnd=0, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if not np.iterable(k):
         k = [k]
@@ -885,7 +912,7 @@ def legval(x, c, tensor=True):
 
     """
     c = np.array(c, ndmin=1, copy=None)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if isinstance(x, (tuple, list)):
         x = np.asarray(x)
@@ -1393,16 +1420,16 @@ def legcompanion(c):
     # c is a trimmed copy
     [c] = pu.as_series([c])
     if len(c) < 2:
-        raise ValueError('Series must have maximum degree of at least 1.')
+        raise ValueError("Series must have maximum degree of at least 1.")
     if len(c) == 2:
         return np.array([[-c[0] / c[1]]])
 
     n = len(c) - 1
     mat = np.zeros((n, n), dtype=c.dtype)
-    scl = 1. / np.sqrt(2 * np.arange(n) + 1)
-    top = mat.reshape(-1)[1::n + 1]
-    bot = mat.reshape(-1)[n::n + 1]
-    top[...] = np.arange(1, n) * scl[:n - 1] * scl[1:n]
+    scl = 1.0 / np.sqrt(2 * np.arange(n) + 1)
+    top = mat.reshape(-1)[1 :: n + 1]
+    bot = mat.reshape(-1)[n :: n + 1]
+    top[...] = np.arange(1, n) * scl[: n - 1] * scl[1:n]
     bot[...] = top
     mat[:, -1] -= (c[:-1] / c[-1]) * (scl / scl[-1]) * (n / (2 * n - 1))
     return mat
@@ -1529,7 +1556,7 @@ def leggauss(deg):
     x = (x - x[::-1]) / 2
 
     # scale w to get the right value
-    w *= 2. / w.sum()
+    w *= 2.0 / w.sum()
 
     return x, w
 
@@ -1555,9 +1582,11 @@ def legweight(x):
     w = x * 0.0 + 1.0
     return w
 
+
 #
 # Legendre series class
 #
+
 
 class Legendre(ABCPolyBase):
     """A Legendre series class.
@@ -1585,6 +1614,7 @@ class Legendre(ABCPolyBase):
         .. versionadded:: 1.24
 
     """
+
     # Virtual Functions
     _add = staticmethod(legadd)
     _sub = staticmethod(legsub)
@@ -1602,4 +1632,4 @@ class Legendre(ABCPolyBase):
     # Virtual properties
     domain = np.array(legdomain)
     window = np.array(legdomain)
-    basis_name = 'P'
+    basis_name = "P"

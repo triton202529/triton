@@ -16,6 +16,7 @@ except Exception:
 RESULTS_DIR_DEFAULT = "data/results"
 SIGNALS_FILE_DEFAULT = os.path.join(RESULTS_DIR_DEFAULT, "signals_with_rationale.csv")
 
+
 def load_signals(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         raise FileNotFoundError(f"❌ No signals file found at {path}")
@@ -47,16 +48,18 @@ def load_signals(path: str) -> pd.DataFrame:
 
     return df
 
+
 def choose_latest_day(df: pd.DataFrame) -> pd.Timestamp:
     # Use normalized (date-only) max to avoid tz/naive mixups
     dates = pd.to_datetime(df["date"], errors="coerce").dt.normalize()
     return dates.max()
 
+
 def filter_actionable(
     df: pd.DataFrame,
     latest_day: pd.Timestamp,
     min_confidence: float | None = None,
-    require_non_hold: bool = True
+    require_non_hold: bool = True,
 ) -> pd.DataFrame:
     sub = df[df["date"].dt.normalize() == latest_day].copy()
 
@@ -71,15 +74,34 @@ def filter_actionable(
 
     return sub
 
+
 def main():
     p = argparse.ArgumentParser(description="Run paper-trading on latest signals day.")
     p.add_argument("--signals-file", default=SIGNALS_FILE_DEFAULT, help="Path to signals CSV")
     p.add_argument("--results-dir", default=RESULTS_DIR_DEFAULT, help="Where to write results CSVs")
-    p.add_argument("--out-prefix", default="paper_", help="Prefix for output files (portfolio_history/trade_log)")
+    p.add_argument(
+        "--out-prefix",
+        default="paper_",
+        help="Prefix for output files (portfolio_history/trade_log)",
+    )
     p.add_argument("--starting-cash", type=float, default=100000.0, help="Initial cash balance")
-    p.add_argument("--position-size", type=float, default=0.10, help="Fraction of cash to allocate per new BUY")
-    p.add_argument("--min-confidence", type=float, default=None, help="Min |confidence| to trade (if column exists)")
-    p.add_argument("--allow-hold", action="store_true", help="Include HOLD rows (generally not useful)")
+    p.add_argument(
+        "--position-size",
+        type=float,
+        default=0.10,
+        help="Fraction of cash to allocate per new BUY",
+    )
+    p.add_argument(
+        "--min-confidence",
+        type=float,
+        default=None,
+        help="Min |confidence| to trade (if column exists)",
+    )
+    p.add_argument(
+        "--allow-hold",
+        action="store_true",
+        help="Include HOLD rows (generally not useful)",
+    )
     args = p.parse_args()
 
     signals = load_signals(args.signals_file)
@@ -96,7 +118,7 @@ def main():
         signals,
         latest_day,
         min_confidence=args.min_confidence,
-        require_non_hold=not args.allow_hold
+        require_non_hold=not args.allow_hold,
     )
 
     print(f"📅 Running paper trades for {latest_day.date()} (rows: {len(actionable)})")
@@ -120,6 +142,7 @@ def main():
     print("✅ Portfolio simulation complete.")
     print(f"💾 Saved → {out_port}")
     print(f"💾 Saved → {out_trades}")
+
 
 if __name__ == "__main__":
     main()

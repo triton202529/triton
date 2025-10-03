@@ -4,6 +4,7 @@ Licenced under the BSD.
 See here https://github.com/clips/pattern/blob/master/LICENSE.txt for
 complete license information.
 """
+
 import re
 
 VERB, NOUN, ADJECTIVE, ADVERB = "VB", "NN", "JJ", "RB"

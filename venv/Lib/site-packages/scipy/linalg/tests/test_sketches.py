@@ -12,6 +12,7 @@ class TestClarksonWoodruffTransform:
     """
     Testing the Clarkson Woodruff Transform
     """
+
     # set seed for generating test matrices
     rng = np.random.default_rng(1179103485)
 
@@ -24,23 +25,48 @@ class TestClarksonWoodruffTransform:
     n_sketch_rows = 200
 
     # Seeds to test with
-    seeds = [1755490010, 934377150, 1391612830, 1752708722, 2008891431,
-             1302443994, 1521083269, 1501189312, 1126232505, 1533465685]
+    seeds = [
+        1755490010,
+        934377150,
+        1391612830,
+        1752708722,
+        2008891431,
+        1302443994,
+        1521083269,
+        1501189312,
+        1126232505,
+        1533465685,
+    ]
 
     A_dense = rng.random((n_rows, n_cols))
     A_csc = rand(
-        n_rows, n_cols, density=density, format='csc', random_state=rng,
+        n_rows,
+        n_cols,
+        density=density,
+        format="csc",
+        random_state=rng,
     )
     A_csr = rand(
-        n_rows, n_cols, density=density, format='csr', random_state=rng,
+        n_rows,
+        n_cols,
+        density=density,
+        format="csr",
+        random_state=rng,
     )
     A_coo = rand(
-        n_rows, n_cols, density=density, format='coo', random_state=rng,
+        n_rows,
+        n_cols,
+        density=density,
+        format="coo",
+        random_state=rng,
     )
 
     # Collect the test matrices
     test_matrices = [
-        A_dense, A_csc, A_csr, A_coo,
+        A_dense,
+        A_csc,
+        A_csr,
+        A_coo,
     ]
 
     # Test vector with norm ~1
@@ -50,30 +76,20 @@ class TestClarksonWoodruffTransform:
         for A in self.test_matrices:
             for seed in self.seeds:
                 # seed to ensure backwards compatibility post SPEC7
-                sketch = clarkson_woodruff_transform(
-                    A, self.n_sketch_rows, seed=seed
-                )
+                sketch = clarkson_woodruff_transform(A, self.n_sketch_rows, seed=seed)
                 assert_(sketch.shape == (self.n_sketch_rows, self.n_cols))
 
     def test_seed_returns_identical_transform_matrix(self):
         for seed in self.seeds:
-            S1 = cwt_matrix(
-                self.n_sketch_rows, self.n_rows, rng=seed
-            ).toarray()
-            S2 = cwt_matrix(
-                self.n_sketch_rows, self.n_rows, rng=seed
-            ).toarray()
+            S1 = cwt_matrix(self.n_sketch_rows, self.n_rows, rng=seed).toarray()
+            S2 = cwt_matrix(self.n_sketch_rows, self.n_rows, rng=seed).toarray()
             assert_equal(S1, S2)
 
     def test_seed_returns_identically(self):
         for A in self.test_matrices:
             for seed in self.seeds:
-                sketch1 = clarkson_woodruff_transform(
-                    A, self.n_sketch_rows, rng=seed
-                )
-                sketch2 = clarkson_woodruff_transform(
-                    A, self.n_sketch_rows, rng=seed
-                )
+                sketch1 = clarkson_woodruff_transform(A, self.n_sketch_rows, rng=seed)
+                sketch2 = clarkson_woodruff_transform(A, self.n_sketch_rows, rng=seed)
                 if issparse(sketch1):
                     sketch1 = sketch1.toarray()
                 if issparse(sketch2):
@@ -92,7 +108,9 @@ class TestClarksonWoodruffTransform:
                 true_norm = np.linalg.norm(A)
             for seed in self.seeds:
                 sketch = clarkson_woodruff_transform(
-                    A, self.n_sketch_rows, rng=seed,
+                    A,
+                    self.n_sketch_rows,
+                    rng=seed,
                 )
                 if issparse(sketch):
                     sketch_norm = norm(sketch)
@@ -105,11 +123,13 @@ class TestClarksonWoodruffTransform:
 
     def test_sketch_preserves_vector_norm(self):
         n_errors = 0
-        n_sketch_rows = int(np.ceil(2. / (0.01 * 0.5**2)))
+        n_sketch_rows = int(np.ceil(2.0 / (0.01 * 0.5**2)))
         true_norm = np.linalg.norm(self.x)
         for seed in self.seeds:
             sketch = clarkson_woodruff_transform(
-                self.x, n_sketch_rows, rng=seed,
+                self.x,
+                n_sketch_rows,
+                rng=seed,
             )
             sketch_norm = np.linalg.norm(sketch)
 

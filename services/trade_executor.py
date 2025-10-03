@@ -1,4 +1,5 @@
-thats my version       import os
+﻿# that's my version
+import os
 import pandas as pd
 from alpaca_trade_api.rest import REST
 from dotenv import load_dotenv
@@ -18,22 +19,24 @@ api = REST(API_KEY, API_SECRET, BASE_URL)
 # Configuration
 SIGNALS_PATH = "data/predictions/signals.csv"
 LOG_PATH = "data/results/executed_trades.csv"
-AUTO_TRADE = False  # 🚫 Simulation mode by default
+AUTO_TRADE = False  # ðŸš« Simulation mode by default
 
-print("🚀 Starting trade simulation...")
+print("ðŸš€ Starting trade simulation...")
 
 # Load signals
 df = pd.read_csv(SIGNALS_PATH)
 
-if 'ticker' not in df.columns or 'signal' not in df.columns:
-    raise ValueError("❌ 'ticker' and 'signal' columns are required in the signals file.")
+if "ticker" not in df.columns or "signal" not in df.columns:
+    raise ValueError("âŒ 'ticker' and 'signal' columns are required in the signals file.")
 
 # Filter latest signal per ticker
 latest_signals = df.groupby("ticker").last().reset_index()
 
 # Prepare log file if it doesn't exist
 if not os.path.exists(LOG_PATH):
-    pd.DataFrame(columns=["timestamp", "ticker", "action", "quantity", "price", "status", "note"]).to_csv(LOG_PATH, index=False)
+    pd.DataFrame(
+        columns=["timestamp", "ticker", "action", "quantity", "price", "status", "note"]
+    ).to_csv(LOG_PATH, index=False)
 
 logs = []
 
@@ -43,12 +46,12 @@ for _, row in latest_signals.iterrows():
     signal = row["signal"].upper()
     timestamp = datetime.now(timezone.utc).isoformat()
 
-    print(f"📊 {ticker}: Signal = {signal}")
+    print(f"ðŸ“Š {ticker}: Signal = {signal}")
 
     try:
         if signal == "BUY":
             logs.append([timestamp, ticker, "BUY", 1, None, "SIMULATED", "Would BUY"])
-            print(f"📝 Would BUY {ticker}")
+            print(f"ðŸ“ Would BUY {ticker}")
 
         elif signal == "SELL":
             try:
@@ -59,21 +62,23 @@ for _, row in latest_signals.iterrows():
 
             if qty > 0:
                 logs.append([timestamp, ticker, "SELL", qty, None, "SIMULATED", "Would SELL"])
-                print(f"📝 Would SELL {ticker}")
+                print(f"ðŸ“ Would SELL {ticker}")
             else:
                 logs.append([timestamp, ticker, "SELL", 0, None, "SKIPPED", "No position"])
-                print(f"⏸️ No position to SELL in {ticker}")
+                print(f"â¸ï¸ No position to SELL in {ticker}")
 
         else:
             logs.append([timestamp, ticker, "HOLD", 0, None, "SKIPPED", "No action"])
-            print(f"⏸️ No action for {ticker} (Signal: {signal})")
+            print(f"â¸ï¸ No action for {ticker} (Signal: {signal})")
 
     except Exception as e:
         logs.append([timestamp, ticker, signal, 0, None, "FAILED", str(e)])
-        print(f"❌ Error processing {ticker}: {str(e)}")
+        print(f"âŒ Error processing {ticker}: {str(e)}")
 
 # Save to log
-log_df = pd.DataFrame(logs, columns=["timestamp", "ticker", "action", "quantity", "price", "status", "note"])
-log_df.to_csv(LOG_PATH, mode='a', header=False, index=False)
+log_df = pd.DataFrame(
+    logs, columns=["timestamp", "ticker", "action", "quantity", "price", "status", "note"]
+)
+log_df.to_csv(LOG_PATH, mode="a", header=False, index=False)
 
-print("📄 Simulated trade log saved.")
+print("ðŸ“„ Simulated trade log saved.")

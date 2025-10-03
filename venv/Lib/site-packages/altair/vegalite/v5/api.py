@@ -1022,7 +1022,9 @@ class Then(ConditionLike, t.Generic[_C]):
             if isinstance(current, list) and len(current) == 1:
                 # This case is guaranteed to have come from `When` and not `ChainedWhen`
                 # The `list` isn't needed if we complete the condition here
-                conditions = _Conditional(condition=current[0])  # pyright: ignore[reportArgumentType]
+                conditions = _Conditional(
+                    condition=current[0]
+                )  # pyright: ignore[reportArgumentType]
             elif isinstance(current, dict):
                 if not is_extra(statement):
                     conditions = self.to_dict()
@@ -1453,7 +1455,9 @@ def selection(type: Optional[SelectionType_T] = Undefined, **kwds: Any) -> Param
     return _selection(type=type, **kwds)
 
 
-_SelectionPointValue: TypeAlias = "PrimitiveValue_T | Temporal | DateTime | Sequence[Mapping[SingleDefUnitChannel_T | LiteralString, PrimitiveValue_T | Temporal | DateTime]]"
+_SelectionPointValue: TypeAlias = (
+    "PrimitiveValue_T | Temporal | DateTime | Sequence[Mapping[SingleDefUnitChannel_T | LiteralString, PrimitiveValue_T | Temporal | DateTime]]"
+)
 """
 Point selections can be initialized with a single primitive value:
 
@@ -1849,6 +1853,8 @@ def condition(
 def condition(
     predicate: _PredicateType, if_true: str, if_false: str, **kwargs: Any
 ) -> Never: ...
+
+
 # TODO: update the docstring
 def condition(
     predicate: _PredicateType,
@@ -3668,7 +3674,9 @@ class TopLevelMixin(mixins.ConfigMethodMixin):
 
     # Display-related methods
 
-    def _repr_mimebundle_(self, *args, **kwds) -> MimeBundleType | None:  # type:ignore[return]  # noqa: ANN002, ANN003
+    def _repr_mimebundle_(
+        self, *args, **kwds
+    ) -> MimeBundleType | None:  # type:ignore[return]  # noqa: ANN002, ANN003
         """Return a MIME bundle for display in Jupyter frontends."""
         # Catch errors explicitly to get around issues in Jupyter frontend
         # see https://github.com/ipython/ipython/issues/11038
@@ -3867,7 +3875,9 @@ class _EncodingMixin(channels._EncodingMixin):
             r: Any = row
             f = FacetMapping(row=r, column=column)
 
-        return FacetChart(spec=self, facet=f, data=data, columns=columns, **kwargs)  # pyright: ignore[reportArgumentType]
+        return FacetChart(
+            spec=self, facet=f, data=data, columns=columns, **kwargs
+        )  # pyright: ignore[reportArgumentType]
 
 
 class Chart(

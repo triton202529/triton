@@ -109,7 +109,7 @@ class ElementFilter(object):
         """
         return False
 
-    def match(self, element: PageElement, _known_rules:bool=False) -> bool:
+    def match(self, element: PageElement, _known_rules: bool = False) -> bool:
         """Does the given PageElement match the rules set down by this
         ElementFilter?
 
@@ -227,7 +227,7 @@ class MatchRule(object):
         pattern: Optional[_RegularExpressionProtocol] = None,
         function: Optional[Callable] = None,
         present: Optional[bool] = None,
-        exclude_everything: Optional[bool] = None
+        exclude_everything: Optional[bool] = None,
     ):
         if isinstance(string, bytes):
             string = string.decode("utf8")
@@ -244,7 +244,13 @@ class MatchRule(object):
 
         values = [
             x
-            for x in (self.string, self.pattern, self.function, self.present, self.exclude_everything)
+            for x in (
+                self.string,
+                self.pattern,
+                self.function,
+                self.present,
+                self.exclude_everything,
+            )
             if x is not None
         ]
         if len(values) == 0:
@@ -396,9 +402,10 @@ class SoupStrainer(ElementFilter):
             # that matches all Tags, and only Tags.
             self.name_rules = [TagNameMatchRule(present=True)]
         else:
-                self.name_rules = cast(
-                    List[TagNameMatchRule], list(self._make_match_rules(name, TagNameMatchRule))
-                )
+            self.name_rules = cast(
+                List[TagNameMatchRule],
+                list(self._make_match_rules(name, TagNameMatchRule)),
+            )
         self.attribute_rules = defaultdict(list)
 
         if not isinstance(attrs, dict):
@@ -440,7 +447,9 @@ class SoupStrainer(ElementFilter):
         everything. (They might include everything even if this returns `False`,
         but not in an obvious way.)
         """
-        return not self.name_rules and not self.string_rules and not self.attribute_rules
+        return (
+            not self.name_rules and not self.string_rules and not self.attribute_rules
+        )
 
     @property
     def excludes_everything(self) -> bool:
@@ -448,7 +457,7 @@ class SoupStrainer(ElementFilter):
         everything. (They might exclude everything even if this returns `False`,
         but not in an obvious way.)
         """
-        if (self.string_rules and (self.name_rules or self.attribute_rules)):
+        if self.string_rules and (self.name_rules or self.attribute_rules):
             # This is self-contradictory, so the rules exclude everything.
             return True
 
@@ -551,7 +560,7 @@ class SoupStrainer(ElementFilter):
         cannot match a `Tag`, only a `NavigableString`.
         """
         # If there are no rules at all, let anything through.
-        #if self.includes_everything:
+        # if self.includes_everything:
         #    return True
 
         # String rules cannot not match a Tag on their own.
@@ -587,7 +596,9 @@ class SoupStrainer(ElementFilter):
                 # with `tag`. It will not be called a second time with
                 # `prefixed_name`.
                 if rule.matches_tag(tag) or (
-                        not rule.function and prefixed_name is not None and rule.matches_string(prefixed_name)
+                    not rule.function
+                    and prefixed_name is not None
+                    and rule.matches_string(prefixed_name)
                 ):
                     name_matches = True
                     break
@@ -718,7 +729,7 @@ class SoupStrainer(ElementFilter):
                 return True
         return False
 
-    def match(self, element: PageElement, _known_rules: bool=False) -> bool:
+    def match(self, element: PageElement, _known_rules: bool = False) -> bool:
         """Does the given `PageElement` match the rules set down by this
         `SoupStrainer`?
 

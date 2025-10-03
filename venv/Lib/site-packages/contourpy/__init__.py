@@ -176,13 +176,17 @@ def contour_generator(
         raise TypeError(f"Input z must be 2D, not {z.ndim}D")
 
     if z.shape[0] < 2 or z.shape[1] < 2:
-        raise TypeError(f"Input z must be at least a (2, 2) shaped array, but has shape {z.shape}")
+        raise TypeError(
+            f"Input z must be at least a (2, 2) shaped array, but has shape {z.shape}"
+        )
 
     ny, nx = z.shape
 
     # Check arguments: x and y.
     if x.ndim != y.ndim:
-        raise TypeError(f"Number of dimensions of x ({x.ndim}) and y ({y.ndim}) do not match")
+        raise TypeError(
+            f"Number of dimensions of x ({x.ndim}) and y ({y.ndim}) do not match"
+        )
 
     if x.ndim == 0:
         x = np.arange(nx, dtype=np.float64)
@@ -190,9 +194,13 @@ def contour_generator(
         x, y = np.meshgrid(x, y)
     elif x.ndim == 1:
         if len(x) != nx:
-            raise TypeError(f"Length of x ({len(x)}) must match number of columns in z ({nx})")
+            raise TypeError(
+                f"Length of x ({len(x)}) must match number of columns in z ({nx})"
+            )
         if len(y) != ny:
-            raise TypeError(f"Length of y ({len(y)}) must match number of rows in z ({ny})")
+            raise TypeError(
+                f"Length of y ({len(y)}) must match number of rows in z ({ny})"
+            )
         x, y = np.meshgrid(x, y)
     elif x.ndim == 2:
         if x.shape != z.shape:
@@ -204,7 +212,9 @@ def contour_generator(
 
     # Check mask shape just in case.
     if mask is not None and mask.shape != z.shape:
-        raise ValueError("If mask is set it must be a 2D array with the same shape as z")
+        raise ValueError(
+            "If mask is set it must be a 2D array with the same shape as z"
+        )
 
     # Check arguments: name.
     if name not in _class_lookup:
@@ -212,7 +222,8 @@ def contour_generator(
 
     # Check arguments: chunk_size, chunk_count and total_chunk_count.
     y_chunk_size, x_chunk_size = calc_chunk_sizes(
-        chunk_size, chunk_count, total_chunk_count, ny, nx)
+        chunk_size, chunk_count, total_chunk_count, ny, nx
+    )
 
     cls = _class_lookup[name]
 
@@ -230,7 +241,9 @@ def contour_generator(
         line_type = as_line_type(line_type)
 
     if not cls.supports_line_type(line_type):
-        raise ValueError(f"{name} contour generator does not support line_type {line_type}")
+        raise ValueError(
+            f"{name} contour generator does not support line_type {line_type}"
+        )
 
     # Check arguments: fill_type.
     if fill_type is None:
@@ -239,7 +252,9 @@ def contour_generator(
         fill_type = as_fill_type(fill_type)
 
     if not cls.supports_fill_type(fill_type):
-        raise ValueError(f"{name} contour generator does not support fill_type {fill_type}")
+        raise ValueError(
+            f"{name} contour generator does not support fill_type {fill_type}"
+        )
 
     # Check arguments: quad_as_tri.
     if quad_as_tri and not cls.supports_quad_as_tri():
@@ -252,11 +267,15 @@ def contour_generator(
         z_interp = as_z_interp(z_interp)
 
     if z_interp != ZInterp.Linear and not cls.supports_z_interp():
-        raise ValueError(f"{name} contour generator does not support z_interp {z_interp}")
+        raise ValueError(
+            f"{name} contour generator does not support z_interp {z_interp}"
+        )
 
     # Check arguments: thread_count.
     if thread_count not in (0, 1) and not cls.supports_threads():
-        raise ValueError(f"{name} contour generator does not support thread_count {thread_count}")
+        raise ValueError(
+            f"{name} contour generator does not support thread_count {thread_count}"
+        )
 
     # Prepare args and kwargs for contour generator constructor.
     args = [x, y, z, mask]

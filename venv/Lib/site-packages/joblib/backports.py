@@ -147,6 +147,7 @@ try:
 
             add_maybe_unlink_finalizer(mm)
         return mm
+
 except ImportError:
 
     def make_memmap(
@@ -191,5 +192,6 @@ if os.name == "nt":
                     raise
         else:
             raise
+
 else:
     from os import replace as concurrency_safe_rename  # noqa

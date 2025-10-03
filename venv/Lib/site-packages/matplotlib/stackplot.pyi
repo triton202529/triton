@@ -17,4 +17,4 @@ def stackplot(
     **kwargs
 ) -> list[PolyCollection]: ...
 
-__all__ = ['stackplot']
+__all__ = ["stackplot"]

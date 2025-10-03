@@ -47,3 +47,8 @@ risk.json
 Thumbs.db
 .idea/
 .vscode/
+
+venv/
+.venv/
+
+weird-copy/

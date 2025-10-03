@@ -2,6 +2,7 @@
 # to simplify the diff during PR review.
 from abc import ABC, abstractmethod
 
+
 class _ProbabilityDistribution(ABC):
     @abstractmethod
     def support(self):
@@ -200,7 +201,7 @@ class _ProbabilityDistribution(ABC):
 
         The definitions for discrete random variables are analogous, with
         sums over the support replacing the integrals.
-        
+
         Parameters
         ----------
         order : int
@@ -1098,7 +1099,7 @@ class _ProbabilityDistribution(ABC):
 
         The CDF evaluates to its minimum value of :math:`0` for :math:`x < l`
         and its maximum value of :math:`1` for :math:`x ≥ r`.
-        
+
         The CDF is also known simply as the "distribution function".
 
         References
@@ -1303,7 +1304,7 @@ class _ProbabilityDistribution(ABC):
 
         The CCDF evaluates to its minimum value of :math:`0` for :math:`x ≥ r`
         and its maximum value of :math:`1` for :math:`x < l`.
-        
+
         The CCDF is also known as the "survival function".
 
         References

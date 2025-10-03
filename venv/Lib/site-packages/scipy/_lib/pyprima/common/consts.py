@@ -1,4 +1,4 @@
-'''
+"""
 This is a module defining some constants.
 
 Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
@@ -6,12 +6,12 @@ Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
 Dedicated to late Professor M. J. D. Powell FRS (1936--2015).
 
 Python translation by Nickolai Belakovski.
-'''
+"""
 
 import numpy as np
 import os
 
-DEBUGGING = bool(os.getenv('PRIMA_DEBUGGING'))
+DEBUGGING = bool(os.getenv("PRIMA_DEBUGGING"))
 
 REALMIN = np.finfo(float).tiny
 REALMAX = np.finfo(float).max
@@ -20,7 +20,7 @@ CONSTRMAX = FUNCMAX
 EPS = np.finfo(float).eps
 
 # Any bound with an absolute value at least BOUNDMAX is considered as no bound.
-BOUNDMAX = REALMAX/4
+BOUNDMAX = REALMAX / 4
 
 # Some default values
 RHOBEG_DEFAULT = 1

@@ -34,7 +34,9 @@ assert_type(iter(np.ndindex(1, 2, 3)), np.ndindex)
 assert_type(next(np.ndindex(1, 2, 3)), tuple[Any, ...])
 
 assert_type(np.unravel_index([22, 41, 37], (7, 6)), tuple[npt.NDArray[np.intp], ...])
-assert_type(np.unravel_index([31, 41, 13], (7, 6), order="F"), tuple[npt.NDArray[np.intp], ...])
+assert_type(
+    np.unravel_index([31, 41, 13], (7, 6), order="F"), tuple[npt.NDArray[np.intp], ...]
+)
 assert_type(np.unravel_index(1621, (6, 7, 8, 9)), tuple[np.intp, ...])
 
 assert_type(np.ravel_multi_index([[1]], (7, 6)), npt.NDArray[np.intp])
@@ -51,12 +53,20 @@ assert_type(np.ogrid[1:1:2], tuple[npt.NDArray[Any], ...])
 assert_type(np.ogrid[1:1:2, None:10], tuple[npt.NDArray[Any], ...])
 
 assert_type(np.index_exp[0:1], tuple[slice[int, int, None]])
-assert_type(np.index_exp[0:1, None:3], tuple[slice[int, int, None], slice[None, int, None]])
-assert_type(np.index_exp[0, 0:1, ..., [0, 1, 3]], tuple[Literal[0], slice[int, int, None], EllipsisType, list[int]])
+assert_type(
+    np.index_exp[0:1, None:3], tuple[slice[int, int, None], slice[None, int, None]]
+)
+assert_type(
+    np.index_exp[0, 0:1, ..., [0, 1, 3]],
+    tuple[Literal[0], slice[int, int, None], EllipsisType, list[int]],
+)
 
 assert_type(np.s_[0:1], slice[int, int, None])
 assert_type(np.s_[0:1, None:3], tuple[slice[int, int, None], slice[None, int, None]])
-assert_type(np.s_[0, 0:1, ..., [0, 1, 3]], tuple[Literal[0], slice[int, int, None], EllipsisType, list[int]])
+assert_type(
+    np.s_[0, 0:1, ..., [0, 1, 3]],
+    tuple[Literal[0], slice[int, int, None], EllipsisType, list[int]],
+)
 
 assert_type(np.ix_(AR_LIKE_b), tuple[npt.NDArray[np.bool], ...])
 assert_type(np.ix_(AR_LIKE_i, AR_LIKE_f), tuple[npt.NDArray[np.float64], ...])

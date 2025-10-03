@@ -41,19 +41,23 @@ def test_flatten_descr() -> None:
 
 
 def test_get_fieldstructure() -> None:
-    ndtype = np.dtype([
-        ("A", int),
-        ("B", [("B_A", int), ("B_B", [("B_B_A", int), ("B_B_B", int)])]),
-    ])
+    ndtype = np.dtype(
+        [
+            ("A", int),
+            ("B", [("B_A", int), ("B_B", [("B_B_A", int), ("B_B_B", int)])]),
+        ]
+    )
     assert_type(rfn.get_fieldstructure(ndtype), dict[str, list[str]])
 
 
 def test_merge_arrays() -> None:
     assert_type(
-        rfn.merge_arrays((
-            np.ones((int(2),), np.int_),
-            np.ones((int(3),), np.float64),
-        )),
+        rfn.merge_arrays(
+            (
+                np.ones((int(2),), np.int_),
+                np.ones((int(3),), np.float64),
+            )
+        ),
         np.recarray[tuple[int], np.dtype[np.void]],
     )
 

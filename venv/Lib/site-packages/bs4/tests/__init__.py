@@ -53,6 +53,7 @@ HTML5LIB_PRESENT = importlib.util.find_spec("html5lib") is not None
 
 try:
     import lxml.etree
+
     LXML_PRESENT = True
     LXML_VERSION = lxml.etree.LXML_VERSION
 except ImportError:

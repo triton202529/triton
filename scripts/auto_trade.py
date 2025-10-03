@@ -17,6 +17,7 @@ TRADE_LOG = "data/results/live_trade_log.csv"
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
+
 def load_latest_signals():
     print("📈 Loading AI signals...")
     df = pd.read_csv(SIGNALS_FILE, parse_dates=["date"])
@@ -31,10 +32,11 @@ def load_latest_signals():
     df_today = df[df["date"] == today]
 
     df_today = df_today[
-        (df_today["signal"].isin(["BUY", "SELL"])) &
-        (df_today["confidence"] >= CONFIDENCE_THRESHOLD)
+        (df_today["signal"].isin(["BUY", "SELL"]))
+        & (df_today["confidence"] >= CONFIDENCE_THRESHOLD)
     ]
     return df_today
+
 
 def submit_order(ticker, side, rationale, confidence):
     try:
@@ -45,12 +47,13 @@ def submit_order(ticker, side, rationale, confidence):
             qty=qty,
             side=side.lower(),
             type="market",
-            time_in_force="gtc"
+            time_in_force="gtc",
         )
         return order
     except Exception as e:
         print(f"❌ Trade failed for {ticker}: {e}")
         return None
+
 
 def log_trade(ticker, side, rationale, confidence, status):
     timestamp = datetime.utcnow().isoformat()
@@ -60,13 +63,14 @@ def log_trade(ticker, side, rationale, confidence, status):
         "action": side,
         "rationale": rationale,
         "confidence": confidence,
-        "status": status
+        "status": status,
     }
     df_log = pd.DataFrame([row])
     if not os.path.exists(TRADE_LOG):
         df_log.to_csv(TRADE_LOG, index=False)
     else:
         df_log.to_csv(TRADE_LOG, mode="a", header=False, index=False)
+
 
 def main():
     signals = load_latest_signals()
@@ -83,6 +87,7 @@ def main():
         order = submit_order(ticker, action, rationale, confidence)
         status = "submitted" if order else "failed"
         log_trade(ticker, action, rationale, confidence, status)
+
 
 if __name__ == "__main__":
     main()

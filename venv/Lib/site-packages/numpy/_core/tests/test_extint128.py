@@ -18,22 +18,22 @@ INT128_MIN = -INT128_MAX
 INT128_MID = 2**64
 
 INT64_VALUES = (
-    [INT64_MIN + j for j in range(20)] +
-    [INT64_MAX - j for j in range(20)] +
-    [INT64_MID + j for j in range(-20, 20)] +
-    [2 * INT64_MID + j for j in range(-20, 20)] +
-    [INT64_MID // 2 + j for j in range(-20, 20)] +
-    list(range(-70, 70))
+    [INT64_MIN + j for j in range(20)]
+    + [INT64_MAX - j for j in range(20)]
+    + [INT64_MID + j for j in range(-20, 20)]
+    + [2 * INT64_MID + j for j in range(-20, 20)]
+    + [INT64_MID // 2 + j for j in range(-20, 20)]
+    + list(range(-70, 70))
 )
 
 INT128_VALUES = (
-    [INT128_MIN + j for j in range(20)] +
-    [INT128_MAX - j for j in range(20)] +
-    [INT128_MID + j for j in range(-20, 20)] +
-    [2 * INT128_MID + j for j in range(-20, 20)] +
-    [INT128_MID // 2 + j for j in range(-20, 20)] +
-    list(range(-70, 70)) +
-    [False]  # negative zero
+    [INT128_MIN + j for j in range(20)]
+    + [INT128_MAX - j for j in range(20)]
+    + [INT128_MID + j for j in range(-20, 20)]
+    + [2 * INT128_MID + j for j in range(-20, 20)]
+    + [INT128_MID // 2 + j for j in range(-20, 20)]
+    + list(range(-70, 70))
+    + [False]  # negative zero
 )
 
 INT64_POS_VALUES = [x for x in INT64_VALUES if x > 0]
@@ -57,6 +57,7 @@ def exc_iter(*args):
         yield iterate()
     except Exception:
         import traceback
+
         msg = f"At: {repr(value[0])!r}\n{traceback.format_exc()}"
         raise AssertionError(msg)
 
@@ -64,11 +65,7 @@ def exc_iter(*args):
 def test_safe_binop():
     # Test checked arithmetic routines
 
-    ops = [
-        (operator.add, 1),
-        (operator.sub, 2),
-        (operator.mul, 3)
-    ]
+    ops = [(operator.add, 1), (operator.sub, 2), (operator.mul, 3)]
 
     with exc_iter(ops, INT64_VALUES, INT64_VALUES) as it:
         for xop, a, b in it:
@@ -86,7 +83,7 @@ def test_safe_binop():
 
 def test_to_128():
     with exc_iter(INT64_VALUES) as it:
-        for a, in it:
+        for (a,) in it:
             b = mt.extint_to_128(a)
             if a != b:
                 assert_equal(b, a)
@@ -94,7 +91,7 @@ def test_to_128():
 
 def test_to_64():
     with exc_iter(INT128_VALUES) as it:
-        for a, in it:
+        for (a,) in it:
             if not (INT64_MIN <= a <= INT64_MAX):
                 assert_raises(OverflowError, mt.extint_to_64, a)
             else:
@@ -138,7 +135,7 @@ def test_sub_128():
 
 def test_neg_128():
     with exc_iter(INT128_VALUES) as it:
-        for a, in it:
+        for (a,) in it:
             b = -a
             c = mt.extint_neg_128(a)
             if b != c:
@@ -147,7 +144,7 @@ def test_neg_128():
 
 def test_shl_128():
     with exc_iter(INT128_VALUES) as it:
-        for a, in it:
+        for (a,) in it:
             if a < 0:
                 b = -(((-a) << 1) & (2**128 - 1))
             else:
@@ -159,7 +156,7 @@ def test_shl_128():
 
 def test_shr_128():
     with exc_iter(INT128_VALUES) as it:
-        for a, in it:
+        for (a,) in it:
             if a < 0:
                 b = -((-a) >> 1)
             else:

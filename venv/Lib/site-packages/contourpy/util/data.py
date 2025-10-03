@@ -9,8 +9,11 @@ if TYPE_CHECKING:
 
 
 def simple(
-    shape: tuple[int, int], want_mask: bool = False,
-) -> tuple[CoordinateArray, CoordinateArray, CoordinateArray | np.ma.MaskedArray[Any, Any]]:
+    shape: tuple[int, int],
+    want_mask: bool = False,
+) -> tuple[
+    CoordinateArray, CoordinateArray, CoordinateArray | np.ma.MaskedArray[Any, Any]
+]:
     """Return simple test data consisting of the sum of two gaussians.
 
     Args:
@@ -36,12 +39,15 @@ def simple(
 
     z = np.zeros_like(x)
     for i in range(len(amp)):
-        z += amp[i]*np.exp(-((x/xscale - mid[i, 0])**2 + (y/yscale - mid[i, 1])**2) / width[i]**2)
+        z += amp[i] * np.exp(
+            -((x / xscale - mid[i, 0]) ** 2 + (y / yscale - mid[i, 1]) ** 2)
+            / width[i] ** 2
+        )
 
     if want_mask:
         mask = np.logical_or(
-            ((x/xscale - 1.0)**2 / 0.2 + (y/yscale - 0.0)**2 / 0.1) < 1.0,
-            ((x/xscale - 0.2)**2 / 0.02 + (y/yscale - 0.45)**2 / 0.08) < 1.0,
+            ((x / xscale - 1.0) ** 2 / 0.2 + (y / yscale - 0.0) ** 2 / 0.1) < 1.0,
+            ((x / xscale - 0.2) ** 2 / 0.02 + (y / yscale - 0.45) ** 2 / 0.08) < 1.0,
         )
         z = np.ma.array(z, mask=mask)  # type: ignore[no-untyped-call]
 
@@ -49,8 +55,12 @@ def simple(
 
 
 def random(
-    shape: tuple[int, int], seed: int = 2187, mask_fraction: float = 0.0,
-) -> tuple[CoordinateArray, CoordinateArray, CoordinateArray | np.ma.MaskedArray[Any, Any]]:
+    shape: tuple[int, int],
+    seed: int = 2187,
+    mask_fraction: float = 0.0,
+) -> tuple[
+    CoordinateArray, CoordinateArray, CoordinateArray | np.ma.MaskedArray[Any, Any]
+]:
     """Return random test data in the range 0 to 1.
 
     Args:

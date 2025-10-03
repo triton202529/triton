@@ -11,26 +11,49 @@ RESULTS.mkdir(parents=True, exist_ok=True)
 LOGS.mkdir(parents=True, exist_ok=True)
 
 # Map Yahoo indices to ETF proxies (more reliable)
-INDEX_PROXIES = {"^GSPC":"SPY", "^DJI":"DIA", "^IXIC":"QQQ", "^VIX":"VIXY"}
-ALIASES = {"BRK-B":["BRK-B","BRK.B"], "BF-B":["BF-B","BF.B"]}
+INDEX_PROXIES = {"^GSPC": "SPY", "^DJI": "DIA", "^IXIC": "QQQ", "^VIX": "VIXY"}
+ALIASES = {"BRK-B": ["BRK-B", "BRK.B"], "BF-B": ["BF-B", "BF.B"]}
+
 
 def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    df = df.rename(columns={"Open":"open","High":"high","Low":"low","Close":"close","Adj Close":"adj_close","Volume":"volume","Date":"date"})
+    df = df.rename(
+        columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Adj Close": "adj_close",
+            "Volume": "volume",
+            "Date": "date",
+        }
+    )
     return df
+
 
 def fetch_one(ticker: str, attempts=3, wait=2.0):
     fetch_symbol = INDEX_PROXIES.get(ticker, ticker)
     candidates = ALIASES.get(fetch_symbol, [fetch_symbol])
     last_err = "unknown"
-    for a in range(1, attempts+1):
+    for a in range(1, attempts + 1):
         for sym in candidates:
             try:
-                df = yf.download(sym, period="10y", interval="1d", auto_adjust=False, progress=False, threads=False, repair=True, timeout=30)
-                if df is None or df.empty: raise ValueError("empty df")
+                df = yf.download(
+                    sym,
+                    period="10y",
+                    interval="1d",
+                    auto_adjust=False,
+                    progress=False,
+                    threads=False,
+                    repair=True,
+                    timeout=30,
+                )
+                if df is None or df.empty:
+                    raise ValueError("empty df")
                 df = normalize_cols(df).reset_index()
-                if "close" not in df.columns: raise ValueError("no close col")
+                if "close" not in df.columns:
+                    raise ValueError("no close col")
                 df["ticker"] = ticker
                 return df
             except Exception as e:
@@ -39,8 +62,10 @@ def fetch_one(ticker: str, attempts=3, wait=2.0):
             time.sleep(wait)
     raise RuntimeError(last_err)
 
+
 def write_parquet(df: pd.DataFrame, out_path: Path):
     df.to_parquet(out_path, index=False)
+
 
 def main():
     # Ticker universe from fundamentals + scores (assumes both exist)
@@ -93,6 +118,7 @@ def main():
         print(f"⚠️ Errors for {len(errors)} tickers. See {log}")
 
     print(f"✅ Done. Parquets written: {saved}")
+
 
 if __name__ == "__main__":
     main()

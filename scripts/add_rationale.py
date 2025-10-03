@@ -13,7 +13,10 @@ merged = merged.merge(news[["ticker", "sentiment"]], on="ticker", how="left")
 
 # ✅ Generate 'confidence' column if missing
 if "confidence" not in merged.columns:
-    merged["confidence"] = abs((merged["predicted_close"] - merged["close"]) / merged["close"]).round(4)
+    merged["confidence"] = abs(
+        (merged["predicted_close"] - merged["close"]) / merged["close"]
+    ).round(4)
+
 
 # Define rationale logic
 def get_rationale(row):
@@ -37,14 +40,27 @@ def get_rationale(row):
 
     return "; ".join(reasons) if reasons else "N/A"
 
+
 # Apply rationale
 merged["rationale"] = merged.apply(get_rationale, axis=1)
 
 # Final column order
 final_columns = [
-    "date", "ticker", "close", "predicted_close", "signal",
-    "pe_ratio", "eps", "revenue", "market_cap", "pb_ratio", "dividend_yield",
-    "total_score", "sentiment", "rationale", "confidence"
+    "date",
+    "ticker",
+    "close",
+    "predicted_close",
+    "signal",
+    "pe_ratio",
+    "eps",
+    "revenue",
+    "market_cap",
+    "pb_ratio",
+    "dividend_yield",
+    "total_score",
+    "sentiment",
+    "rationale",
+    "confidence",
 ]
 
 # Save

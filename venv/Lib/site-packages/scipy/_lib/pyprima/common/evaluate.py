@@ -1,4 +1,4 @@
-'''
+"""
 This is a module evaluating the objective/constraint function with Nan/Inf handling.
 
 Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
@@ -6,7 +6,7 @@ Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
 Dedicated to late Professor M. J. D. Powell FRS (1936--2015).
 
 Python translation by Nickolai Belakovski.
-'''
+"""
 
 import numpy as np
 from .consts import FUNCMAX, CONSTRMAX, REALMAX, DEBUGGING
@@ -16,13 +16,14 @@ from .linalg import matprod, primasum
 
 
 def moderatex(x):
-    '''
+    """
     This function moderates a decision variable. It replaces NaN by 0 and Inf/-Inf by
     REALMAX/-REALMAX.
-    '''
+    """
     x[np.isnan(x)] = 0
     x = np.clip(x, -REALMAX, REALMAX)
     return x
+
 
 def moderatef(f):
     """
@@ -63,9 +64,9 @@ def evaluate(calcfc, x, m_nlcon, amat, bvec):
         # they never produce a step containing NaN/Inf.
         assert not any(np.isnan(x))
 
-    #====================#
+    # ====================#
     # Calculation starts #
-    #====================#
+    # ====================#
 
     constr = np.zeros(m_lcon + m_nlcon)
     if amat is not None:
@@ -85,9 +86,9 @@ def evaluate(calcfc, x, m_nlcon, amat, bvec):
         f = moderatef(f)
         constr[m_lcon:] = moderatec(constr[m_lcon:])
 
-    #==================#
+    # ==================#
     # Calculation ends #
-    #==================#
+    # ==================#
 
     # Postconditions
     if DEBUGGING:

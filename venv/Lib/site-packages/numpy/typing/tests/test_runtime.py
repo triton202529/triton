@@ -53,7 +53,8 @@ def test_get_type_hints(name: type, tup: TypeTup) -> None:
     """Test `typing.get_type_hints`."""
     typ = tup.typ
 
-    def func(a: typ) -> None: pass
+    def func(a: typ) -> None:
+        pass
 
     out = get_type_hints(func)
     ref = {"a": typ, "return": type(None)}
@@ -65,7 +66,8 @@ def test_get_type_hints_str(name: type, tup: TypeTup) -> None:
     """Test `typing.get_type_hints` with string-representation of types."""
     typ_str, typ = f"npt.{name}", tup.typ
 
-    def func(a: typ_str) -> None: pass
+    def func(a: typ_str) -> None:
+        pass
 
     out = get_type_hints(func)
     ref = {"a": typ, "return": type(None)}
@@ -95,8 +97,6 @@ class TestRuntimeProtocol:
 
     def test_issubclass(self, cls: type[Any], obj: object) -> None:
         if cls is _npt._SupportsDType:
-            pytest.xfail(
-                "Protocols with non-method members don't support issubclass()"
-            )
+            pytest.xfail("Protocols with non-method members don't support issubclass()")
         assert issubclass(type(obj), cls)
         assert not issubclass(type(None), cls)

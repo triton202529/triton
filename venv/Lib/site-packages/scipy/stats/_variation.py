@@ -6,10 +6,8 @@ from scipy._lib._array_api import array_namespace
 from ._axis_nan_policy import _axis_nan_policy_factory
 
 
-@_axis_nan_policy_factory(
-    lambda x: x, n_outputs=1, result_to_tuple=lambda x, _: (x,)
-)
-def variation(a, axis=0, nan_policy='propagate', ddof=0, *, keepdims=False):
+@_axis_nan_policy_factory(lambda x: x, n_outputs=1, result_to_tuple=lambda x, _: (x,))
+def variation(a, axis=0, nan_policy="propagate", ddof=0, *, keepdims=False):
     """
     Compute the coefficient of variation.
 
@@ -119,7 +117,7 @@ def variation(a, axis=0, nan_policy='propagate', ddof=0, *, keepdims=False):
         result = xp.where(std_a > 0, xp.copysign(xp.inf, mean_a), xp.nan)
         return result[()] if result.ndim == 0 else result
 
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         std_a = xp.std(a, axis=axis, correction=ddof)
         result = std_a / mean_a
 

@@ -30,7 +30,10 @@ if os.path.exists(TRADE_LOG_FILE):
     df_trades = pd.read_csv(TRADE_LOG_FILE, parse_dates=["timestamp"])
     today = pd.to_datetime(datetime.utcnow().date())
     today_trades = df_trades[df_trades["timestamp"].dt.date == today.date()]
-    st.dataframe(today_trades.sort_values(by="timestamp", ascending=False), use_container_width=True)
+    st.dataframe(
+        today_trades.sort_values(by="timestamp", ascending=False),
+        use_container_width=True,
+    )
 else:
     st.warning("No live trades found.")
 
@@ -49,14 +52,19 @@ st.subheader("📊 Current Open Positions")
 try:
     positions = api.list_positions()
     if positions:
-        df_pos = pd.DataFrame([{
-            "Ticker": p.symbol,
-            "Qty": p.qty,
-            "Market Value": p.market_value,
-            "Avg Entry": p.avg_entry_price,
-            "Unrealized PnL": p.unrealized_pl,
-            "Side": "LONG" if float(p.qty) > 0 else "SHORT"
-        } for p in positions])
+        df_pos = pd.DataFrame(
+            [
+                {
+                    "Ticker": p.symbol,
+                    "Qty": p.qty,
+                    "Market Value": p.market_value,
+                    "Avg Entry": p.avg_entry_price,
+                    "Unrealized PnL": p.unrealized_pl,
+                    "Side": "LONG" if float(p.qty) > 0 else "SHORT",
+                }
+                for p in positions
+            ]
+        )
         st.dataframe(df_pos, use_container_width=True)
     else:
         st.info("No open positions.")
@@ -74,10 +82,17 @@ try:
 
     if df_valid.empty:
         st.warning("No signals for today. Showing most recent valid signals instead.")
-        df_valid = df_signals[df_signals["signal"].isin(["BUY", "SELL"])].sort_values("date", ascending=False).head(10)
+        df_valid = (
+            df_signals[df_signals["signal"].isin(["BUY", "SELL"])]
+            .sort_values("date", ascending=False)
+            .head(10)
+        )
 
     st.write(f"Total Signals Today: {len(df_signals_today)}")
     st.write(f"Qualifying Trades (Buy/Sell): {len(df_valid)}")
-    st.dataframe(df_valid[["ticker", "signal", "confidence", "rationale"]], use_container_width=True)
+    st.dataframe(
+        df_valid[["ticker", "signal", "confidence", "rationale"]],
+        use_container_width=True,
+    )
 except Exception as e:
     st.warning(f"Unable to load today's signal summary: {e}")

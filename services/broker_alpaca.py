@@ -31,8 +31,9 @@ def _load_env_files() -> None:
     - Else try ROOT/.env, ROOT/config/.env, ROOT/config/alpaca.json
     - Support both ALPACA_* and APCA_* keys
     """
-    have_keys = ((os.getenv("ALPACA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID")) and
-                 (os.getenv("ALPACA_API_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")))
+    have_keys = (os.getenv("ALPACA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID")) and (
+        os.getenv("ALPACA_API_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
+    )
     if have_keys:
         return
 
@@ -77,6 +78,7 @@ class AlpacaBroker:
     Minimal Alpaca REST wrapper using requests.Session.
     Provides account/positions/orders endpoints + convenience helpers.
     """
+
     def __init__(self, mode: str = "paper", timeout: int = 20):
         _load_env_files()
         self.key = os.getenv("ALPACA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID")
@@ -86,12 +88,14 @@ class AlpacaBroker:
         self.base = ALPACA_PAPER_BASE if mode.lower() == "paper" else ALPACA_LIVE_BASE
         self.data_base = ALPACA_DATA_BASE
         self.session = requests.Session()
-        self.session.headers.update({
-            "APCA-API-KEY-ID": self.key,
-            "APCA-API-SECRET-KEY": self.secret,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        })
+        self.session.headers.update(
+            {
+                "APCA-API-KEY-ID": self.key,
+                "APCA-API-SECRET-KEY": self.secret,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+        )
         self.timeout = timeout
         self.mode = mode.lower()
 
@@ -126,6 +130,7 @@ class AlpacaBroker:
     @staticmethod
     def _normalize_order(o: Dict[str, Any]) -> Dict[str, Any]:
         """Return a compact, consistent order dict suitable for logs/UI."""
+
         def _flt(x: Any) -> Optional[float]:
             try:
                 return None if x in (None, "", "null") else float(x)
@@ -186,7 +191,11 @@ class AlpacaBroker:
         status: 'open' | 'closed' | 'all'
         direction: 'asc' | 'desc'
         """
-        params: Dict[str, Any] = {"status": status, "limit": limit, "direction": direction}
+        params: Dict[str, Any] = {
+            "status": status,
+            "limit": limit,
+            "direction": direction,
+        }
         if after:
             params["after"] = after
         if until:
@@ -215,7 +224,9 @@ class AlpacaBroker:
             return None
 
     # ---------- Convenience: open orders ----------
-    def get_open_orders(self, symbols: Optional[Iterable[str]] = None, limit: int = 200) -> List[Dict[str, Any]]:
+    def get_open_orders(
+        self, symbols: Optional[Iterable[str]] = None, limit: int = 200
+    ) -> List[Dict[str, Any]]:
         """
         Return normalized open orders. Optional `symbols` filter.
         """
@@ -229,8 +240,8 @@ class AlpacaBroker:
     def cancel_open_orders(
         self,
         whitelist: Optional[Iterable[str]] = None,
-        cutoff: Optional[str] = None,              # ISO date/time, e.g. "2025-09-01" or "2025-09-01T15:30:00"
-        older_than_days: Optional[int] = None,     # 0 = older than today's start-of-day (US/Eastern)
+        cutoff: Optional[str] = None,  # ISO date/time, e.g. "2025-09-01" or "2025-09-01T15:30:00"
+        older_than_days: Optional[int] = None,  # 0 = older than today's start-of-day (US/Eastern)
         limit: int = 500,
         dry_run: bool = False,
     ) -> List[Dict[str, Any]]:
@@ -256,7 +267,7 @@ class AlpacaBroker:
                 # Trim excessive fractional seconds to microseconds if present
                 if "." in t:
                     # split off timezone if present
-                    if "+" in t[ t.index(".") : ] or "-" in t[ t.index(".") : ]:
+                    if "+" in t[t.index(".") :] or "-" in t[t.index(".") :]:
                         head, rest = t.split(".", 1)
                         # locate sign of tz offset in remainder
                         if "+" in rest:
@@ -296,8 +307,8 @@ class AlpacaBroker:
             ts = _parse_ts(o.get("submitted_at")) or _parse_ts(o.get("created_at"))
             ts_naive = ts.replace(tzinfo=None) if ts is not None else None
 
-            keep_by_wl = (wl is not None and sym in wl)
-            too_old = (cutoff_dt is not None and ts_naive is not None and ts_naive < cutoff_dt)
+            keep_by_wl = wl is not None and sym in wl
+            too_old = cutoff_dt is not None and ts_naive is not None and ts_naive < cutoff_dt
 
             # Cancel if not whitelisted OR too old
             cancel = (wl is None or not keep_by_wl) or too_old
@@ -410,11 +421,19 @@ class AlpacaBroker:
         return self._post("/v2/orders", payload)
 
     # Aliases other modules use:
-    def place_order_notional(self, symbol: str, notional: float, side: str, tif: str = "day") -> Dict[str, Any]:
-        return self.submit_order_notional(symbol=symbol, notional=notional, side=side, time_in_force=tif)
+    def place_order_notional(
+        self, symbol: str, notional: float, side: str, tif: str = "day"
+    ) -> Dict[str, Any]:
+        return self.submit_order_notional(
+            symbol=symbol, notional=notional, side=side, time_in_force=tif
+        )
 
-    def submit_market_order_notional(self, symbol: str, notional: float, side: str, tif: str = "day") -> Dict[str, Any]:
-        return self.submit_order_notional(symbol=symbol, notional=notional, side=side, time_in_force=tif)
+    def submit_market_order_notional(
+        self, symbol: str, notional: float, side: str, tif: str = "day"
+    ) -> Dict[str, Any]:
+        return self.submit_order_notional(
+            symbol=symbol, notional=notional, side=side, time_in_force=tif
+        )
 
     # Backward-compat alias some codebases use:
     def place_order(

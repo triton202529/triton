@@ -1,4 +1,4 @@
-'''
+"""
 This module provides some Powell-style linear algebra procedures.
 
 Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
@@ -6,7 +6,7 @@ Translated from Zaikun Zhang's modern-Fortran reference implementation in PRIMA.
 Dedicated to late Professor M. J. D. Powell FRS (1936--2015).
 
 Python translation by Nickolai Belakovski.
-'''
+"""
 
 import numpy as np
 from .linalg import isminor, planerot, matprod, inprod, hypot
@@ -14,7 +14,7 @@ from .consts import DEBUGGING, EPS
 
 
 def qradd_Rdiag(c, Q, Rdiag, n):
-    '''
+    """
     This function updates the QR factorization of an MxN matrix A of full column rank, attempting to
     add a new column C to this matrix as the LAST column while maintaining the full-rankness.
     Case 1. If C is not in range(A) (theoretically, it implies N < M), then the new matrix is np.hstack([A, C])
@@ -32,7 +32,7 @@ def qradd_Rdiag(c, Q, Rdiag, n):
     (such a column must exist unless C = 0). But his code essentially sets iout=n always. Maybe he
     found this worked well enough in practice. Meanwhile, Powell's code includes a snippet that can
     never be reached, which was probably intended to deal with the case that IOUT != n
-    '''
+    """
     m = Q.shape[1]
     nsave = n  # Needed for debugging (only)
 
@@ -47,13 +47,13 @@ def qradd_Rdiag(c, Q, Rdiag, n):
     # Update Q so that the columns of Q[:, n+1:m] are orthogonal to C. This is done by applying a 2D
     # Givens rotation to Q[:, [k, k+1]] from the right to zero C' @ Q[:, k+1] out for K=n+1, ... m-1.
     # Nothing will be done if n >= m-1
-    for k in range(m-2, n-1, -1):
-        if abs(cq[k+1]) > 0:
+    for k in range(m - 2, n - 1, -1):
+        if abs(cq[k + 1]) > 0:
             # Powell wrote cq[k+1] != 0 instead of abs. The two differ if cq[k+1] is NaN.
             # If we apply the rotation below when cq[k+1] = 0, then cq[k] will get updated to |cq[k]|.
-            G = planerot(cq[k:k+2])
-            Q[:, [k, k+1]] = matprod(Q[:, [k, k+1]], G.T)
-            cq[k] = hypot(*cq[k:k+2])
+            G = planerot(cq[k : k + 2])
+            Q[:, [k, k + 1]] = matprod(Q[:, [k, k + 1]], G.T)
+            cq[k] = hypot(*cq[k : k + 2])
 
     # Augment n by 1 if C is not in range(A)
     if n < m:
@@ -74,7 +74,7 @@ def qradd_Rdiag(c, Q, Rdiag, n):
 
 
 def qrexc_Rdiag(A, Q, Rdiag, i):  # Used in COBYLA
-    '''
+    """
     This function updates the QR factorization for an MxN matrix A=Q@R so that the updated Q and
     R form a QR factorization of [A_0, ..., A_{I-1}, A_{I+1}, ..., A_{N-1}, A_I] which is the matrix
     obtained by rearranging columns [I, I+1, ... N-1] of A to [I+1, ..., N-1, I]. Here A is ASSUMED TO
@@ -85,7 +85,7 @@ def qrexc_Rdiag(A, Q, Rdiag, i):  # Used in COBYLA
     1. With L = Q.shape[1] = R.shape[0], we have M >= L >= N. Most often L = M or N.
     2. This function changes only Q[:, i:] and Rdiag[i:]
     3. (NDB 20230919) In Python, i is either icon or nact - 2, whereas in FORTRAN it is either icon or nact - 1.
-    '''
+    """
 
     # Sizes
     m, n = A.shape
@@ -97,7 +97,6 @@ def qrexc_Rdiag(A, Q, Rdiag, i):  # Used in COBYLA
     assert Q.shape[0] == m and Q.shape[1] >= n and Q.shape[1] <= m
     # tol = max(1.0E-8, min(1.0E-1, 1.0E8 * EPS * m + 1))
     # assert isorth(Q, tol)  # Costly!
-
 
     if i < 0 or i >= n:
         return Q, Rdiag
@@ -113,9 +112,9 @@ def qrexc_Rdiag(A, Q, Rdiag, i):  # Used in COBYLA
     # Powell's code, however, is slightly different: before everything, he first exchanged columns k and
     # k+1 of Q (as well as rows k and k+1 of R). This makes sure that the entries of the update Rdiag
     # are all positive if it is the case for the original Rdiag.
-    for k in range(i, n-1):
-        G = planerot([Rdiag[k+1], inprod(Q[:, k], A[:, k+1])])
-        Q[:, [k, k+1]] = matprod(Q[:, [k+1, k]], (G.T))
+    for k in range(i, n - 1):
+        G = planerot([Rdiag[k + 1], inprod(Q[:, k], A[:, k + 1])])
+        Q[:, [k, k + 1]] = matprod(Q[:, [k + 1, k]], (G.T))
         # Powell's code updates Rdiag in the following way:
         # hypt = np.sqrt(Rdiag[k+1]**2 + np.dot(Q[:, k], A[:, k+1])**2)
         # Rdiag[[k, k+1]] = [hypt, (Rdiag[k+1]/hypt)*Rdiag[k]]
@@ -125,7 +124,7 @@ def qrexc_Rdiag(A, Q, Rdiag, i):  # Used in COBYLA
         # from scratch below.
 
     # Calculate Rdiag(i:n) from scratch
-    Rdiag[i:n-1] = [inprod(Q[:, k], A[:, k+1]) for k in range(i, n-1)]
-    Rdiag[n-1] = inprod(Q[:, n-1], A[:, i])
+    Rdiag[i : n - 1] = [inprod(Q[:, k], A[:, k + 1]) for k in range(i, n - 1)]
+    Rdiag[n - 1] = inprod(Q[:, n - 1], A[:, i])
 
     return Q, Rdiag

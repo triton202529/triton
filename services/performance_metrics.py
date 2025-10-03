@@ -48,7 +48,7 @@ summary = {
     "Sharpe Ratio": [f"{sharpe_ratio:.2f}"],
     "Max Drawdown": [f"{max_drawdown:.2%}"],
     "Win Rate": [f"{win_rate:.2%}"],
-    "Average Trade Return": [f"{avg_trade_return:.2%}"]
+    "Average Trade Return": [f"{avg_trade_return:.2%}"],
 }
 
 summary_df = pd.DataFrame(summary)

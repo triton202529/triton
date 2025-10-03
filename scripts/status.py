@@ -42,7 +42,7 @@ def read_alpha_paths(root: Path) -> dict:
         try:
             with alpha_yaml.open("r", encoding="utf-8-sig") as f:
                 cfg = yaml.safe_load(f) or {}
-            paths = (cfg.get("paths") or {})
+            paths = cfg.get("paths") or {}
             for k in defaults:
                 if k in paths and isinstance(paths[k], str) and paths[k].strip():
                     defaults[k] = paths[k]

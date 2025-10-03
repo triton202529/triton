@@ -22,14 +22,16 @@ try:
     else:
         data = []
         for pos in positions:
-            data.append({
-                "Ticker": pos.symbol,
-                "Qty": pos.qty,
-                "Avg Price": float(pos.avg_entry_price),
-                "Current Price": float(pos.current_price),
-                "Unrealized P&L": float(pos.unrealized_pl),
-                "Market Value": float(pos.market_value)
-            })
+            data.append(
+                {
+                    "Ticker": pos.symbol,
+                    "Qty": pos.qty,
+                    "Avg Price": float(pos.avg_entry_price),
+                    "Current Price": float(pos.current_price),
+                    "Unrealized P&L": float(pos.unrealized_pl),
+                    "Market Value": float(pos.market_value),
+                }
+            )
 
         df = pd.DataFrame(data)
         df["Unrealized P&L"] = df["Unrealized P&L"].round(2)

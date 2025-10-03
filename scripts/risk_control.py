@@ -1,5 +1,6 @@
 # scripts/risk_control.py
 
+
 def risk_check(ticker, signal, api):
     """
     Evaluate whether the given trade passes risk controls.
@@ -21,7 +22,10 @@ def risk_check(ticker, signal, api):
                 position = api.get_position(ticker)
                 current_value = float(position.market_value)
                 if current_value > 0.10 * buying_power:
-                    return False, f"Too much exposure to {ticker} (>10% of buying power)"
+                    return (
+                        False,
+                        f"Too much exposure to {ticker} (>10% of buying power)",
+                    )
             except:
                 # No position yet — this is okay
                 pass

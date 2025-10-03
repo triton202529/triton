@@ -21,7 +21,9 @@ __all__ = ["VERSION_PATTERN", "InvalidVersion", "LegacyVersion", "Version", "par
 ###
 
 _CmpKeyT = TypeVar("_CmpKeyT", bound=tuple[object, ...])
-_CmpKeyT_co = TypeVar("_CmpKeyT_co", bound=tuple[object, ...], default=tuple[Any, ...], covariant=True)
+_CmpKeyT_co = TypeVar(
+    "_CmpKeyT_co", bound=tuple[object, ...], default=tuple[Any, ...], covariant=True
+)
 
 ###
 
@@ -74,7 +76,12 @@ class _BaseVersion(Generic[_CmpKeyT_co]):
     def __le__(self, other: _BaseVersion, /) -> bool: ...
     def __ge__(self, other: _BaseVersion, /) -> bool: ...
     def __gt__(self, other: _BaseVersion, /) -> bool: ...
-    def _compare(self, /, other: _BaseVersion[_CmpKeyT], method: Callable[[_CmpKeyT_co, _CmpKeyT], bool]) -> bool: ...
+    def _compare(
+        self,
+        /,
+        other: _BaseVersion[_CmpKeyT],
+        method: Callable[[_CmpKeyT_co, _CmpKeyT], bool],
+    ) -> bool: ...
 
 class LegacyVersion(_BaseVersion[tuple[L[-1], tuple[str, ...]]]):
     _version: Final[str]
@@ -98,7 +105,8 @@ class Version(
             tuple[str, int] | _InfinityType | _NegativeInfinityType,  # pre
             tuple[str, int] | _NegativeInfinityType,  # post
             tuple[str, int] | _InfinityType,  # dev
-            tuple[tuple[int, L[""]] | tuple[_NegativeInfinityType, str], ...] | _NegativeInfinityType,  # local
+            tuple[tuple[int, L[""]] | tuple[_NegativeInfinityType, str], ...]
+            | _NegativeInfinityType,  # local
         ],
     ],
 ):

@@ -9,6 +9,7 @@ available as it implements subclasses of multiprocessing Pool
 that uses a custom alternative to SimpleQueue.
 
 """
+
 # Author: Olivier Grisel <olivier.grisel@ensta.org>
 # Copyright: 2012, Olivier Grisel
 # License: BSD 3 clause

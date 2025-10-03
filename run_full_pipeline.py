@@ -8,7 +8,7 @@ steps = [
     ("🔮 Generating predictions", "python generate_predictions.py"),
     ("📡 Generating signals", "python generate_signals.py"),
     ("💼 Simulating portfolio", "python simulate_portfolio.py"),
-    ("📊 Launching dashboard", "streamlit run backtest_dashboard.py")
+    ("📊 Launching dashboard", "streamlit run backtest_dashboard.py"),
 ]
 
 for label, cmd in steps:

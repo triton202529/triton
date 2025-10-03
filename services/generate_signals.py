@@ -14,8 +14,9 @@ OUT_WITH_RATIONALE = os.path.join(RESULTS_DIR, "signals_with_rationale.csv")
 OUT_SIGNALS = os.path.join(RESULTS_DIR, "signals.csv")  # backward compatibility
 
 # Signal thresholds (as pct moves vs close)
-BUY_DELTA = 0.002   # +0.20%
-SELL_DELTA = -0.002 # -0.20%
+BUY_DELTA = 0.002  # +0.20%
+SELL_DELTA = -0.002  # -0.20%
+
 
 def load_pred_file(path: str) -> pd.DataFrame:
     try:
@@ -26,11 +27,13 @@ def load_pred_file(path: str) -> pd.DataFrame:
         print(f"🔥 Error reading {path}: {e}")
         return pd.DataFrame()
 
+
 def normalize_date(s: pd.Series) -> pd.Series:
     # Convert any mix of tz-aware/naive to UTC then drop tz (naive)
     s = pd.to_datetime(s, errors="coerce", utc=True)
     # s is datetime64[ns, UTC]; drop tz so everything is naive & sortable
     return s.dt.tz_convert("UTC").dt.tz_localize(None)
+
 
 def build_rationale(delta_pct: float, buy_thr: float, sell_thr: float) -> str:
     pct = f"{delta_pct*100:.2f}%"
@@ -40,10 +43,12 @@ def build_rationale(delta_pct: float, buy_thr: float, sell_thr: float) -> str:
         return f"Predicted ↓ {pct} vs close (<{sell_thr*100:.2f}%). Downside risk; SELL bias."
     return f"Predicted {pct} vs close within band; momentum unclear; HOLD."
 
+
 all_rows = []
 
-pred_files = sorted(glob.glob(os.path.join(PREDICTIONS_DIR, "*_predictions.parquet"))) \
-           + sorted(glob.glob(os.path.join(PREDICTIONS_DIR, "*_predictions.csv")))
+pred_files = sorted(glob.glob(os.path.join(PREDICTIONS_DIR, "*_predictions.parquet"))) + sorted(
+    glob.glob(os.path.join(PREDICTIONS_DIR, "*_predictions.csv"))
+)
 
 if not pred_files:
     print(f"🚫 No predictions found in {PREDICTIONS_DIR}. Run train_model.py first.")
@@ -72,8 +77,10 @@ for path in pred_files:
         continue
 
     df = df.sort_values("date").copy()
-    df["delta_pct"] = (pd.to_numeric(df["predicted_close"], errors="coerce") /
-                       pd.to_numeric(df["close"], errors="coerce")) - 1.0
+    df["delta_pct"] = (
+        pd.to_numeric(df["predicted_close"], errors="coerce")
+        / pd.to_numeric(df["close"], errors="coerce")
+    ) - 1.0
 
     def decide(delta):
         if delta >= BUY_DELTA:
@@ -87,8 +94,20 @@ for path in pred_files:
     df["rationale"] = df["delta_pct"].apply(lambda d: build_rationale(d, BUY_DELTA, SELL_DELTA))
     df["ticker"] = str(ticker)
 
-    all_rows.append(df[["date", "ticker", "close", "predicted_close", "delta_pct",
-                        "signal", "confidence", "rationale"]])
+    all_rows.append(
+        df[
+            [
+                "date",
+                "ticker",
+                "close",
+                "predicted_close",
+                "delta_pct",
+                "signal",
+                "confidence",
+                "rationale",
+            ]
+        ]
+    )
 
 if not all_rows:
     print("🚫 No signals generated (no valid prediction files).")
@@ -104,7 +123,9 @@ signals = signals.sort_values(["ticker", "date"], kind="mergesort")
 signals.to_csv(OUT_WITH_RATIONALE, index=False)
 
 # Back-compat: drop rationale, rename confidence
-signals_no_rat = signals.drop(columns=["rationale"]).rename(columns={"confidence": "confidence_score"})
+signals_no_rat = signals.drop(columns=["rationale"]).rename(
+    columns={"confidence": "confidence_score"}
+)
 signals_no_rat.to_csv(OUT_SIGNALS, index=False)
 
 print(f"✅ signals_with_rationale.csv → {OUT_WITH_RATIONALE}")

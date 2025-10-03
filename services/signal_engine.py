@@ -3,6 +3,7 @@
 import pandas as pd
 import os
 
+
 def generate_signals(prediction_file):
     try:
         if not os.path.exists(prediction_file):
@@ -11,19 +12,19 @@ def generate_signals(prediction_file):
         df = pd.read_csv(prediction_file)
 
         # Drop completely blank rows
-        df.dropna(how='all', inplace=True)
+        df.dropna(how="all", inplace=True)
 
         # Ensure required columns exist
-        required_cols = {'ticker', 'prediction', 'actual_close'}
+        required_cols = {"ticker", "prediction", "actual_close"}
         if not required_cols.issubset(df.columns):
             raise ValueError(f"Missing columns in prediction file. Required: {required_cols}")
 
         signals = []
 
         for _, row in df.iterrows():
-            ticker = row['ticker']
-            predicted = row['prediction']
-            actual = row['actual_close']
+            ticker = row["ticker"]
+            predicted = row["prediction"]
+            actual = row["actual_close"]
             diff = predicted - actual
 
             # Basic rule for generating signals
@@ -34,13 +35,15 @@ def generate_signals(prediction_file):
             else:
                 signal = "HOLD"
 
-            signals.append({
-                "ticker": ticker,
-                "actual_price": round(actual, 2),
-                "predicted_price": round(predicted, 2),
-                "difference": round(diff, 2),
-                "signal": signal
-            })
+            signals.append(
+                {
+                    "ticker": ticker,
+                    "actual_price": round(actual, 2),
+                    "predicted_price": round(predicted, 2),
+                    "difference": round(diff, 2),
+                    "signal": signal,
+                }
+            )
 
         df_signals = pd.DataFrame(signals)
         output_path = "../predictions/signals.csv"
@@ -53,6 +56,7 @@ def generate_signals(prediction_file):
     except Exception as e:
         print(f"❌ Error generating signals: {e}")
         return pd.DataFrame()
+
 
 if __name__ == "__main__":
     print("🔁 Running signal engine...")

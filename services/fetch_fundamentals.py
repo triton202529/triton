@@ -26,27 +26,31 @@ for ticker in tickers:
         pb_ratio = info.get("priceToBook", 1.5)
         dividend_yield = info.get("dividendYield", 0)
 
-        fundamentals.append({
-            "ticker": ticker.upper(),
-            "pe_ratio": pe_ratio,
-            "eps": eps,
-            "revenue": revenue,
-            "market_cap": market_cap,
-            "pb_ratio": pb_ratio,
-            "dividend_yield": dividend_yield
-        })
+        fundamentals.append(
+            {
+                "ticker": ticker.upper(),
+                "pe_ratio": pe_ratio,
+                "eps": eps,
+                "revenue": revenue,
+                "market_cap": market_cap,
+                "pb_ratio": pb_ratio,
+                "dividend_yield": dividend_yield,
+            }
+        )
 
     except Exception as e:
         print(f"⚠️ Error fetching {ticker}, using defaults: {e}")
-        fundamentals.append({
-            "ticker": ticker.upper(),
-            "pe_ratio": 15,
-            "eps": 5,
-            "revenue": 1e9,
-            "market_cap": 1e10,
-            "pb_ratio": 1.5,
-            "dividend_yield": 0
-        })
+        fundamentals.append(
+            {
+                "ticker": ticker.upper(),
+                "pe_ratio": 15,
+                "eps": 5,
+                "revenue": 1e9,
+                "market_cap": 1e10,
+                "pb_ratio": 1.5,
+                "dividend_yield": 0,
+            }
+        )
 
 df = pd.DataFrame(fundamentals)
 df.to_csv(OUTPUT_PATH, index=False)

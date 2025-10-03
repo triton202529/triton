@@ -72,13 +72,37 @@ See Also
 `numpy.polynomial`
 
 """
+
 __all__ = [
-    'polyzero', 'polyone', 'polyx', 'polydomain', 'polyline', 'polyadd',
-    'polysub', 'polymulx', 'polymul', 'polydiv', 'polypow', 'polyval',
-    'polyvalfromroots', 'polyder', 'polyint', 'polyfromroots', 'polyvander',
-    'polyfit', 'polytrim', 'polyroots', 'Polynomial', 'polyval2d', 'polyval3d',
-    'polygrid2d', 'polygrid3d', 'polyvander2d', 'polyvander3d',
-    'polycompanion']
+    "polyzero",
+    "polyone",
+    "polyx",
+    "polydomain",
+    "polyline",
+    "polyadd",
+    "polysub",
+    "polymulx",
+    "polymul",
+    "polydiv",
+    "polypow",
+    "polyval",
+    "polyvalfromroots",
+    "polyder",
+    "polyint",
+    "polyfromroots",
+    "polyvander",
+    "polyfit",
+    "polytrim",
+    "polyroots",
+    "Polynomial",
+    "polyval2d",
+    "polyval3d",
+    "polygrid2d",
+    "polygrid3d",
+    "polyvander2d",
+    "polyvander3d",
+    "polycompanion",
+]
 
 import numpy as np
 import numpy.linalg as la
@@ -95,7 +119,7 @@ polytrim = pu.trimcoef
 #
 
 # Polynomial default domain.
-polydomain = np.array([-1., 1.])
+polydomain = np.array([-1.0, 1.0])
 
 # Polynomial coefficients representing zero.
 polyzero = np.array([0])
@@ -421,7 +445,7 @@ def polydiv(c1, c2):
             c1[i:j] -= c2 * c1[j]
             i -= 1
             j -= 1
-        return c1[j + 1:] / scl, pu.trimseq(c1[:j + 1])
+        return c1[j + 1 :] / scl, pu.trimseq(c1[: j + 1])
 
 
 def polypow(c, pow, maxpower=None):
@@ -514,7 +538,7 @@ def polyder(c, m=1, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         # astype fails with NA
         c = c + 0.0
     cdt = c.dtype
@@ -620,7 +644,7 @@ def polyint(c, m=1, k=[], lbnd=0, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         # astype doesn't preserve mask attribute.
         c = c + 0.0
     cdt = c.dtype
@@ -741,7 +765,7 @@ def polyval(x, c, tensor=True):
 
     """
     c = np.array(c, ndmin=1, copy=None)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         # astype fails with NA
         c = c + 0.0
     if isinstance(x, (tuple, list)):
@@ -830,7 +854,7 @@ def polyvalfromroots(x, r, tensor=True):
 
     """
     r = np.array(r, ndmin=1, copy=None)
-    if r.dtype.char in '?bBhHiIlLqQpP':
+    if r.dtype.char in "?bBhHiIlLqQpP":
         r = r.astype(np.double)
     if isinstance(x, (tuple, list)):
         x = np.asarray(x)
@@ -1467,13 +1491,13 @@ def polycompanion(c):
     # c is a trimmed copy
     [c] = pu.as_series([c])
     if len(c) < 2:
-        raise ValueError('Series must have maximum degree of at least 1.')
+        raise ValueError("Series must have maximum degree of at least 1.")
     if len(c) == 2:
         return np.array([[-c[0] / c[1]]])
 
     n = len(c) - 1
     mat = np.zeros((n, n), dtype=c.dtype)
-    bot = mat.reshape(-1)[n::n + 1]
+    bot = mat.reshape(-1)[n :: n + 1]
     bot[...] = 1
     mat[:, -1] -= c[:-1] / c[-1]
     return mat
@@ -1545,6 +1569,7 @@ def polyroots(c):
 # polynomial class
 #
 
+
 class Polynomial(ABCPolyBase):
     """A power series class.
 
@@ -1571,6 +1596,7 @@ class Polynomial(ABCPolyBase):
         .. versionadded:: 1.24
 
     """
+
     # Virtual Functions
     _add = staticmethod(polyadd)
     _sub = staticmethod(polysub)
@@ -1592,14 +1618,14 @@ class Polynomial(ABCPolyBase):
 
     @classmethod
     def _str_term_unicode(cls, i, arg_str):
-        if i == '1':
+        if i == "1":
             return f"·{arg_str}"
         else:
             return f"·{arg_str}{i.translate(cls._superscript_mapping)}"
 
     @staticmethod
     def _str_term_ascii(i, arg_str):
-        if i == '1':
+        if i == "1":
             return f" {arg_str}"
         else:
             return f" {arg_str}**{i}"
@@ -1609,7 +1635,7 @@ class Polynomial(ABCPolyBase):
         if needs_parens:
             arg_str = rf"\left({arg_str}\right)"
         if i == 0:
-            return '1'
+            return "1"
         elif i == 1:
             return arg_str
         else:

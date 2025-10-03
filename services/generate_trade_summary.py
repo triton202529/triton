@@ -35,20 +35,22 @@ for ticker, group in df.groupby("ticker"):
         elif action == "SELL" and holding:
             exit_date = date
             exit_price = price
-            profit = (exit_price - holding["entry_price"])
+            profit = exit_price - holding["entry_price"]
             return_pct = (profit / holding["entry_price"]) * 100
             days_held = (exit_date - holding["entry_date"]).days
 
-            detailed_trades.append({
-                "ticker": ticker,
-                "entry_date": holding["entry_date"].date(),
-                "exit_date": exit_date.date(),
-                "entry_price": round(holding["entry_price"], 2),
-                "exit_price": round(exit_price, 2),
-                "profit": round(profit, 2),
-                "return_pct": round(return_pct, 2),
-                "days_held": days_held
-            })
+            detailed_trades.append(
+                {
+                    "ticker": ticker,
+                    "entry_date": holding["entry_date"].date(),
+                    "exit_date": exit_date.date(),
+                    "entry_price": round(holding["entry_price"], 2),
+                    "exit_price": round(exit_price, 2),
+                    "profit": round(profit, 2),
+                    "return_pct": round(return_pct, 2),
+                    "days_held": days_held,
+                }
+            )
 
             holding = None  # Reset
 

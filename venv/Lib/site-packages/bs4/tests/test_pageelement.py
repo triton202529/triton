@@ -199,12 +199,12 @@ class TestFormatters(SoupTest):
         # encounter the first </pre> tag, because we know it's not
         # the one that put us into string literal mode.
         markup = """<div><pre><code>some
-<script><pre>code</pre></script> for you 
+<script><pre>code</pre></script> for you
 </code></pre></div>"""
 
         expect = """<div>
  <pre><code>some
-<script><pre>code</pre></script> for you 
+<script><pre>code</pre></script> for you
 </code></pre>
 </div>
 """
@@ -408,8 +408,8 @@ class TestEquality(SoupTest):
 
     def test_comparison(self):
         soup = self.soup("<a>string</a> <a>string</a>")
-        first_a, second_a = soup.find_all('a')
-        first_string, second_string = soup.find_all(string='string')
+        first_a, second_a = soup.find_all("a")
+        first_string, second_string = soup.find_all(string="string")
 
         # Tags with the same markup are equal.
         assert first_a == second_a
@@ -423,8 +423,8 @@ class TestEquality(SoupTest):
 
     def test_hash(self):
         soup = self.soup("<a>string</a> <a>string</a>")
-        first_a, second_a = soup.find_all('a')
-        first_string, second_string = soup.find_all(string='string')
+        first_a, second_a = soup.find_all("a")
+        first_string, second_string = soup.find_all(string="string")
 
         # Tags with the same markup hash to the same value.
         assert hash(first_a) == hash(second_a)

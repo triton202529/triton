@@ -7,7 +7,7 @@ import scipy.signal._wavelets as wavelets
 class TestWavelets:
     def test_ricker(self):
         w = wavelets._ricker(1.0, 1)
-        expected = 2 / (np.sqrt(3 * 1.0) * (np.pi ** 0.25))
+        expected = 2 / (np.sqrt(3 * 1.0) * (np.pi**0.25))
         assert_array_equal(w, expected)
 
         lengths = [5, 11, 15, 51, 101]
@@ -36,8 +36,10 @@ class TestWavelets:
 
     def test_cwt(self):
         widths = [1.0]
+
         def delta_wavelet(s, t):
             return np.array([1])
+
         len_data = 100
         test_data = np.sin(np.pi * np.arange(0, len_data) / 10.0)
 
@@ -52,8 +54,10 @@ class TestWavelets:
         assert cwt_dat.shape == (len(widths), len_data)
 
         widths = [len_data * 10]
+
         # Note: this wavelet isn't defined quite right, but is fine for this test
         def flat_wavelet(l, w):
             return np.full(w, 1 / w)
+
         cwt_dat = wavelets._cwt(test_data, flat_wavelet, widths)
         assert_array_almost_equal(cwt_dat, np.mean(test_data))

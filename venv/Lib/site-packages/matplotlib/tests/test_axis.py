@@ -11,8 +11,8 @@ def test_tick_labelcolor_array():
 
 
 def test_axis_not_in_layout():
-    fig1, (ax1_left, ax1_right) = plt.subplots(ncols=2, layout='constrained')
-    fig2, (ax2_left, ax2_right) = plt.subplots(ncols=2, layout='constrained')
+    fig1, (ax1_left, ax1_right) = plt.subplots(ncols=2, layout="constrained")
+    fig2, (ax2_left, ax2_right) = plt.subplots(ncols=2, layout="constrained")
 
     # 100 label overlapping the end of the axis
     ax1_left.set_xlim([0, 100])
@@ -33,8 +33,16 @@ def test_axis_not_in_layout():
 
 def test_translate_tick_params_reverse():
     fig, ax = plt.subplots()
-    kw = {'label1On': 'a', 'label2On': 'b', 'tick1On': 'c', 'tick2On': 'd'}
-    assert (ax.xaxis._translate_tick_params(kw, reverse=True) ==
-            {'labelbottom': 'a', 'labeltop': 'b', 'bottom': 'c', 'top': 'd'})
-    assert (ax.yaxis._translate_tick_params(kw, reverse=True) ==
-            {'labelleft': 'a', 'labelright': 'b', 'left': 'c', 'right': 'd'})
+    kw = {"label1On": "a", "label2On": "b", "tick1On": "c", "tick2On": "d"}
+    assert ax.xaxis._translate_tick_params(kw, reverse=True) == {
+        "labelbottom": "a",
+        "labeltop": "b",
+        "bottom": "c",
+        "top": "d",
+    }
+    assert ax.yaxis._translate_tick_params(kw, reverse=True) == {
+        "labelleft": "a",
+        "labelright": "b",
+        "left": "c",
+        "right": "d",
+    }

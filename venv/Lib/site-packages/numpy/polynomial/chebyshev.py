@@ -107,6 +107,7 @@ References
   (https://web.archive.org/web/20080221202153/https://www.math.hmc.edu/~benjamin/papers/CombTrig.pdf, pg. 4)
 
 """  # noqa: E501
+
 import numpy as np
 import numpy.linalg as la
 from numpy.lib.array_utils import normalize_axis_index
@@ -115,13 +116,41 @@ from . import polyutils as pu
 from ._polybase import ABCPolyBase
 
 __all__ = [
-    'chebzero', 'chebone', 'chebx', 'chebdomain', 'chebline', 'chebadd',
-    'chebsub', 'chebmulx', 'chebmul', 'chebdiv', 'chebpow', 'chebval',
-    'chebder', 'chebint', 'cheb2poly', 'poly2cheb', 'chebfromroots',
-    'chebvander', 'chebfit', 'chebtrim', 'chebroots', 'chebpts1',
-    'chebpts2', 'Chebyshev', 'chebval2d', 'chebval3d', 'chebgrid2d',
-    'chebgrid3d', 'chebvander2d', 'chebvander3d', 'chebcompanion',
-    'chebgauss', 'chebweight', 'chebinterpolate']
+    "chebzero",
+    "chebone",
+    "chebx",
+    "chebdomain",
+    "chebline",
+    "chebadd",
+    "chebsub",
+    "chebmulx",
+    "chebmul",
+    "chebdiv",
+    "chebpow",
+    "chebval",
+    "chebder",
+    "chebint",
+    "cheb2poly",
+    "poly2cheb",
+    "chebfromroots",
+    "chebvander",
+    "chebfit",
+    "chebtrim",
+    "chebroots",
+    "chebpts1",
+    "chebpts2",
+    "Chebyshev",
+    "chebval2d",
+    "chebval3d",
+    "chebgrid2d",
+    "chebgrid3d",
+    "chebvander2d",
+    "chebvander3d",
+    "chebcompanion",
+    "chebgauss",
+    "chebweight",
+    "chebinterpolate",
+]
 
 chebtrim = pu.trimcoef
 
@@ -129,6 +158,7 @@ chebtrim = pu.trimcoef
 # A collection of functions for manipulating z-series. These are private
 # functions and do minimal error checking.
 #
+
 
 def _cseries_to_zseries(c):
     """Convert Chebyshev series to z-series.
@@ -151,7 +181,7 @@ def _cseries_to_zseries(c):
     """
     n = c.size
     zs = np.zeros(2 * n - 1, dtype=c.dtype)
-    zs[n - 1:] = c / 2
+    zs[n - 1 :] = c / 2
     return zs + zs[::-1]
 
 
@@ -175,7 +205,7 @@ def _zseries_to_cseries(zs):
 
     """
     n = (zs.size + 1) // 2
-    c = zs[n - 1:].copy()
+    c = zs[n - 1 :].copy()
     c[1:n] *= 2
     return c
 
@@ -261,16 +291,16 @@ def _zseries_div(z1, z2):
             quo[i] = z1[i]
             quo[dlen - i] = r
             tmp = r * z2
-            z1[i:i + lc2] -= tmp
-            z1[j:j + lc2] -= tmp
+            z1[i : i + lc2] -= tmp
+            z1[j : j + lc2] -= tmp
             i += 1
             j -= 1
         r = z1[i]
         quo[i] = r
         tmp = r * z2
-        z1[i:i + lc2] -= tmp
+        z1[i : i + lc2] -= tmp
         quo /= scl
-        rem = z1[i + 1:i - 1 + lc2].copy()
+        rem = z1[i + 1 : i - 1 + lc2].copy()
         return quo, rem
 
 
@@ -335,9 +365,10 @@ def _zseries_int(zs):
     zs = _zseries_mul(zs, ns)
     div = np.arange(-n, n + 1) * 2
     zs[:n] /= div[:n]
-    zs[n + 1:] /= div[n + 1:]
+    zs[n + 1 :] /= div[n + 1 :]
     zs[n] = 0
     return zs
+
 
 #
 # Chebyshev series functions
@@ -461,7 +492,7 @@ def cheb2poly(c):
 #
 
 # Chebyshev default domain.
-chebdomain = np.array([-1., 1.])
+chebdomain = np.array([-1.0, 1.0])
 
 # Chebyshev coefficients representing zero.
 chebzero = np.array([0])
@@ -930,7 +961,7 @@ def chebder(c, m=1, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     cnt = pu._as_int(m, "the order of derivation")
     iaxis = pu._as_int(axis, "the axis")
@@ -1045,7 +1076,7 @@ def chebint(c, m=1, k=[], lbnd=0, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if not np.iterable(k):
         k = [k]
@@ -1144,7 +1175,7 @@ def chebval(x, c, tensor=True):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if isinstance(x, (tuple, list)):
         x = np.asarray(x)
@@ -1649,19 +1680,19 @@ def chebcompanion(c):
     # c is a trimmed copy
     [c] = pu.as_series([c])
     if len(c) < 2:
-        raise ValueError('Series must have maximum degree of at least 1.')
+        raise ValueError("Series must have maximum degree of at least 1.")
     if len(c) == 2:
         return np.array([[-c[0] / c[1]]])
 
     n = len(c) - 1
     mat = np.zeros((n, n), dtype=c.dtype)
-    scl = np.array([1.] + [np.sqrt(.5)] * (n - 1))
-    top = mat.reshape(-1)[1::n + 1]
-    bot = mat.reshape(-1)[n::n + 1]
-    top[0] = np.sqrt(.5)
+    scl = np.array([1.0] + [np.sqrt(0.5)] * (n - 1))
+    top = mat.reshape(-1)[1 :: n + 1]
+    bot = mat.reshape(-1)[n :: n + 1]
+    top[0] = np.sqrt(0.5)
     top[1:] = 1 / 2
     bot[...] = top
-    mat[:, -1] -= (c[:-1] / c[-1]) * (scl / scl[-1]) * .5
+    mat[:, -1] -= (c[:-1] / c[-1]) * (scl / scl[-1]) * 0.5
     return mat
 
 
@@ -1774,7 +1805,7 @@ def chebinterpolate(func, deg, args=()):
     deg = np.asarray(deg)
 
     # check arguments.
-    if deg.ndim > 0 or deg.dtype.kind not in 'iu' or deg.size == 0:
+    if deg.ndim > 0 or deg.dtype.kind not in "iu" or deg.size == 0:
         raise TypeError("deg must be an int")
     if deg < 0:
         raise ValueError("expected deg >= 0")
@@ -1850,7 +1881,7 @@ def chebweight(x):
     w : ndarray
        The weight function at `x`.
     """
-    w = 1. / (np.sqrt(1. + x) * np.sqrt(1. - x))
+    w = 1.0 / (np.sqrt(1.0 + x) * np.sqrt(1.0 - x))
     return w
 
 
@@ -1917,6 +1948,7 @@ def chebpts2(npts):
 # Chebyshev series class
 #
 
+
 class Chebyshev(ABCPolyBase):
     """A Chebyshev series class.
 
@@ -1943,6 +1975,7 @@ class Chebyshev(ABCPolyBase):
         .. versionadded:: 1.24
 
     """
+
     # Virtual Functions
     _add = staticmethod(chebadd)
     _sub = staticmethod(chebsub)
@@ -2000,4 +2033,4 @@ class Chebyshev(ABCPolyBase):
     # Virtual properties
     domain = np.array(chebdomain)
     window = np.array(chebdomain)
-    basis_name = 'T'
+    basis_name = "T"

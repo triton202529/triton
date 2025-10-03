@@ -159,9 +159,7 @@ class _ReusablePoolExecutor(ProcessPoolExecutor):
             if isinstance(context, str):
                 context = get_context(context)
             if context is not None and context.get_start_method() == "fork":
-                raise ValueError(
-                    "Cannot use reusable executor with the 'fork' context"
-                )
+                raise ValueError("Cannot use reusable executor with the 'fork' context")
 
             kwargs = dict(
                 context=context,
@@ -174,9 +172,7 @@ class _ReusablePoolExecutor(ProcessPoolExecutor):
             )
             if executor is None:
                 is_reused = False
-                mp.util.debug(
-                    f"Create a executor with max_workers={max_workers}."
-                )
+                mp.util.debug(f"Create a executor with max_workers={max_workers}.")
                 executor_id = _get_next_executor_id()
                 _executor_kwargs = kwargs
                 _executor = executor = cls(
@@ -212,9 +208,7 @@ class _ReusablePoolExecutor(ProcessPoolExecutor):
                     executor.shutdown(wait=True, kill_workers=kill_workers)
                     _executor = executor = _executor_kwargs = None
                     # Recursive call to build a new instance
-                    return cls.get_reusable_executor(
-                        max_workers=max_workers, **kwargs
-                    )
+                    return cls.get_reusable_executor(max_workers=max_workers, **kwargs)
                 else:
                     mp.util.debug(
                         "Reusing existing executor with "
@@ -254,9 +248,7 @@ class _ReusablePoolExecutor(ProcessPoolExecutor):
                 self._max_workers = max_workers
                 for _ in range(max_workers, nb_children_alive):
                     self._call_queue.put(None)
-            while (
-                len(self._processes) > max_workers and not self._flags.broken
-            ):
+            while len(self._processes) > max_workers and not self._flags.broken:
                 time.sleep(1e-3)
 
             self._adjust_process_count()
@@ -289,6 +281,4 @@ class _ReusablePoolExecutor(ProcessPoolExecutor):
 
         min_queue_size = max(cpu_count(), self._max_workers)
         self.queue_size = 2 * min_queue_size + EXTRA_QUEUED_CALLS
-        super()._setup_queues(
-            job_reducers, result_reducers, queue_size=self.queue_size
-        )
+        super()._setup_queues(job_reducers, result_reducers, queue_size=self.queue_size)

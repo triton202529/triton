@@ -223,7 +223,7 @@ class AttributeValueList(List[str]):
     """
 
 
-class AttributeDict(Dict[Any,Any]):
+class AttributeDict(Dict[Any, Any]):
     """Superclass for the dictionary used to hold a tag's
     attributes. You can use this, but it's just a regular dict with no
     special logic.
@@ -1010,9 +1010,7 @@ class PageElement(object):
         # NOTE: We can't use _find_one because findParents takes a different
         # set of arguments.
         r = None
-        results = self.find_parents(
-            name, attrs, 1, _stacklevel=3, **kwargs
-        )
+        results = self.find_parents(name, attrs, 1, _stacklevel=3, **kwargs)
         if results:
             r = results[0]
         return r
@@ -1231,7 +1229,9 @@ class PageElement(object):
         """
         return self._self_and(self.parents)
 
-    def _self_and(self, other_generator:Iterator[PageElement]) -> Iterator[PageElement]:
+    def _self_and(
+        self, other_generator: Iterator[PageElement]
+    ) -> Iterator[PageElement]:
         """Modify a generator by yielding this element, then everything
         yielded by the other generator.
         """
@@ -1319,10 +1319,14 @@ class NavigableString(str, PageElement):
 
     # TODO-TYPING This should be SupportsIndex|slice but SupportsIndex
     # is introduced in 3.8.
-    def __getitem__(self, key: Union[int|slice]) -> str:
-        """Raise an exception """
+    def __getitem__(self, key: Union[int | slice]) -> str:
+        """Raise an exception"""
         if isinstance(key, str):
-            raise TypeError("string indices must be integers, not '{0}'. Are you treating a NavigableString like a Tag?".format(key.__class__.__name__))
+            raise TypeError(
+                "string indices must be integers, not '{0}'. Are you treating a NavigableString like a Tag?".format(
+                    key.__class__.__name__
+                )
+            )
         return super(NavigableString, self).__getitem__(key)
 
     @property
@@ -1921,7 +1925,9 @@ class Tag(PageElement):
 
     strings = property(_all_strings)
 
-    def insert(self, position: int, *new_children: _InsertableElement) -> List[PageElement]:
+    def insert(
+        self, position: int, *new_children: _InsertableElement
+    ) -> List[PageElement]:
         """Insert one or more new PageElements as a child of this `Tag`.
 
         This works similarly to :py:meth:`list.insert`, except you can insert
@@ -1940,7 +1946,9 @@ class Tag(PageElement):
             position += 1
         return inserted
 
-    def _insert(self, position: int, new_child: _InsertableElement) -> List[PageElement]:
+    def _insert(
+        self, position: int, new_child: _InsertableElement
+    ) -> List[PageElement]:
         if new_child is None:
             raise ValueError("Cannot insert None into a tag.")
         if new_child is self:
@@ -1949,6 +1957,7 @@ class Tag(PageElement):
             new_child = NavigableString(new_child)
 
         from bs4 import BeautifulSoup
+
         if isinstance(new_child, BeautifulSoup):
             # We don't want to end up with a situation where one BeautifulSoup
             # object contains another. Insert the BeautifulSoup's children and
@@ -2061,7 +2070,9 @@ class Tag(PageElement):
         """
         return self.insert(len(self.contents), tag)[0]
 
-    def extend(self, tags: Union[Iterable[_InsertableElement], Tag]) -> List[PageElement]:
+    def extend(
+        self, tags: Union[Iterable[_InsertableElement], Tag]
+    ) -> List[PageElement]:
         """Appends one or more objects to the contents of this
         `Tag`.
 
@@ -2713,7 +2724,9 @@ class Tag(PageElement):
         :kwargs: Additional filters on attribute values.
         """
         r = None
-        results = self.find_all(name, attrs, recursive, string, 1, _stacklevel=3, **kwargs)
+        results = self.find_all(
+            name, attrs, recursive, string, 1, _stacklevel=3, **kwargs
+        )
         if results:
             r = results[0]
         return r
@@ -2891,4 +2904,4 @@ class ResultSet(List[_PageElementT], Generic[_PageElementT]):
 # import SoupStrainer itself into this module to preserve the
 # backwards compatibility of anyone who imports
 # bs4.element.SoupStrainer.
-from bs4.filter import SoupStrainer # noqa: E402
+from bs4.filter import SoupStrainer  # noqa: E402

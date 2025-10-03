@@ -2,12 +2,15 @@ import warnings
 
 # 2018-05-29, PendingDeprecationWarning added to matrix.__new__
 # 2020-01-23, numpy 1.19.0 PendingDeprecatonWarning
-warnings.warn("Importing from numpy.matlib is deprecated since 1.19.0. "
-              "The matrix subclass is not the recommended way to represent "
-              "matrices or deal with linear algebra (see "
-              "https://docs.scipy.org/doc/numpy/user/numpy-for-matlab-users.html). "
-              "Please adjust your code to use regular ndarray. ",
-              PendingDeprecationWarning, stacklevel=2)
+warnings.warn(
+    "Importing from numpy.matlib is deprecated since 1.19.0. "
+    "The matrix subclass is not the recommended way to represent "
+    "matrices or deal with linear algebra (see "
+    "https://docs.scipy.org/doc/numpy/user/numpy-for-matlab-users.html). "
+    "Please adjust your code to use regular ndarray. ",
+    PendingDeprecationWarning,
+    stacklevel=2,
+)
 
 import numpy as np
 
@@ -19,10 +22,11 @@ from numpy.matrixlib.defmatrix import asmatrix, matrix
 
 __version__ = np.__version__
 
-__all__ = ['rand', 'randn', 'repmat']
+__all__ = ["rand", "randn", "repmat"]
 __all__ += np.__all__
 
-def empty(shape, dtype=None, order='C'):
+
+def empty(shape, dtype=None, order="C"):
     """Return a new matrix of given shape and type, without initializing entries.
 
     Parameters
@@ -63,7 +67,8 @@ def empty(shape, dtype=None, order='C'):
     """
     return ndarray.__new__(matrix, shape, dtype, order=order)
 
-def ones(shape, dtype=None, order='C'):
+
+def ones(shape, dtype=None, order="C"):
     """
     Matrix of ones.
 
@@ -108,7 +113,8 @@ def ones(shape, dtype=None, order='C'):
     a.fill(1)
     return a
 
-def zeros(shape, dtype=None, order='C'):
+
+def zeros(shape, dtype=None, order="C"):
     """
     Return a matrix of given shape and type, filled with zeros.
 
@@ -152,6 +158,7 @@ def zeros(shape, dtype=None, order='C'):
     a.fill(0)
     return a
 
+
 def identity(n, dtype=None):
     """
     Returns the square identity matrix of given size.
@@ -188,7 +195,8 @@ def identity(n, dtype=None):
     b.flat = a
     return b
 
-def eye(n, M=None, k=0, dtype=float, order='C'):
+
+def eye(n, M=None, k=0, dtype=float, order="C"):
     """
     Return a matrix with ones on the diagonal and zeros elsewhere.
 
@@ -229,6 +237,7 @@ def eye(n, M=None, k=0, dtype=float, order='C'):
 
     """
     return asmatrix(np.eye(n, M=M, k=k, dtype=dtype, order=order))
+
 
 def rand(*args):
     """
@@ -275,6 +284,7 @@ def rand(*args):
     if isinstance(args[0], tuple):
         args = args[0]
     return asmatrix(np.random.rand(*args))
+
 
 def randn(*args):
     """
@@ -328,6 +338,7 @@ def randn(*args):
     if isinstance(args[0], tuple):
         args = args[0]
     return asmatrix(np.random.randn(*args))
+
 
 def repmat(a, m, n):
     """

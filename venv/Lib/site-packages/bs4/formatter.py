@@ -83,7 +83,7 @@ class Formatter(EntitySubstitution):
         void_element_close_prefix: str = "/",
         cdata_containing_tags: Optional[Set[str]] = None,
         empty_attributes_are_booleans: bool = False,
-        indent: Union[int,str] = 1,
+        indent: Union[int, str] = 1,
     ):
         r"""Constructor.
 
@@ -201,7 +201,7 @@ class HTMLFormatter(Formatter):
         void_element_close_prefix: str = "/",
         cdata_containing_tags: Optional[Set[str]] = None,
         empty_attributes_are_booleans: bool = False,
-        indent: Union[int,str] = 1,
+        indent: Union[int, str] = 1,
     ):
         super(HTMLFormatter, self).__init__(
             self.HTML,
@@ -209,7 +209,7 @@ class HTMLFormatter(Formatter):
             void_element_close_prefix,
             cdata_containing_tags,
             empty_attributes_are_booleans,
-            indent=indent
+            indent=indent,
         )
 
 
@@ -224,7 +224,7 @@ class XMLFormatter(Formatter):
         void_element_close_prefix: str = "/",
         cdata_containing_tags: Optional[Set[str]] = None,
         empty_attributes_are_booleans: bool = False,
-        indent: Union[int,str] = 1,
+        indent: Union[int, str] = 1,
     ):
         super(XMLFormatter, self).__init__(
             self.XML,

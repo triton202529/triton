@@ -75,6 +75,7 @@ See also
 `numpy.polynomial`
 
 """
+
 import numpy as np
 import numpy.linalg as la
 from numpy.lib.array_utils import normalize_axis_index
@@ -83,12 +84,38 @@ from . import polyutils as pu
 from ._polybase import ABCPolyBase
 
 __all__ = [
-    'lagzero', 'lagone', 'lagx', 'lagdomain', 'lagline', 'lagadd',
-    'lagsub', 'lagmulx', 'lagmul', 'lagdiv', 'lagpow', 'lagval', 'lagder',
-    'lagint', 'lag2poly', 'poly2lag', 'lagfromroots', 'lagvander',
-    'lagfit', 'lagtrim', 'lagroots', 'Laguerre', 'lagval2d', 'lagval3d',
-    'laggrid2d', 'laggrid3d', 'lagvander2d', 'lagvander3d', 'lagcompanion',
-    'laggauss', 'lagweight']
+    "lagzero",
+    "lagone",
+    "lagx",
+    "lagdomain",
+    "lagline",
+    "lagadd",
+    "lagsub",
+    "lagmulx",
+    "lagmul",
+    "lagdiv",
+    "lagpow",
+    "lagval",
+    "lagder",
+    "lagint",
+    "lag2poly",
+    "poly2lag",
+    "lagfromroots",
+    "lagvander",
+    "lagfit",
+    "lagtrim",
+    "lagroots",
+    "Laguerre",
+    "lagval2d",
+    "lagval3d",
+    "laggrid2d",
+    "laggrid3d",
+    "lagvander2d",
+    "lagvander3d",
+    "lagcompanion",
+    "laggauss",
+    "lagweight",
+]
 
 lagtrim = pu.trimcoef
 
@@ -200,7 +227,7 @@ def lag2poly(c):
 #
 
 # Laguerre
-lagdomain = np.array([0., 1.])
+lagdomain = np.array([0.0, 1.0])
 
 # Laguerre coefficients representing zero.
 lagzero = np.array([0])
@@ -643,7 +670,7 @@ def lagder(c, m=1, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
 
     cnt = pu._as_int(m, "the order of derivation")
@@ -756,7 +783,7 @@ def lagint(c, m=1, k=[], lbnd=0, scl=1, axis=0):
 
     """
     c = np.array(c, ndmin=1, copy=True)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if not np.iterable(k):
         k = [k]
@@ -863,7 +890,7 @@ def lagval(x, c, tensor=True):
 
     """
     c = np.array(c, ndmin=1, copy=None)
-    if c.dtype.char in '?bBhHiIlLqQpP':
+    if c.dtype.char in "?bBhHiIlLqQpP":
         c = c.astype(np.double)
     if isinstance(x, (tuple, list)):
         x = np.asarray(x)
@@ -1450,17 +1477,17 @@ def lagcompanion(c):
     # c is a trimmed copy
     [c] = pu.as_series([c])
     if len(c) < 2:
-        raise ValueError('Series must have maximum degree of at least 1.')
+        raise ValueError("Series must have maximum degree of at least 1.")
     if len(c) == 2:
         return np.array([[1 + c[0] / c[1]]])
 
     n = len(c) - 1
     mat = np.zeros((n, n), dtype=c.dtype)
-    top = mat.reshape(-1)[1::n + 1]
-    mid = mat.reshape(-1)[0::n + 1]
-    bot = mat.reshape(-1)[n::n + 1]
+    top = mat.reshape(-1)[1 :: n + 1]
+    mid = mat.reshape(-1)[0 :: n + 1]
+    bot = mat.reshape(-1)[n :: n + 1]
     top[...] = -np.arange(1, n)
-    mid[...] = 2. * np.arange(n) + 1.
+    mid[...] = 2.0 * np.arange(n) + 1.0
     bot[...] = top
     mat[:, -1] += (c[:-1] / c[-1]) * n
     return mat
@@ -1625,9 +1652,11 @@ def lagweight(x):
     w = np.exp(-x)
     return w
 
+
 #
 # Laguerre series class
 #
+
 
 class Laguerre(ABCPolyBase):
     """A Laguerre series class.
@@ -1655,6 +1684,7 @@ class Laguerre(ABCPolyBase):
         .. versionadded:: 1.24
 
     """
+
     # Virtual Functions
     _add = staticmethod(lagadd)
     _sub = staticmethod(lagsub)
@@ -1672,4 +1702,4 @@ class Laguerre(ABCPolyBase):
     # Virtual properties
     domain = np.array(lagdomain)
     window = np.array(lagdomain)
-    basis_name = 'L'
+    basis_name = "L"

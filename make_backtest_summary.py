@@ -4,13 +4,15 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-RESULTS_DIR  = PROJECT_ROOT / "data" / "results"
+RESULTS_DIR = PROJECT_ROOT / "data" / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def max_drawdown(cum):
     peak = cum.cummax()
     dd = cum / peak - 1.0
     return float(dd.min()) if len(dd) else np.nan
+
 
 def main():
     sig_path = RESULTS_DIR / "signals_with_rationale.csv"
@@ -33,21 +35,25 @@ def main():
         if g.empty:
             continue
         price = pd.to_numeric(g["close"], errors="coerce")
-        ret   = price.pct_change().fillna(0.0)
+        ret = price.pct_change().fillna(0.0)
 
         # Position follows yesterday's signal: BUY=+1, SELL=-1, HOLD=0
         pos = g["signal"].map({"BUY": 1.0, "SELL": -1.0}).fillna(0.0).shift(1).fillna(0.0)
         strat_ret = pos * ret
 
-        cum_market   = (1.0 + ret).cumprod()
+        cum_market = (1.0 + ret).cumprod()
         cum_strategy = (1.0 + strat_ret).cumprod()
 
-        svm_frames.append(pd.DataFrame({
-            "ticker": t,
-            "date": g["date"],
-            "cumulative_strategy": cum_strategy.values,
-            "cumulative_market":   cum_market.values,
-        }))
+        svm_frames.append(
+            pd.DataFrame(
+                {
+                    "ticker": t,
+                    "date": g["date"],
+                    "cumulative_strategy": cum_strategy.values,
+                    "cumulative_market": cum_market.values,
+                }
+            )
+        )
 
         n = len(g)
         if n == 0:
@@ -61,18 +67,20 @@ def main():
         sharpe = float(cagr / vol) if vol and np.isfinite(vol) and vol != 0 else np.nan
         mdd = max_drawdown(cum_strategy)
 
-        rows.append({
-            "ticker": t,
-            "start_date": g["date"].iloc[0].date(),
-            "end_date":   g["date"].iloc[-1].date(),
-            "n_days": n,
-            "total_return": total,
-            "cagr": cagr,
-            "volatility": vol,
-            "sharpe": sharpe,
-            "max_drawdown": mdd,
-            "trades": int((g["signal"].isin(["BUY","SELL"])).sum()),
-        })
+        rows.append(
+            {
+                "ticker": t,
+                "start_date": g["date"].iloc[0].date(),
+                "end_date": g["date"].iloc[-1].date(),
+                "n_days": n,
+                "total_return": total,
+                "cagr": cagr,
+                "volatility": vol,
+                "sharpe": sharpe,
+                "max_drawdown": mdd,
+                "trades": int((g["signal"].isin(["BUY", "SELL"])).sum()),
+            }
+        )
 
     # Write strategy_vs_market
     if svm_frames:
@@ -85,6 +93,7 @@ def main():
     print(f"Wrote {len(out):,} rows -> {RESULTS_DIR / 'backtest_summary.csv'}")
     if svm_frames:
         print(f"Wrote {len(svm):,} rows -> {RESULTS_DIR / 'strategy_vs_market.csv'}")
+
 
 if __name__ == "__main__":
     main()

@@ -9,12 +9,14 @@ import requests
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
+
 def _load_json(path: str) -> Dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
+
 
 def _load_notify_config() -> Dict[str, Any]:
     cfg = _load_json(os.path.join(ROOT, "config", "notify.json"))
@@ -28,6 +30,7 @@ def _load_notify_config() -> Dict[str, Any]:
     cfg.setdefault("notify_to", os.getenv("NOTIFY_TO", cfg.get("notify_to", "")))
     return cfg
 
+
 def _send_slack(text: str, cfg: Dict[str, Any]) -> None:
     url = cfg.get("slack_webhook_url", "")
     if not url:
@@ -36,6 +39,7 @@ def _send_slack(text: str, cfg: Dict[str, Any]) -> None:
         requests.post(url, json={"text": text}, timeout=10)
     except Exception:
         pass
+
 
 def _send_email(subject: str, body: str, cfg: Dict[str, Any]) -> None:
     host = cfg.get("smtp_host", "")
@@ -57,6 +61,7 @@ def _send_email(subject: str, body: str, cfg: Dict[str, Any]) -> None:
             s.send_message(msg)
     except Exception:
         pass
+
 
 def notify(event: str, text: str, extra: Optional[Dict[str, Any]] = None) -> None:
     """

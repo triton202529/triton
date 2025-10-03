@@ -110,8 +110,8 @@ def as_series(
 ) -> list[_ObjectSeries]: ...
 
 _T_seq = TypeVar("_T_seq", bound=_CoefArray | Sequence[_CoefLike_co])
-def trimseq(seq: _T_seq) -> _T_seq: ...
 
+def trimseq(seq: _T_seq) -> _T_seq: ...
 @overload
 def trimcoef(  # type: ignore[overload-overlap]
     c: npt.NDArray[np.integer] | _FloatArray,
@@ -142,7 +142,6 @@ def trimcoef(
     c: _SeriesLikeCoef_co | object,
     tol: _FloatLike_co = ...,
 ) -> _ObjectSeries: ...
-
 @overload
 def getdomain(  # type: ignore[overload-overlap]
     x: _FloatArray | npt.NDArray[np.integer],
@@ -167,7 +166,6 @@ def getdomain(
 def getdomain(
     x: _SeriesLikeCoef_co | object,
 ) -> _Array2[np.object_]: ...
-
 @overload
 def mapparms(  # type: ignore[overload-overlap]
     old: npt.NDArray[np.floating | np.integer],
@@ -208,7 +206,6 @@ def mapparms(
     old: _SeriesLikeCoef_co,
     new: _SeriesLikeCoef_co,
 ) -> _Tuple2[object]: ...
-
 @overload
 def mapdomain(  # type: ignore[overload-overlap]
     x: _FloatLike_co,
@@ -263,7 +260,6 @@ def mapdomain(
     old: _SeriesLikeCoef_co,
     new: _SeriesLikeCoef_co,
 ) -> object: ...
-
 def _nth_slice(
     i: SupportsIndex,
     ndim: SupportsIndex,
@@ -418,6 +414,5 @@ def _fit(
     full: Literal[True],
     w: _SeriesLikeCoef_co | None = ...,
 ) -> tuple[_CoefSeries, Sequence[np.inexact | np.int32]]: ...
-
 def _as_int(x: SupportsIndex, desc: str) -> int: ...
 def format_float(x: _FloatLike_co, parens: bool = ...) -> str: ...

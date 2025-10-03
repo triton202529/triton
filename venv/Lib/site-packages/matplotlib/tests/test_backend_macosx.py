@@ -5,13 +5,14 @@ from unittest import mock
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+
 try:
     from matplotlib.backends import _macosx
 except ImportError:
     pytest.skip("These are mac only tests", allow_module_level=True)
 
 
-@pytest.mark.backend('macosx')
+@pytest.mark.backend("macosx")
 def test_cached_renderer():
     # Make sure that figures have an associated renderer after
     # a fig.canvas.draw() call
@@ -24,7 +25,7 @@ def test_cached_renderer():
     assert fig.canvas.get_renderer()._renderer is not None
 
 
-@pytest.mark.backend('macosx')
+@pytest.mark.backend("macosx")
 def test_savefig_rcparam(monkeypatch, tmp_path):
 
     def new_choose_save_file(title, directory, filename):
@@ -47,13 +48,14 @@ def test_savefig_rcparam(monkeypatch, tmp_path):
         assert mpl.rcParams["savefig.directory"] == f"{tmp_path}/test"
 
 
-@pytest.mark.backend('macosx')
+@pytest.mark.backend("macosx")
 def test_ipython():
     from matplotlib.testing import ipython_in_subprocess
+
     ipython_in_subprocess("osx", {(8, 24): "macosx", (7, 0): "MacOSX"})
 
 
-@pytest.mark.backend('macosx')
+@pytest.mark.backend("macosx")
 def test_save_figure_return():
     fig, ax = plt.subplots()
     ax.imshow([[1]])

@@ -32,12 +32,12 @@ class hybrid_property(ModelDescriptor):
 
     def __set__(self, instance, value):
         if self.fset is None:
-            raise AttributeError('Cannot set attribute.')
+            raise AttributeError("Cannot set attribute.")
         self.fset(instance, value)
 
     def __delete__(self, instance):
         if self.fdel is None:
-            raise AttributeError('Cannot delete attribute.')
+            raise AttributeError("Cannot delete attribute.")
         self.fdel(instance)
 
     def setter(self, fset):

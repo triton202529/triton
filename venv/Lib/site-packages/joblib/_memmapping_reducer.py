@@ -1,6 +1,7 @@
 """
 Reducer using memory mapping for numpy arrays
 """
+
 # Author: Thomas Moreau <thomas.moreau.2010@gmail.com>
 # Copyright: 2017, Thomas Moreau
 # License: BSD 3 clause

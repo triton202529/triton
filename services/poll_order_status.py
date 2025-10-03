@@ -20,25 +20,46 @@ RESULTS_DIR = os.path.join("data", "results")
 LIVE_ORDERS_LOG = os.path.join(RESULTS_DIR, "live_orders.csv")
 
 EXPECTED_COLS = [
-    "timestamp", "session", "action", "symbol", "side", "qty",
-    "type", "limit_price", "order_id", "status",
-    "filled_qty", "filled_avg_price", "client_order_id",
-    "tp_limit", "sl_stop"
+    "timestamp",
+    "session",
+    "action",
+    "symbol",
+    "side",
+    "qty",
+    "type",
+    "limit_price",
+    "order_id",
+    "status",
+    "filled_qty",
+    "filled_avg_price",
+    "client_order_id",
+    "tp_limit",
+    "sl_stop",
 ]
 
 TERMINAL = {
-    "filled", "canceled", "expired", "rejected", "stopped",
-    "suspended", "calculated", "replaced", "done_for_day"
+    "filled",
+    "canceled",
+    "expired",
+    "rejected",
+    "stopped",
+    "suspended",
+    "calculated",
+    "replaced",
+    "done_for_day",
 }
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 def _ensure_log():
     os.makedirs(RESULTS_DIR, exist_ok=True)
     if not os.path.exists(LIVE_ORDERS_LOG):
         with open(LIVE_ORDERS_LOG, "w", newline="") as f:
             csv.writer(f).writerow(EXPECTED_COLS)
+
 
 def _upgrade_log_schema_if_needed():
     if not os.path.exists(LIVE_ORDERS_LOG):
@@ -59,11 +80,12 @@ def _upgrade_log_schema_if_needed():
             w = csv.writer(f)
             w.writerow(EXPECTED_COLS)
             for row in rows[1:]:
-                new_row = (row + [""] * len(EXPECTED_COLS))[:len(EXPECTED_COLS)]
+                new_row = (row + [""] * len(EXPECTED_COLS))[: len(EXPECTED_COLS)]
                 w.writerow(new_row)
         print("Upgraded live_orders.csv schema. Backup saved as:", backup)
     except Exception as e:
         print("Log schema upgrade skipped:", e)
+
 
 def _read_log_df() -> pd.DataFrame:
     _ensure_log()
@@ -78,6 +100,7 @@ def _read_log_df() -> pd.DataFrame:
     df = df[EXPECTED_COLS].copy()
     return df
 
+
 def _latest_session_from_log(df: pd.DataFrame) -> Optional[str]:
     if df.empty:
         return None
@@ -88,6 +111,7 @@ def _latest_session_from_log(df: pd.DataFrame) -> Optional[str]:
     s = df["session"].astype(str).str.strip()
     s = s[s != ""]
     return str(s.iloc[-1]) if not s.empty else None
+
 
 def _minutes_to_market_close(broker: AlpacaBroker) -> Optional[float]:
     try:
@@ -102,6 +126,7 @@ def _minutes_to_market_close(broker: AlpacaBroker) -> Optional[float]:
     except Exception:
         return None
 
+
 def _build_session_map(df: pd.DataFrame) -> Dict[str, str]:
     """Map order_id -> last known non-empty session from history."""
     if df.empty:
@@ -114,15 +139,18 @@ def _build_session_map(df: pd.DataFrame) -> Dict[str, str]:
     df2 = df2.sort_values("timestamp").groupby("order_id", as_index=False).last()
     return {str(r["order_id"]): str(r["session"]) for _, r in df2.iterrows()}
 
+
 def _last_state(df: pd.DataFrame, order_id: str) -> Optional[pd.Series]:
     sub = df[df["order_id"].astype(str).eq(order_id)]
     if sub.empty:
         return None
     return sub.tail(1).iloc[0]
 
+
 def _append_log_row(row: List[Any]):
     with open(LIVE_ORDERS_LOG, "a", newline="") as f:
         csv.writer(f).writerow(row)
+
 
 def _write_poll_if_changed(session: str, o: Dict[str, Any], last: Optional[pd.Series]) -> bool:
     """Write a poll row only if status or filled_qty changed since the last log entry for this order."""
@@ -154,18 +182,32 @@ def _write_poll_if_changed(session: str, o: Dict[str, Any], last: Optional[pd.Se
         if same_status and same_filled:
             return False
 
-    _append_log_row([
-        _now_iso(), session, "poll", symbol, side, qty, otype, limit_price,
-        order_id, status, filled_qty, filled_avg_price, client_order_id,
-        tp_limit, sl_stop
-    ])
+    _append_log_row(
+        [
+            _now_iso(),
+            session,
+            "poll",
+            symbol,
+            side,
+            qty,
+            otype,
+            limit_price,
+            order_id,
+            status,
+            filled_qty,
+            filled_avg_price,
+            client_order_id,
+            tp_limit,
+            sl_stop,
+        ]
+    )
     return True
+
 
 def _summarize_session(df_all: pd.DataFrame, session: str):
     """Summarize by taking the last status for each order_id submitted in the session (from the full log)."""
     submits = df_all[
-        (df_all["action"] == "submit") &
-        (df_all["session"].astype(str).str.strip() == session)
+        (df_all["action"] == "submit") & (df_all["session"].astype(str).str.strip() == session)
     ].copy()
     if submits.empty:
         print(f"Session summary [{session}]: no submit rows found.")
@@ -184,7 +226,9 @@ def _summarize_session(df_all: pd.DataFrame, session: str):
     total_qty = int(last["qty"].sum())
     total_filled = int(last["filled_qty"].sum())
     fill_pct = (100.0 * total_filled / total_qty) if total_qty else 0.0
-    print(f"Session summary [{session}]: total_qty={total_qty} total_filled={total_filled} fill_pct={fill_pct:.2f}%")
+    print(
+        f"Session summary [{session}]: total_qty={total_qty} total_filled={total_filled} fill_pct={fill_pct:.2f}%"
+    )
 
     # Per-symbol breakdown
     br = last.groupby("symbol", as_index=False).agg(
@@ -197,7 +241,13 @@ def _summarize_session(df_all: pd.DataFrame, session: str):
     rows: List[List[str]] = []
     for _, r in br.iterrows():
         denom = max(1, int(r["qty"]))
-        row = [r["symbol"], int(r["qty"]), int(r["filled"]), f"{(100*r['filled']/denom):.1f}%", r["status"]]
+        row = [
+            r["symbol"],
+            int(r["qty"]),
+            int(r["filled"]),
+            f"{(100*r['filled']/denom):.1f}%",
+            r["status"],
+        ]
         rows.append(row)
         for i, cell in enumerate(row):
             widths[i] = max(widths[i], len(str(cell)))
@@ -216,14 +266,33 @@ def _summarize_session(df_all: pd.DataFrame, session: str):
             w.writerow(["timestamp", "session", "total_qty", "total_filled", "fill_pct"])
         w.writerow([_now_iso(), session, total_qty, total_filled, round(fill_pct, 4)])
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Poll orders; tag sessions; dedup; EOD cancel/refresh; summarize.")
+    parser = argparse.ArgumentParser(
+        description="Poll orders; tag sessions; dedup; EOD cancel/refresh; summarize."
+    )
     parser.add_argument("--mode", default="paper", choices=["paper", "live"])
-    parser.add_argument("--session", default=None, help="Override session (used when no mapping is found).")
-    parser.add_argument("--cancel-near-eod-min", type=float, default=5.0,
-                        help="If minutes to close <= this and order unfilled, cancel.")
-    parser.add_argument("--refresh-on-cancel", action="store_true", help="After cancel, re-submit as MARKET.")
-    parser.add_argument("--dry-run", action="store_true", help="Do not actually cancel/refresh, just log.")
+    parser.add_argument(
+        "--session",
+        default=None,
+        help="Override session (used when no mapping is found).",
+    )
+    parser.add_argument(
+        "--cancel-near-eod-min",
+        type=float,
+        default=5.0,
+        help="If minutes to close <= this and order unfilled, cancel.",
+    )
+    parser.add_argument(
+        "--refresh-on-cancel",
+        action="store_true",
+        help="After cancel, re-submit as MARKET.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Do not actually cancel/refresh, just log.",
+    )
     args = parser.parse_args()
 
     _ensure_log()
@@ -263,15 +332,23 @@ def main():
             status = o.get("status", "")
             if filled_qty > prev_filled:
                 ev = "filled" if filled_qty == qty else "partial_fill"
-                notify(ev, f"{symbol} {side.upper()} {filled_qty}/{qty} @ {filled_avg_price} (status={status})")
+                notify(
+                    ev,
+                    f"{symbol} {side.upper()} {filled_qty}/{qty} @ {filled_avg_price} (status={status})",
+                )
             elif status != prev_status and status in ("canceled", "rejected"):
-                notify(status, f"{symbol} {side.upper()} {qty} {otype} status={status} id={oid}")
+                notify(
+                    status,
+                    f"{symbol} {side.upper()} {qty} {otype} status={status} id={oid}",
+                )
 
     # 2) Poll OUTSTANDING orders (those not terminal by the last seen log row)
     if not df_hist.empty:
         last_by_id = df_hist.sort_values("timestamp").groupby("order_id", as_index=False).last()
         outstanding_ids: Set[str] = set(
-            last_by_id[~last_by_id["status"].astype(str).str.lower().isin(TERMINAL)]["order_id"].astype(str)
+            last_by_id[~last_by_id["status"].astype(str).str.lower().isin(TERMINAL)][
+                "order_id"
+            ].astype(str)
         )
     else:
         outstanding_ids = set()
@@ -300,9 +377,15 @@ def main():
             status = o.get("status", "")
             if filled_qty > prev_filled:
                 ev = "filled" if filled_qty == qty else "partial_fill"
-                notify(ev, f"{symbol} {side.upper()} {filled_qty}/{qty} @ {filled_avg_price} (status={status})")
+                notify(
+                    ev,
+                    f"{symbol} {side.upper()} {filled_qty}/{qty} @ {filled_avg_price} (status={status})",
+                )
             elif status != prev_status and status in ("canceled", "rejected"):
-                notify(status, f"{symbol} {side.upper()} {qty} {otype} status={status} id={oid}")
+                notify(
+                    status,
+                    f"{symbol} {side.upper()} {qty} {otype} status={status} id={oid}",
+                )
 
     # 3) Near EOD cancel/refresh (on current OPEN orders)
     minutes_to_close = _minutes_to_market_close(broker)
@@ -322,41 +405,83 @@ def main():
                 continue
             try:
                 broker.cancel_order(oid)
-                _append_log_row([
-                    _now_iso(), sess, "cancel", symbol, side, qty, (o.get("type", "") or "").lower(),
-                    o.get("limit_price", ""), oid, "canceled", filled_qty, o.get("filled_avg_price", ""), o.get("client_order_id", ""),
-                    "", ""
-                ])
+                _append_log_row(
+                    [
+                        _now_iso(),
+                        sess,
+                        "cancel",
+                        symbol,
+                        side,
+                        qty,
+                        (o.get("type", "") or "").lower(),
+                        o.get("limit_price", ""),
+                        oid,
+                        "canceled",
+                        filled_qty,
+                        o.get("filled_avg_price", ""),
+                        o.get("client_order_id", ""),
+                        "",
+                        "",
+                    ]
+                )
                 print(f"Canceled unfilled {symbol} (remain={remain}) near EOD.")
-                notify("canceled", f"{symbol} {side.upper()} canceled near EOD. remain={remain}")
+                notify(
+                    "canceled",
+                    f"{symbol} {side.upper()} canceled near EOD. remain={remain}",
+                )
 
                 if args.refresh_on_cancel:
                     resp = broker.submit_order(
-                        symbol=symbol, qty=remain, side=side, order_type="market",
-                        time_in_force="day", client_order_id=f"refresh-{oid}"
+                        symbol=symbol,
+                        qty=remain,
+                        side=side,
+                        order_type="market",
+                        time_in_force="day",
+                        client_order_id=f"refresh-{oid}",
                     )
                     rid = resp.get("id", "")
                     rstatus = resp.get("status", "")
                     rfilled = int(float(resp.get("filled_qty", 0) or 0))
                     ravg = resp.get("filled_avg_price", "")
-                    _append_log_row([
-                        _now_iso(), sess, "submit", symbol, side, remain, "market", "",
-                        rid, rstatus, rfilled, ravg, f"refresh-{oid}", "", ""
-                    ])
+                    _append_log_row(
+                        [
+                            _now_iso(),
+                            sess,
+                            "submit",
+                            symbol,
+                            side,
+                            remain,
+                            "market",
+                            "",
+                            rid,
+                            rstatus,
+                            rfilled,
+                            ravg,
+                            f"refresh-{oid}",
+                            "",
+                            "",
+                        ]
+                    )
                     print(f"Refreshed {symbol} as MARKET for remain={remain}. status={rstatus}")
-                    notify("refresh", f"{symbol} {side.upper()} re-submitted MARKET for remain={remain}. status={rstatus}")
+                    notify(
+                        "refresh",
+                        f"{symbol} {side.upper()} re-submitted MARKET for remain={remain}. status={rstatus}",
+                    )
             except AlpacaError as e:
                 print(f"Cancel/refresh failed for {symbol}: {e}")
                 notify("error", f"Cancel/refresh failed {symbol}: {e}")
 
     # 4) Summary
-    print(f"Polled {len(open_orders)} open + {len(outstanding_ids)} outstanding; wrote {changes} changes.")
+    print(
+        f"Polled {len(open_orders)} open + {len(outstanding_ids)} outstanding; wrote {changes} changes."
+    )
     df_all = _read_log_df()
     chosen = args.session or _latest_session_from_log(df_all)
     if chosen:
         _summarize_session(df_all, chosen)
     else:
         print("No session found to summarize.")
+
 
 if __name__ == "__main__":
     main()

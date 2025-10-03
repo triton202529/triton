@@ -105,12 +105,36 @@ def load_signals() -> pd.DataFrame:
 
     # standard optional columns
     must = ["ticker", "date"]
-    nice = ["close", "predicted_close", "signal", "confidence", "rationale", "total_score",
-            "rsi14", "sma20", "sma50", "atr14", "sentiment", "pe_ratio", "dividend_yield"]
+    nice = [
+        "close",
+        "predicted_close",
+        "signal",
+        "confidence",
+        "rationale",
+        "total_score",
+        "rsi14",
+        "sma20",
+        "sma50",
+        "atr14",
+        "sentiment",
+        "pe_ratio",
+        "dividend_yield",
+    ]
     df = ensure_cols(df, must + nice)
     # numeric coercions
-    for c in ["close", "predicted_close", "confidence", "total_score",
-              "rsi14", "sma20", "sma50", "atr14", "sentiment", "pe_ratio", "dividend_yield"]:
+    for c in [
+        "close",
+        "predicted_close",
+        "confidence",
+        "total_score",
+        "rsi14",
+        "sma20",
+        "sma50",
+        "atr14",
+        "sentiment",
+        "pe_ratio",
+        "dividend_yield",
+    ]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     # add edge if possible
@@ -155,12 +179,16 @@ def make_strategy_vs_market(signals: pd.DataFrame, force: bool = False) -> Optio
         return None
     if signals.empty:
         # minimal placeholder
-        df = pd.DataFrame({
-            "date": [pd.Timestamp.today().normalize() - pd.Timedelta(days=i) for i in range(10)][::-1],
-            "ticker": ["SPY"] * 10,
-            "cumulative_strategy": np.linspace(1.00, 1.05, 10),
-            "cumulative_market":   np.linspace(1.00, 1.03, 10),
-        })
+        df = pd.DataFrame(
+            {
+                "date": [
+                    pd.Timestamp.today().normalize() - pd.Timedelta(days=i) for i in range(10)
+                ][::-1],
+                "ticker": ["SPY"] * 10,
+                "cumulative_strategy": np.linspace(1.00, 1.05, 10),
+                "cumulative_market": np.linspace(1.00, 1.03, 10),
+            }
+        )
         df.to_csv(out, index=False)
         return out
 
@@ -172,12 +200,16 @@ def make_strategy_vs_market(signals: pd.DataFrame, force: bool = False) -> Optio
         strat = (1 + edge).cumprod()
         # simple market baseline = a flat 1.0 (you can replace with SPY later)
         market = pd.Series(1.0, index=g.index)
-        rows.append(pd.DataFrame({
-            "date": g["date"].values,
-            "ticker": tkr,
-            "cumulative_strategy": strat.values,
-            "cumulative_market": market.values
-        }))
+        rows.append(
+            pd.DataFrame(
+                {
+                    "date": g["date"].values,
+                    "ticker": tkr,
+                    "cumulative_strategy": strat.values,
+                    "cumulative_market": market.values,
+                }
+            )
+        )
     df = pd.concat(rows, ignore_index=True)
     df.to_csv(out, index=False)
     return out
@@ -189,10 +221,19 @@ def make_backtest_summary(trades: pd.DataFrame, force: bool = False) -> Optional
         return None
     if trades.empty:
         # small placeholder
-        df = pd.DataFrame([{
-            "ticker": "SPY", "trades": 0, "wins": 0, "win_rate": 0.0,
-            "total_profit": 0.0, "avg_profit": 0.0, "last_trade": ""
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "ticker": "SPY",
+                    "trades": 0,
+                    "wins": 0,
+                    "win_rate": 0.0,
+                    "total_profit": 0.0,
+                    "avg_profit": 0.0,
+                    "last_trade": "",
+                }
+            ]
+        )
         df.to_csv(out, index=False)
         return out
 
@@ -201,12 +242,16 @@ def make_backtest_summary(trades: pd.DataFrame, force: bool = False) -> Optional
         df["profit"] = np.nan
     df["profit"] = pd.to_numeric(df["profit"], errors="coerce")
 
-    agg = df.groupby("ticker").agg(
-        trades=("ticker", "size"),
-        wins=("profit", lambda s: int((s.fillna(0) > 0).sum())),
-        total_profit=("profit", lambda s: float(s.fillna(0).sum())),
-        avg_profit=("profit", lambda s: float(s.fillna(0).mean()))
-    ).reset_index()
+    agg = (
+        df.groupby("ticker")
+        .agg(
+            trades=("ticker", "size"),
+            wins=("profit", lambda s: int((s.fillna(0) > 0).sum())),
+            total_profit=("profit", lambda s: float(s.fillna(0).sum())),
+            avg_profit=("profit", lambda s: float(s.fillna(0).mean())),
+        )
+        .reset_index()
+    )
     agg["win_rate"] = agg.apply(lambda r: (r["wins"] / r["trades"]) if r["trades"] else 0.0, axis=1)
     if "date" in df.columns:
         dts = to_datetime_col(df, "date")
@@ -217,7 +262,9 @@ def make_backtest_summary(trades: pd.DataFrame, force: bool = False) -> Optional
     return out
 
 
-def make_stock_scores(fund: pd.DataFrame, signals: pd.DataFrame, force: bool = False) -> Optional[Path]:
+def make_stock_scores(
+    fund: pd.DataFrame, signals: pd.DataFrame, force: bool = False
+) -> Optional[Path]:
     out = RESULTS / "stock_scores.csv"
     if out.exists() and not force:
         return None
@@ -240,7 +287,9 @@ def make_stock_scores(fund: pd.DataFrame, signals: pd.DataFrame, force: bool = F
         score = pd.Series(0.0, index=f.index, dtype=float)
         if not pe.empty:
             pev = pd.to_numeric(pe.iloc[:, 0], errors="coerce")
-            score = score + (-((pev - pev.mean()) / (pev.std() + 1e-9))).fillna(0)  # lower PE -> higher score
+            score = score + (-((pev - pev.mean()) / (pev.std() + 1e-9))).fillna(
+                0
+            )  # lower PE -> higher score
         if not dy.empty:
             dyv = pd.to_numeric(dy.iloc[:, 0], errors="coerce")
             score = score + ((dyv - dyv.mean()) / (dyv.std() + 1e-9)).fillna(0)
@@ -262,18 +311,20 @@ def make_news_sentiment(signals: pd.DataFrame, force: bool = False) -> Optional[
     out = RESULTS / "news_sentiment.csv"
     if out.exists() and not force:
         return None
-    tickers = (signals["ticker"].dropna().unique().tolist() if not signals.empty else ["SPY"])
+    tickers = signals["ticker"].dropna().unique().tolist() if not signals.empty else ["SPY"]
     today = pd.Timestamp.today().normalize()
     rows = []
     for t in tickers[:8]:
-        rows.append({
-            "date": today.strftime("%Y-%m-%d"),
-            "ticker": t,
-            "sentiment": 0.0,
-            "title": f"{t} placeholder headline",
-            "url": "https://example.com/",
-            "description": f"Auto-generated placeholder news for {t}."
-        })
+        rows.append(
+            {
+                "date": today.strftime("%Y-%m-%d"),
+                "ticker": t,
+                "sentiment": 0.0,
+                "title": f"{t} placeholder headline",
+                "url": "https://example.com/",
+                "description": f"Auto-generated placeholder news for {t}.",
+            }
+        )
     pd.DataFrame(rows).to_csv(out, index=False)
     return out
 
@@ -288,19 +339,31 @@ def make_alerts(signals: pd.DataFrame, force: bool = False) -> Optional[Path]:
         s = signals.copy()
         s = s.sort_values("edge_pct", ascending=False)
         for _, r in s.head(10).iterrows():
-            rows.append({
-                "date": today,
-                "ticker": r.get("ticker"),
-                "type": "EDGE_SPIKE",
-                "priority": "HIGH",
-                "score": float((r.get("edge_pct") or 0) * 100),
-                "title": f"{r.get('ticker')} elevated model edge",
-                "url": "https://example.com/",
-                "message": f"Model edge {float((r.get('edge_pct') or 0)*100):.2f}%"
-            })
+            rows.append(
+                {
+                    "date": today,
+                    "ticker": r.get("ticker"),
+                    "type": "EDGE_SPIKE",
+                    "priority": "HIGH",
+                    "score": float((r.get("edge_pct") or 0) * 100),
+                    "title": f"{r.get('ticker')} elevated model edge",
+                    "url": "https://example.com/",
+                    "message": f"Model edge {float((r.get('edge_pct') or 0)*100):.2f}%",
+                }
+            )
     else:
-        rows = [{"date": today, "ticker": "SPY", "type": "INFO", "priority": "LOW",
-                 "score": 0, "title": "Placeholder alert", "url": "", "message": "Generated placeholder"}]
+        rows = [
+            {
+                "date": today,
+                "ticker": "SPY",
+                "type": "INFO",
+                "priority": "LOW",
+                "score": 0,
+                "title": "Placeholder alert",
+                "url": "",
+                "message": "Generated placeholder",
+            }
+        ]
     pd.DataFrame(rows).to_csv(out, index=False)
     return out
 
@@ -319,16 +382,18 @@ def make_economic_calendar(force: bool = False) -> Optional[Path]:
         ("Nonfarm Payrolls", "High"),
     ]
     for i, (event, imp) in enumerate(items):
-        rows.append({
-            "date": (base + pd.Timedelta(days=i+1)).strftime("%Y-%m-%d"),
-            "time": "08:30",
-            "event": event,
-            "period": "",
-            "actual": "",
-            "forecast": "",
-            "previous": "",
-            "importance": imp
-        })
+        rows.append(
+            {
+                "date": (base + pd.Timedelta(days=i + 1)).strftime("%Y-%m-%d"),
+                "time": "08:30",
+                "event": event,
+                "period": "",
+                "actual": "",
+                "forecast": "",
+                "previous": "",
+                "importance": imp,
+            }
+        )
     pd.DataFrame(rows).to_csv(out, index=False)
     return out
 
@@ -340,10 +405,24 @@ def make_model_comparison(signals: pd.DataFrame, force: bool = False) -> Optiona
     if signals.empty:
         # tiny placeholder
         today = pd.Timestamp.today().normalize().strftime("%Y-%m-%d")
-        df = pd.DataFrame([
-            {"ticker": "SPY", "date": today, "model": "Naive", "close": 100.0, "predicted_close": 100.0},
-            {"ticker": "SPY", "date": today, "model": "ML", "close": 100.0, "predicted_close": 101.0},
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "ticker": "SPY",
+                    "date": today,
+                    "model": "Naive",
+                    "close": 100.0,
+                    "predicted_close": 100.0,
+                },
+                {
+                    "ticker": "SPY",
+                    "date": today,
+                    "model": "ML",
+                    "close": 100.0,
+                    "predicted_close": 101.0,
+                },
+            ]
+        )
         df.to_csv(out, index=False)
         return out
 
@@ -363,8 +442,14 @@ def make_model_comparison(signals: pd.DataFrame, force: bool = False) -> Optiona
         ml_pred = g["predicted_close"].fillna(close)
 
         base = g[["date", "ticker"]].copy()
-        m1 = base.copy(); m1["model"] = "Naive"; m1["close"] = close.values; m1["predicted_close"] = naive_pred.values
-        m2 = base.copy(); m2["model"] = "ML";    m2["close"] = close.values; m2["predicted_close"] = ml_pred.values
+        m1 = base.copy()
+        m1["model"] = "Naive"
+        m1["close"] = close.values
+        m1["predicted_close"] = naive_pred.values
+        m2 = base.copy()
+        m2["model"] = "ML"
+        m2["close"] = close.values
+        m2["predicted_close"] = ml_pred.values
         rows.append(pd.concat([m1, m2], ignore_index=True))
     df = pd.concat(rows, ignore_index=True)
     df.to_csv(out, index=False)
@@ -376,12 +461,20 @@ def make_feature_importance(signals: pd.DataFrame, force: bool = False) -> Optio
     if out.exists() and not force:
         return None
     if signals.empty:
-        pd.DataFrame([{"ticker": "SPY", "feature": "confidence", "importance": 1.0}]).to_csv(out, index=False)
+        pd.DataFrame([{"ticker": "SPY", "feature": "confidence", "importance": 1.0}]).to_csv(
+            out, index=False
+        )
         return out
 
-    feats = [c for c in ["rsi14", "sma20", "sma50", "atr14", "sentiment", "confidence"] if c in signals.columns]
+    feats = [
+        c
+        for c in ["rsi14", "sma20", "sma50", "atr14", "sentiment", "confidence"]
+        if c in signals.columns
+    ]
     if not feats:
-        pd.DataFrame([{"ticker": "SPY", "feature": "confidence", "importance": 1.0}]).to_csv(out, index=False)
+        pd.DataFrame([{"ticker": "SPY", "feature": "confidence", "importance": 1.0}]).to_csv(
+            out, index=False
+        )
         return out
 
     rows = []
@@ -420,8 +513,18 @@ def make_buffett_orders(scores: pd.DataFrame, force: bool = False) -> Optional[P
     ORDERS.mkdir(parents=True, exist_ok=True)
 
     if scores.empty or "ticker" not in scores.columns:
-        rows = [{"ticker": "SPY", "action": "HOLD", "target_weight": 0.0, "current_weight": 0.0,
-                 "current_value": 0.0, "target_value": 0.0, "delta_notional": 0.0, "buffett_score": 0.0}]
+        rows = [
+            {
+                "ticker": "SPY",
+                "action": "HOLD",
+                "target_weight": 0.0,
+                "current_weight": 0.0,
+                "current_value": 0.0,
+                "target_value": 0.0,
+                "delta_notional": 0.0,
+                "buffett_score": 0.0,
+            }
+        ]
         pd.DataFrame(rows).to_csv(out, index=False)
         return out
 
@@ -440,13 +543,23 @@ def make_buffett_orders(scores: pd.DataFrame, force: bool = False) -> Optional[P
     top["delta_notional"] = top["target_value"] - top["current_value"]
     top["action"] = np.where(top["delta_notional"] > 0, "BUY", "SELL")
     top["buffett_score"] = top["total_score"]
-    cols = ["ticker", "action", "target_weight", "current_weight", "current_value",
-            "target_value", "delta_notional", "buffett_score"]
+    cols = [
+        "ticker",
+        "action",
+        "target_weight",
+        "current_weight",
+        "current_value",
+        "target_value",
+        "delta_notional",
+        "buffett_score",
+    ]
     top[cols].to_csv(out, index=False)
     return out
 
 
-def make_orders_today(scores: pd.DataFrame, signals: pd.DataFrame, force: bool = False) -> Optional[Path]:
+def make_orders_today(
+    scores: pd.DataFrame, signals: pd.DataFrame, force: bool = False
+) -> Optional[Path]:
     out = ORDERS / "orders_today.csv"
     if out.exists() and not force:
         return None
@@ -468,7 +581,13 @@ def make_orders_today(scores: pd.DataFrame, signals: pd.DataFrame, force: bool =
             hi = ss[(pd.to_numeric(ss["confidence"], errors="coerce") >= 0.8)]
             hi = hi.sort_values("confidence", ascending=False).drop_duplicates("ticker")
             for _, r in hi.head(5).iterrows():
-                rows.append({"ticker": r["ticker"], "action": str(r.get("signal", "HOLD")).upper(), "target_weight": 0.02})
+                rows.append(
+                    {
+                        "ticker": r["ticker"],
+                        "action": str(r.get("signal", "HOLD")).upper(),
+                        "target_weight": 0.02,
+                    }
+                )
 
     if not rows:
         rows = [{"ticker": "SPY", "action": "HOLD", "target_weight": 0.0}]
@@ -476,7 +595,9 @@ def make_orders_today(scores: pd.DataFrame, signals: pd.DataFrame, force: bool =
     return out
 
 
-def make_ai_feedback(scores: pd.DataFrame, orders_today: Path, force: bool = False) -> Optional[Path]:
+def make_ai_feedback(
+    scores: pd.DataFrame, orders_today: Path, force: bool = False
+) -> Optional[Path]:
     out = RESULTS / "ai_feedback.jsonl"
     if out.exists() and not force:
         return None
@@ -484,14 +605,36 @@ def make_ai_feedback(scores: pd.DataFrame, orders_today: Path, force: bool = Fal
     uni = int(scores["ticker"].nunique()) if not scores.empty and "ticker" in scores.columns else 0
     # summarize orders
     odf = read_csv_safe(orders_today) if orders_today.exists() else pd.DataFrame()
-    total_buy = float((odf[odf.get("action", "").astype(str).str.upper() == "BUY"]["target_weight"].fillna(0).sum()) * 100000.0) if not odf.empty else 0.0
-    total_sell = float((odf[odf.get("action", "").astype(str).str.upper() == "SELL"]["target_weight"].fillna(0).sum()) * 100000.0) if not odf.empty else 0.0
+    total_buy = (
+        float(
+            (
+                odf[odf.get("action", "").astype(str).str.upper() == "BUY"]["target_weight"]
+                .fillna(0)
+                .sum()
+            )
+            * 100000.0
+        )
+        if not odf.empty
+        else 0.0
+    )
+    total_sell = (
+        float(
+            (
+                odf[odf.get("action", "").astype(str).str.upper() == "SELL"]["target_weight"]
+                .fillna(0)
+                .sum()
+            )
+            * 100000.0
+        )
+        if not odf.empty
+        else 0.0
+    )
 
     rec = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "universe": {"count": uni},
         "orders": {"total_buy_notional": total_buy, "total_sell_notional": total_sell},
-        "notes": "Auto-generated placeholder so the dashboard has something to show."
+        "notes": "Auto-generated placeholder so the dashboard has something to show.",
     }
     with open(out, "w", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\n")

@@ -2,14 +2,15 @@ import numpy as np
 import scipy.fft
 import threading
 
+
 class _MockFunction:
-    def __init__(self, return_value = None):
+    def __init__(self, return_value=None):
         self.number_calls = threading.local()
         self.return_value = return_value
         self.last_args = threading.local()
 
     def __call__(self, *args, **kwargs):
-        if not hasattr(self.number_calls, 'c'):
+        if not hasattr(self.number_calls, "c"):
             self.number_calls.c = 0
 
         self.number_calls.c += 1
@@ -86,11 +87,10 @@ _implements = {
     scipy.fft.dstn: dstn,
     scipy.fft.idstn: idstn,
     scipy.fft.fht: fht,
-    scipy.fft.ifht: ifht
+    scipy.fft.ifht: ifht,
 }
 
 
 def __ua_function__(method, args, kwargs):
     fn = _implements.get(method)
-    return (fn(*args, **kwargs) if fn is not None
-            else NotImplemented)
+    return fn(*args, **kwargs) if fn is not None else NotImplemented

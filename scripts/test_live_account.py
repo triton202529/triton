@@ -2,9 +2,10 @@ import sys
 import os
 
 # Make sure root folder is in path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from alpaca_client import get_account, get_positions
+
 
 def main():
     print("🔌 Connecting to live Alpaca account...\n")
@@ -23,6 +24,7 @@ def main():
             print("No open positions.")
     except Exception as e:
         print("❌ Failed to connect:", e)
+
 
 if __name__ == "__main__":
     main()

@@ -25,65 +25,101 @@ def get_client_and_conf():
     client = TradingClient(conf["key_id"], conf["secret_key"], paper=conf.get("paper", True))
     return client, conf
 
+
 def to_float(x):
     try:
         return float(x)
     except Exception:
         return None
 
+
 def df_positions(positions) -> pd.DataFrame:
     rows: List[Dict[str, Any]] = []
     for p in positions:
-        rows.append({
-            "Symbol": p.symbol,
-            "Qty": to_float(p.qty),
-            "Avg Price": to_float(p.avg_entry_price),
-            "Price": to_float(p.current_price),
-            "Market Value": to_float(p.market_value),
-            "Cost Basis": to_float(p.cost_basis),
-            "Unrlzd P/L": to_float(p.unrealized_pl),
-            "Unrlzd P/L %": to_float(p.unrealized_plpc),
-            "Change Today %": to_float(p.change_today),
-        })
+        rows.append(
+            {
+                "Symbol": p.symbol,
+                "Qty": to_float(p.qty),
+                "Avg Price": to_float(p.avg_entry_price),
+                "Price": to_float(p.current_price),
+                "Market Value": to_float(p.market_value),
+                "Cost Basis": to_float(p.cost_basis),
+                "Unrlzd P/L": to_float(p.unrealized_pl),
+                "Unrlzd P/L %": to_float(p.unrealized_plpc),
+                "Change Today %": to_float(p.change_today),
+            }
+        )
     if not rows:
-        return pd.DataFrame(columns=["Symbol","Qty","Avg Price","Price","Market Value","Cost Basis","Unrlzd P/L","Unrlzd P/L %","Change Today %"])
+        return pd.DataFrame(
+            columns=[
+                "Symbol",
+                "Qty",
+                "Avg Price",
+                "Price",
+                "Market Value",
+                "Cost Basis",
+                "Unrlzd P/L",
+                "Unrlzd P/L %",
+                "Change Today %",
+            ]
+        )
     df = pd.DataFrame(rows)
     df["Unrlzd P/L %"] = (df["Unrlzd P/L %"] * 100.0).round(2)
     df["Change Today %"] = (df["Change Today %"] * 100.0).round(2)
-    return df.sort_values("Market Value", ascending=False, na_position="last").reset_index(drop=True)
+    return df.sort_values("Market Value", ascending=False, na_position="last").reset_index(
+        drop=True
+    )
+
 
 def df_orders(orders) -> pd.DataFrame:
     rows = []
     for o in orders:
         side = getattr(o.side, "name", str(o.side)).lower()
-        tif  = getattr(o.time_in_force, "name", str(o.time_in_force)).lower()
-        otype= getattr(o.type, "name", str(o.type)).lower()
+        tif = getattr(o.time_in_force, "name", str(o.time_in_force)).lower()
+        otype = getattr(o.type, "name", str(o.type)).lower()
         qty = getattr(o, "qty", None)
         notional = getattr(o, "notional", None)
-        qty_or_notional = str(qty) if qty is not None else (f"${notional}" if notional is not None else "")
-        rows.append({
-            "Symbol": o.symbol,
-            "Side": side,
-            "Qty/Notional": qty_or_notional,
-            "Type": otype,
-            "TIF": tif,
-            "Status": getattr(o, "status", ""),
-            "Submitted": str(getattr(o, "submitted_at", ""))[:19],
-            "Order ID": str(getattr(o, "id", "")),
-        })
+        qty_or_notional = (
+            str(qty) if qty is not None else (f"${notional}" if notional is not None else "")
+        )
+        rows.append(
+            {
+                "Symbol": o.symbol,
+                "Side": side,
+                "Qty/Notional": qty_or_notional,
+                "Type": otype,
+                "TIF": tif,
+                "Status": getattr(o, "status", ""),
+                "Submitted": str(getattr(o, "submitted_at", ""))[:19],
+                "Order ID": str(getattr(o, "id", "")),
+            }
+        )
     if not rows:
-        return pd.DataFrame(columns=["Symbol","Side","Qty/Notional","Type","TIF","Status","Submitted","Order ID"])
+        return pd.DataFrame(
+            columns=[
+                "Symbol",
+                "Side",
+                "Qty/Notional",
+                "Type",
+                "TIF",
+                "Status",
+                "Submitted",
+                "Order ID",
+            ]
+        )
     df = pd.DataFrame(rows)
-    return df.sort_values(["Symbol","Submitted"]).reset_index(drop=True)
+    return df.sort_values(["Symbol", "Submitted"]).reset_index(drop=True)
 
 
 def run_script_sync(args: list[str]) -> str:
     """Run a repo-local Python script and return combined stdout/stderr."""
-    proc = subprocess.run([str(Path().resolve() / ".venv" / "Scripts" / "python.exe")] + args,
-                          cwd=str(REPO_ROOT),
-                          capture_output=True,
-                          text=True,
-                          shell=False)
+    proc = subprocess.run(
+        [str(Path().resolve() / ".venv" / "Scripts" / "python.exe")] + args,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        shell=False,
+    )
     out = (proc.stdout or "") + (proc.stderr or "")
     return out.strip() or f"(exit code {proc.returncode})"
 
@@ -130,7 +166,7 @@ st.divider()
 
 # Actions
 st.subheader("⚙️ Actions")
-c1, c2, c3 = st.columns([2,2,3])
+c1, c2, c3 = st.columns([2, 2, 3])
 
 with c1:
     if st.button("▶️ Run Opening Sequence", use_container_width=True):
@@ -139,15 +175,29 @@ with c1:
 
 with c2:
     if st.button("🧹 Cancel ALL Open Orders", use_container_width=True):
-        out = run_script_sync(["-c", "import json;from pathlib import Path;from alpaca.trading.client import TradingClient;"
-                                    "conf=json.loads(Path('config/alpaca.json').read_text(encoding='utf-8-sig'));"
-                                    "c=TradingClient(conf['key_id'],conf['secret_key'],paper=conf.get('paper',True));"
-                                    "c.cancel_orders();print('Canceled ALL open orders')"])
+        out = run_script_sync(
+            [
+                "-c",
+                "import json;from pathlib import Path;from alpaca.trading.client import TradingClient;"
+                "conf=json.loads(Path('config/alpaca.json').read_text(encoding='utf-8-sig'));"
+                "c=TradingClient(conf['key_id'],conf['secret_key'],paper=conf.get('paper',True));"
+                "c.cancel_orders();print('Canceled ALL open orders')",
+            ]
+        )
         st.code(out, language="bash")
 
 with c3:
     if st.button("🛑 Flatten (sell everything)", use_container_width=True):
-        out = run_script_sync(["scripts/auto_execute_signals.py","--paper","--force-close-all","--cancel-all-open","--max-buys","0"])
+        out = run_script_sync(
+            [
+                "scripts/auto_execute_signals.py",
+                "--paper",
+                "--force-close-all",
+                "--cancel-all-open",
+                "--max-buys",
+                "0",
+            ]
+        )
         st.code(out, language="bash")
 
 st.divider()
@@ -161,8 +211,12 @@ try:
     if not dfp.empty:
         total_mv = dfp["Market Value"].sum(skipna=True)
         total_cb = dfp["Cost Basis"].sum(skipna=True)
-        total_pl = (total_mv - total_cb) if (total_mv is not None and total_cb is not None) else None
-        st.caption(f"Total Market Value ≈ **${total_mv:,.2f}** · Total Cost Basis ≈ **${total_cb:,.2f}** · Unrlzd P/L ≈ **${(total_pl or 0):,.2f}**")
+        total_pl = (
+            (total_mv - total_cb) if (total_mv is not None and total_cb is not None) else None
+        )
+        st.caption(
+            f"Total Market Value ≈ **${total_mv:,.2f}** · Total Cost Basis ≈ **${total_cb:,.2f}** · Unrlzd P/L ≈ **${(total_pl or 0):,.2f}**"
+        )
 except Exception as e:
     st.error(f"Positions error: {e}")
 

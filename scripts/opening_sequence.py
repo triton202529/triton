@@ -13,21 +13,29 @@ from alpaca.trading.enums import QueryOrderStatus
 
 REPO_ROOT = Path(__file__).resolve().parents[1]  # repo root (parent of /scripts)
 
+
 def load_client() -> TradingClient:
     conf = json.loads((REPO_ROOT / "config" / "alpaca.json").read_text(encoding="utf-8-sig"))
-    return TradingClient(conf["key_id"], conf["secret_key"], paper=conf.get("paper", True)), conf
+    return (
+        TradingClient(conf["key_id"], conf["secret_key"], paper=conf.get("paper", True)),
+        conf,
+    )
+
 
 def open_orders_count(c: TradingClient) -> int:
     return len(list(c.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.OPEN))))
 
+
 def positions_count(c: TradingClient) -> int:
     return len(list(c.get_all_positions()))
+
 
 def run_py(*args: str) -> int:
     """Run a Python module/script with the current interpreter, in repo root."""
     cmd = [sys.executable, *args]
     print(">", " ".join(cmd))
     return subprocess.run(cmd, cwd=str(REPO_ROOT), check=True).returncode
+
 
 def wait_until_flat(c: TradingClient, timeout_s: int = 90, poll_s: int = 2) -> bool:
     t0 = time.time()
@@ -36,6 +44,7 @@ def wait_until_flat(c: TradingClient, timeout_s: int = 90, poll_s: int = 2) -> b
             return True
         time.sleep(poll_s)
     return False
+
 
 def main() -> None:
     c, conf = load_client()
@@ -55,8 +64,14 @@ def main() -> None:
     print(f"🧹 Open orders after cancel: {open_orders_count(c)}")
 
     # 2) Flatten everything (no new buys)
-    run_py("scripts/auto_execute_signals.py", *paper_flag,
-           "--force-close-all", "--cancel-all-open", "--max-buys", "0")
+    run_py(
+        "scripts/auto_execute_signals.py",
+        *paper_flag,
+        "--force-close-all",
+        "--cancel-all-open",
+        "--max-buys",
+        "0",
+    )
 
     # 3) Verify we’re flat
     ok = wait_until_flat(c, timeout_s=120, poll_s=2)
@@ -66,10 +81,20 @@ def main() -> None:
         return
 
     # 4) Run buys pass
-    run_py("scripts/auto_execute_signals.py", *paper_flag,
-           "--dollars-per-trade", "50", "--autoscale", "--min-alloc", "25", "--max-buys", "25")
+    run_py(
+        "scripts/auto_execute_signals.py",
+        *paper_flag,
+        "--dollars-per-trade",
+        "50",
+        "--autoscale",
+        "--min-alloc",
+        "25",
+        "--max-buys",
+        "25",
+    )
 
     print("✅ Opening sequence complete.")
+
 
 if __name__ == "__main__":
     try:

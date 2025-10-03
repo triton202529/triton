@@ -16,6 +16,7 @@ import yfinance as yf
 # Optional Stooq fallback (pip install pandas-datareader)
 try:
     from pandas_datareader import data as pdr
+
     HAS_STOOQ = True
 except Exception:
     HAS_STOOQ = False
@@ -47,12 +48,15 @@ session.headers["User-Agent"] = (
     "(KHTML, like Gecko) Chrome/121 Safari/537.36"
 )
 
+
 # ---------------- Helpers ----------------
 def _norm_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={c: c.lower().strip().replace(" ", "_") for c in df.columns})
 
-def fetch_yf_download(ticker: str, period="10y", interval="1d",
-                      max_retries=3, sleep=(1.2, 3.0)) -> pd.DataFrame | None:
+
+def fetch_yf_download(
+    ticker: str, period="10y", interval="1d", max_retries=3, sleep=(1.2, 3.0)
+) -> pd.DataFrame | None:
     """
     More robust than Ticker().history(); handles multi-index and empties.
     """
@@ -75,7 +79,9 @@ def fetch_yf_download(ticker: str, period="10y", interval="1d",
                 # If multi-level, select that ticker
                 if isinstance(df.columns, pd.MultiIndex):
                     # select the first level matching our ticker if present
-                    top = [lvl for lvl in df.columns.levels[0] if str(lvl).upper() == ticker.upper()]
+                    top = [
+                        lvl for lvl in df.columns.levels[0] if str(lvl).upper() == ticker.upper()
+                    ]
                     if top:
                         df = df[top[0]]
                 df = df.reset_index()
@@ -96,6 +102,7 @@ def fetch_yf_download(ticker: str, period="10y", interval="1d",
         print(f"⚠️ yfinance failed for {ticker}: {last_err}")
     return None
 
+
 def fetch_stooq(ticker: str) -> pd.DataFrame | None:
     """
     Fallback: Stooq daily bars. Skips index-style symbols (^GSPC, etc.).
@@ -110,20 +117,23 @@ def fetch_stooq(ticker: str) -> pd.DataFrame | None:
         if df is None or df.empty:
             return None
         df = df.sort_index().reset_index()
-        df = df.rename(columns={
-            "Date": "date",
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        })
+        df = df.rename(
+            columns={
+                "Date": "date",
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        )
         # Stooq may not have volume; ok for most features
         df["ticker"] = ticker
         return df
     except Exception as e:
         print(f"⚠️ Stooq failed for {ticker}: {e}")
         return None
+
 
 def save_parquet_basic(df: pd.DataFrame, ticker: str) -> bool:
     # Minimal OHLC check
@@ -133,6 +143,7 @@ def save_parquet_basic(df: pd.DataFrame, ticker: str) -> bool:
     out_path = os.path.join(RESULTS_DIR, f"{ticker}.parquet")
     df.to_parquet(out_path, index=False)
     return True
+
 
 def fetch_data(ticker: str) -> pd.DataFrame | None:
     """
@@ -148,6 +159,7 @@ def fetch_data(ticker: str) -> pd.DataFrame | None:
             log.write(f"{ticker}\n")
         return None
     return df
+
 
 # ---------------- Main ----------------
 def main():
@@ -200,6 +212,7 @@ def main():
     final_df = pd.concat(enhanced_frames, ignore_index=True).dropna(subset=["close"])
     final_df.to_parquet(PROCESSED_FILE, index=False)
     print(f"✅ Retrained data saved to: {PROCESSED_FILE}")
+
 
 if __name__ == "__main__":
     main()

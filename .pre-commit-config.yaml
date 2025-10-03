@@ -1,11 +1,40 @@
+# .pre-commit-config.yaml
+
+minimum_pre_commit_version: "4.0.0"
+
+# Use the current interpreter (your activated venv) for all Python hooks
+default_language_version:
+  python: "python"
+
+# Keep hooks away from large/generated/venv stuff
+exclude: |
+  (?x)^(
+    venv/|
+    \.venv/|
+    .*/site-packages/|
+    tmp/|
+    data/.*\.csv$|
+    weird-copy/?|
+    weird\[copy]/?
+  )
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: mixed-line-ending
         args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
   - repo: https://github.com/psf/black
-    rev: 24.8.0
-    hooks: [ { id: black } ]
+    rev: 25.9.0
+    hooks:
+      - id: black
+        args: ["--line-length=100"]

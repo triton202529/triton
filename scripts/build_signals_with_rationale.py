@@ -9,10 +9,12 @@ SCORES_CSV = os.path.join(RESULTS_DIR, "stock_scores.csv")
 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
+
 def normalize_date(series):
     # Make everything tz-aware UTC, then drop tz -> tz-naive
     dt = pd.to_datetime(series, errors="coerce", utc=True)
     return dt.dt.tz_localize(None)
+
 
 def load_scores():
     if os.path.exists(SCORES_CSV):
@@ -25,6 +27,7 @@ def load_scores():
         except Exception as e:
             print(f"⚠️ Could not read {SCORES_CSV}: {e}")
     return pd.DataFrame(columns=["ticker", "total_score"])
+
 
 def main():
     files = sorted(glob.glob(os.path.join(PRED_DIR, "*_predictions.parquet")))
@@ -93,12 +96,21 @@ def main():
     signals = signals.sort_values(["ticker", "date"]).reset_index(drop=True)
 
     # Final column order
-    cols = ["date", "ticker", "close", "predicted_close", "signal", "total_score", "rationale"]
+    cols = [
+        "date",
+        "ticker",
+        "close",
+        "predicted_close",
+        "signal",
+        "total_score",
+        "rationale",
+    ]
     cols = [c for c in cols if c in signals.columns]
     signals = signals[cols]
 
     signals.to_csv(OUT_CSV, index=False)
     print(f"✅ Wrote {OUT_CSV} with {len(signals):,} rows")
+
 
 if __name__ == "__main__":
     main()

@@ -531,7 +531,9 @@ def _from_date_datetime(obj: dt.date | dt.datetime, /) -> dict[str, Any]:
     return result
 
 
-def _todict(obj: Any, context: dict[str, Any] | None, np_opt: Any, pd_opt: Any) -> Any:  # noqa: C901
+def _todict(
+    obj: Any, context: dict[str, Any] | None, np_opt: Any, pd_opt: Any
+) -> Any:  # noqa: C901
     """Convert an object to a dict representation."""
     if np_opt is not None:
         np = np_opt
@@ -1083,7 +1085,9 @@ class SchemaBase:
             return self._kwds[attr]
         else:
             try:
-                _getattr = super().__getattr__  # pyright: ignore[reportAttributeAccessIssue]
+                _getattr = (
+                    super().__getattr__
+                )  # pyright: ignore[reportAttributeAccessIssue]
             except AttributeError:
                 _getattr = super().__getattribute__
             return _getattr(attr)
@@ -1473,7 +1477,9 @@ class _FromDict:
         tp: Any = ...,
         schema: Any = ...,
         rootschema: Any = ...,
-        default_class: type[TSchemaBase] = ...,  # pyright: ignore[reportInvalidTypeVarUse]
+        default_class: type[
+            TSchemaBase
+        ] = ...,  # pyright: ignore[reportInvalidTypeVarUse]
     ) -> TSchemaBase: ...
     @overload
     def from_dict(

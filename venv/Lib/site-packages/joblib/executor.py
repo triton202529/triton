@@ -4,6 +4,7 @@ This module provides efficient ways of working with data stored in
 shared memory with numpy.memmap arrays without inducing any memory
 copy between the parent and child processes.
 """
+
 # Author: Thomas Moreau <thomas.moreau.2010@gmail.com>
 # Copyright: 2017, Thomas Moreau
 # License: BSD 3 clause

@@ -134,7 +134,6 @@ class TestConstructor(SoupTest):
             yield markup, None, None, False
             yield markup, None, None, False
 
-
         with pytest.raises(ParserRejectedMarkup) as exc_info:
             BeautifulSoup("", builder=Mock)
         assert (

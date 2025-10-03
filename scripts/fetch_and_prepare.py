@@ -12,12 +12,68 @@ from services.feature_generator import add_technical_indicators
 
 # Tickers to fetch
 TICKERS = [
-    "AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "META", "NVDA", "NFLX", "AMD", "INTC",
-    "SPY", "QQQ", "DIA", "VTI", "ARKK", "XLF", "XLE", "XLY", "XLV", "XLI", "XLK",
-    "XLP", "XLU", "XLRE", "XLB", "GLD", "SLV", "BITO", "GBTC", "USO", "UNG", "DBA",
-    "^GSPC", "^IXIC", "^DJI", "^VIX", "JPM", "BAC", "WFC", "C", "GS", "MS", "SCHW",
-    "BLK", "BRK-B", "GE", "UNH", "JNJ", "PG", "V", "MA", "PEP", "KO", "CVX", "XOM",
-    "WMT", "HD", "DIS", "T", "PFE", "ABBV", "MRK"
+    "AAPL",
+    "TSLA",
+    "GOOGL",
+    "MSFT",
+    "AMZN",
+    "META",
+    "NVDA",
+    "NFLX",
+    "AMD",
+    "INTC",
+    "SPY",
+    "QQQ",
+    "DIA",
+    "VTI",
+    "ARKK",
+    "XLF",
+    "XLE",
+    "XLY",
+    "XLV",
+    "XLI",
+    "XLK",
+    "XLP",
+    "XLU",
+    "XLRE",
+    "XLB",
+    "GLD",
+    "SLV",
+    "BITO",
+    "GBTC",
+    "USO",
+    "UNG",
+    "DBA",
+    "^GSPC",
+    "^IXIC",
+    "^DJI",
+    "^VIX",
+    "JPM",
+    "BAC",
+    "WFC",
+    "C",
+    "GS",
+    "MS",
+    "SCHW",
+    "BLK",
+    "BRK-B",
+    "GE",
+    "UNH",
+    "JNJ",
+    "PG",
+    "V",
+    "MA",
+    "PEP",
+    "KO",
+    "CVX",
+    "XOM",
+    "WMT",
+    "HD",
+    "DIS",
+    "T",
+    "PFE",
+    "ABBV",
+    "MRK",
 ]
 
 PROCESSED_FILE = "data/processed/stock_data.parquet"
@@ -39,12 +95,14 @@ print("🧹 Cleared old files from data/results/")
 # Start with empty failed tickers set
 failed_tickers = set()
 
+
 def log_failed_ticker(ticker, reason="fetch error"):
     """Logs a failed ticker without duplicates"""
     if ticker not in failed_tickers:
         failed_tickers.add(ticker)
         with open(FAILED_LOG, "a") as log:
             log.write(f"{ticker} ({reason})\n")
+
 
 def fetch_data(ticker, retries=3, wait=2):
     for attempt in range(1, retries + 1):
@@ -73,6 +131,7 @@ def fetch_data(ticker, retries=3, wait=2):
                 print(f"❌ Failed to fetch {ticker} after {retries} attempts.")
                 log_failed_ticker(ticker, "fetch error")
                 return None
+
 
 def main():
     all_data = []
@@ -115,6 +174,7 @@ def main():
     print(f"✅ Saved merged dataset to: {PROCESSED_FILE}")
     print(f"✅ Saved individual ticker files to: {RESULTS_DIR}")
     print(f"\n📄 Failed tickers log saved to: {FAILED_LOG}")
+
 
 if __name__ == "__main__":
     main()

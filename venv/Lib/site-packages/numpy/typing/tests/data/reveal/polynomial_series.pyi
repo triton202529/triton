@@ -69,21 +69,34 @@ assert_type(npp.polynomial.polyval2d(AR_b, AR_b, AR_b), npt.NDArray[np.floating]
 assert_type(npp.polynomial.polyval2d(AR_u4, AR_u4, AR_b), npt.NDArray[np.floating])
 assert_type(npp.polynomial.polyval2d(AR_i8, AR_i8, AR_i8), npt.NDArray[np.floating])
 assert_type(npp.polynomial.polyval2d(AR_f8, AR_f8, AR_i8), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyval2d(AR_i8, AR_i8, AR_c16), npt.NDArray[np.complexfloating])
+assert_type(
+    npp.polynomial.polyval2d(AR_i8, AR_i8, AR_c16), npt.NDArray[np.complexfloating]
+)
 assert_type(npp.polynomial.polyval2d(AR_O, AR_O, AR_O), npt.NDArray[np.object_])
 
 assert_type(npp.polynomial.polyval3d(AR_b, AR_b, AR_b, AR_b), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyval3d(AR_u4, AR_u4, AR_u4, AR_b), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyval3d(AR_i8, AR_i8, AR_i8, AR_i8), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyval3d(AR_f8, AR_f8, AR_f8, AR_i8), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyval3d(AR_i8, AR_i8, AR_i8, AR_c16), npt.NDArray[np.complexfloating])
+assert_type(
+    npp.polynomial.polyval3d(AR_u4, AR_u4, AR_u4, AR_b), npt.NDArray[np.floating]
+)
+assert_type(
+    npp.polynomial.polyval3d(AR_i8, AR_i8, AR_i8, AR_i8), npt.NDArray[np.floating]
+)
+assert_type(
+    npp.polynomial.polyval3d(AR_f8, AR_f8, AR_f8, AR_i8), npt.NDArray[np.floating]
+)
+assert_type(
+    npp.polynomial.polyval3d(AR_i8, AR_i8, AR_i8, AR_c16),
+    npt.NDArray[np.complexfloating],
+)
 assert_type(npp.polynomial.polyval3d(AR_O, AR_O, AR_O, AR_O), npt.NDArray[np.object_])
 
 assert_type(npp.polynomial.polyvalfromroots(AR_b, AR_b), npt.NDArray[np.floating])
 assert_type(npp.polynomial.polyvalfromroots(AR_u4, AR_b), npt.NDArray[np.floating])
 assert_type(npp.polynomial.polyvalfromroots(AR_i8, AR_i8), npt.NDArray[np.floating])
 assert_type(npp.polynomial.polyvalfromroots(AR_f8, AR_i8), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyvalfromroots(AR_i8, AR_c16), npt.NDArray[np.complexfloating])
+assert_type(
+    npp.polynomial.polyvalfromroots(AR_i8, AR_c16), npt.NDArray[np.complexfloating]
+)
 assert_type(npp.polynomial.polyvalfromroots(AR_O, AR_O), npt.NDArray[np.object_])
 
 assert_type(npp.polynomial.polyvander(AR_f8, 3), npt.NDArray[np.floating])
@@ -91,12 +104,22 @@ assert_type(npp.polynomial.polyvander(AR_c16, 3), npt.NDArray[np.complexfloating
 assert_type(npp.polynomial.polyvander(AR_O, 3), npt.NDArray[np.object_])
 
 assert_type(npp.polynomial.polyvander2d(AR_f8, AR_f8, [4, 2]), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyvander2d(AR_c16, AR_c16, [4, 2]), npt.NDArray[np.complexfloating])
+assert_type(
+    npp.polynomial.polyvander2d(AR_c16, AR_c16, [4, 2]), npt.NDArray[np.complexfloating]
+)
 assert_type(npp.polynomial.polyvander2d(AR_O, AR_O, [4, 2]), npt.NDArray[np.object_])
 
-assert_type(npp.polynomial.polyvander3d(AR_f8, AR_f8, AR_f8, [4, 3, 2]), npt.NDArray[np.floating])
-assert_type(npp.polynomial.polyvander3d(AR_c16, AR_c16, AR_c16, [4, 3, 2]), npt.NDArray[np.complexfloating])
-assert_type(npp.polynomial.polyvander3d(AR_O, AR_O, AR_O, [4, 3, 2]), npt.NDArray[np.object_])
+assert_type(
+    npp.polynomial.polyvander3d(AR_f8, AR_f8, AR_f8, [4, 3, 2]),
+    npt.NDArray[np.floating],
+)
+assert_type(
+    npp.polynomial.polyvander3d(AR_c16, AR_c16, AR_c16, [4, 3, 2]),
+    npt.NDArray[np.complexfloating],
+)
+assert_type(
+    npp.polynomial.polyvander3d(AR_O, AR_O, AR_O, [4, 3, 2]), npt.NDArray[np.object_]
+)
 
 assert_type(
     npp.polynomial.polyfit(AR_f8, AR_f8, 2),

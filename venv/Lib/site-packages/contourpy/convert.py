@@ -37,7 +37,11 @@ def _convert_filled_from_OuterCode(
         return ([points], [None if codes is None else arr.offsets_from_codes(codes)])
     elif fill_type_to == FillType.ChunkCombinedCodeOffset:
         outer_offsets = None if points is None else arr.offsets_from_lengths(filled[0])
-        ret1: cpy.FillReturn_ChunkCombinedCodeOffset = ([points], [codes], [outer_offsets])
+        ret1: cpy.FillReturn_ChunkCombinedCodeOffset = (
+            [points],
+            [codes],
+            [outer_offsets],
+        )
         return ret1
     elif fill_type_to == FillType.ChunkCombinedOffsetOffset:
         if codes is None:
@@ -69,7 +73,10 @@ def _convert_filled_from_OuterOffset(
         offsets = None
 
     if fill_type_to == FillType.ChunkCombinedCode:
-        return ([points], [None if offsets is None else arr.codes_from_offsets(offsets)])
+        return (
+            [points],
+            [None if offsets is None else arr.codes_from_offsets(offsets)],
+        )
     elif fill_type_to == FillType.ChunkCombinedOffset:
         return ([points], [offsets])
     elif fill_type_to == FillType.ChunkCombinedCodeOffset:
@@ -98,11 +105,15 @@ def _convert_filled_from_ChunkCombinedCode(
     if fill_type_to == FillType.ChunkCombinedCode:
         return filled
     elif fill_type_to == FillType.ChunkCombinedOffset:
-        codes = [None if codes is None else arr.offsets_from_codes(codes) for codes in filled[1]]
+        codes = [
+            None if codes is None else arr.offsets_from_codes(codes)
+            for codes in filled[1]
+        ]
         return (filled[0], codes)
     else:
         raise ValueError(
-            f"Conversion from {FillType.ChunkCombinedCode} to {fill_type_to} not supported")
+            f"Conversion from {FillType.ChunkCombinedCode} to {fill_type_to} not supported"
+        )
 
 
 def _convert_filled_from_ChunkCombinedOffset(
@@ -123,7 +134,8 @@ def _convert_filled_from_ChunkCombinedOffset(
         return filled
     else:
         raise ValueError(
-            f"Conversion from {FillType.ChunkCombinedOffset} to {fill_type_to} not supported")
+            f"Conversion from {FillType.ChunkCombinedOffset} to {fill_type_to} not supported"
+        )
 
 
 def _convert_filled_from_ChunkCombinedCodeOffset(
@@ -151,14 +163,18 @@ def _convert_filled_from_ChunkCombinedCodeOffset(
                     assert outer_offsets is not None
                 separate_points += arr.split_points_by_offsets(points, outer_offsets)
                 separate_codes = arr.split_codes_by_offsets(codes, outer_offsets)
-                separate_offsets += [arr.offsets_from_codes(codes) for codes in separate_codes]
+                separate_offsets += [
+                    arr.offsets_from_codes(codes) for codes in separate_codes
+                ]
         return (separate_points, separate_offsets)
     elif fill_type_to == FillType.ChunkCombinedCode:
         ret1: cpy.FillReturn_ChunkCombinedCode = (filled[0], filled[1])
         return ret1
     elif fill_type_to == FillType.ChunkCombinedOffset:
-        all_offsets = [None if codes is None else arr.offsets_from_codes(codes)
-                       for codes in filled[1]]
+        all_offsets = [
+            None if codes is None else arr.offsets_from_codes(codes)
+            for codes in filled[1]
+        ]
         ret2: cpy.FillReturn_ChunkCombinedOffset = (filled[0], all_offsets)
         return ret2
     elif fill_type_to == FillType.ChunkCombinedCodeOffset:
@@ -174,12 +190,16 @@ def _convert_filled_from_ChunkCombinedCodeOffset(
                 if TYPE_CHECKING:
                     assert outer_offsets is not None
                 offsets = arr.offsets_from_codes(codes)
-                outer_offsets = np.array([np.nonzero(offsets == oo)[0][0] for oo in outer_offsets],
-                                         dtype=offset_dtype)
+                outer_offsets = np.array(
+                    [np.nonzero(offsets == oo)[0][0] for oo in outer_offsets],
+                    dtype=offset_dtype,
+                )
                 chunk_offsets.append(offsets)
                 chunk_outer_offsets.append(outer_offsets)
         ret3: cpy.FillReturn_ChunkCombinedOffsetOffset = (
-            filled[0], chunk_offsets, chunk_outer_offsets,
+            filled[0],
+            chunk_offsets,
+            chunk_outer_offsets,
         )
         return ret3
     else:
@@ -212,11 +232,15 @@ def _convert_filled_from_ChunkCombinedOffsetOffset(
                     assert offsets is not None
                     assert outer_offsets is not None
                 if len(outer_offsets) > 2:
-                    separate_offsets += [offsets[s:e+1] - offsets[s] for s, e in
-                                         pairwise(outer_offsets)]
+                    separate_offsets += [
+                        offsets[s : e + 1] - offsets[s]
+                        for s, e in pairwise(outer_offsets)
+                    ]
                 else:
                     separate_offsets.append(offsets)
-                separate_points += arr.split_points_by_offsets(points, offsets[outer_offsets])
+                separate_points += arr.split_points_by_offsets(
+                    points, offsets[outer_offsets]
+                )
         return (separate_points, separate_offsets)
     elif fill_type_to == FillType.ChunkCombinedCode:
         chunk_codes: list[cpy.CodeArray | None] = []
@@ -245,7 +269,11 @@ def _convert_filled_from_ChunkCombinedOffsetOffset(
                     assert outer_offsets is not None
                 chunk_codes.append(arr.codes_from_offsets_and_points(offsets, points))
                 chunk_outer_offsets.append(offsets[outer_offsets])
-        ret2: cpy.FillReturn_ChunkCombinedCodeOffset = (filled[0], chunk_codes, chunk_outer_offsets)
+        ret2: cpy.FillReturn_ChunkCombinedCodeOffset = (
+            filled[0],
+            chunk_codes,
+            chunk_outer_offsets,
+        )
         return ret2
     elif fill_type_to == FillType.ChunkCombinedOffsetOffset:
         return filled
@@ -256,7 +284,7 @@ def _convert_filled_from_ChunkCombinedOffsetOffset(
 def convert_filled(
     filled: cpy.FillReturn,
     fill_type_from: FillType | str,
-    fill_type_to:  FillType | str,
+    fill_type_to: FillType | str,
 ) -> cpy.FillReturn:
     """Convert filled contours from one :class:`~.FillType` to another.
 
@@ -400,8 +428,10 @@ def _convert_lines_from_ChunkCombinedCode(
     elif line_type_to == LineType.ChunkCombinedCode:
         return lines
     elif line_type_to == LineType.ChunkCombinedOffset:
-        chunk_offsets = [None if codes is None else arr.offsets_from_codes(codes)
-                         for codes in lines[1]]
+        chunk_offsets = [
+            None if codes is None else arr.offsets_from_codes(codes)
+            for codes in lines[1]
+        ]
         return (lines[0], chunk_offsets)
     elif line_type_to == LineType.ChunkCombinedNan:
         points_nan: list[cpy.PointArray | None] = []
@@ -472,7 +502,9 @@ def _convert_lines_from_ChunkCombinedNan(
         if line_type_to == LineType.Separate:
             return separate_lines
         else:
-            separate_codes = [arr.codes_from_points(points) for points in separate_lines]
+            separate_codes = [
+                arr.codes_from_points(points) for points in separate_lines
+            ]
             return (separate_lines, separate_codes)
     elif line_type_to == LineType.ChunkCombinedCode:
         chunk_points: list[cpy.PointArray | None] = []
@@ -507,7 +539,7 @@ def _convert_lines_from_ChunkCombinedNan(
 def convert_lines(
     lines: cpy.LineReturn,
     line_type_from: LineType | str,
-    line_type_to:  LineType | str,
+    line_type_to: LineType | str,
 ) -> cpy.LineReturn:
     """Convert contour lines from one :class:`~.LineType` to another.
 
@@ -561,7 +593,7 @@ def convert_lines(
 def convert_multi_filled(
     multi_filled: list[cpy.FillReturn],
     fill_type_from: FillType | str,
-    fill_type_to:  FillType | str,
+    fill_type_to: FillType | str,
 ) -> list[cpy.FillReturn]:
     """Convert multiple sets of filled contours from one :class:`~.FillType` to another.
 
@@ -587,13 +619,15 @@ def convert_multi_filled(
     fill_type_from = as_fill_type(fill_type_from)
     fill_type_to = as_fill_type(fill_type_to)
 
-    return [convert_filled(filled, fill_type_from, fill_type_to) for filled in multi_filled]
+    return [
+        convert_filled(filled, fill_type_from, fill_type_to) for filled in multi_filled
+    ]
 
 
 def convert_multi_lines(
     multi_lines: list[cpy.LineReturn],
     line_type_from: LineType | str,
-    line_type_to:  LineType | str,
+    line_type_to: LineType | str,
 ) -> list[cpy.LineReturn]:
     """Convert multiple sets of contour lines from one :class:`~.LineType` to another.
 

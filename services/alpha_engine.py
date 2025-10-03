@@ -36,21 +36,36 @@ class AlphaEngine:
         self.config = config or {}
 
         # Factor specs (defaults if not supplied)
-        fcfg = (self.config.get("factors") or {})
+        fcfg = self.config.get("factors") or {}
         self.factors: List[FactorSpec] = [
-            FactorSpec("mom20", int((fcfg.get("mom20") or {}).get("lookback", 20)),
-                       float((fcfg.get("mom20") or {}).get("weight", 0.40))),
-            FactorSpec("mom60", int((fcfg.get("mom60") or {}).get("lookback", 60)),
-                       float((fcfg.get("mom60") or {}).get("weight", 0.20))),
-            FactorSpec("rev5",  int((fcfg.get("rev5")  or {}).get("lookback", 5)),
-                       float((fcfg.get("rev5")  or {}).get("weight", 0.20))),
-            FactorSpec("rsi14", int((fcfg.get("rsi14") or {}).get("lookback", 14)),
-                       float((fcfg.get("rsi14") or {}).get("weight", -0.10))),
-            FactorSpec("atr14", int((fcfg.get("atr14") or {}).get("lookback", 14)),
-                       float((fcfg.get("atr14") or {}).get("weight", -0.10))),
+            FactorSpec(
+                "mom20",
+                int((fcfg.get("mom20") or {}).get("lookback", 20)),
+                float((fcfg.get("mom20") or {}).get("weight", 0.40)),
+            ),
+            FactorSpec(
+                "mom60",
+                int((fcfg.get("mom60") or {}).get("lookback", 60)),
+                float((fcfg.get("mom60") or {}).get("weight", 0.20)),
+            ),
+            FactorSpec(
+                "rev5",
+                int((fcfg.get("rev5") or {}).get("lookback", 5)),
+                float((fcfg.get("rev5") or {}).get("weight", 0.20)),
+            ),
+            FactorSpec(
+                "rsi14",
+                int((fcfg.get("rsi14") or {}).get("lookback", 14)),
+                float((fcfg.get("rsi14") or {}).get("weight", -0.10)),
+            ),
+            FactorSpec(
+                "atr14",
+                int((fcfg.get("atr14") or {}).get("lookback", 14)),
+                float((fcfg.get("atr14") or {}).get("weight", -0.10)),
+            ),
         ]
 
-        scfg = (self.config.get("scoring") or {})
+        scfg = self.config.get("scoring") or {}
         self.zclip = float(scfg.get("zclip", 3.0))
         self.min_z_var = float(scfg.get("min_z_var", 1e-6))
 
@@ -64,14 +79,18 @@ class AlphaEngine:
 
         # Alpaca data base (reused from broker) and feed (iex for free plans; sip for paid)
         self.data_base = ALPACA_DATA_BASE
-        self.data_feed = str(self.config.get("data_feed", os.getenv("ALPACA_DATA_FEED", "iex"))).lower()
+        self.data_feed = str(
+            self.config.get("data_feed", os.getenv("ALPACA_DATA_FEED", "iex"))
+        ).lower()
 
         # Optional: basic debugging toggle from config
         self.debug = bool(self.config.get("debug", False))
 
     # ----------------------------- Data ---------------------------------
 
-    def _fetch_symbol_bars(self, symbol: str, limit: int = 120, verbose: bool = False) -> Optional[pd.DataFrame]:
+    def _fetch_symbol_bars(
+        self, symbol: str, limit: int = 120, verbose: bool = False
+    ) -> Optional[pd.DataFrame]:
         """
         Fetch daily bars for a single symbol. Returns DataFrame with columns: t,o,h,l,c,v
         Adds 'symbol' column and sorts ascending on 't'.
@@ -130,16 +149,22 @@ class AlphaEngine:
         need = {"t", "o", "h", "l", "c", "v"}
         if not need.issubset(set(df.columns)):
             if verbose or self.debug:
-                print(f"[alpha] missing cols for {symbol}: have={sorted(df.columns)} need={sorted(need)}")
+                print(
+                    f"[alpha] missing cols for {symbol}: have={sorted(df.columns)} need={sorted(need)}"
+                )
             return None
 
         # Parse timestamps & clean
         df["t"] = pd.to_datetime(df["t"], utc=True, errors="coerce")
-        df = df.dropna(subset=["t", "o", "h", "l", "c", "v"]).sort_values("t").reset_index(drop=True)
+        df = (
+            df.dropna(subset=["t", "o", "h", "l", "c", "v"]).sort_values("t").reset_index(drop=True)
+        )
         df["symbol"] = symbol
         return df
 
-    def fetch_bars_universe(self, symbols: Iterable[str], lookback: int, verbose: bool = False) -> Dict[str, pd.DataFrame]:
+    def fetch_bars_universe(
+        self, symbols: Iterable[str], lookback: int, verbose: bool = False
+    ) -> Dict[str, pd.DataFrame]:
         res: Dict[str, pd.DataFrame] = {}
         lim = max(lookback, max([fs.lookback for fs in self.factors]) + 5)
         for sym in symbols:
@@ -165,11 +190,10 @@ class AlphaEngine:
     @staticmethod
     def _atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.Series:
         prev_close = close.shift(1)
-        tr = pd.concat([
-            (high - low).abs(),
-            (high - prev_close).abs(),
-            (low - prev_close).abs()
-        ], axis=1).max(axis=1)
+        tr = pd.concat(
+            [(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()],
+            axis=1,
+        ).max(axis=1)
         atr = tr.rolling(n).mean()
         return atr
 
@@ -177,7 +201,9 @@ class AlphaEngine:
     def _ret(close: pd.Series, n: int) -> pd.Series:
         return close.pct_change(n)
 
-    def compute_factor_snapshot(self, bars: Dict[str, pd.DataFrame]) -> Tuple[pd.DataFrame, pd.Timestamp]:
+    def compute_factor_snapshot(
+        self, bars: Dict[str, pd.DataFrame]
+    ) -> Tuple[pd.DataFrame, pd.Timestamp]:
         """
         For each symbol, compute latest factor values and liquidity metrics.
         Returns (df, latest_ts) where df columns:
@@ -198,7 +224,7 @@ class AlphaEngine:
             # Factors
             mom20 = self._ret(c, 20)
             mom60 = self._ret(c, 60)
-            rev5  = -self._ret(c, 5)   # short-term reversal: negative of 5d return
+            rev5 = -self._ret(c, 5)  # short-term reversal: negative of 5d return
             rsi14 = self._rsi(c, 14)
             atr14 = self._atr(h, l, c, 14)
 
@@ -214,18 +240,31 @@ class AlphaEngine:
             else:
                 latest_common_ts = max(latest_common_ts, last_ts)
 
-            rows.append({
-                "symbol": sym,
-                "px": float(c.iloc[-1]) if not math.isnan(float(c.iloc[-1])) else 0.0,
-                "dollar_vol_med20": float(med_dv20.iloc[-1]) if pd.notna(med_dv20.iloc[-1]) else 0.0,
-                "mom20": float(mom20.iloc[-1]) if pd.notna(mom20.iloc[-1]) else 0.0,
-                "mom60": float(mom60.iloc[-1]) if pd.notna(mom60.iloc[-1]) else 0.0,
-                "rev5":  float(rev5.iloc[-1])  if pd.notna(rev5.iloc[-1])  else 0.0,
-                "rsi14": float(rsi14.iloc[-1]) if pd.notna(rsi14.iloc[-1]) else 50.0,
-                "atr14": float(atr14.iloc[-1]) if pd.notna(atr14.iloc[-1]) else 0.0,
-            })
+            rows.append(
+                {
+                    "symbol": sym,
+                    "px": (float(c.iloc[-1]) if not math.isnan(float(c.iloc[-1])) else 0.0),
+                    "dollar_vol_med20": (
+                        float(med_dv20.iloc[-1]) if pd.notna(med_dv20.iloc[-1]) else 0.0
+                    ),
+                    "mom20": float(mom20.iloc[-1]) if pd.notna(mom20.iloc[-1]) else 0.0,
+                    "mom60": float(mom60.iloc[-1]) if pd.notna(mom60.iloc[-1]) else 0.0,
+                    "rev5": float(rev5.iloc[-1]) if pd.notna(rev5.iloc[-1]) else 0.0,
+                    "rsi14": (float(rsi14.iloc[-1]) if pd.notna(rsi14.iloc[-1]) else 50.0),
+                    "atr14": float(atr14.iloc[-1]) if pd.notna(atr14.iloc[-1]) else 0.0,
+                }
+            )
 
-        cols = ["symbol", "px", "dollar_vol_med20", "mom20", "mom60", "rev5", "rsi14", "atr14"]
+        cols = [
+            "symbol",
+            "px",
+            "dollar_vol_med20",
+            "mom20",
+            "mom60",
+            "rev5",
+            "rsi14",
+            "atr14",
+        ]
         snap = pd.DataFrame(rows, columns=cols).dropna(how="all").reset_index(drop=True)
 
         if latest_common_ts is None:
@@ -333,8 +372,7 @@ class AlphaEngine:
 
         # contribution summary string (by factor weights)
         out["source_weights"] = out.apply(
-            lambda r: "|".join([f"{name}={w:+.2f}" for name, w in contribs]),
-            axis=1
+            lambda r: "|".join([f"{name}={w:+.2f}" for name, w in contribs]), axis=1
         )
         return out
 
@@ -376,7 +414,9 @@ class AlphaEngine:
 
     # ----------------------------- Public --------------------------------
 
-    def build_weights(self, universe: Iterable[str], lookback: int, verbose: bool = False) -> pd.DataFrame:
+    def build_weights(
+        self, universe: Iterable[str], lookback: int, verbose: bool = False
+    ) -> pd.DataFrame:
         bars = self.fetch_bars_universe(universe, lookback=lookback, verbose=verbose or self.debug)
         if verbose:
             print(f"[alpha] fetched bars for {len(bars)}/{len(list(universe))} symbols")
@@ -387,7 +427,9 @@ class AlphaEngine:
 
         gated = self.gate_universe(snap, ts)
         if verbose and not snap.empty:
-            dropped = set(snap.get("symbol", pd.Series(dtype=str))) - set(gated.get("symbol", pd.Series(dtype=str)))
+            dropped = set(snap.get("symbol", pd.Series(dtype=str))) - set(
+                gated.get("symbol", pd.Series(dtype=str))
+            )
             if dropped:
                 print(f"[alpha] gated out: {', '.join(sorted(dropped))}")
 
@@ -401,7 +443,9 @@ class AlphaEngine:
             out = pd.DataFrame(columns=["ticker", "target_weight", "source_weights", "notes"])
             return out
 
-        weighted["notes"] = weighted.apply(lambda r: f"alpha={float(r.get('alpha', 0.0)):.3f} ts={iso_ts}", axis=1)
+        weighted["notes"] = weighted.apply(
+            lambda r: f"alpha={float(r.get('alpha', 0.0)):.3f} ts={iso_ts}", axis=1
+        )
 
         # Final output shape for place_live_orders
         out = weighted[["symbol", "target_weight", "source_weights", "notes"]].copy()
@@ -409,7 +453,9 @@ class AlphaEngine:
         out = out.sort_values("target_weight", ascending=False).reset_index(drop=True)
 
         # Ensure floats are well-formed
-        out["target_weight"] = pd.to_numeric(out["target_weight"], errors="coerce").fillna(0.0).round(6)
+        out["target_weight"] = (
+            pd.to_numeric(out["target_weight"], errors="coerce").fillna(0.0).round(6)
+        )
         out["ticker"] = out["ticker"].astype(str).str.upper()
         out["source_weights"] = out["source_weights"].astype(str)
         out["notes"] = out["notes"].astype(str)

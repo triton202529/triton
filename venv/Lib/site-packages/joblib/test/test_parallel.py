@@ -1264,7 +1264,9 @@ print(Parallel(backend="loky", n_jobs=2)(
     delayed(square2)(MyClass(i), ignored=[dict(a=MyClass(1))])
     for i in range(5)
 ))
-""".format(joblib_root_folder=os.path.dirname(os.path.dirname(joblib.__file__)))
+""".format(
+    joblib_root_folder=os.path.dirname(os.path.dirname(joblib.__file__))
+)
 
 
 @with_multiprocessing
@@ -1303,7 +1305,9 @@ l = MyList()
 print(Parallel(backend="loky", n_jobs=2)(
     delayed(l.append)(i) for i in range(3)
 ))
-""".format(joblib_root_folder=os.path.dirname(os.path.dirname(joblib.__file__)))
+""".format(
+    joblib_root_folder=os.path.dirname(os.path.dirname(joblib.__file__))
+)
 
 
 @with_multiprocessing
@@ -2141,9 +2145,10 @@ def _set_initialized(status):
 def _check_status(status, n_jobs, wait_workers=False):
     pid = os.getpid()
     state = status.get(pid, None)
-    assert state in ("initialized", "started"), (
-        f"worker should have been in initialized state, got {state}"
-    )
+    assert state in (
+        "initialized",
+        "started",
+    ), f"worker should have been in initialized state, got {state}"
     if not wait_workers:
         return
 
@@ -2218,9 +2223,9 @@ def test_initializer_reused(n_jobs):
             for i in range(n_jobs)
         )
         pids = pids.union(set(results))
-    assert len(pids) == n_jobs, (
-        "The workers should be reused when the initializer is the same"
-    )
+    assert (
+        len(pids) == n_jobs
+    ), "The workers should be reused when the initializer is the same"
 
 
 @with_multiprocessing
@@ -2245,6 +2250,6 @@ def test_initializer_not_reused(n_jobs):
             for i in range(n_jobs)
         )
         pids = pids.union(set(results))
-    assert len(pids) == n_repetitions * n_jobs, (
-        "The workers should not be reused when the initializer arguments change"
-    )
+    assert (
+        len(pids) == n_repetitions * n_jobs
+    ), "The workers should not be reused when the initializer arguments change"

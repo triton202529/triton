@@ -1,0 +1,51 @@
+name: baseline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekdays at 13:00 UTC — adjust to taste
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  build-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy
+
+      - name: Build baseline (capture preview)
+        # Folded style keeps this readable; tee writes a file for the artifact
+        run: >
+          python scripts/build_baseline.py
+          --method cap --top 20
+          --max-weight 0.125 --min-weight 0.0005
+          --fund-whitelist BITO GBTC GLD ARKK DIA DBA
+          --turnover-cap 0.05 --dry-run
+          | tee baseline_preview.txt
+
+      - name: Validate last committed weights
+        run: python scripts/validate_baseline.py --path data/results/baseline/weights.csv
+
+      - name: Audit
+        run: python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-preview
+          path: baseline_preview.txt

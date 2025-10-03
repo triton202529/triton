@@ -431,8 +431,7 @@ def _check_pickle(filename, expected_list, mmap_mode=None):
             user_warnings = [w for w in warninfo if issubclass(w.category, UserWarning)]
             for w in deprecation_warnings:
                 assert (
-                    str(w.message)
-                    == "The file '{0}' has been generated with a joblib "
+                    str(w.message) == "The file '{0}' has been generated with a joblib "
                     "version less than 0.10. Please regenerate this "
                     "pickle file.".format(filename)
                 )
@@ -809,11 +808,12 @@ def test_file_handle_persistence_compressed_mmap(tmpdir):
         with warns(UserWarning) as warninfo:
             numpy_pickle.load(f, mmap_mode="r+")
         assert len(warninfo) == 1
-        assert (
-            str(warninfo[0].message)
-            == '"%(fileobj)r" is not a raw file, mmap_mode "%(mmap_mode)s" '
-            "flag will be ignored." % {"fileobj": f, "mmap_mode": "r+"}
-        )
+        assert str(
+            warninfo[0].message
+        ) == '"%(fileobj)r" is not a raw file, mmap_mode "%(mmap_mode)s" ' "flag will be ignored." % {
+            "fileobj": f,
+            "mmap_mode": "r+",
+        }
 
 
 @with_numpy

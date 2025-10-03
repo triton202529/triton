@@ -114,7 +114,7 @@ def logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False):
     axis = tuple(range(a.ndim)) if axis is None else axis
 
     if xp_size(a) != 0:
-        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             # Where result is infinite, we use the direct logsumexp calculation to
             # delegate edge case handling to the behavior of `xp.log` and `xp.exp`,
             # which should follow the C99 standard for complex values.
@@ -124,7 +124,7 @@ def logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False):
             sum_ = xp.abs(sum_) if return_sign else sum_
             out_inf = xp.log(sum_)
 
-        with np.errstate(divide='ignore', invalid='ignore'):  # log of zero is OK
+        with np.errstate(divide="ignore", invalid="ignore"):  # log of zero is OK
             out, sgn = _logsumexp(a, b, axis=axis, return_sign=return_sign, xp=xp)
 
         # Replace infinite results. This probably could be done with an
@@ -139,15 +139,15 @@ def logsumexp(a, axis=None, b=None, keepdims=False, return_sign=False):
         out = xp.full(tuple(shape), -xp.inf, dtype=a.dtype, device=xp_device(a))
         sgn = xp.sign(out)
 
-    if xp.isdtype(out.dtype, 'complex floating'):
+    if xp.isdtype(out.dtype, "complex floating"):
         if return_sign:
             real = xp.real(sgn)
             imag = xp_float_to_complex(_wrap_radians(xp.imag(sgn), xp=xp), xp=xp)
-            sgn = real + imag*1j
+            sgn = real + imag * 1j
         else:
             real = xp.real(out)
             imag = xp_float_to_complex(_wrap_radians(xp.imag(out), xp=xp), xp=xp)
-            out = real + imag*1j
+            out = real + imag * 1j
 
     # Deal with shape details - reducing dimensions and convert 0-D to scalar for NumPy
     out = xp.squeeze(out, axis=axis) if not keepdims else out
@@ -189,7 +189,7 @@ def _elements_and_indices_with_max_real(a, *, axis=-1, xp):
         i = xpx.at(i, ~mask).set(-1)
         max_i = xp.max(i, axis=axis, keepdims=True)
         mask = i == max_i
-        a = xp.where(mask, a, 0.)
+        a = xp.where(mask, a, 0.0)
         max_ = xp.sum(a, axis=axis, dtype=a.dtype, keepdims=True)
     else:
         max_ = xp.max(a, axis=axis, keepdims=True)
@@ -199,7 +199,7 @@ def _elements_and_indices_with_max_real(a, *, axis=-1, xp):
 
 
 def _sign(x, *, xp):
-    return x / xp.where(x == 0, 1., xp.abs(x))
+    return x / xp.where(x == 0, 1.0, xp.abs(x))
 
 
 def _logsumexp(a, b, *, axis, return_sign, xp):
@@ -224,7 +224,7 @@ def _logsumexp(a, b, *, axis, return_sign, xp):
     # Shift, exponentiate, scale, and sum
     exp = b * xp.exp(a - a_max) if b is not None else xp.exp(a - a_max)
     s = xp.sum(exp, axis=axis, keepdims=True, dtype=exp.dtype)
-    s = xp.where(s == 0, s, s/m)
+    s = xp.where(s == 0, s, s / m)
 
     # Separate sign/magnitude information
     # Originally, this was only performed if `return_sign=True`.
@@ -248,7 +248,7 @@ def _logsumexp(a, b, *, axis, return_sign, xp):
 
     if return_sign:
         out = xp.real(out)
-    elif xp.isdtype(out.dtype, 'real floating'):
+    elif xp.isdtype(out.dtype, "real floating"):
         out = xpx.at(out)[sgn < 0].set(xp.nan)
 
     return out, sgn
@@ -419,7 +419,7 @@ def log_softmax(x, axis=None):
     exp_tmp = xp.exp(tmp)
 
     # suppress warnings about log of zero
-    with np.errstate(divide='ignore'):
+    with np.errstate(divide="ignore"):
         s = xp.sum(exp_tmp, axis=axis, keepdims=True)
         out = xp.log(s)
 

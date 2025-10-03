@@ -704,12 +704,14 @@ class Angle(FieldChannelMixin, core.FieldOrDatumDefWithConditionMarkPropFieldDef
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Angle: ...
     @overload
@@ -1524,12 +1526,14 @@ class Color(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Color: ...
     @overload
@@ -2208,13 +2212,15 @@ class Column(FieldChannelMixin, core.RowColumnEncodingFieldDef):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | EncodingSortField
-        | Sequence[DateTime | Temporal]
-        | SortOrder_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | EncodingSortField
+            | Sequence[DateTime | Temporal]
+            | SortOrder_T
+            | None
+        ),
         /,
     ) -> Column: ...
     @overload
@@ -3332,13 +3338,15 @@ class Facet(FieldChannelMixin, core.FacetEncodingFieldDef):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | EncodingSortField
-        | Sequence[DateTime | Temporal]
-        | SortOrder_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | EncodingSortField
+            | Sequence[DateTime | Temporal]
+            | SortOrder_T
+            | None
+        ),
         /,
     ) -> Facet: ...
     @overload
@@ -3869,12 +3877,14 @@ class Fill(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Fill: ...
     @overload
@@ -4695,12 +4705,14 @@ class FillOpacity(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> FillOpacity: ...
     @overload
@@ -7513,12 +7525,14 @@ class Opacity(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Opacity: ...
     @overload
@@ -8514,12 +8528,14 @@ class Radius(FieldChannelMixin, core.PositionFieldDefBase):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Radius: ...
     @overload
@@ -9461,13 +9477,15 @@ class Row(FieldChannelMixin, core.RowColumnEncodingFieldDef):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | EncodingSortField
-        | Sequence[DateTime | Temporal]
-        | SortOrder_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | EncodingSortField
+            | Sequence[DateTime | Temporal]
+            | SortOrder_T
+            | None
+        ),
         /,
     ) -> Row: ...
     @overload
@@ -9990,12 +10008,14 @@ class Shape(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Shape: ...
     @overload
@@ -10808,12 +10828,14 @@ class Size(FieldChannelMixin, core.FieldOrDatumDefWithConditionMarkPropFieldDefn
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Size: ...
     @overload
@@ -11632,12 +11654,14 @@ class Stroke(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Stroke: ...
     @overload
@@ -12458,12 +12482,14 @@ class StrokeDash(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> StrokeDash: ...
     @overload
@@ -13283,12 +13309,14 @@ class StrokeOpacity(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> StrokeOpacity: ...
     @overload
@@ -14108,12 +14136,14 @@ class StrokeWidth(
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> StrokeWidth: ...
     @overload
@@ -15399,12 +15429,14 @@ class Theta(FieldChannelMixin, core.PositionFieldDefBase):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Theta: ...
     @overload
@@ -17399,12 +17431,14 @@ class X(FieldChannelMixin, core.PositionFieldDef):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> X: ...
     @overload
@@ -18863,12 +18897,14 @@ class XOffset(FieldChannelMixin, core.ScaleFieldDef):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> XOffset: ...
     @overload
@@ -19638,12 +19674,14 @@ class Y(FieldChannelMixin, core.PositionFieldDef):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> Y: ...
     @overload
@@ -21102,12 +21140,14 @@ class YOffset(FieldChannelMixin, core.ScaleFieldDef):
     @overload
     def sort(
         self,
-        _: Sequence[str]
-        | Sequence[bool]
-        | Sequence[float]
-        | Sequence[DateTime | Temporal]
-        | AllSortString_T
-        | None,
+        _: (
+            Sequence[str]
+            | Sequence[bool]
+            | Sequence[float]
+            | Sequence[DateTime | Temporal]
+            | AllSortString_T
+            | None
+        ),
         /,
     ) -> YOffset: ...
     @overload

@@ -1,6 +1,7 @@
 """
 Miscellaneous utils.
 """
+
 from numpy._core import asarray
 from numpy._core.numeric import normalize_axis_index, normalize_axis_tuple
 from numpy._utils import set_module
@@ -43,9 +44,9 @@ def byte_bounds(a):
 
     """
     ai = a.__array_interface__
-    a_data = ai['data'][0]
-    astrides = ai['strides']
-    ashape = ai['shape']
+    a_data = ai["data"][0]
+    astrides = ai["strides"]
+    ashape = ai["shape"]
     bytes_a = asarray(a).dtype.itemsize
 
     a_low = a_high = a_data

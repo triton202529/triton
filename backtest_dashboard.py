@@ -33,6 +33,7 @@ if {"symbol", "action", "actual_price", "predicted_price", "pnl"}.issubset(df.co
 
     # Plot strategy PnL
     import matplotlib.pyplot as plt
+
     pnl_by_date = df.groupby("date")["pnl"].sum().cumsum()
     fig, ax = plt.subplots()
     pnl_by_date.plot(ax=ax, label="Cumulative PnL")
@@ -45,6 +46,7 @@ if {"symbol", "action", "actual_price", "predicted_price", "pnl"}.issubset(df.co
 elif {"cumulative_pnl", "portfolio_value"}.issubset(df.columns):
     st.subheader("📈 Portfolio Growth Over Time")
     import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots()
     df["date"] = pd.to_datetime(df["date"])
     df.set_index("date")[["portfolio_value", "cumulative_pnl"]].plot(ax=ax)
@@ -54,4 +56,6 @@ elif {"cumulative_pnl", "portfolio_value"}.issubset(df.columns):
     st.pyplot(fig)
 
 else:
-    st.warning("⚠️ No recognized data columns. Ensure the file contains either portfolio or signal data.")
+    st.warning(
+        "⚠️ No recognized data columns. Ensure the file contains either portfolio or signal data."
+    )

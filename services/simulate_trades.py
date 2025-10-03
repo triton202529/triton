@@ -41,26 +41,43 @@ for _, row in df.iterrows():
             new_total_shares = shares_held + shares_to_buy
             avg_price = (shares_held * avg_price + shares_to_buy * price) / new_total_shares
             holdings[ticker] = (new_total_shares, avg_price)
-            trade_log.append({
-                "date": date, "ticker": ticker, "action": "BUY",
-                "shares": shares_to_buy, "price": price, "value": cost
-            })
+            trade_log.append(
+                {
+                    "date": date,
+                    "ticker": ticker,
+                    "action": "BUY",
+                    "shares": shares_to_buy,
+                    "price": price,
+                    "value": cost,
+                }
+            )
 
     elif signal == "SELL" and shares_held > 0:
         proceeds = shares_held * price
         cash += proceeds
-        trade_log.append({
-            "date": date, "ticker": ticker, "action": "SELL",
-            "shares": shares_held, "price": price, "value": proceeds
-        })
+        trade_log.append(
+            {
+                "date": date,
+                "ticker": ticker,
+                "action": "SELL",
+                "shares": shares_held,
+                "price": price,
+                "value": proceeds,
+            }
+        )
         holdings.pop(ticker)
 
     # Portfolio snapshot
     market_value = sum(sh * price for tkr, (sh, _) in holdings.items() if tkr == ticker)
     total_value = cash + market_value
-    portfolio_history.append({
-        "date": date, "cash": cash, "market_value": market_value, "total_value": total_value
-    })
+    portfolio_history.append(
+        {
+            "date": date,
+            "cash": cash,
+            "market_value": market_value,
+            "total_value": total_value,
+        }
+    )
 
 # Save results
 os.makedirs("data/results", exist_ok=True)

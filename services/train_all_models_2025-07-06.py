@@ -22,7 +22,7 @@ for filename in os.listdir(data_dir):
             # 🔍 Try to detect correct close column
             close_column = None
             for col in df.columns:
-                if col.strip().lower() in ['close', 'adj close']:
+                if col.strip().lower() in ["close", "adj close"]:
                     close_column = col
                     break
 
@@ -32,19 +32,19 @@ for filename in os.listdir(data_dir):
 
             # Normalize column and ensure it's numeric
             df = df[[close_column]].copy()
-            df.rename(columns={close_column: 'close'}, inplace=True)
-            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df.rename(columns={close_column: "close"}, inplace=True)
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
 
             # Drop rows with non-numeric close values
             df.dropna(inplace=True)
 
             # Compute return and target
-            df['return'] = df['close'].pct_change()
-            df['target'] = df['return'].shift(-1)
+            df["return"] = df["close"].pct_change()
+            df["target"] = df["return"].shift(-1)
             df.dropna(inplace=True)
 
-            X = df[['return']]
-            y = df['target']
+            X = df[["return"]]
+            y = df["target"]
 
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
@@ -55,7 +55,7 @@ for filename in os.listdir(data_dir):
             mse = mean_squared_error(y_test, y_pred)
 
             result_file = os.path.join(model_dir, filename.replace(".csv", "_mse.txt"))
-            with open(result_file, 'w') as f:
+            with open(result_file, "w") as f:
                 f.write(f"Mean Squared Error: {mse:.6f}\n")
                 f.write(f"Trained on: {filename}\n")
                 f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

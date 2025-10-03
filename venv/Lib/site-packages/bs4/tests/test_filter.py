@@ -460,7 +460,11 @@ class TestSoupStrainer(SoupTest):
 
         with warnings.catch_warnings(record=True) as w:
             rules = SoupStrainer._make_match_rules(["a", selfref, "b"], MatchRule)
-            assert list(rules) == [MatchRule(string="a"), MatchRule(exclude_everything=True), MatchRule(string="b")]
+            assert list(rules) == [
+                MatchRule(string="a"),
+                MatchRule(exclude_everything=True),
+                MatchRule(string="b"),
+            ]
 
             [warning] = w
             # Don't check the filename because the stacklevel is
