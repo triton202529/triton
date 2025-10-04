@@ -1,0 +1,104 @@
+﻿name: baseline-pr
+
+on:
+  schedule:
+    - cron: "0 13 * * 1-5"   # weekdays 13:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: baseline-pr
+  cancel-in-progress: true
+
+jobs:
+  rebuild-and-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy
+
+      - name: Save previous weights
+        run: |
+          mkdir -p tmp
+          cp data/results/baseline/weights.csv tmp/prev_weights.csv
+
+      - name: Build baseline
+        run: >
+          python scripts/build_baseline.py
+          --method cap --top 20
+          --max-weight 0.125 --min-weight 0.0005
+          --fund-whitelist BITO GBTC GLD ARKK DIA DBA
+          --turnover-cap 0.05
+
+      - name: Validate
+        run: python scripts/validate_baseline.py --path data/results/baseline/weights.csv
+
+      - name: Audit + enforce thresholds
+        run: |
+          python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10 | tee audit.txt
+          python scripts/audit_enforce.py --path data/results/baseline/weights.csv --max 0.1255 --eff-n-min 9.0
+
+      - name: Build diff markdown for PR
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pandas as pd, pathlib
+          prev = pd.read_csv("tmp/prev_weights.csv")
+          new  = pd.read_csv("data/results/baseline/weights.csv")
+          p = prev.set_index("ticker")["target_weight"]
+          n = new.set_index("ticker")["target_weight"]
+          all_t = sorted(set(p.index) | set(n.index))
+          rows=[]
+          for t in all_t:
+              old = float(p.get(t, 0.0))
+              neww= float(n.get(t, 0.0))
+              rows.append((t, old, neww, neww-old))
+          df = pd.DataFrame(rows, columns=["ticker","old","new","delta"]).sort_values("delta", key=abs, ascending=False)
+          df.to_csv("baseline_diff.csv", index=False, float_format="%.6f")
+          top = df.head(20).copy()
+          def f(x): return f"{x:.4%}"
+          md=["# Baseline auto-update", "", "## Top 20 weight changes", "",
+              "| ticker | old | new | delta |", "|---|---:|---:|---:|"]
+          for _,r in top.iterrows():
+              md.append(f"| {r.ticker} | {f(r.old)} | {f(r.new)} | {f(r.delta)} |")
+          pathlib.Path("PR_BODY.md").write_text("\n".join(md))
+          PY
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "Baseline: auto-rebuild"
+          branch: "ci/baseline-${{ github.run_id }}"
+          commit-message: "baseline: auto-update"
+          add-paths: |
+            data/results/baseline/weights.csv
+          body-path: PR_BODY.md
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-pr-assets
+          path: |
+            data/results/baseline/weights.csv
+            baseline_diff.csv
+            audit.txt
