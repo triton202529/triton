@@ -1,5 +1,10 @@
 # ===== Generated data & artifacts =====
 /data/results/*
+!/data/results/baseline/
+# Ignore timestamped/backups but keep the live baseline file
+/data/results/baseline/weights.*.csv
+!/data/results/baseline/weights.csv
+
 /data/predictions/*
 /data/orders/*
 /data/run/*
@@ -10,7 +15,7 @@
 /logs/*
 *.log
 
-# If you ever need to keep empty folders:
+# Keep empty folders when needed
 !**/.gitkeep
 
 # ===== Python caches =====
@@ -25,9 +30,9 @@
 .ipynb_checkpoints/
 
 # ===== Virtual environments =====
-/venv/
-/.venv/
-/env/
+venv/
+.venv/
+env/
 
 # ===== Local secrets & machine-specific config =====
 /config/*.json
@@ -48,9 +53,8 @@ Thumbs.db
 .idea/
 .vscode/
 
-venv/
-.venv/
-
-weird-copy/
-
+# ===== Tool caches =====
 .pre-commit-cache/
+
+# ===== Project-specific =====
+weird-copy/
