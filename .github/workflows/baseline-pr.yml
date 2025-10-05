@@ -16,15 +16,11 @@ concurrency:
 jobs:
   rebuild-and-pr:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,30 +33,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Show runner & Python versions
+      - name: Versions
         run: |
-          echo "Python: $(python --version)"
-          echo "Pip:    $(pip --version)"
           python - <<'PY'
-          import sys, platform, importlib
-          pkgs = ["numpy","pandas","requests"]
-          print("Platform:", platform.platform())
-          for p in pkgs:
-              try:
-                  m = importlib.import_module(p)
-                  print(f"{p}:", getattr(m, "__version__", "unknown"))
-              except Exception as e:
-                  print(f"{p}: not installed ({e})")
+          import sys, numpy, pandas, requests
+          print("PY:", sys.version.replace("\n"," "))
+          print("numpy:", numpy.__version__)
+          print("pandas:", pandas.__version__)
+          print("requests:", requests.__version__)
           PY
-
-      - name: Sanity checks (git dir, required files)
-        run: |
-          echo "Repo root: $(pwd)"
-          ls -la
-          test -f scripts/build_baseline.py
-          test -f scripts/validate_baseline.py
-          test -f scripts/audit_baseline.py
-          test -f scripts/audit_enforce.py
 
       - name: Save previous weights (if any)
         shell: bash
@@ -83,14 +64,7 @@ jobs:
         shell: bash
         run: |
           python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10 | tee audit.txt
-          # Guardrails (aligned with baseline.yml)
-          python scripts/audit_enforce.py \
-            --path data/results/baseline/weights.csv \
-            --max-weight 0.1251 \
-            --min-weight 0.0005 \
-            --max-hhi 0.1005 \
-            --min-entropy 2.45 \
-            --min-effn 10.0
+          python scripts/audit_enforce.py --path data/results/baseline/weights.csv --max-weight 0.1251 --min-weight 0.0005 --max-hhi 0.1005 --min-entropy 2.45 --min-effn 10.0
 
       - name: Build diff markdown for PR
         shell: bash
@@ -98,40 +72,18 @@ jobs:
           python - <<'PY'
           import pandas as pd, pathlib
           from pathlib import Path
-
           prev_path = Path("tmp/prev_weights.csv")
           new = pd.read_csv("data/results/baseline/weights.csv")
-
-          if prev_path.exists():
-              prev = pd.read_csv(prev_path)
-              p = prev.set_index("ticker")["target_weight"]
-          else:
-              p = pd.Series(dtype=float)
-
+          p = pd.read_csv(prev_path).set_index("ticker")["target_weight"] if prev_path.exists() else pd.Series(dtype=float)
           n = new.set_index("ticker")["target_weight"]
           all_t = sorted(set(p.index) | set(n.index))
-
-          rows=[]
-          for t in all_t:
-              old = float(p.get(t, 0.0))
-              newv= float(n.get(t, 0.0))
-              rows.append((t, old, newv, newv-old))
-
-          df = pd.DataFrame(rows, columns=["ticker","old","new","delta"]).sort_values("delta", key=abs, ascending=False)
+          rows=[(t, float(p.get(t, 0.0)), float(n.get(t, 0.0))) for t in all_t]
+          df = pd.DataFrame([(t,o,nw,nw-o) for t,o,nw in rows], columns=["ticker","old","new","delta"]).sort_values("delta", key=abs, ascending=False)
           df.to_csv("baseline_diff.csv", index=False, float_format="%.6f")
-
           top = df.head(20).copy()
           pct = lambda x: f"{x:.4%}"
-          md = [
-              "# Baseline auto-update",
-              "",
-              "## Top 20 weight changes",
-              "",
-              "| ticker | old | new | delta |",
-              "|---|---:|---:|---:|",
-          ]
-          for _, r in top.iterrows():
-              md.append(f"| {r.ticker} | {pct(r.old)} | {pct(r.new)} | {pct(r.delta)} |")
+          md = ["# Baseline auto-update","","## Top 20 weight changes","","| ticker | old | new | delta |","|---|---:|---:|---:|"]
+          md += [f"| {r.ticker} | {pct(r.old)} | {pct(r.new)} | {pct(r.delta)} |" for _, r in top.iterrows()]
           pathlib.Path("PR_BODY.md").write_text("\n".join(md))
           PY
 
