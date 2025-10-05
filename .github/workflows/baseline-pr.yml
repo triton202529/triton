@@ -1,4 +1,4 @@
-﻿name: baseline-pr
+name: baseline-pr
 
 on:
   schedule:
