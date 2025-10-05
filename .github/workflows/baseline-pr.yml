@@ -36,20 +36,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Show lib versions
+      - name: Show versions
         run: |
           python - <<'PY'
-          import sys, numpy, pandas
+          import sys, platform, numpy, pandas, requests
           print("Python:", sys.version.replace("\n"," "))
-          print("NumPy :", numpy.__version__)
-          print("Pandas:", pandas.__version__)
+          print("Platform:", platform.platform())
+          print("numpy:", numpy.__version__)
+          print("pandas:", pandas.__version__)
+          print("requests:", requests.__version__)
           PY
 
       - name: Save previous weights (if any)
         shell: bash
         run: |
           mkdir -p tmp
-          test -f data/results/baseline/weights.csv && cp data/results/baseline/weights.csv tmp/prev_weights.csv || true
+          test -f data/results/baseline/weights.csv && \
+            cp data/results/baseline/weights.csv tmp/prev_weights.csv || true
 
       - name: Build baseline
         run: >
@@ -66,8 +69,14 @@ jobs:
         shell: bash
         run: |
           python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10 | tee audit.txt
-          # Guardrails: adjust as desired
-          python scripts/audit_enforce.py --path data/results/baseline/weights.csv --max 0.1255 --eff-n-min 9.0
+          # Guardrails — align with the push workflow
+          python scripts/audit_enforce.py \
+            --path data/results/baseline/weights.csv \
+            --max-weight 0.1251 \
+            --min-weight 0.0005 \
+            --max-hhi 0.1005 \
+            --min-entropy 2.45 \
+            --min-effn 10.0
 
       - name: Build diff markdown for PR
         shell: bash
@@ -78,26 +87,16 @@ jobs:
 
           prev_path = Path("tmp/prev_weights.csv")
           new = pd.read_csv("data/results/baseline/weights.csv")
-
-          if prev_path.exists():
-              prev = pd.read_csv(prev_path)
-              p = prev.set_index("ticker")["target_weight"]
-          else:
-              p = pd.Series(dtype=float)
-
+          p = pd.Series(dtype=float) if not prev_path.exists() else pd.read_csv(prev_path).set_index("ticker")["target_weight"]
           n = new.set_index("ticker")["target_weight"]
+
           all_t = sorted(set(p.index) | set(n.index))
-
-          rows=[]
-          for t in all_t:
-              old = float(p.get(t, 0.0))
-              newv= float(n.get(t, 0.0))
-              rows.append((t, old, newv, newv-old))
-
-          df = pd.DataFrame(rows, columns=["ticker","old","new","delta"]).sort_values("delta", key=abs, ascending=False)
+          rows = [(t, float(p.get(t, 0.0)), float(n.get(t, 0.0))) for t in all_t]
+          df = pd.DataFrame(rows, columns=["ticker","old","new"])
+          df["delta"] = df["new"] - df["old"]
+          df = df.sort_values("delta", key=abs, ascending=False)
           df.to_csv("baseline_diff.csv", index=False, float_format="%.6f")
 
-          top = df.head(20).copy()
           def pct(x): return f"{x:.4%}"
           md = [
               "# Baseline auto-update",
@@ -107,7 +106,7 @@ jobs:
               "| ticker | old | new | delta |",
               "|---|---:|---:|---:|",
           ]
-          for _, r in top.iterrows():
+          for _, r in df.head(20).iterrows():
               md.append(f"| {r.ticker} | {pct(r.old)} | {pct(r.new)} | {pct(r.delta)} |")
           pathlib.Path("PR_BODY.md").write_text("\n".join(md))
           PY
