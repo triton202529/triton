@@ -2,7 +2,7 @@ name: baseline-pr
 
 on:
   schedule:
-    - cron: "0 13 * * 1-5"
+    - cron: "0 13 * * 1-5"   # weekdays 13:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -117,4 +117,3 @@ jobs:
             data/results/baseline/weights.csv
             baseline_diff.csv
             audit.txt
-# noop
