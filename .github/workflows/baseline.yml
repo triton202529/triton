@@ -1,13 +1,30 @@
-﻿jobs:
+﻿name: baseline
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    # Weekdays at 13:00 UTC
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch:
+
+jobs:
   build-validate:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # prevent git 128 “unsafe repo” annoyances
-      - name: Mark workspace safe
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Show runner & Python versions
+        run: |
+          uname -a || true
+          which python3 || true
+          python3 --version || true
+          python -V || true
+          pip --version || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -17,18 +34,26 @@
 
       - name: Install deps
         run: |
-          python -V
-          pip -V
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip check || true   # show dependency issues without failing the job yet
           python - <<'PY'
-          import sys, numpy as np, pandas as pd
-          print("python:", sys.version.split()[0])
-          print("numpy :", np.__version__)
-          print("pandas:", pd.__version__)
+          import sys, numpy, pandas, requests
+          print("PY:", sys.version.replace("\n"," "))
+          print("numpy:", numpy.__version__)
+          print("pandas:", pandas.__version__)
+          print("requests:", requests.__version__)
           PY
 
+      - name: Sanity checks (git dir, required files)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          test -f scripts/build_baseline.py
+          test -f scripts/validate_baseline.py
+          test -f scripts/audit_baseline.py
+          echo "repo OK"
+
       - name: Build baseline (capture preview)
+        # Folded style: newlines become spaces; tee saves a copy
         run: >
           python scripts/build_baseline.py
           --method cap --top 20
@@ -54,6 +79,7 @@
           --min-effn 10.0
 
       - name: Upload preview artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: baseline-preview
