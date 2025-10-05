@@ -6,8 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Weekdays at 13:00 UTC
-    - cron: "0 13 * * 1-5"
+    - cron: "0 13 * * 1-5" # Weekdays at 13:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -27,10 +26,18 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy
+          pip install -r requirements.txt
+
+      - name: Show lib versions
+        run: |
+          python - <<'PY'
+          import sys, numpy, pandas
+          print("Python:", sys.version.replace("\n"," "))
+          print("NumPy :", numpy.__version__)
+          print("Pandas:", pandas.__version__)
+          PY
 
       - name: Build baseline (capture preview)
-        # Folded style: newlines become spaces; tee saves a copy
         run: >
           python scripts/build_baseline.py
           --method cap --top 20
@@ -49,11 +56,11 @@ jobs:
         run: >
           python scripts/audit_enforce.py
           --path data/results/baseline/weights.csv
-          --max-weight 0.1251
-          --min-weight 0.0005
-          --max-hhi 0.1005
-          --min-entropy 2.45
-          --min-effn 10.0
+          --max 0.1251
+          --min 0.0005
+          --hhi-max 0.1005
+          --entropy-min 2.45
+          --eff-n-min 10.0
 
       - name: Upload preview artifact
         uses: actions/upload-artifact@v4

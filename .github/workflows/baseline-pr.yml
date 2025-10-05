@@ -34,7 +34,16 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy
+          pip install -r requirements.txt
+
+      - name: Show lib versions
+        run: |
+          python - <<'PY'
+          import sys, numpy, pandas
+          print("Python:", sys.version.replace("\n"," "))
+          print("NumPy :", numpy.__version__)
+          print("Pandas:", pandas.__version__)
+          PY
 
       - name: Save previous weights (if any)
         shell: bash
@@ -58,7 +67,7 @@ jobs:
         run: |
           python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10 | tee audit.txt
           # Guardrails: adjust as desired
-          python scripts/audit_enforce.py --path data/results/baseline/weights.csv --hhi-max 0.11 --effn-min 9.0
+          python scripts/audit_enforce.py --path data/results/baseline/weights.csv --max 0.1255 --eff-n-min 9.0
 
       - name: Build diff markdown for PR
         shell: bash
@@ -89,7 +98,7 @@ jobs:
           df.to_csv("baseline_diff.csv", index=False, float_format="%.6f")
 
           top = df.head(20).copy()
-          pct = lambda x: f"{x:.4%}"
+          def pct(x): return f"{x:.4%}"
           md = [
               "# Baseline auto-update",
               "",
