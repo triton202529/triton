@@ -1,4 +1,4 @@
-﻿name: baseline-pr
+# paste the YAML above here (entire block), nothing elsename: baseline-pr
 
 on:
   schedule:
@@ -18,6 +18,8 @@ concurrency:
 
 defaults:
   run:
+    shell: bash
+
 jobs:
   register:
     if: ${{ github.event_name == 'push' }}
@@ -123,8 +125,7 @@ jobs:
             data/results/baseline/weights.csv
           body-path: PR_BODY.md
           labels: |
-            baseline
-            automerge
+            baseline, automerge
           delete-branch: true
           if-no-files-changed: skip
 
@@ -140,10 +141,9 @@ jobs:
         if: ${{ steps.data.outputs.ok != 'true' }}
         run: |
           echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
-          echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
 
       - name: Upload artifacts
-        if: always()
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: baseline-pr-assets
