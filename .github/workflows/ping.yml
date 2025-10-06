@@ -1,4 +1,4 @@
-﻿name: ping
+name: ping
 on: { workflow_dispatch: {} }
 jobs:
   t:
