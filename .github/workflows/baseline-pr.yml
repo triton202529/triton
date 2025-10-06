@@ -140,6 +140,7 @@ jobs:
         if: ${{ steps.data.outputs.ok != 'true' }}
         run: |
           echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
+          echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
 
       - name: Upload artifacts
         if: always()
