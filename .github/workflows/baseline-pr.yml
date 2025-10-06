@@ -1,4 +1,4 @@
-name: baseline-pr
+﻿name: baseline-pr
 
 on:
   schedule:
@@ -16,15 +16,17 @@ concurrency:
   group: baseline-pr
   cancel-in-progress: true
 
+defaults:
+  run:
 jobs:
   register:
-    if: github.event_name == 'push'
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'registering baseline-pr on push'
+      - run: echo "registering baseline-pr on push"
 
   rebuild-and-pr:
-    if: github.event_name != 'push'
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,7 +46,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Versions
-        shell: bash
         run: |
           python - <<'PY'
           import sys, numpy, pandas, requests
@@ -55,14 +56,12 @@ jobs:
           PY
 
       - name: Save previous weights (if any)
-        shell: bash
         run: |
           mkdir -p tmp
           test -f data/results/baseline/weights.csv && cp data/results/baseline/weights.csv tmp/prev_weights.csv || true
 
       - name: Check data prerequisites
         id: data
-        shell: bash
         run: |
           set -euo pipefail
           if [[ -f data/results/market_by_ticker.csv ]]; then
@@ -73,7 +72,7 @@ jobs:
           fi
 
       - name: Build baseline
-        if: steps.data.outputs.ok == 'true'
+        if: ${{ steps.data.outputs.ok == 'true' }}
         run: >
           python scripts/build_baseline.py
           --method cap --top 20
@@ -82,19 +81,17 @@ jobs:
           --turnover-cap 0.05
 
       - name: Validate
-        if: steps.data.outputs.ok == 'true'
+        if: ${{ steps.data.outputs.ok == 'true' }}
         run: python scripts/validate_baseline.py --path data/results/baseline/weights.csv
 
       - name: Audit + enforce thresholds
-        if: steps.data.outputs.ok == 'true'
-        shell: bash
+        if: ${{ steps.data.outputs.ok == 'true' }}
         run: |
           python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10 | tee audit.txt
           python scripts/audit_enforce.py --path data/results/baseline/weights.csv --max-weight 0.1251 --min-weight 0.0005 --max-hhi 0.1005 --min-entropy 2.45 --min-effn 10.0
 
       - name: Build diff markdown for PR
-        if: steps.data.outputs.ok == 'true'
-        shell: bash
+        if: ${{ steps.data.outputs.ok == 'true' }}
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -115,7 +112,7 @@ jobs:
           PY
 
       - name: Create PR
-        if: steps.data.outputs.ok == 'true'
+        if: ${{ steps.data.outputs.ok == 'true' }}
         id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
@@ -125,12 +122,14 @@ jobs:
           add-paths: |
             data/results/baseline/weights.csv
           body-path: PR_BODY.md
-          labels: baseline, automerge
+          labels: |
+            baseline
+            automerge
           delete-branch: true
           if-no-files-changed: skip
 
       - name: Enable auto-merge
-        if: steps.data.outputs.ok == 'true' && steps.cpr.outputs.pull-request-number != ''
+        if: ${{ steps.data.outputs.ok == 'true' && steps.cpr.outputs.pull-request-number != '' }}
         continue-on-error: true
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
@@ -138,8 +137,7 @@ jobs:
           merge-method: squash
 
       - name: No-op (no data)
-        if: steps.data.outputs.ok != 'true'
-        shell: bash
+        if: ${{ steps.data.outputs.ok != 'true' }}
         run: |
           echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
 
