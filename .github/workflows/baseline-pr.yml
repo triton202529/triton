@@ -146,12 +146,22 @@ jobs:
         if: ${{ steps.data.outputs.ok != 'true' }}
         run: |
           echo "No rebuild: data/results/market_by_ticker.csv not found" > noop.txt
+      - name: Debug artifacts dir
+        if: ${{ always() }}
+        run: |
+          pwd
+          ls -al
+          ls -al artifacts || true
+          find . -maxdepth 3 -type f -name "noop.txt" || true
+
       - name: Upload artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: baseline-pr-assets
           path: |
+            artifacts/noop.txt
+            artifacts/**
             artifacts/**
             data/results/baseline/weights.csv
             baseline_diff.csv
