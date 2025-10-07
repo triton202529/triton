@@ -1,4 +1,4 @@
-﻿name: baseline-pr
+name: baseline-pr
 
 on:
   schedule:
@@ -142,9 +142,12 @@ jobs:
         if: ${{ steps.data.outputs.ok != 'true' }}
         run: |
           echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
-
+      - name: Ensure artifact on no-op
+        if: ${{ steps.data.outputs.ok != 'true' }}
+        run: |
+          echo "No rebuild: data/results/market_by_ticker.csv not found" > noop.txt
       - name: Upload artifacts
-        if: ${{ steps.data.outputs.ok == 'true' }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: baseline-pr-assets
@@ -152,4 +155,5 @@ jobs:
             data/results/baseline/weights.csv
             baseline_diff.csv
             audit.txt
+            noop.txt
           if-no-files-found: warn
