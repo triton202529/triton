@@ -152,8 +152,8 @@ jobs:
         with:
           name: baseline-pr-assets
           path: |
+            artifacts/**
             data/results/baseline/weights.csv
             baseline_diff.csv
             audit.txt
-            noop.txt
           if-no-files-found: warn
