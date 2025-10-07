@@ -1,4 +1,4 @@
-# paste the YAML above here (entire block), nothing elsename: baseline-pr
+﻿name: baseline-pr
 
 on:
   schedule:
@@ -125,7 +125,8 @@ jobs:
             data/results/baseline/weights.csv
           body-path: PR_BODY.md
           labels: |
-            baseline, automerge
+            baseline
+            automerge
           delete-branch: true
           if-no-files-changed: skip
 
@@ -143,7 +144,7 @@ jobs:
           echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
 
       - name: Upload artifacts
-        if: ${{ always() }}
+        if: ${{ steps.data.outputs.ok == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: baseline-pr-assets
