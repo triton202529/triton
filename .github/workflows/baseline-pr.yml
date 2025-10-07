@@ -57,6 +57,17 @@ jobs:
           print("requests:", requests.__version__)
           PY
 
+      # ⬇️ Pull universe CSV produced by baseline.yml (extract to repo root)
+      - name: Download universe CSV from baseline
+        continue-on-error: true
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: baseline.yml
+          workflow_conclusion: success
+          name: universe-csv
+          path: .           # extract with original path -> data/results/market_by_ticker.csv
+          branch: main
+
       - name: Save previous weights (if any)
         run: |
           mkdir -p tmp
@@ -138,31 +149,12 @@ jobs:
           pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
           merge-method: squash
 
-      - name: No-op (no data)
-        if: ${{ steps.data.outputs.ok != 'true' }}
-        run: |
-          echo "Skipping rebuild: data/results/market_by_ticker.csv not found"
-      - name: Ensure artifact on no-op
-        if: ${{ steps.data.outputs.ok != 'true' }}
-        run: |
-          echo "No rebuild: data/results/market_by_ticker.csv not found" > noop.txt
-      - name: Debug artifacts dir
-        if: ${{ always() }}
-        run: |
-          pwd
-          ls -al
-          ls -al artifacts || true
-          find . -maxdepth 3 -type f -name "noop.txt" || true
-
       - name: Upload artifacts
-        if: ${{ always() }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: baseline-pr-assets
           path: |
-            artifacts/noop.txt
-            artifacts/**
-            artifacts/**
             data/results/baseline/weights.csv
             baseline_diff.csv
             audit.txt
