@@ -58,3 +58,7 @@ Thumbs.db
 
 # ===== Project-specific =====
 weird-copy/
+out/
+data/results/baseline/*.csv
+!data/results/baseline/weights.csv
+data/results/baseline/diffs/
