@@ -1,64 +1,8 @@
-# ===== Generated data & artifacts =====
-/data/results/*
-!/data/results/baseline/
-# Ignore timestamped/backups but keep the live baseline file
-/data/results/baseline/weights.*.csv
-!/data/results/baseline/weights.csv
-
-/data/predictions/*
-/data/orders/*
-/data/run/*
-/data/processed/*
-/data/raw/*
-/data/parquet/*
-/data/logs/*
-/logs/*
-*.log
-
-# Keep empty folders when needed
-!**/.gitkeep
-
-# ===== Python caches =====
-**/__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.cache/
-.ipynb_checkpoints/
-
-# ===== Virtual environments =====
-venv/
-.venv/
-env/
-
-# ===== Local secrets & machine-specific config =====
-/config/*.json
-/config/*.yaml
-/config/*.yml
-/config/*.txt
-/config/*.csv
-/data/secrets/
-overrides.json
-risk.json
-
-# Keep the shared baseline config under version control
-!config/baseline.smart_weight.json
-
-# ===== OS / editor junk =====
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
-
-# ===== Tool caches =====
-.pre-commit-cache/
-
-# ===== Project-specific =====
+﻿# Local scratch
+/out/
 weird-copy/
-out/
-data/results/baseline/*.csv
-!data/results/baseline/weights.csv
-data/results/baseline/diffs/
+
+# Baseline result dumps (keep the committed canonical weights.csv)
+/data/results/baseline/*.csv
+!/data/results/baseline/weights.csv
+/data/results/baseline/diffs/
