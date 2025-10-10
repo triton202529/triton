@@ -30,6 +30,7 @@ jobs:
   rebuild-and-pr:
     if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,16 +58,23 @@ jobs:
           print("requests:", requests.__version__)
           PY
 
-      # ⬇️ Pull universe CSV produced by baseline.yml (extract to repo root)
       - name: Download universe CSV from baseline
-        continue-on-error: true
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: baseline.yml
-          workflow_conclusion: success
-          name: universe-csv
-          path: .           # extract with original path -> data/results/market_by_ticker.csv
-          branch: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          wf=".github/workflows/baseline.yml"
+          rid="$(gh run list --workflow "$wf" --json databaseId,status,conclusion,createdAt \
+                 --jq '[.[] | select(.status=="completed" and .conclusion=="success")][0].databaseId')"
+          echo "==> Baseline RID: ${rid:-<none>}"
+          if [[ -z "${rid:-}" ]]; then
+            echo "::error::No successful baseline run found"; exit 1
+          fi
+          gh run download "$rid" --name universe-csv -D .
+          mkdir -p data/results
+          # artifact contains market_by_ticker.csv at root
+          mv market_by_ticker.csv data/results/market_by_ticker.csv
+          ls -al data/results/market_by_ticker.csv
 
       - name: Save previous weights (if any)
         run: |
@@ -101,7 +109,8 @@ jobs:
         if: ${{ steps.data.outputs.ok == 'true' }}
         run: |
           python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10 | tee audit.txt
-          python scripts/audit_enforce.py --path data/results/baseline/weights.csv --max-weight 0.1251 --min-weight 0.0005 --max-hhi 0.1005 --min-entropy 2.45 --min-effn 10.0
+          python scripts/audit_enforce.py --path data/results/baseline/weights.csv \
+            --max-weight 0.1251 --min-weight 0.0005 --max-hhi 0.1005 --min-entropy 2.45 --min-effn 10.0
 
       - name: Build diff markdown for PR
         if: ${{ steps.data.outputs.ok == 'true' }}
@@ -113,9 +122,10 @@ jobs:
           new = pd.read_csv("data/results/baseline/weights.csv")
           p = pd.read_csv(prev_path).set_index("ticker")["target_weight"] if prev_path.exists() else pd.Series(dtype=float)
           n = new.set_index("ticker")["target_weight"]
-          all_t = sorted(set(p.index) | set(n.index))
-          rows=[(t, float(p.get(t, 0.0)), float(n.get(t, 0.0))) for t in all_t]
-          df = pd.DataFrame([(t,o,nw,nw-o) for t,o,nw in rows], columns=["ticker","old","new","delta"]).sort_values("delta", key=abs, ascending=False)
+          tickers = sorted(set(p.index) | set(n.index))
+          rows = [(t, float(p.get(t, 0.0)), float(n.get(t, 0.0))) for t in tickers]
+          df = pd.DataFrame([(t, o, nw, nw - o) for t, o, nw in rows], columns=["ticker","old","new","delta"]) \
+                 .sort_values("delta", key=abs, ascending=False)
           df.to_csv("baseline_diff.csv", index=False, float_format="%.6f")
           top = df.head(20).copy()
           pct = lambda x: f"{x:.4%}"
@@ -139,7 +149,6 @@ jobs:
             baseline
             automerge
           delete-branch: true
-          if-no-files-changed: skip
 
       - name: Enable auto-merge
         if: ${{ steps.data.outputs.ok == 'true' && steps.cpr.outputs.pull-request-number != '' }}
@@ -150,7 +159,7 @@ jobs:
           merge-method: squash
 
       - name: Upload artifacts
-        if: always()
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: baseline-pr-assets

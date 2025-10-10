@@ -53,7 +53,6 @@ jobs:
           echo "repo OK"
 
       - name: Build baseline (capture preview)
-        # Folded style: newlines become spaces; tee saves a copy
         run: >
           python scripts/build_baseline.py
           --method cap --top 20
@@ -78,14 +77,14 @@ jobs:
           --min-entropy 2.45
           --min-effn 10.0
 
-      # ⬇️ Publish the universe CSV for baseline-pr to consume (only if present)
+      # Publish the current universe file so baseline-pr can consume it
       - name: Upload universe CSV
-        if: ${{ hashFiles('data/results/market_by_ticker.csv') != '' }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: universe-csv
           path: data/results/market_by_ticker.csv
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload preview artifact
         if: always()
