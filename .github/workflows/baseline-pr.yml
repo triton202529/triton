@@ -2,7 +2,7 @@ name: baseline-pr
 
 on:
   schedule:
-    - cron: "0 13 * * 1-5"
+    - cron: "0 13 * * 1-5"   # Weekdays 09:00 ET
   workflow_dispatch:
   push:
     paths:
@@ -45,6 +45,7 @@ jobs:
 
       - name: Install deps
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -65,9 +66,9 @@ jobs:
           set -euo pipefail
           wf=".github/workflows/baseline.yml"
           rid="$(gh run list --workflow "$wf" --json databaseId,status,conclusion,createdAt \
-                 --jq '[.[] | select(.status=="completed" and .conclusion=="success")][0].databaseId')"
+                 --jq '[.[] | select(.status=="completed" and .conclusion=="success")][0].databaseId' | tr -d '\r\n')"
           echo "==> Baseline RID: ${rid:-<none>}"
-          if [[ -z "${rid:-}" ]]; then
+          if [[ -z "${rid:-}" || "${rid}" == "null" ]]; then
             echo "::error::No successful baseline run found"; exit 1
           fi
           gh run download "$rid" --name universe-csv -D .
@@ -75,11 +76,6 @@ jobs:
           # artifact contains market_by_ticker.csv at root
           mv market_by_ticker.csv data/results/market_by_ticker.csv
           ls -al data/results/market_by_ticker.csv
-
-      - name: Save previous weights (if any)
-        run: |
-          mkdir -p tmp
-          test -f data/results/baseline/weights.csv && cp data/results/baseline/weights.csv tmp/prev_weights.csv || true
 
       - name: Check data prerequisites
         id: data
@@ -108,31 +104,28 @@ jobs:
       - name: Audit + enforce thresholds
         if: ${{ steps.data.outputs.ok == 'true' }}
         run: |
+          set -euo pipefail
           python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10 | tee audit.txt
           python scripts/audit_enforce.py --path data/results/baseline/weights.csv \
             --max-weight 0.1251 --min-weight 0.0005 --max-hhi 0.1005 --min-entropy 2.45 --min-effn 10.0
 
-      - name: Build diff markdown for PR
+      # Use PowerShell audit to generate SUMMARY.md and a CSV diff for the PR body
+      - name: Audit baseline & prepare PR body
         if: ${{ steps.data.outputs.ok == 'true' }}
+        shell: pwsh
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import pandas as pd
-          prev_path = Path("tmp/prev_weights.csv")
-          new = pd.read_csv("data/results/baseline/weights.csv")
-          p = pd.read_csv(prev_path).set_index("ticker")["target_weight"] if prev_path.exists() else pd.Series(dtype=float)
-          n = new.set_index("ticker")["target_weight"]
-          tickers = sorted(set(p.index) | set(n.index))
-          rows = [(t, float(p.get(t, 0.0)), float(n.get(t, 0.0))) for t in tickers]
-          df = pd.DataFrame([(t, o, nw, nw - o) for t, o, nw in rows], columns=["ticker","old","new","delta"]) \
-                 .sort_values("delta", key=abs, ascending=False)
-          df.to_csv("baseline_diff.csv", index=False, float_format="%.6f")
-          top = df.head(20).copy()
-          pct = lambda x: f"{x:.4%}"
-          md = ["# Baseline auto-update","","## Top 20 weight changes","","| ticker | old | new | delta |","|---|---:|---:|---:|"]
-          md += [f"| {r.ticker} | {pct(r.old)} | {pct(r.new)} | {pct(r.delta)} |" for _, r in top.iterrows()]
-          Path("PR_BODY.md").write_text("\n".join(md))
-          PY
+          git fetch origin main --depth=1
+          $out = "out/audit"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          ./scripts/Invoke-BaselineAudit.ps1 `
+            -Path "data/results/baseline/weights.csv" `
+            -BaseRef "origin/main" `
+            -TopN 20 `
+            -OutDir $out
+          Copy-Item "$out/SUMMARY.md" PR_BODY.md
+          # Also publish in the Job Summary
+          $summary = Get-Content -Raw PR_BODY.md
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
 
       - name: Create PR
         if: ${{ steps.data.outputs.ok == 'true' }}
@@ -165,6 +158,9 @@ jobs:
           name: baseline-pr-assets
           path: |
             data/results/baseline/weights.csv
-            baseline_diff.csv
             audit.txt
+            out/audit/SUMMARY.md
+            out/audit/baseline_diff.csv
+            out/audit/weights_prev.csv
+            out/audit/weights_new.csv
           if-no-files-found: warn
