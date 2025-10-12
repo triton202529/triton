@@ -6,3 +6,27 @@ weird-copy/
 /data/results/baseline/*.csv
 !/data/results/baseline/weights.csv
 /data/results/baseline/diffs/
+# OS/editor
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Tools & logs
+logs/
+.pre-commit-cache/
+
+# Local outputs
+out/
+data/logs/
+data/orders/
+data/run/
+data/results/*.parquet
+data/results/*.bak.csv
+data/results/reports/
+data/results/*.csv
+data/predictions/
+weird-copy
