@@ -1,42 +1,10 @@
-* text=auto
+﻿* text=auto
 
-# --- Windows scripts keep CRLF ---
-*.cmd  text eol=crlf
-*.bat  text eol=crlf
+# Common project choices
+*.py   text eol=lf
+*.sh   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# PowerShell on Windows is fine with CRLF; keep it consistent
 *.ps1  text eol=crlf
-
-# --- Source & configs use LF ---
-*.sh    text eol=lf
-*.py    text eol=lf
-*.json  text eol=lf
-*.yaml  text eol=lf
-*.yml   text eol=lf
-*.toml  text eol=lf
-*.md    text eol=lf
-*.txt   text eol=lf
-*.csv   text eol=lf
-*.tsv   text eol=lf
-
-# --- Files treated as binary (no EOL conversion / no diffs) ---
-*.parquet binary
-*.feather binary
-*.pkl  binary
-*.npy  binary
-*.npz  binary
-*.zip  binary
-*.gz   binary
-*.xz   binary
-*.lz4  binary
-*.png  binary
-*.jpg  binary
-*.jpeg binary
-*.gif  binary
-*.pdf  binary
-*.xlsx binary
-*.xls  binary
-*.pptx binary
-*.docx binary
-
-# --- Keep these meta files LF too ---
-.gitattributes text eol=lf
-.gitignore     text eol=lf
