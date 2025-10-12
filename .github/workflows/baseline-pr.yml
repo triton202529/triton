@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: read
 
 concurrency:
   group: baseline-pr
@@ -73,7 +74,6 @@ jobs:
           fi
           gh run download "$rid" --name universe-csv -D .
           mkdir -p data/results
-          # artifact contains market_by_ticker.csv at root
           mv market_by_ticker.csv data/results/market_by_ticker.csv
           ls -al data/results/market_by_ticker.csv
 
@@ -109,23 +109,39 @@ jobs:
           python scripts/audit_enforce.py --path data/results/baseline/weights.csv \
             --max-weight 0.1251 --min-weight 0.0005 --max-hhi 0.1005 --min-entropy 2.45 --min-effn 10.0
 
-      # Use PowerShell audit to generate SUMMARY.md and a CSV diff for the PR body
+      # PowerShell audit to generate SUMMARY.md + CSV diff for the PR body
       - name: Audit baseline & prepare PR body
         if: ${{ steps.data.outputs.ok == 'true' }}
         shell: pwsh
         run: |
-          git fetch origin main --depth=1
+          $ErrorActionPreference = 'Stop'
+
+          try {
+            git fetch origin main --depth=1 | Out-Null
+          } catch {
+            Write-Warning "git fetch failed: $($_.Exception.Message)"
+          }
+
           $out = "out/audit"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
+
           ./scripts/Invoke-BaselineAudit.ps1 `
             -Path "data/results/baseline/weights.csv" `
             -BaseRef "origin/main" `
             -TopN 20 `
             -OutDir $out
-          Copy-Item "$out/SUMMARY.md" PR_BODY.md
-          # Also publish in the Job Summary
+
+          if (-not (Test-Path "$out/SUMMARY.md")) { throw "Audit didn't produce $out/SUMMARY.md" }
+          if (-not (Test-Path "$out/baseline_diff.csv")) { throw "Audit didn't produce $out/baseline_diff.csv" }
+
+          Copy-Item "$out/SUMMARY.md" PR_BODY.md -Force
+
+          # Publish to Job Summary
           $summary = Get-Content -Raw PR_BODY.md
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+
+          Write-Host "`n== Audit outputs =="
+          Get-ChildItem -LiteralPath $out | Format-Table Name,Length,LastWriteTime
 
       - name: Create PR
         if: ${{ steps.data.outputs.ok == 'true' }}
