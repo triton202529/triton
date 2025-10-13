@@ -1,30 +1,34 @@
 ﻿name: baseline
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
   schedule:
-    # Weekdays at 13:00 UTC
-    - cron: "0 13 * * 1-5"
+    - cron: "0 12 * * 1-5"  # Weekdays 08:00 ET
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/baseline.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: baseline
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  build-validate:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
-
-      - name: Show runner & Python versions
-        run: |
-          uname -a || true
-          which python3 || true
-          python3 --version || true
-          python -V || true
-          pip --version || true
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,8 +38,12 @@ jobs:
 
       - name: Install deps
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Versions
+        run: |
           python - <<'PY'
           import sys, numpy, pandas, requests
           print("PY:", sys.version.replace("\n"," "))
@@ -44,38 +52,62 @@ jobs:
           print("requests:", requests.__version__)
           PY
 
-      - name: Sanity checks (git dir, required files)
+      - name: Fetch universe
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          test -f scripts/build_baseline.py
-          test -f scripts/validate_baseline.py
-          test -f scripts/audit_baseline.py
-          echo "repo OK"
+          set -euo pipefail
+          python scripts/fetch_and_prepare.py --rebuild-universe
+          ls -lh data/results/market_by_ticker.csv || true
 
-      - name: Build baseline (capture preview)
+      - name: Build baseline weights
         run: >
           python scripts/build_baseline.py
-          --method cap --top 20
-          --max-weight 0.125 --min-weight 0.0005
-          --fund-whitelist BITO GBTC GLD ARKK DIA DBA
-          --turnover-cap 0.05 --dry-run
-          | tee baseline_preview.txt
+          --method cap
+          --top 20
+          --max-weight 0.125
+          --min-weight 0.0005
+          --turnover-cap 0.05
 
-      - name: Validate last committed weights
+      - name: Validate weights
         run: python scripts/validate_baseline.py --path data/results/baseline/weights.csv
 
-      - name: Audit summary (human-friendly)
-        run: python scripts/audit_baseline.py --path data/results/baseline/weights.csv --top 10
-
       - name: Enforce audit thresholds (CI gate)
-        run: >
-          python scripts/audit_enforce.py
-          --path data/results/baseline/weights.csv
-          --max-weight 0.1251
-          --min-weight 0.0005
-          --max-hhi 0.1005
-          --min-entropy 2.45
-          --min-effn 10.0
+        run: |
+          set -euo pipefail
+          python scripts/audit_enforce.py --path data/results/baseline/weights.csv \
+            --max-hhi 0.1005 \
+            --min-entropy 2.45 \
+            --min-effn 10.0
+
+      # === New: generate SUMMARY.md and CSV diff like the PR job ===
+      - name: Audit baseline & publish summary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          try {
+            git fetch origin main --depth=1 | Out-Null
+          } catch {
+            Write-Warning "git fetch failed: $($_.Exception.Message)"
+          }
+
+          $out = "out/audit"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          ./scripts/Invoke-BaselineAudit.ps1 `
+            -Path "data/results/baseline/weights.csv" `
+            -BaseRef "origin/main" `
+            -TopN 20 `
+            -OutDir $out
+
+          if (-not (Test-Path "$out/SUMMARY.md")) { throw "Audit didn't produce $out/SUMMARY.md" }
+          if (-not (Test-Path "$out/baseline_diff.csv")) { throw "Audit didn't produce $out/baseline_diff.csv" }
+
+          # Show in the job summary
+          $summary = Get-Content -Raw "$out/SUMMARY.md"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+
+          Write-Host "`n== Audit outputs =="
+          Get-ChildItem -LiteralPath $out | Format-Table Name,Length,LastWriteTime
 
       # Publish the current universe file so baseline-pr can consume it
       - name: Upload universe CSV
@@ -86,9 +118,16 @@ jobs:
           path: data/results/market_by_ticker.csv
           if-no-files-found: warn
 
-      - name: Upload preview artifact
+      # Also upload analysis/audit artifacts for inspection
+      - name: Upload analysis artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: baseline-preview
-          path: baseline_preview.txt
+          name: baseline-artifacts
+          path: |
+            data/results/baseline/weights.csv
+            out/audit/SUMMARY.md
+            out/audit/baseline_diff.csv
+            out/audit/weights_prev.csv
+            out/audit/weights_new.csv
+          if-no-files-found: warn
