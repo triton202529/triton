@@ -115,6 +115,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
 
           try {
             git fetch origin main --depth=1 | Out-Null
@@ -142,6 +143,12 @@ jobs:
 
           Write-Host "`n== Audit outputs =="
           Get-ChildItem -LiteralPath $out | Format-Table Name,Length,LastWriteTime
+
+          # Reset a stale native exit code from prior native commands if all checks above succeeded
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Resetting stale LASTEXITCODE=$LASTEXITCODE -> 0 (audit succeeded)."
+            $global:LASTEXITCODE = 0
+          }
 
       - name: Create PR
         if: ${{ steps.data.outputs.ok == 'true' }}
