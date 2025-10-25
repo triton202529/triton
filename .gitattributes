@@ -1,11 +1,43 @@
-﻿* text=auto
+﻿# Default: normalize line endings for text, keep as LF in repo
+*           text=auto eol=lf
 
-# Common project choices
-*.py   text eol=lf
-*.sh   text eol=lf
-*.yml  text eol=lf
-*.yaml text eol=lf
-.gitignore text eol=lf
+# Languages / configs (force LF)
+*.py        text eol=lf
+*.ipynb     text eol=lf
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.toml      text eol=lf
+*.ini       text eol=lf
+*.md        text eol=lf
+*.mdx       text eol=lf
+*.rst       text eol=lf
+*.gitignore text eol=lf
+.gitattributes text eol=lf
+.editorconfig  text eol=lf
 
-# PowerShell on Windows is fine with CRLF; keep it consistent
-*.ps1  text eol=crlf
+# Data you want diffable (LF prevents churn in PRs)
+*.csv       text eol=lf
+*.tsv       text eol=lf
+
+# Windows scripts (CRLF is friendlier here)
+*.ps1       text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# Binary / artifacts (never touch line endings)
+*.parquet   -text
+*.feather   -text
+*.pkl       -text
+*.zip       -text
+*.gz        -text
+*.7z        -text
+*.png       -text
+*.jpg       -text
+*.jpeg      -text
+*.gif       -text
+*.pdf       -text
+*.exe       -text
+*.dll       -text
+*.so        -text

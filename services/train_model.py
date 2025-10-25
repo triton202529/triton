@@ -1,4 +1,3 @@
-# services/train_model.py
 # Multi-model training + Trade Rationale 2.0 (+ Confidence & Position Sizing)
 # LEAKAGE-SAFE: Predict today's close (t) using only lagged features from (t-1).
 # No retries, no live fetch. Trains only on tickers with data/results/{TICKER}.parquet.
@@ -8,6 +7,22 @@ import sys
 import argparse
 import numpy as np
 import pandas as pd
+
+# --- Ensure stdout/stderr use UTF-8 (prevents Windows cp1252 UnicodeEncodeError when printing emojis) ---
+try:
+    # Python 3.7+ provides reconfigure()
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    # Fallback for older Pythons / unusual environments
+    try:
+        import io
+
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        # If even this fails, continue — printing may still error but we avoid crashing at import time
+        pass
 
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression

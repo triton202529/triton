@@ -22,6 +22,8 @@ defaults:
     shell: bash
 
 jobs:
+  # This light-weight job exists only so that a push to the workflow
+  # file registers the workflow without running the heavy steps.
   register:
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
@@ -31,6 +33,8 @@ jobs:
   rebuild-and-pr:
     if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout
@@ -61,17 +65,21 @@ jobs:
           PY
 
       - name: Download universe CSV from baseline
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           wf=".github/workflows/baseline.yml"
+
+          # Pick newest successful run (stable across timezones/ordering)
           rid="$(gh run list --workflow "$wf" --json databaseId,status,conclusion,createdAt \
-                 --jq '[.[] | select(.status=="completed" and .conclusion=="success")][0].databaseId' | tr -d '\r\n')"
+                 --jq '[ .[] | select(.status=="completed" and .conclusion=="success") ] | sort_by(.createdAt) | reverse | (.[0].databaseId // "")' \
+                 | tr -d '\r\n')"
+
           echo "==> Baseline RID: ${rid:-<none>}"
-          if [[ -z "${rid:-}" || "${rid}" == "null" ]]; then
-            echo "::error::No successful baseline run found"; exit 1
+          if [[ -z "${rid:-}" ]]; then
+            echo "::error::No successful baseline run found for $wf"
+            exit 1
           fi
+
           gh run download "$rid" --name universe-csv -D .
           mkdir -p data/results
           mv market_by_ticker.csv data/results/market_by_ticker.csv
@@ -120,7 +128,7 @@ jobs:
           try {
             git fetch origin main --depth=1 | Out-Null
           } catch {
-            Write-Warning "git fetch failed: $($_.Exception.Message)"
+            Write-Warning ("git fetch failed: {0}" -f $_.Exception.Message)
           }
 
           $out = "out/audit"
@@ -132,7 +140,7 @@ jobs:
             -TopN 20 `
             -OutDir $out
 
-          if (-not (Test-Path "$out/SUMMARY.md")) { throw "Audit didn't produce $out/SUMMARY.md" }
+          if (-not (Test-Path "$out/SUMMARY.md"))    { throw "Audit didn't produce $out/SUMMARY.md" }
           if (-not (Test-Path "$out/baseline_diff.csv")) { throw "Audit didn't produce $out/baseline_diff.csv" }
 
           Copy-Item "$out/SUMMARY.md" PR_BODY.md -Force
@@ -144,9 +152,9 @@ jobs:
           Write-Host "`n== Audit outputs =="
           Get-ChildItem -LiteralPath $out | Format-Table Name,Length,LastWriteTime
 
-          # Reset a stale native exit code from prior native commands if all checks above succeeded
+          # Reset a stale native exit code if everything above succeeded
           if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Resetting stale LASTEXITCODE=$LASTEXITCODE -> 0 (audit succeeded)."
+            Write-Warning ("Resetting stale LASTEXITCODE={0} -> 0 (audit succeeded)." -f $LASTEXITCODE)
             $global:LASTEXITCODE = 0
           }
 
@@ -155,6 +163,7 @@ jobs:
         id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           title: "Baseline: auto-rebuild"
           branch: "ci/baseline-${{ github.run_id }}"
           commit-message: "baseline: auto-update"
@@ -165,6 +174,9 @@ jobs:
             baseline
             automerge
           delete-branch: true
+        env:
+          GIT_COMMITTER_NAME: github-actions
+          GIT_COMMITTER_EMAIL: github-actions@github.com
 
       - name: Enable auto-merge
         if: ${{ steps.data.outputs.ok == 'true' && steps.cpr.outputs.pull-request-number != '' }}
@@ -179,6 +191,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: baseline-pr-assets
+          if-no-files-found: warn
           path: |
             data/results/baseline/weights.csv
             audit.txt
@@ -186,4 +199,3 @@ jobs:
             out/audit/baseline_diff.csv
             out/audit/weights_prev.csv
             out/audit/weights_new.csv
-          if-no-files-found: warn
