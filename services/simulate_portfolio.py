@@ -10,11 +10,11 @@ import numpy as np
 
 # ── Defaults
 DEFAULT_INITIAL_BALANCE = 100_000.0
-DEFAULT_POSITION_SIZE   = 0.10  # 10% of CASH per new BUY
-PROJECT_ROOT            = Path(__file__).resolve().parents[1]
-DATA_DIR                = PROJECT_ROOT / "data"
-RESULTS_DIR             = DATA_DIR / "results"
-PREDICTIONS_DIR         = DATA_DIR / "predictions"
+DEFAULT_POSITION_SIZE = 0.10  # 10% of CASH per new BUY
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = PROJECT_ROOT / "data"
+RESULTS_DIR = DATA_DIR / "results"
+PREDICTIONS_DIR = DATA_DIR / "predictions"
 
 # Preferred signal locations (searched in order if --signals not provided)
 DEFAULT_SIGNAL_CANDIDATES = [
@@ -24,7 +24,7 @@ DEFAULT_SIGNAL_CANDIDATES = [
 ]
 
 DEFAULT_PORTFOLIO_HISTORY_FILE = RESULTS_DIR / "portfolio_history.csv"
-DEFAULT_TRADE_LOG_FILE         = RESULTS_DIR / "trade_log.csv"
+DEFAULT_TRADE_LOG_FILE = RESULTS_DIR / "trade_log.csv"
 
 
 def _exists(p: Path | str) -> bool:
@@ -46,7 +46,9 @@ def _normalize_signals_schema(df: pd.DataFrame) -> pd.DataFrame:
     # Date
     if "date" not in df.columns:
         if "timestamp" in df.columns:
-            df["date"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True).dt.tz_localize(None)
+            df["date"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True).dt.tz_localize(
+                None
+            )
         else:
             # synthesize today's date to avoid hard crash (keeps dashboard alive)
             df["date"] = pd.Timestamp.today().normalize()
@@ -159,13 +161,15 @@ def simulate_portfolio(
     # Validate essentials
     for col in ("date", "ticker", "signal", "price"):
         if col not in df.columns:
-            raise ValueError(f"simulate_portfolio: required column '{col}' missing after normalization")
+            raise ValueError(
+                f"simulate_portfolio: required column '{col}' missing after normalization"
+            )
 
     # Coerce types
-    df["date"]   = pd.to_datetime(df["date"], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["ticker"] = df["ticker"].astype(str).str.upper()
     df["signal"] = df["signal"].astype(str).str.upper()
-    df["price"]  = pd.to_numeric(df["price"], errors="coerce")
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
 
     # Drop hopeless rows (no date/ticker/signal)
     df = df.dropna(subset=["date", "ticker", "signal"]).reset_index(drop=True)
@@ -195,7 +199,7 @@ def simulate_portfolio(
         # 1) Sells first
         for row in day_df[day_df["signal"] == "SELL"].itertuples():
             tkr = row.ticker
-            px  = float(row.price) if np.isfinite(row.price) else last_price_for_day.get(tkr)
+            px = float(row.price) if np.isfinite(row.price) else last_price_for_day.get(tkr)
             if px is None or not np.isfinite(px):
                 continue
             pos = positions.get(tkr)
@@ -268,12 +272,36 @@ def simulate_portfolio(
 
 def main():
     ap = argparse.ArgumentParser(description="Simulate a simple portfolio curve from signals.")
-    ap.add_argument("--signals", type=str, default=None, help="Path to signals CSV. If omitted, tries results/predictions defaults.")
-    ap.add_argument("--initial-cash", type=float, default=DEFAULT_INITIAL_BALANCE, help="Starting cash balance.")
-    ap.add_argument("--position-size", type=float, default=DEFAULT_POSITION_SIZE, help="Fraction of cash per new BUY (0..1).")
-    ap.add_argument("--out-history", type=str, default=str(DEFAULT_PORTFOLIO_HISTORY_FILE), help="Where to write portfolio_history.csv")
-    ap.add_argument("--out-trades", type=str, default=str(DEFAULT_TRADE_LOG_FILE), help="Where to write trade_log.csv")
-    ap.add_argument("--no-write", action="store_true", help="If set, prints tail instead of writing files.")
+    ap.add_argument(
+        "--signals",
+        type=str,
+        default=None,
+        help="Path to signals CSV. If omitted, tries results/predictions defaults.",
+    )
+    ap.add_argument(
+        "--initial-cash", type=float, default=DEFAULT_INITIAL_BALANCE, help="Starting cash balance."
+    )
+    ap.add_argument(
+        "--position-size",
+        type=float,
+        default=DEFAULT_POSITION_SIZE,
+        help="Fraction of cash per new BUY (0..1).",
+    )
+    ap.add_argument(
+        "--out-history",
+        type=str,
+        default=str(DEFAULT_PORTFOLIO_HISTORY_FILE),
+        help="Where to write portfolio_history.csv",
+    )
+    ap.add_argument(
+        "--out-trades",
+        type=str,
+        default=str(DEFAULT_TRADE_LOG_FILE),
+        help="Where to write trade_log.csv",
+    )
+    ap.add_argument(
+        "--no-write", action="store_true", help="If set, prints tail instead of writing files."
+    )
     args = ap.parse_args()
 
     # Load + normalize signals
@@ -294,7 +322,7 @@ def main():
         print(tl.tail(5).to_string(index=False))
     else:
         out_hist = Path(args.out_history)
-        out_tr   = Path(args.out_trades)
+        out_tr = Path(args.out_trades)
         out_hist.parent.mkdir(parents=True, exist_ok=True)
         out_tr.parent.mkdir(parents=True, exist_ok=True)
         ph.to_csv(out_hist, index=False)

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 
 import sys  # ← added
+
 # ---- UTF-8 / Windows console safety (avoid UnicodeEncodeError) ----
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -116,7 +117,9 @@ def _request(url: str, params: dict, label: str) -> Optional[requests.Response]:
             if tries >= MAX_429_RETRIES:
                 print(f"Stop: too many 429s for {label}; skipping.")
                 return None
-            print(f"Rate limited on {label}. Sleeping {RATE_LIMIT_SLEEP}s… ({tries}/{MAX_429_RETRIES})")
+            print(
+                f"Rate limited on {label}. Sleeping {RATE_LIMIT_SLEEP}s… ({tries}/{MAX_429_RETRIES})"
+            )
             time.sleep(RATE_LIMIT_SLEEP)
             continue
 
@@ -124,8 +127,14 @@ def _request(url: str, params: dict, label: str) -> Optional[requests.Response]:
         return None
 
 
-def fetch_everything(q: str, from_str: str, to_str: str, page_size: int, page: int,
-                     domains: Optional[List[str]] = None):
+def fetch_everything(
+    q: str,
+    from_str: str,
+    to_str: str,
+    page_size: int,
+    page: int,
+    domains: Optional[List[str]] = None,
+):
     url = "https://newsapi.org/v2/everything"
     params = {
         "q": q,
@@ -142,9 +151,13 @@ def fetch_everything(q: str, from_str: str, to_str: str, page_size: int, page: i
     return _request(url, params, f"everything p{page}")
 
 
-def fetch_top_headlines(page_size: int = 100, page: int = 1,
-                        country: str = "us", category: str = "business",
-                        domains: Optional[List[str]] = None):
+def fetch_top_headlines(
+    page_size: int = 100,
+    page: int = 1,
+    country: str = "us",
+    category: str = "business",
+    domains: Optional[List[str]] = None,
+):
     url = "https://newsapi.org/v2/top-headlines"
     params = {
         "country": country,
@@ -160,8 +173,7 @@ def fetch_top_headlines(page_size: int = 100, page: int = 1,
 
 def tag_tickers(article: dict, tickers: List[str]) -> List[str]:
     text = " ".join(
-        str(article.get(k, "") or "")
-        for k in ("title", "description", "content")
+        str(article.get(k, "") or "") for k in ("title", "description", "content")
     ).lower()
     matched = set()
     for t in tickers:
@@ -191,16 +203,29 @@ def canonical_source(url: str, fallback: str = "") -> str:
 def _normalize_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     """Return DataFrame with dashboard-friendly columns."""
     if not rows:
-        return pd.DataFrame(columns=[
-            "date", "ticker", "sentiment", "source_display",
-            "news", "description", "url", "source", "author", "domain"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "date",
+                "ticker",
+                "sentiment",
+                "source_display",
+                "news",
+                "description",
+                "url",
+                "source",
+                "author",
+                "domain",
+            ]
+        )
 
     df = pd.DataFrame(rows)
 
     # date → naive UTC midnight
-    df["date"] = pd.to_datetime(df.get("date"), errors="coerce", utc=True)\
-                    .dt.tz_localize(None).dt.normalize()
+    df["date"] = (
+        pd.to_datetime(df.get("date"), errors="coerce", utc=True)
+        .dt.tz_localize(None)
+        .dt.normalize()
+    )
 
     # Ensure columns exist & have type
     for c in ["ticker", "news", "description", "url", "source", "author"]:
@@ -214,8 +239,7 @@ def _normalize_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
 
     if "source_display" not in df.columns:
         df["source_display"] = df.apply(
-            lambda r: TRUSTED_CANON.get(r.get("domain", ""), r.get("source", "")),
-            axis=1
+            lambda r: TRUSTED_CANON.get(r.get("domain", ""), r.get("source", "")), axis=1
         )
 
     # Dedupe by URL (keep latest date)
@@ -225,8 +249,18 @@ def _normalize_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     if "title" in df.columns and "news" not in df.columns:
         df = df.rename(columns={"title": "news"})
 
-    keep = ["date", "ticker", "sentiment", "source_display",
-            "news", "description", "url", "source", "author", "domain"]
+    keep = [
+        "date",
+        "ticker",
+        "sentiment",
+        "source_display",
+        "news",
+        "description",
+        "url",
+        "source",
+        "author",
+        "domain",
+    ]
     for c in keep:
         if c not in df.columns:
             df[c] = "" if c not in ("sentiment",) else 0.0
@@ -238,8 +272,11 @@ def _merge_into_csv(new_df: pd.DataFrame, out_csv: str):
     if os.path.exists(out_csv) and os.stat(out_csv).st_size > 0:
         old = pd.read_csv(out_csv)
         if "date" in old.columns:
-            old["date"] = pd.to_datetime(old["date"], errors="coerce", utc=True)\
-                            .dt.tz_localize(None).dt.normalize()
+            old["date"] = (
+                pd.to_datetime(old["date"], errors="coerce", utc=True)
+                .dt.tz_localize(None)
+                .dt.normalize()
+            )
         merged = pd.concat([old, new_df], ignore_index=True)
         merged = merged.sort_values(["url", "date"]).drop_duplicates(subset=["url"], keep="last")
     else:
@@ -304,7 +341,7 @@ def aggregate_mode(
                 source_name = (a.get("source", {}) or {}).get("name", "")
                 pub_at = a.get("publishedAt", "") or ""
                 pub_dt = pd.to_datetime(pub_at, utc=True, errors="coerce")
-                row_date = (pub_dt.tz_convert(None) if hasattr(pub_dt, "tz_convert") else pub_dt)
+                row_date = pub_dt.tz_convert(None) if hasattr(pub_dt, "tz_convert") else pub_dt
                 if pd.isna(row_date):
                     row_date = start_dt
                 row_date = row_date.normalize()
@@ -316,18 +353,20 @@ def aggregate_mode(
                 sent = analyze_sentiment(f"{title} {desc}")
 
                 for t in hits:
-                    batch_articles.append({
-                        "date": row_date,
-                        "ticker": t,
-                        "title": title,
-                        "description": desc,
-                        "url": url,
-                        "source": source_name,
-                        "author": author,
-                        "sentiment": sent,
-                        "domain": dom,
-                        "source_display": canonical_source(url, source_name),
-                    })
+                    batch_articles.append(
+                        {
+                            "date": row_date,
+                            "ticker": t,
+                            "title": title,
+                            "description": desc,
+                            "url": url,
+                            "source": source_name,
+                            "author": author,
+                            "sentiment": sent,
+                            "domain": dom,
+                            "source_display": canonical_source(url, source_name),
+                        }
+                    )
 
             if len(items) < page_size:
                 break
@@ -346,7 +385,9 @@ def aggregate_mode(
     # Fallback to top-headlines if absolutely nothing
     if not any_success and not all_rows:
         print("Fallback to /top-headlines…")
-        r = fetch_top_headlines(page_size=100, page=1, country="us", category="business", domains=domains)
+        r = fetch_top_headlines(
+            page_size=100, page=1, country="us", category="business", domains=domains
+        )
         if r is not None:
             items = r.json().get("articles", []) or []
             for a in items:
@@ -360,7 +401,7 @@ def aggregate_mode(
                 source_name = (a.get("source", {}) or {}).get("name", "")
                 pub_at = a.get("publishedAt", "") or ""
                 pub_dt = pd.to_datetime(pub_at, utc=True, errors="coerce")
-                row_date = (pub_dt.tz_convert(None) if hasattr(pub_dt, "tz_convert") else pub_dt)
+                row_date = pub_dt.tz_convert(None) if hasattr(pub_dt, "tz_convert") else pub_dt
                 if pd.isna(row_date):
                     row_date = end_dt
                 row_date = row_date.normalize()
@@ -371,18 +412,20 @@ def aggregate_mode(
 
                 sent = analyze_sentiment(f"{title} {desc}")
                 for t in hits:
-                    all_rows.append({
-                        "date": row_date,
-                        "ticker": t,
-                        "title": title,
-                        "description": desc,
-                        "url": url,
-                        "source": source_name,
-                        "author": author,
-                        "sentiment": sent,
-                        "domain": dom,
-                        "source_display": canonical_source(url, source_name),
-                    })
+                    all_rows.append(
+                        {
+                            "date": row_date,
+                            "ticker": t,
+                            "title": title,
+                            "description": desc,
+                            "url": url,
+                            "source": source_name,
+                            "author": author,
+                            "sentiment": sent,
+                            "domain": dom,
+                            "source_display": canonical_source(url, source_name),
+                        }
+                    )
 
     if not all_rows:
         print("No news articles found.")
@@ -433,23 +476,25 @@ def by_ticker_mode(
                 pub_at = a.get("publishedAt", "") or ""
                 sent = analyze_sentiment(f"{title} {desc}")
                 pub_dt = pd.to_datetime(pub_at, utc=True, errors="coerce")
-                row_date = (pub_dt.tz_convert(None) if hasattr(pub_dt, "tz_convert") else pub_dt)
+                row_date = pub_dt.tz_convert(None) if hasattr(pub_dt, "tz_convert") else pub_dt
                 if pd.isna(row_date):
                     row_date = start_dt
                 row_date = row_date.normalize()
 
-                all_rows.append({
-                    "date": row_date,
-                    "ticker": t,
-                    "title": title,
-                    "description": desc,
-                    "url": url,
-                    "source": source_name,
-                    "author": author,
-                    "sentiment": sent,
-                    "domain": dom,
-                    "source_display": canonical_source(url, source_name),
-                })
+                all_rows.append(
+                    {
+                        "date": row_date,
+                        "ticker": t,
+                        "title": title,
+                        "description": desc,
+                        "url": url,
+                        "source": source_name,
+                        "author": author,
+                        "sentiment": sent,
+                        "domain": dom,
+                        "source_display": canonical_source(url, source_name),
+                    }
+                )
 
             if len(items) < page_size:
                 break
@@ -475,7 +520,9 @@ def by_ticker_mode(
 # CLI
 # ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fetch market news → data/results/news_sentiment.csv")
+    parser = argparse.ArgumentParser(
+        description="Fetch market news → data/results/news_sentiment.csv"
+    )
     parser.add_argument("--tickers", default="all", help="Comma-separated tickers or 'all'")
     parser.add_argument("--window", type=int, default=7, help="Days back (auto-clamped to 30)")
     parser.add_argument("--out", default=OUT_CSV)
@@ -483,8 +530,12 @@ if __name__ == "__main__":
     parser.add_argument("--max_pages", type=int, default=DEFAULT_MAX_PAGES)
     parser.add_argument("--strategy", choices=["aggregate", "by_ticker"], default="aggregate")
     parser.add_argument("--batch", type=int, default=10, help="Tickers per batch in aggregate mode")
-    parser.add_argument("--domains", default="", help="Comma-separated preferred domains (defaults to majors)")
-    parser.add_argument("--trusted-only", action="store_true", help="Keep only canonical trusted outlets")
+    parser.add_argument(
+        "--domains", default="", help="Comma-separated preferred domains (defaults to majors)"
+    )
+    parser.add_argument(
+        "--trusted-only", action="store_true", help="Keep only canonical trusted outlets"
+    )
     args = parser.parse_args()
 
     # Build ticker list
@@ -493,20 +544,39 @@ if __name__ == "__main__":
         scores = os.path.join(RESULTS_DIR, "stock_scores.csv")
         if os.path.exists(scores) and os.stat(scores).st_size > 0:
             df_tickers = pd.read_csv(scores)
-            tickers = sorted(df_tickers.get("ticker", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+            tickers = sorted(
+                df_tickers.get("ticker", pd.Series(dtype=str))
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
         else:
             tickers = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN"]
     else:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
 
     # Domains preference
-    domains = [d.strip().lower() for d in args.domains.split(",") if d.strip()] or DEFAULT_PREFERRED_DOMAINS
+    domains = [
+        d.strip().lower() for d in args.domains.split(",") if d.strip()
+    ] or DEFAULT_PREFERRED_DOMAINS
     trusted_only = bool(args.trusted_only)
 
     if not NEWSAPI_KEY:
         print("Warn: NEWSAPI_KEY not set; NewsAPI requests may fail.")
 
     if args.strategy == "aggregate":
-        aggregate_mode(tickers, args.window, args.out, args.page_size, args.max_pages, args.batch, domains, trusted_only)
+        aggregate_mode(
+            tickers,
+            args.window,
+            args.out,
+            args.page_size,
+            args.max_pages,
+            args.batch,
+            domains,
+            trusted_only,
+        )
     else:
-        by_ticker_mode(tickers, args.window, args.out, args.page_size, args.max_pages, domains, trusted_only)
+        by_ticker_mode(
+            tickers, args.window, args.out, args.page_size, args.max_pages, domains, trusted_only
+        )

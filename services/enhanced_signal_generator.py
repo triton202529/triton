@@ -21,6 +21,7 @@ import pandas as pd
 FUSION_AVAILABLE = False
 try:
     from services.deep_learning_fusion_engine import DeepLearningFusionEngine
+
     FUSION_AVAILABLE = True
 except Exception as _e:
     DeepLearningFusionEngine = None  # type: ignore
@@ -33,18 +34,23 @@ class ESGConfig:
     use_fusion: bool = True
     use_adaptive_risk: bool = True
     verbose: bool = False
-    lookback: int = 20     # for simple momentum baseline
+    lookback: int = 20  # for simple momentum baseline
     fusion_kwargs: dict = None
 
 
 class EnhancedSignalGenerator:
-    def __init__(self, use_fusion: bool = True, use_adaptive_risk: bool = True,
-                 verbose: bool = False, **kwargs):
+    def __init__(
+        self,
+        use_fusion: bool = True,
+        use_adaptive_risk: bool = True,
+        verbose: bool = False,
+        **kwargs,
+    ):
         self.cfg = ESGConfig(
             use_fusion=use_fusion,
             use_adaptive_risk=use_adaptive_risk,
             verbose=verbose,
-            fusion_kwargs=kwargs.get("fusion_kwargs") or {}
+            fusion_kwargs=kwargs.get("fusion_kwargs") or {},
         )
         self.use_fusion = bool(self.cfg.use_fusion) and FUSION_AVAILABLE
         self.fusion = None
@@ -60,7 +66,7 @@ class EnhancedSignalGenerator:
         self,
         universe_data: Dict[str, pd.DataFrame],
         model_predictions: Optional[Dict[str, float]] = None,
-        sentiment_data: Optional[Dict[str, float]] = None
+        sentiment_data: Optional[Dict[str, float]] = None,
     ) -> pd.DataFrame:
         """
         universe_data: {ticker: DataFrame[date, close, (volume?)]}
@@ -78,7 +84,9 @@ class EnhancedSignalGenerator:
                 # Fall through to baseline
         return self._generate_baseline(universe_data)
 
-    def apply_adaptive_risk(self, signals_df: pd.DataFrame, universe_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    def apply_adaptive_risk(
+        self, signals_df: pd.DataFrame, universe_data: Dict[str, pd.DataFrame]
+    ) -> pd.DataFrame:
         """
         Optional post-processing to tilt or cap signals.
         This is a light placeholder that scales confidence by realized volatility.
@@ -112,6 +120,7 @@ class EnhancedSignalGenerator:
             "lookback": self.cfg.lookback,
         }
         import json
+
         p.write_text(json.dumps(cfg, indent=2))
 
     # ------------------------ internals ---------------------------------------
@@ -132,7 +141,7 @@ class EnhancedSignalGenerator:
         universe_data: Dict[str, pd.DataFrame],
         model_predictions: Dict[str, float],
         sentiment_data: Dict[str, float],
-        T: int = 20
+        T: int = 20,
     ) -> tuple[list[str], np.ndarray, np.ndarray]:
         """
         Build a simple [N, T, F] tensor using returns, rolling vol, and extras.
@@ -147,14 +156,20 @@ class EnhancedSignalGenerator:
             if len(ret) < T + 1:
                 continue
             # recent window
-            r_win = ret[-T:]                     # [T]
+            r_win = ret[-T:]  # [T]
             vol_win = pd.Series(ret).rolling(10).std().fillna(0.0).values[-T:]
             pred = float(model_predictions.get(tkr, 0.0))
             sent = float(sentiment_data.get(tkr, 0.0))
             # features: [ret, vol, pred, sent] -> [T, 4]
-            X = np.stack([r_win, vol_win,
-                          np.full_like(r_win, pred, dtype=float),
-                          np.full_like(r_win, sent, dtype=float)], axis=1)
+            X = np.stack(
+                [
+                    r_win,
+                    vol_win,
+                    np.full_like(r_win, pred, dtype=float),
+                    np.full_like(r_win, sent, dtype=float),
+                ],
+                axis=1,
+            )
             # pseudo target: forward 5-day return sign
             fwd = (close[-1] / close[-6] - 1.0) if len(close) >= 6 and close[-6] != 0 else 0.0
             y = 1.0 if fwd > 0 else 0.0
@@ -171,7 +186,7 @@ class EnhancedSignalGenerator:
         self,
         universe_data: Dict[str, pd.DataFrame],
         model_predictions: Dict[str, float],
-        sentiment_data: Dict[str, float]
+        sentiment_data: Dict[str, float],
     ) -> pd.DataFrame:
         # Build features
         tickers, X, y = self._stack_features(universe_data, model_predictions, sentiment_data, T=20)
@@ -179,7 +194,7 @@ class EnhancedSignalGenerator:
             return self._generate_baseline(universe_data)
         # Light fit (demo-level) then predict own window
         try:
-            self.fusion.fit(X, y)   # type: ignore
+            self.fusion.fit(X, y)  # type: ignore
             scores = self.fusion.predict(X)  # type: ignore
         except Exception as e:
             print(f"[EnhancedSignalGenerator] Fusion training/prediction failed: {e}")
@@ -190,4 +205,3 @@ class EnhancedSignalGenerator:
             sig = "BUY" if float(s) >= 0.5 else "HOLD"
             rows.append({"ticker": tkr, "signal": sig, "confidence": float(np.clip(s, 0.0, 1.0))})
         return pd.DataFrame(rows)
-

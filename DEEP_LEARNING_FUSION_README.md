@@ -298,5 +298,3 @@ python run_deep_learning_pipeline.py
 ```
 
 **This is the signal generation system that elite hedge funds use. You now have it.**
-
-

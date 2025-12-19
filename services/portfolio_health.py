@@ -38,10 +38,10 @@ MAX_ROWS_FOR_ANALYSIS = 5000
 
 @dataclass
 class PortfolioHealth:
-    drawdown_pct: float    # e.g. 0.12 means "down 12% from peak"
-    latest_equity: float   # most recent equity value we saw
-    peak_equity: float     # max equity in window
-    data_points: int       # how many usable rows we had
+    drawdown_pct: float  # e.g. 0.12 means "down 12% from peak"
+    latest_equity: float  # most recent equity value we saw
+    peak_equity: float  # max equity in window
+    data_points: int  # how many usable rows we had
 
 
 def _safe_float(val, default=None):
@@ -104,15 +104,8 @@ def _load_equity_series() -> List[Tuple[dt.datetime, float]]:
             # normalize headers (DictReader preserves header row)
             headers = [h.strip().lower() for h in (r.fieldnames or [])]
 
-            legacy_schema = (
-                "date" in headers and
-                "cash" in headers and
-                "market_value" in headers
-            )
-            live_schema = (
-                "timestamp" in headers and
-                "equity" in headers
-            )
+            legacy_schema = "date" in headers and "cash" in headers and "market_value" in headers
+            live_schema = "timestamp" in headers and "equity" in headers
 
             # NOTE:
             # Even if DictReader saw only one header style,
@@ -124,7 +117,7 @@ def _load_equity_series() -> List[Tuple[dt.datetime, float]]:
                 # equity = cash + market_value
                 ts_legacy = _parse_timestamp(row.get("date", "")) if "date" in row else None
                 cash_val = _safe_float(row.get("cash")) if "cash" in row else None
-                mv_val   = _safe_float(row.get("market_value")) if "market_value" in row else None
+                mv_val = _safe_float(row.get("market_value")) if "market_value" in row else None
 
                 if ts_legacy is not None and (cash_val is not None or mv_val is not None):
                     eq_val = (cash_val or 0.0) + (mv_val or 0.0)
@@ -169,7 +162,7 @@ def _compute_drawdown(series: List[Tuple[dt.datetime, float]]):
     vals = [eq for (_, eq) in series]
 
     latest_equity = vals[-1]
-    peak_equity   = max(vals) if vals else 0.0
+    peak_equity = max(vals) if vals else 0.0
 
     if peak_equity <= 0.0:
         return 0.0, latest_equity, peak_equity

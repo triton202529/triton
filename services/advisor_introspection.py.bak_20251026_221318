@@ -749,7 +749,7 @@ def main(argv: List[str]) -> int:
     p.add_argument("--no-save", action="store_true", help="Do not write CSV/JSON artifacts")
     p.add_argument("--min-trades", type=int, default=3, help="Minimum realized trades per advisor for weights")
     p.add_argument("--prior-n0", type=int, default=5, help="Shrinkage strength for expectancy")
-    
+
 p.add_argument("--weights-out", type=str, help="Write suggested weights directly to this file (json/csv/table)")
 p.add_argument("--weights-format", choices=["json","csv","table"], default="json",
                help="File format for --weights-out")
@@ -807,5 +807,3 @@ p.add_argument("--weights-format", choices=["json","csv","table"], default="json
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
-
-

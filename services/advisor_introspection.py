@@ -68,6 +68,7 @@ OUT_DIR = os.path.join(ROOT, "data", "results", "advisor_introspection")
 
 # ---------- Utilities ----------
 
+
 def _today_tag() -> str:
     return dt.datetime.now().strftime("%Y%m%d")
 
@@ -118,11 +119,12 @@ def _bps(x: float) -> str:
 
 # ---------- Metrics ----------
 
+
 def compute_sharpe(returns: pd.Series, rf: float = 0.0, periods_per_year: int = 252) -> float:
     r = returns.dropna().astype(float)
     if r.empty:
         return np.nan
-    excess = r - rf/periods_per_year
+    excess = r - rf / periods_per_year
     std = excess.std()
     if std == 0 or np.isnan(std):
         return np.nan
@@ -137,7 +139,7 @@ def compute_sortino(returns: pd.Series, rf: float = 0.0, periods_per_year: int =
     dd = downside.std()
     if dd == 0 or np.isnan(dd):
         return np.nan
-    mean_excess = r.mean() - rf/periods_per_year
+    mean_excess = r.mean() - rf / periods_per_year
     return (mean_excess * periods_per_year) / (dd * np.sqrt(periods_per_year))
 
 
@@ -173,7 +175,13 @@ def trade_level_metrics(df: pd.DataFrame) -> Dict[str, Any]:
     avg_win = wins["pnl_pct"].mean() if len(wins) else np.nan
     avg_loss = losses["pnl_pct"].mean() if len(losses) else np.nan
     expectancy = d["pnl_pct"].mean() if len(d) else np.nan
-    return {"trades": len(d), "hit_rate": hit_rate, "avg_win": avg_win, "avg_loss": avg_loss, "expectancy": expectancy}
+    return {
+        "trades": len(d),
+        "hit_rate": hit_rate,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "expectancy": expectancy,
+    }
 
 
 def series_from_trades(df: pd.DataFrame) -> pd.Series:
@@ -195,6 +203,7 @@ def series_from_trades(df: pd.DataFrame) -> pd.Series:
 
 # ---------- Signals merge (to tag advisors on BUY) ----------
 
+
 def _merge_advisors_from_signals(trades: pd.DataFrame) -> pd.DataFrame:
     if not os.path.exists(SIGNALS_PATH):
         return trades
@@ -207,7 +216,10 @@ def _merge_advisors_from_signals(trades: pd.DataFrame) -> pd.DataFrame:
         ("date", ["date", "timestamp"]),
         ("ticker", ["ticker", "symbol"]),
         ("signal", ["signal", "side", "action"]),
-        ("advisor", ["advisor", "source", "model", "strategy", "generator", "engine", "advisor_name"])
+        (
+            "advisor",
+            ["advisor", "source", "model", "strategy", "generator", "engine", "advisor_name"],
+        ),
     ]:
         if col not in sig.columns:
             sig = _coalesce(sig, alts, col)
@@ -228,7 +240,7 @@ def _merge_advisors_from_signals(trades: pd.DataFrame) -> pd.DataFrame:
         sig[["date_key", "ticker", "advisor"]],
         on=["date_key", "ticker"],
         how="left",
-        suffixes=("", "_sig")
+        suffixes=("", "_sig"),
     )
     # prefer advisor from signals when present
     tr_buy["advisor"] = tr_buy["advisor"].fillna(tr_buy.get("advisor_sig"))
@@ -241,8 +253,7 @@ def _merge_advisors_from_signals(trades: pd.DataFrame) -> pd.DataFrame:
         sig2["date"] = pd.to_datetime(sig2["date"], errors="coerce")
         tr2["date"] = pd.to_datetime(tr2["date"], errors="coerce")
         tr_buy2 = tr2[buy_mask].merge(
-            sig2[["date", "ticker", "advisor"]],
-            on=["date", "ticker"], how="left"
+            sig2[["date", "ticker", "advisor"]], on=["date", "ticker"], how="left"
         )
         fill2 = tr_buy2["advisor"].notna()
         if fill2.any():
@@ -258,9 +269,12 @@ def _merge_advisors_from_signals(trades: pd.DataFrame) -> pd.DataFrame:
         for delta in (-1, 1):
             tmp = tr2[buy_mask].copy()
             tmp["date_shift"] = tmp["date"] + pd.Timedelta(days=delta)
-            j = tmp.merge(sig3[["date", "ticker", "advisor"]],
-                          left_on=["date_shift", "ticker"], right_on=["date", "ticker"],
-                          how="left")
+            j = tmp.merge(
+                sig3[["date", "ticker", "advisor"]],
+                left_on=["date_shift", "ticker"],
+                right_on=["date", "ticker"],
+                how="left",
+            )
             mask = j["advisor"].notna()
             if mask.any():
                 idx = tr[buy_mask].index[mask]
@@ -273,13 +287,23 @@ def _merge_advisors_from_signals(trades: pd.DataFrame) -> pd.DataFrame:
 
 # ---------- FIFO Pairing (with advisor propagation) ----------
 
+
 def _fifo_pair_and_compute(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if df.empty:
         df["pnl_pct"] = np.nan
-        return df, pd.DataFrame(columns=[
-            "ticker","entry_date","exit_date","advisor","matched_qty",
-            "avg_buy_px","sell_px","pnl","pnl_pct"
-        ])
+        return df, pd.DataFrame(
+            columns=[
+                "ticker",
+                "entry_date",
+                "exit_date",
+                "advisor",
+                "matched_qty",
+                "avg_buy_px",
+                "sell_px",
+                "pnl",
+                "pnl_pct",
+            ]
+        )
 
     d = df.copy()
     d["quantity"] = pd.to_numeric(d["quantity"], errors="coerce")
@@ -339,7 +363,11 @@ def _fifo_pair_and_compute(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame
 
             if matched_qty > 0:
                 avg_buy_px = total_cost / matched_qty if total_cost > 0 else np.nan
-                realized_pct = (px - avg_buy_px) / avg_buy_px if pd.notna(avg_buy_px) and avg_buy_px > 0 else np.nan
+                realized_pct = (
+                    (px - avg_buy_px) / avg_buy_px
+                    if pd.notna(avg_buy_px) and avg_buy_px > 0
+                    else np.nan
+                )
 
                 if pd.notna(row.get("profit")) and pd.notna(avg_buy_px):
                     realized_pct = (row["profit"]) / (matched_qty * avg_buy_px)
@@ -361,38 +389,57 @@ def _fifo_pair_and_compute(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame
                         tz_utc = dt.UTC
                     except AttributeError:
                         tz_utc = dt.timezone.utc
-                    ts_utc = dt.datetime.fromtimestamp(weighted_entry_seconds / matched_qty, tz=tz_utc)
+                    ts_utc = dt.datetime.fromtimestamp(
+                        weighted_entry_seconds / matched_qty, tz=tz_utc
+                    )
                     entry_date = pd.to_datetime(ts_utc.date())
 
                 if pd.notna(row.get("profit")):
                     realized_pnl = float(row["profit"])
                 else:
-                    realized_pnl = float((px - avg_buy_px) * matched_qty) if pd.notna(avg_buy_px) else np.nan
+                    realized_pnl = (
+                        float((px - avg_buy_px) * matched_qty) if pd.notna(avg_buy_px) else np.nan
+                    )
 
-                pairs_rows.append({
-                    "ticker": tkr,
-                    "entry_date": entry_date,
-                    "exit_date": row["exit_date"] if pd.notna(row["exit_date"]) else row["date"],
-                    "advisor": dominant_adv if dominant_adv else adv,
-                    "matched_qty": matched_qty,
-                    "avg_buy_px": avg_buy_px,
-                    "sell_px": px,
-                    "pnl": realized_pnl,
-                    "pnl_pct": realized_pct
-                })
+                pairs_rows.append(
+                    {
+                        "ticker": tkr,
+                        "entry_date": entry_date,
+                        "exit_date": (
+                            row["exit_date"] if pd.notna(row["exit_date"]) else row["date"]
+                        ),
+                        "advisor": dominant_adv if dominant_adv else adv,
+                        "matched_qty": matched_qty,
+                        "avg_buy_px": avg_buy_px,
+                        "sell_px": px,
+                        "pnl": realized_pnl,
+                        "pnl_pct": realized_pct,
+                    }
+                )
 
     d["pnl_pct"] = d["pnl_pct"].where(d["pnl_pct"].notna(), pnl_pct_out)
 
     d["sell_advisor_derived"] = sell_advisor
-    mask_sell = (d["side"] == "SELL")
-    mask_unlabeled = (d["advisor"] == "Unlabeled")
+    mask_sell = d["side"] == "SELL"
+    mask_unlabeled = d["advisor"] == "Unlabeled"
     mask_have_der = pd.Series(d["sell_advisor_derived"]).notna()
     mask = mask_sell & mask_unlabeled & mask_have_der
     d.loc[mask, "advisor"] = d.loc[mask, "sell_advisor_derived"].astype(str)
 
-    pairs = pd.DataFrame(pairs_rows, columns=[
-        "ticker","entry_date","exit_date","advisor","matched_qty","avg_buy_px","sell_px","pnl","pnl_pct"
-    ])
+    pairs = pd.DataFrame(
+        pairs_rows,
+        columns=[
+            "ticker",
+            "entry_date",
+            "exit_date",
+            "advisor",
+            "matched_qty",
+            "avg_buy_px",
+            "sell_px",
+            "pnl",
+            "pnl_pct",
+        ],
+    )
     if not pairs.empty:
         pairs["entry_date"] = pd.to_datetime(pairs["entry_date"], errors="coerce")
         pairs["exit_date"] = pd.to_datetime(pairs["exit_date"], errors="coerce")
@@ -401,6 +448,7 @@ def _fifo_pair_and_compute(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame
 
 
 # ---------- Config + Trades ----------
+
 
 def load_advisors() -> Dict[str, Dict[str, Any]]:
     cfg = _read_json(CFG_PATH)
@@ -418,18 +466,39 @@ def load_advisors() -> Dict[str, Dict[str, Any]]:
 def load_trades() -> Tuple[pd.DataFrame, pd.DataFrame]:
     df = _read_csv(TRADE_LOG)
     if df is None:
-        return pd.DataFrame(), pd.DataFrame(columns=[
-            "ticker","entry_date","exit_date","advisor","matched_qty",
-            "avg_buy_px","sell_px","pnl","pnl_pct"
-        ])
+        return pd.DataFrame(), pd.DataFrame(
+            columns=[
+                "ticker",
+                "entry_date",
+                "exit_date",
+                "advisor",
+                "matched_qty",
+                "avg_buy_px",
+                "sell_px",
+                "pnl",
+                "pnl_pct",
+            ]
+        )
 
     for col, alts in [
         ("date", ["date", "open_date", "entry_date", "timestamp"]),
         ("ticker", ["ticker", "symbol"]),
-        ("advisor", [
-            "advisor", "advisor_name", "advisor_id", "advisor_source", "advisorModel",
-            "source", "model", "model_name", "strategy", "generator", "engine"
-        ]),
+        (
+            "advisor",
+            [
+                "advisor",
+                "advisor_name",
+                "advisor_id",
+                "advisor_source",
+                "advisorModel",
+                "source",
+                "model",
+                "model_name",
+                "strategy",
+                "generator",
+                "engine",
+            ],
+        ),
         ("side", ["side", "action"]),
         ("quantity", ["quantity", "qty"]),
         ("price", ["price", "entry_price", "open_price"]),
@@ -437,7 +506,7 @@ def load_trades() -> Tuple[pd.DataFrame, pd.DataFrame]:
         ("pnl", ["pnl", "pnl_usd", "profit"]),
         ("pnl_pct", ["pnl_pct", "return_pct", "ret_pct"]),
         ("signal", ["signal"]),
-        ("rationale", ["rationale", "explanation", "reason"])
+        ("rationale", ["rationale", "explanation", "reason"]),
     ]:
         if col not in df.columns:
             df = _coalesce(df, alts, col)
@@ -471,6 +540,7 @@ def load_trades() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 # ---------- Conflicts, Narratives, Summary ----------
 
+
 def conflict_matrix(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or "side" not in df.columns or "advisor" not in df.columns:
         return pd.DataFrame(columns=["date", "ticker", "buyers", "sellers", "conflict"])
@@ -483,14 +553,28 @@ def conflict_matrix(df: pd.DataFrame) -> pd.DataFrame:
     for (day, tkr), g in grp:
         buyers = sorted(g.loc[g["side"] == "BUY", "advisor"].dropna().unique().tolist())
         sellers = sorted(g.loc[g["side"] == "SELL", "advisor"].dropna().unique().tolist())
-        rows.append({"date": pd.Timestamp(day), "ticker": tkr, "buyers": buyers, "sellers": sellers, "conflict": bool(buyers and sellers)})
+        rows.append(
+            {
+                "date": pd.Timestamp(day),
+                "ticker": tkr,
+                "buyers": buyers,
+                "sellers": sellers,
+                "conflict": bool(buyers and sellers),
+            }
+        )
     out = pd.DataFrame(rows).sort_values(["date", "ticker"])
     return out
 
 
-def persona_narrative(advisor: str, meta: Dict[str, Any], metrics: Dict[str, Any], regime_hint: Optional[str] = None) -> str:
+def persona_narrative(
+    advisor: str, meta: Dict[str, Any], metrics: Dict[str, Any], regime_hint: Optional[str] = None
+) -> str:
     k = lambda key, default=np.nan: metrics.get(key, default)
-    hr = k("hit_rate"); expct = k("expectancy"); sharpe = k("sharpe"); sortino = k("sortino"); mdd = k("max_drawdown")
+    hr = k("hit_rate")
+    expct = k("expectancy")
+    sharpe = k("sharpe")
+    sortino = k("sortino")
+    mdd = k("max_drawdown")
     persona = (meta.get("introspection", {}) or {}).get("persona", "neutral")
     focus_qs = (meta.get("introspection", {}) or {}).get("focus_questions", [])
     tone = {
@@ -507,14 +591,16 @@ def persona_narrative(advisor: str, meta: Dict[str, Any], metrics: Dict[str, Any
         "allocator": "diversification-first",
         "growth_conviction": "growth-focused",
         "activist": "thesis-driven",
-        "neutral": "data-driven"
+        "neutral": "data-driven",
     }.get(persona, "data-driven")
     mdd_str = f"{mdd:.1%}" if pd.notna(mdd) else "—"
 
     pieces = [
-        f"As {advisor}, a {tone} advisor, my recent hit-rate is {_pct_to_str(hr)}, expectancy { _bps(expct) }, Sharpe {sharpe:.2f} and Sortino {sortino:.2f}."
-        if all(pd.notna(x) for x in [hr, expct, sharpe, sortino]) else
-        f"As {advisor}, a {tone} advisor, here’s my latest self-check."
+        (
+            f"As {advisor}, a {tone} advisor, my recent hit-rate is {_pct_to_str(hr)}, expectancy { _bps(expct) }, Sharpe {sharpe:.2f} and Sortino {sortino:.2f}."
+            if all(pd.notna(x) for x in [hr, expct, sharpe, sortino])
+            else f"As {advisor}, a {tone} advisor, here’s my latest self-check."
+        )
     ]
 
     # Tiny-sample gating
@@ -524,24 +610,36 @@ def persona_narrative(advisor: str, meta: Dict[str, Any], metrics: Dict[str, Any
     if pd.notna(mdd):
         pieces.append(f"Max drawdown recorded: {mdd_str}.")
         if mdd < -0.08:
-            pieces.append("Drawdown elevated versus our Capital Preservation Doctrine; defensive posture advised.")
+            pieces.append(
+                "Drawdown elevated versus our Capital Preservation Doctrine; defensive posture advised."
+            )
         elif mdd > -0.05:
             pieces.append("Drawdown remains controlled and within protection bands.")
 
     if not tiny and hr is not None and not pd.isna(hr):
         if hr < 0.5:
-            pieces.append("Hit-rate is below 50%; I will down-weight lower-signal setups and tighten stop-loss gates.")
+            pieces.append(
+                "Hit-rate is below 50%; I will down-weight lower-signal setups and tighten stop-loss gates."
+            )
         elif hr > 0.6:
-            pieces.append("Hit-rate is strong; consider cautiously expanding position sizes within risk limits.")
+            pieces.append(
+                "Hit-rate is strong; consider cautiously expanding position sizes within risk limits."
+            )
 
     if not tiny and expct is not None and not pd.isna(expct):
         if expct < 0:
-            pieces.append("Negative expectancy detected; shifting emphasis to higher-quality filters and regime gating.")
+            pieces.append(
+                "Negative expectancy detected; shifting emphasis to higher-quality filters and regime gating."
+            )
         elif expct > 0:
-            pieces.append("Positive expectancy confirms edge; continue discipline on exits to retain gains.")
+            pieces.append(
+                "Positive expectancy confirms edge; continue discipline on exits to retain gains."
+            )
 
     if tiny:
-        pieces.append("Sample size is limited; interpret stats with caution until ≥3 realized exits.")
+        pieces.append(
+            "Sample size is limited; interpret stats with caution until ≥3 realized exits."
+        )
 
     if regime_hint:
         pieces.append(f"Regime context: {regime_hint}.")
@@ -550,7 +648,9 @@ def persona_narrative(advisor: str, meta: Dict[str, Any], metrics: Dict[str, Any
     return " ".join(pieces)
 
 
-def build_summary(trades: pd.DataFrame, advisors: Dict[str, Dict[str, Any]]) -> Tuple[pd.DataFrame, Dict[str, str], pd.DataFrame]:
+def build_summary(
+    trades: pd.DataFrame, advisors: Dict[str, Dict[str, Any]]
+) -> Tuple[pd.DataFrame, Dict[str, str], pd.DataFrame]:
     rows = []
     narratives = {}
     curves_rows = []
@@ -559,7 +659,9 @@ def build_summary(trades: pd.DataFrame, advisors: Dict[str, Dict[str, Any]]) -> 
     port_curve = None
     if port is not None and "equity" in port.columns:
         try:
-            port["date"] = pd.to_datetime(port.get("date") or port.get("timestamp"), errors="coerce")
+            port["date"] = pd.to_datetime(
+                port.get("date") or port.get("timestamp"), errors="coerce"
+            )
             port = port.dropna(subset=["date"]).sort_values("date")
             port_curve = pd.Series(port["equity"].values, index=port["date"])
         except Exception:
@@ -583,8 +685,10 @@ def build_summary(trades: pd.DataFrame, advisors: Dict[str, Dict[str, Any]]) -> 
         sortino = compute_sortino(series)
         if _series_is_degenerate(series):
             fs, fo = compute_sharpe_sortino_fallback(sub["pnl_pct"])
-            if pd.isna(sharpe): sharpe = fs
-            if pd.isna(sortino): sortino = fo
+            if pd.isna(sharpe):
+                sharpe = fs
+            if pd.isna(sortino):
+                sortino = fo
 
         if series.empty:
             adv_mdd = np.nan
@@ -605,7 +709,7 @@ def build_summary(trades: pd.DataFrame, advisors: Dict[str, Dict[str, Any]]) -> 
             "expectancy": tstats["expectancy"],
             "sharpe": sharpe,
             "sortino": sortino,
-            "max_drawdown": adv_mdd
+            "max_drawdown": adv_mdd,
         }
         rows.append(row)
 
@@ -622,36 +726,47 @@ def build_summary(trades: pd.DataFrame, advisors: Dict[str, Dict[str, Any]]) -> 
         sortino = compute_sortino(series)
         if _series_is_degenerate(series):
             fs, fo = compute_sharpe_sortino_fallback(realized["pnl_pct"])
-            if pd.isna(sharpe): sharpe = fs
-            if pd.isna(sortino): sortino = fo
+            if pd.isna(sharpe):
+                sharpe = fs
+            if pd.isna(sortino):
+                sortino = fo
         if series.empty:
             mdd = np.nan
             eq_curve = pd.Series(dtype=float)
         else:
             eq_curve = (1 + series.fillna(0)).cumprod()
             mdd = compute_max_drawdown(eq_curve)
-        rows.append({
-            "advisor": "AllAdvisors",
-            "trades": tstats["trades"],
-            "hit_rate": tstats["hit_rate"],
-            "avg_win": tstats["avg_win"],
-            "avg_loss": tstats["avg_loss"],
-            "expectancy": tstats["expectancy"],
-            "sharpe": sharpe,
-            "sortino": sortino,
-            "max_drawdown": mdd
-        })
+        rows.append(
+            {
+                "advisor": "AllAdvisors",
+                "trades": tstats["trades"],
+                "hit_rate": tstats["hit_rate"],
+                "avg_win": tstats["avg_win"],
+                "avg_loss": tstats["avg_loss"],
+                "expectancy": tstats["expectancy"],
+                "sharpe": sharpe,
+                "sortino": sortino,
+                "max_drawdown": mdd,
+            }
+        )
         if not eq_curve.empty:
             for ts, val in eq_curve.items():
                 curves_rows.append({"date": ts, "advisor": "AllAdvisors", "equity": float(val)})
-        narratives["AllAdvisors"] = "Aggregate portfolio rollup across all advisors (including Unlabeled)."
+        narratives["AllAdvisors"] = (
+            "Aggregate portfolio rollup across all advisors (including Unlabeled)."
+        )
 
     summary = pd.DataFrame(rows).sort_values(["advisor"]).reset_index(drop=True)
-    curves = pd.DataFrame(curves_rows).sort_values(["advisor", "date"]) if curves_rows else pd.DataFrame(columns=["date","advisor","equity"])
+    curves = (
+        pd.DataFrame(curves_rows).sort_values(["advisor", "date"])
+        if curves_rows
+        else pd.DataFrame(columns=["date", "advisor", "equity"])
+    )
     return summary, narratives, curves
 
 
 # ---------- Suggested Weights (CLI-tunable) ----------
+
 
 def suggest_weights(
     summary: pd.DataFrame,
@@ -659,16 +774,16 @@ def suggest_weights(
     min_trades: int = 3,
     prior_n0: int = 5,
     cap: float = 0.60,
-    normalize_after_cap: bool = True
+    normalize_after_cap: bool = True,
 ) -> pd.DataFrame:
     if summary is None or summary.empty:
-        return pd.DataFrame(columns=["advisor","raw_score","weight"])
+        return pd.DataFrame(columns=["advisor", "raw_score", "weight"])
 
     df = summary.copy()
-    df = df.loc[~df["advisor"].isin(["AllAdvisors","Unlabeled"])].copy()
+    df = df.loc[~df["advisor"].isin(["AllAdvisors", "Unlabeled"])].copy()
     df = df[df["trades"].fillna(0) >= min_trades].copy()
     if df.empty:
-        return pd.DataFrame(columns=["advisor","raw_score","weight"])
+        return pd.DataFrame(columns=["advisor", "raw_score", "weight"])
 
     trades = df["trades"].fillna(0)
     exp = df["expectancy"].fillna(0.0)
@@ -677,7 +792,7 @@ def suggest_weights(
     df["sharpe_safe"] = df["sharpe"].fillna(0.0)
     dd_pen = df["max_drawdown"].fillna(0.0).abs()
 
-    df["raw_score"] = df["exp_shrunk"] + 0.25*df["sharpe_safe"] - 0.10*dd_pen
+    df["raw_score"] = df["exp_shrunk"] + 0.25 * df["sharpe_safe"] - 0.10 * dd_pen
     df["raw_score"] = df["raw_score"].clip(lower=0)
 
     if df["raw_score"].sum() == 0:
@@ -692,7 +807,7 @@ def suggest_weights(
             s = df["weight"].sum()
             df["weight"] = df["weight"] / s if s > 0 else df["weight"]
 
-    return df[["advisor","raw_score","weight"]].sort_values("weight", ascending=False)
+    return df[["advisor", "raw_score", "weight"]].sort_values("weight", ascending=False)
 
 
 def _print_weights_to_stdout(weights: pd.DataFrame, fmt: str = "json") -> None:
@@ -715,10 +830,7 @@ def _print_weights_to_stdout(weights: pd.DataFrame, fmt: str = "json") -> None:
 
 
 def _weights_to_map(
-    weights: pd.DataFrame,
-    *,
-    min_threshold: float = 0.0,
-    renormalize: bool = False
+    weights: pd.DataFrame, *, min_threshold: float = 0.0, renormalize: bool = False
 ) -> Dict[str, float]:
     if weights is None or weights.empty:
         return {}
@@ -741,7 +853,7 @@ def _score_signals_csv(weights_map: Dict[str, float], src: str, dst: str) -> Non
         pd.DataFrame().to_csv(dst, index=False)
         return
     # find advisor-ish column
-    candidates = ["advisor","source","model","strategy","generator","engine","advisor_name"]
+    candidates = ["advisor", "source", "model", "strategy", "generator", "engine", "advisor_name"]
     adv_col = None
     for c in candidates:
         if c in sig.columns:
@@ -751,9 +863,11 @@ def _score_signals_csv(weights_map: Dict[str, float], src: str, dst: str) -> Non
         # create weight=0 for all rows
         sig["weight"] = 0.0
     else:
+
         def _lookup(v: Any) -> float:
             key = str(v).strip() if pd.notna(v) else "Unlabeled"
             return float(weights_map.get(key, 0.0))
+
         sig["weight"] = sig[adv_col].map(_lookup)
     _ensure_dir(os.path.dirname(dst))
     sig.to_csv(dst, index=False, encoding="utf-8")
@@ -761,13 +875,14 @@ def _score_signals_csv(weights_map: Dict[str, float], src: str, dst: str) -> Non
 
 # ---------- Orchestrator ----------
 
+
 def run(
     save: bool = True,
     *,
     min_trades: int = 3,
     prior_n0: int = 5,
     cap: float = 0.60,
-    normalize_after_cap: bool = True
+    normalize_after_cap: bool = True,
 ) -> Dict[str, Any]:
     _ensure_dir(OUT_DIR)
 
@@ -783,14 +898,15 @@ def run(
         min_trades=min_trades,
         prior_n0=prior_n0,
         cap=cap,
-        normalize_after_cap=normalize_after_cap
+        normalize_after_cap=normalize_after_cap,
     )
 
     artifacts = {}
     tag = _today_tag()
     if save:
         sum_path = os.path.join(OUT_DIR, f"summary_{tag}.csv")
-        summary.to_csv(sum_path, index=False); artifacts["summary_csv"] = sum_path
+        summary.to_csv(sum_path, index=False)
+        artifacts["summary_csv"] = sum_path
 
         nar_path = os.path.join(OUT_DIR, f"narratives_{tag}.json")
         with open(nar_path, "w", encoding="utf-8") as f:
@@ -798,13 +914,16 @@ def run(
         artifacts["narratives_json"] = nar_path
 
         conf_path = os.path.join(OUT_DIR, f"conflicts_{tag}.csv")
-        conflicts.to_csv(conf_path, index=False); artifacts["conflicts_csv"] = conf_path
+        conflicts.to_csv(conf_path, index=False)
+        artifacts["conflicts_csv"] = conf_path
 
         eq_path = os.path.join(OUT_DIR, f"equity_curves_{tag}.csv")
-        curves.to_csv(eq_path, index=False); artifacts["equity_curves_csv"] = eq_path
+        curves.to_csv(eq_path, index=False)
+        artifacts["equity_curves_csv"] = eq_path
 
         paired_path = os.path.join(OUT_DIR, f"paired_trades_{tag}.csv")
-        paired.to_csv(paired_path, index=False); artifacts["paired_trades_csv"] = paired_path
+        paired.to_csv(paired_path, index=False)
+        artifacts["paired_trades_csv"] = paired_path
 
         weights_path = os.path.join(OUT_DIR, f"advisor_weights_suggested_{tag}.csv")
         w.to_csv(weights_path, index=False)
@@ -817,35 +936,74 @@ def run(
         "equity_curves": curves,
         "paired_trades": paired,
         "artifacts": artifacts,
-        "weights": w
+        "weights": w,
     }
 
 
 def main(argv: List[str]) -> int:
     import argparse
+
     p = argparse.ArgumentParser(description="Advisor Introspection")
     p.add_argument("--no-save", action="store_true", help="Do not write CSV/JSON artifacts")
-    p.add_argument("--min-trades", type=int, default=3, help="Minimum realized trades per advisor for weights")
+    p.add_argument(
+        "--min-trades", type=int, default=3, help="Minimum realized trades per advisor for weights"
+    )
     p.add_argument("--prior-n0", type=int, default=5, help="Shrinkage strength for expectancy")
     p.add_argument("--cap", type=float, default=0.60, help="Max single-advisor weight cap (0-1)")
-    p.add_argument("--no-normalize-after-cap", action="store_true",
-                   help="If set, skip renormalization after capping")
+    p.add_argument(
+        "--no-normalize-after-cap",
+        action="store_true",
+        help="If set, skip renormalization after capping",
+    )
     p.add_argument("--print-weights", action="store_true", help="Print suggested weights to stdout")
-    p.add_argument("--format", choices=["json","csv","table"], default="json", help="Output format for --print-weights")
-    p.add_argument("--weights-out", type=str, help="Write suggested weights directly to this file (json/csv/table)")
-    p.add_argument("--weights-format", choices=["json","csv","table"], default="json",
-                   help="File format for --weights-out")
-    p.add_argument("--weights-map-out", type=str, help="Write advisor->weight JSON map to this file")
-    p.add_argument("--weights-min-threshold", type=float, default=0.0,
-                   help="Drop advisors with weight < threshold from the map")
-    p.add_argument("--weights-map-renormalize", action="store_true",
-                   help="Renormalize the map to sum to 1 after thresholding")
-    p.add_argument("--score-signals-inplace", action="store_true",
-                   help="Score signals CSV with weights and write a new file with a 'weight' column")
-    p.add_argument("--signals-in", type=str, default=SIGNALS_PATH,
-                   help="Input signals CSV path (default: data/results/signals_with_rationale.csv)")
-    p.add_argument("--signals-out", type=str, default=os.path.join(ROOT, "data", "results", "signals_scored.csv"),
-                   help="Output scored signals CSV path (default: data/results/signals_scored.csv)")
+    p.add_argument(
+        "--format",
+        choices=["json", "csv", "table"],
+        default="json",
+        help="Output format for --print-weights",
+    )
+    p.add_argument(
+        "--weights-out",
+        type=str,
+        help="Write suggested weights directly to this file (json/csv/table)",
+    )
+    p.add_argument(
+        "--weights-format",
+        choices=["json", "csv", "table"],
+        default="json",
+        help="File format for --weights-out",
+    )
+    p.add_argument(
+        "--weights-map-out", type=str, help="Write advisor->weight JSON map to this file"
+    )
+    p.add_argument(
+        "--weights-min-threshold",
+        type=float,
+        default=0.0,
+        help="Drop advisors with weight < threshold from the map",
+    )
+    p.add_argument(
+        "--weights-map-renormalize",
+        action="store_true",
+        help="Renormalize the map to sum to 1 after thresholding",
+    )
+    p.add_argument(
+        "--score-signals-inplace",
+        action="store_true",
+        help="Score signals CSV with weights and write a new file with a 'weight' column",
+    )
+    p.add_argument(
+        "--signals-in",
+        type=str,
+        default=SIGNALS_PATH,
+        help="Input signals CSV path (default: data/results/signals_with_rationale.csv)",
+    )
+    p.add_argument(
+        "--signals-out",
+        type=str,
+        default=os.path.join(ROOT, "data", "results", "signals_scored.csv"),
+        help="Output scored signals CSV path (default: data/results/signals_scored.csv)",
+    )
     p.add_argument("--quiet", action="store_true", help="Suppress summary/narratives printing")
 
     args = p.parse_args(argv)
@@ -854,7 +1012,7 @@ def main(argv: List[str]) -> int:
         min_trades=args.min_trades,
         prior_n0=args.prior_n0,
         cap=args.cap,
-        normalize_after_cap=not args.no_normalize_after_cap
+        normalize_after_cap=not args.no_normalize_after_cap,
     )
 
     # Export weights to file if requested
@@ -880,7 +1038,11 @@ def main(argv: List[str]) -> int:
         wmap = _weights_to_map(
             w,
             min_threshold=args.weights_min_threshold,
-            renormalize=args.weights_map-renormalize if hasattr(args, "weights_map") else args.weights_map_renormalize
+            renormalize=(
+                args.weights_map - renormalize
+                if hasattr(args, "weights_map")
+                else args.weights_map_renormalize
+            ),
         )
 
         # Fix argparse attribute (typo-safe)
@@ -898,9 +1060,7 @@ def main(argv: List[str]) -> int:
     if args.score_signals_inplace:
         w = res.get("weights")
         wmap = _weights_to_map(
-            w,
-            min_threshold=args.weights_min_threshold,
-            renormalize=args.weights_map_renormalize
+            w, min_threshold=args.weights_min_threshold, renormalize=args.weights_map_renormalize
         )
         _score_signals_csv(wmap, args.signals_in, args.signals_out)
 

@@ -61,15 +61,15 @@ ENV_MIN_CASH_FLOOR = os.getenv("TRITON_MIN_CASH_FLOOR")  # optional, numeric str
 
 @dataclass
 class GuardInputs:
-    buying_power: float                 # current BP from broker
-    reserve_pct: float                  # e.g. 0.05 means keep 5% untouched
-    min_cash_floor_usd: float           # e.g. 1000 => never allow BP < $1k to be risked
-    est_portfolio_drawdown_pct: float   # rough % drawdown, e.g. 0.12 = -12%
+    buying_power: float  # current BP from broker
+    reserve_pct: float  # e.g. 0.05 means keep 5% untouched
+    min_cash_floor_usd: float  # e.g. 1000 => never allow BP < $1k to be risked
+    est_portfolio_drawdown_pct: float  # rough % drawdown, e.g. 0.12 = -12%
 
 
 @dataclass
 class GuardDecision:
-    mode: str                # "NORMAL", "DEFENSIVE", "LOCKDOWN"
+    mode: str  # "NORMAL", "DEFENSIVE", "LOCKDOWN"
     scale_multiplier: float  # multiply all target notionals by this
     reason: str
 

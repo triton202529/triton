@@ -33,7 +33,7 @@ python services/enhanced_stress_test.py
 
 ### 1. Regime Detector (`services/regime_detector.py`)
 - **Purpose**: Identifies current market regime using ML models
-- **Features**: 
+- **Features**:
   - Bull/Bear/Sideways/Volatile classification
   - Regime transition detection
   - Confidence scoring
@@ -230,5 +230,3 @@ For issues or questions:
 ---
 
 **The Adaptive Risk Budgeting Engine transforms Triton from a smart beta system into an institutional-grade risk management platform. This is exactly what separates top-tier hedge funds from the rest - sophisticated risk management that adapts to changing market conditions in real-time.**
-
-

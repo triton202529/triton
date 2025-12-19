@@ -109,7 +109,9 @@ class EnhancedPortfolioManager:
                 portfolio_value = float("nan")
 
         if portfolio_value == 0 or math.isnan(portfolio_value):
-            print(f"⚠️ Invalid portfolio_value for risk report: {portfolio_value}. Setting to 1.0 to avoid divide-by-zero.")
+            print(
+                f"⚠️ Invalid portfolio_value for risk report: {portfolio_value}. Setting to 1.0 to avoid divide-by-zero."
+            )
             portfolio_value = 1.0
 
         # Gather current weights from positions (defensive casting)
@@ -121,7 +123,15 @@ class EnhancedPortfolioManager:
             position_value = None
             if isinstance(pos, dict):
                 # try multiple common keys
-                for key in ("market_value", "value", "position_value", "size", "notional", "mv", "amount"):
+                for key in (
+                    "market_value",
+                    "value",
+                    "position_value",
+                    "size",
+                    "notional",
+                    "mv",
+                    "amount",
+                ):
                     if key in pos and pos[key] is not None:
                         position_value = pos[key]
                         break
@@ -138,7 +148,9 @@ class EnhancedPortfolioManager:
             # Coerce to numeric (NaN on failure)
             pv_numeric = pd.to_numeric(position_value, errors="coerce")
             if pd.isna(pv_numeric):
-                print(f"⚠️ Skipping position '{ticker}' — non-numeric position value: {repr(position_value)}")
+                print(
+                    f"⚠️ Skipping position '{ticker}' — non-numeric position value: {repr(position_value)}"
+                )
                 continue
 
             # Compute weight safely
@@ -195,5 +207,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

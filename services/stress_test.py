@@ -220,7 +220,7 @@ class TritonStressTest:
             for _ in range(days):
                 mkt_ret = self._simulate_crash_day(params)
                 port_ret = self._simulate_portfolio_response(mkt_ret, positions=[])
-                portfolio_value *= (1.0 + port_ret)
+                portfolio_value *= 1.0 + port_ret
                 values.append(portfolio_value)
                 daily_returns.append(port_ret)
 
@@ -264,7 +264,7 @@ class TritonStressTest:
             for _ in range(days):
                 mkt_ret = float(self.rng.normal(0.0, 0.02 * mult))
                 port_ret = self._simulate_portfolio_response(mkt_ret, positions=[])
-                portfolio_value *= (1.0 + port_ret)
+                portfolio_value *= 1.0 + port_ret
                 values.append(portfolio_value)
                 daily_returns.append(port_ret)
 
@@ -319,7 +319,7 @@ class TritonStressTest:
                     mkt_ret = float(self.rng.normal(0.0, 0.025))
 
                 port_ret = self._simulate_portfolio_response(mkt_ret, positions=[])
-                portfolio_value *= (1.0 + port_ret)
+                portfolio_value *= 1.0 + port_ret
                 values.append(portfolio_value)
                 daily_returns.append(port_ret)
 
@@ -389,7 +389,7 @@ class TritonStressTest:
                         mkt_ret = float(self.rng.normal(0.0, 0.015))
 
                 port_ret = self._simulate_portfolio_response(mkt_ret, positions=[])
-                portfolio_value *= (1.0 + port_ret)
+                portfolio_value *= 1.0 + port_ret
                 values.append(portfolio_value)
                 daily_returns.append(port_ret)
 
@@ -447,7 +447,7 @@ class TritonStressTest:
 
                 mkt_ret = float(self.rng.normal(0.0, 0.015))
                 port_ret = self._simulate_portfolio_response(mkt_ret, positions=[])
-                portfolio_value *= (1.0 + port_ret)
+                portfolio_value *= 1.0 + port_ret
                 values.append(portfolio_value)
                 daily_returns.append(port_ret)
 
@@ -532,7 +532,7 @@ class TritonStressTest:
                         mkt_ret = float(self.rng.normal(0.0, 0.015))
 
                 port_ret = self._simulate_portfolio_response(mkt_ret, positions=positions)
-                portfolio_value *= (1.0 + port_ret)
+                portfolio_value *= 1.0 + port_ret
                 values.append(portfolio_value)
                 daily_returns.append(port_ret)
 
@@ -660,7 +660,9 @@ class TritonStressTest:
         path = output_dir / f"stress_test_results_{ts}.json"
 
         serializable = {
-            scen: {name: {k: _to_jsonable(v) for k, v in res.items()} for name, res in scen_res.items()}
+            scen: {
+                name: {k: _to_jsonable(v) for k, v in res.items()} for name, res in scen_res.items()
+            }
             for scen, scen_res in test_results.items()
         }
 

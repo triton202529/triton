@@ -19,7 +19,7 @@ PORTFOLIO_HISTORY_PATH = Path("data/results/portfolio_history.csv")
 
 
 def _alpaca_headers():
-    key    = os.getenv("ALPACA_API_KEY")
+    key = os.getenv("ALPACA_API_KEY")
     secret = os.getenv("ALPACA_API_SECRET")
     if not key or not secret:
         return None
@@ -89,9 +89,11 @@ def append_equity_snapshot():
         w = csv.DictWriter(f, fieldnames=fieldnames)
         if not file_exists:
             w.writeheader()
-        w.writerow({
-            "timestamp": ts,
-            "equity": f"{eq:.4f}",
-        })
+        w.writerow(
+            {
+                "timestamp": ts,
+                "equity": f"{eq:.4f}",
+            }
+        )
 
     return eq

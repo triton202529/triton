@@ -3,7 +3,8 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 import warnings
 from pathlib import Path
-warnings.filterwarnings('ignore')
+
+warnings.filterwarnings("ignore")
 
 
 class DynamicRiskAllocator:
@@ -18,7 +19,12 @@ class DynamicRiskAllocator:
     - Tail risk hedging
     """
 
-    def __init__(self, target_volatility: float = 0.15, max_position_size: float = 0.10, verbose: bool = False):
+    def __init__(
+        self,
+        target_volatility: float = 0.15,
+        max_position_size: float = 0.10,
+        verbose: bool = False,
+    ):
         self.target_volatility = float(target_volatility)
         self.max_position_size = float(max_position_size)
         self.regime_detector = None
@@ -51,9 +57,9 @@ class DynamicRiskAllocator:
             try:
                 if df is None or len(df) < 20:
                     continue
-                if 'close' not in df.columns:
+                if "close" not in df.columns:
                     continue
-                series = pd.to_numeric(df['close'], errors='coerce').pct_change().rename(ticker)
+                series = pd.to_numeric(df["close"], errors="coerce").pct_change().rename(ticker)
                 returns_data[ticker] = series
             except Exception as e:
                 self._log(f"_calculate_correlation_matrix skip {ticker}: {e}")
@@ -64,7 +70,7 @@ class DynamicRiskAllocator:
 
         returns_df = pd.concat(returns_data.values(), axis=1)
         # drop rows with any NaN so correlations are computed on aligned dates
-        returns_df = returns_df.dropna(axis=0, how='any')
+        returns_df = returns_df.dropna(axis=0, how="any")
 
         if returns_df.shape[0] < 5 or returns_df.shape[1] < 2:
             return pd.DataFrame()
@@ -73,7 +79,9 @@ class DynamicRiskAllocator:
         corr = returns_df.corr()
         return corr
 
-    def _calculate_volatility_forecast(self, universe_data: Dict[str, pd.DataFrame]) -> Dict[str, float]:
+    def _calculate_volatility_forecast(
+        self, universe_data: Dict[str, pd.DataFrame]
+    ) -> Dict[str, float]:
         """Calculate volatility forecasts using EWMA-style approach.
 
         Returns annualized volatility per ticker. Falls back to a small positive number if not computable.
@@ -84,16 +92,16 @@ class DynamicRiskAllocator:
             try:
                 if df is None or len(df) < 20:
                     continue
-                if 'close' not in df.columns:
+                if "close" not in df.columns:
                     continue
 
-                returns = pd.to_numeric(df['close'], errors='coerce').pct_change().dropna()
+                returns = pd.to_numeric(df["close"], errors="coerce").pct_change().dropna()
                 if returns.empty:
                     continue
 
                 alpha = 0.06  # RiskMetrics-ish decay; tunable
                 # EWMA volatility: use ewm on squared returns then sqrt
-                ewma_var = (returns ** 2).ewm(alpha=alpha).mean().iloc[-1]
+                ewma_var = (returns**2).ewm(alpha=alpha).mean().iloc[-1]
                 vol_forecast = float(np.sqrt(ewma_var)) if np.isfinite(ewma_var) else np.nan
 
                 # Annualize (if vol_forecast is nan fall back to sample std)
@@ -110,17 +118,26 @@ class DynamicRiskAllocator:
     def _calculate_regime_adjustments(self, regime: str) -> Dict[str, float]:
         """Calculate regime-based adjustments (proxy to regime_detector)."""
         if not self.regime_detector:
-            return {'volatility_multiplier': 1.0, 'position_size_multiplier': 1.0, 'tail_risk_multiplier': 1.0}
+            return {
+                "volatility_multiplier": 1.0,
+                "position_size_multiplier": 1.0,
+                "tail_risk_multiplier": 1.0,
+            }
 
         try:
             adjustments = self.regime_detector.get_regime_risk_adjustments(regime)
         except Exception as e:
             self._log(f"_calculate_regime_adjustments error: {e}")
-            adjustments = {'volatility_multiplier': 1.0, 'position_size_multiplier': 1.0, 'tail_risk_multiplier': 1.0}
+            adjustments = {
+                "volatility_multiplier": 1.0,
+                "position_size_multiplier": 1.0,
+                "tail_risk_multiplier": 1.0,
+            }
         return adjustments
 
-    def _calculate_correlation_adjustments(self, correlation_matrix: pd.DataFrame,
-                                           portfolio_weights: Dict[str, float]) -> Dict[str, float]:
+    def _calculate_correlation_adjustments(
+        self, correlation_matrix: pd.DataFrame, portfolio_weights: Dict[str, float]
+    ) -> Dict[str, float]:
         """Calculate correlation-based position adjustments.
 
         Higher average correlation reduces allowed position size. Returns mapping ticker -> multiplier.
@@ -136,7 +153,11 @@ class DynamicRiskAllocator:
                 adjustments[ticker] = 1.0
                 continue
 
-            other_tickers = [t for t in portfolio_weights.keys() if t != ticker and t in correlation_matrix.columns]
+            other_tickers = [
+                t
+                for t in portfolio_weights.keys()
+                if t != ticker and t in correlation_matrix.columns
+            ]
             if not other_tickers:
                 adjustments[ticker] = 1.0
                 continue
@@ -163,8 +184,9 @@ class DynamicRiskAllocator:
 
         return adjustments
 
-    def _calculate_volatility_targeting(self, signals: Dict[str, float],
-                                        volatility_forecasts: Dict[str, float]) -> Dict[str, float]:
+    def _calculate_volatility_targeting(
+        self, signals: Dict[str, float], volatility_forecasts: Dict[str, float]
+    ) -> Dict[str, float]:
         """Calculate volatility-targeted position sizes (pre-normalization)."""
         volatility_adjusted_weights: Dict[str, float] = {}
 
@@ -184,13 +206,14 @@ class DynamicRiskAllocator:
 
         return volatility_adjusted_weights
 
-    def _calculate_tail_risk_hedging(self, portfolio_weights: Dict[str, float],
-                                     regime: str) -> Dict[str, float]:
+    def _calculate_tail_risk_hedging(
+        self, portfolio_weights: Dict[str, float], regime: str
+    ) -> Dict[str, float]:
         """Calculate tail risk hedging multipliers (reduce positions in high tail-risk regimes)."""
         hedging_adjustments: Dict[str, float] = {}
 
         regime_adjustments = self._calculate_regime_adjustments(regime)
-        tail_risk_multiplier = regime_adjustments.get('tail_risk_multiplier', 1.0)
+        tail_risk_multiplier = regime_adjustments.get("tail_risk_multiplier", 1.0)
 
         if tail_risk_multiplier > 1.5:
             for ticker in portfolio_weights.keys():
@@ -201,8 +224,9 @@ class DynamicRiskAllocator:
 
         return hedging_adjustments
 
-    def allocate_risk_budget(self, signals: Dict[str, float],
-                             universe_data: Dict[str, pd.DataFrame]) -> Dict[str, float]:
+    def allocate_risk_budget(
+        self, signals: Dict[str, float], universe_data: Dict[str, pd.DataFrame]
+    ) -> Dict[str, float]:
         """Main risk allocation function. Returns normalized final weights (sum to 1.0)."""
         self._log("🎯 Calculating dynamic risk allocation...")
 
@@ -211,23 +235,25 @@ class DynamicRiskAllocator:
         vol_adjusted_weights = self._calculate_volatility_targeting(signals, volatility_forecasts)
 
         # Step 2: Regime-based adjustments
-        regime = 'Unknown'
+        regime = "Unknown"
         regime_adjustments = {}
         if self.regime_detector:
             try:
                 # Prefer SPY as market proxy; otherwise use first available ticker
-                market_df = universe_data.get('SPY')
+                market_df = universe_data.get("SPY")
                 if market_df is None:
                     market_df = next(iter(universe_data.values()), pd.DataFrame())
                 regime, confidence = self.regime_detector.predict_regime(market_df)
             except Exception as e:
                 self._log(f"regime detection failed: {e}")
-                regime, confidence = 'Unknown', 0.0
+                regime, confidence = "Unknown", 0.0
             regime_adjustments = self._calculate_regime_adjustments(regime)
 
         # Step 3: Correlation adjustments (static correlation)
         correlation_matrix = self._calculate_correlation_matrix(universe_data)
-        correlation_adjustments = self._calculate_correlation_adjustments(correlation_matrix, vol_adjusted_weights)
+        correlation_adjustments = self._calculate_correlation_adjustments(
+            correlation_matrix, vol_adjusted_weights
+        )
 
         # Step 4: Tail risk hedging
         tail_risk_adjustments = self._calculate_tail_risk_hedging(vol_adjusted_weights, regime)
@@ -236,7 +262,9 @@ class DynamicRiskAllocator:
         factor_adjusted_weights = vol_adjusted_weights.copy()
         if self.risk_model:
             try:
-                factor_adjusted_weights = self.risk_model.get_risk_adjusted_weights(vol_adjusted_weights, universe_data, self.target_volatility)
+                factor_adjusted_weights = self.risk_model.get_risk_adjusted_weights(
+                    vol_adjusted_weights, universe_data, self.target_volatility
+                )
                 # if model returns empty or invalid, fall back
                 if not isinstance(factor_adjusted_weights, dict) or not factor_adjusted_weights:
                     factor_adjusted_weights = vol_adjusted_weights.copy()
@@ -252,7 +280,7 @@ class DynamicRiskAllocator:
             weight = float(vol_adjusted_weights.get(ticker, 0.0))
 
             # Apply regime multiplier
-            regime_multiplier = float(regime_adjustments.get('position_size_multiplier', 1.0))
+            regime_multiplier = float(regime_adjustments.get("position_size_multiplier", 1.0))
             weight *= regime_multiplier
 
             # Correlation adjustment
@@ -267,7 +295,12 @@ class DynamicRiskAllocator:
                     w_fac = float(factor_adjusted_weights[ticker])
                     # Mix factors: prefer model output but keep regime/corr/tail scaling applied
                     # We'll combine by taking model weight * (regime * corr * tail)
-                    weight = w_fac * regime_multiplier * float(correlation_adjustments.get(ticker, 1.0)) * float(tail_risk_adjustments.get(ticker, 1.0))
+                    weight = (
+                        w_fac
+                        * regime_multiplier
+                        * float(correlation_adjustments.get(ticker, 1.0))
+                        * float(tail_risk_adjustments.get(ticker, 1.0))
+                    )
                 except Exception:
                     pass
 
@@ -290,14 +323,18 @@ class DynamicRiskAllocator:
         portfolio_metrics = self._calculate_portfolio_metrics(final_weights, universe_data, regime)
 
         self._log(f"📊 Regime: {regime}")
-        self._log(f"🎯 Portfolio Volatility (expected): {portfolio_metrics.get('expected_volatility', 0):.2%}")
-        self._log(f"📈 Risk-Adjusted Return: {portfolio_metrics.get('risk_adjusted_return', 0):.2%}")
+        self._log(
+            f"🎯 Portfolio Volatility (expected): {portfolio_metrics.get('expected_volatility', 0):.2%}"
+        )
+        self._log(
+            f"📈 Risk-Adjusted Return: {portfolio_metrics.get('risk_adjusted_return', 0):.2%}"
+        )
 
         return final_weights
 
-    def _calculate_portfolio_metrics(self, weights: Dict[str, float],
-                                     universe_data: Dict[str, pd.DataFrame],
-                                     regime: str) -> Dict[str, float]:
+    def _calculate_portfolio_metrics(
+        self, weights: Dict[str, float], universe_data: Dict[str, pd.DataFrame], regime: str
+    ) -> Dict[str, float]:
         """Calculate portfolio-level metrics: expected volatility, risk-adjusted return, diversification ratio."""
         metrics: Dict[str, float] = {}
         expected_var = 0.0
@@ -308,74 +345,77 @@ class DynamicRiskAllocator:
                 if ticker not in universe_data:
                     continue
                 df = universe_data[ticker]
-                if df is None or 'close' not in df.columns:
+                if df is None or "close" not in df.columns:
                     continue
-                returns = pd.to_numeric(df['close'], errors='coerce').pct_change().dropna()
+                returns = pd.to_numeric(df["close"], errors="coerce").pct_change().dropna()
                 if len(returns) < 2:
                     continue
                 vol = float(returns.std(ddof=0) * np.sqrt(252))
-                expected_var += (weight ** 2) * (vol ** 2)
+                expected_var += (weight**2) * (vol**2)
                 individual_vols.append(weight * vol)
             except Exception as e:
                 self._log(f"_calculate_portfolio_metrics skip {ticker}: {e}")
                 continue
 
         expected_vol = float(np.sqrt(expected_var)) if expected_var > 0 else 0.0
-        metrics['expected_volatility'] = expected_vol
+        metrics["expected_volatility"] = expected_vol
 
         # Risk-adjusted return (naive proxy: inverse of volatility scaled by regime)
         if self.regime_detector:
             regime_adjustments = self._calculate_regime_adjustments(regime)
-            volatility_multiplier = float(regime_adjustments.get('volatility_multiplier', 1.0))
+            volatility_multiplier = float(regime_adjustments.get("volatility_multiplier", 1.0))
             risk_adjusted_return = expected_vol / max(volatility_multiplier, 0.0001)
         else:
             risk_adjusted_return = expected_vol
 
-        metrics['risk_adjusted_return'] = risk_adjusted_return
+        metrics["risk_adjusted_return"] = risk_adjusted_return
 
         # Diversification ratio (avg individual vol / portfolio vol)
         if individual_vols and expected_vol > 0:
             avg_individual_vol = float(np.mean(individual_vols))
             diversification_ratio = avg_individual_vol / expected_vol if expected_vol > 0 else 1.0
-            metrics['diversification_ratio'] = diversification_ratio
+            metrics["diversification_ratio"] = diversification_ratio
         else:
-            metrics['diversification_ratio'] = 1.0
+            metrics["diversification_ratio"] = 1.0
 
         return metrics
 
-    def get_risk_report(self, weights: Dict[str, float],
-                        universe_data: Dict[str, pd.DataFrame]) -> Dict[str, any]:
+    def get_risk_report(
+        self, weights: Dict[str, float], universe_data: Dict[str, pd.DataFrame]
+    ) -> Dict[str, any]:
         """Generate a comprehensive risk report for the current weights and universe."""
         report: Dict[str, any] = {}
 
-        regime = 'Unknown'
+        regime = "Unknown"
         confidence = 0.0
         if self.regime_detector:
             try:
-                market_df = universe_data.get('SPY')
+                market_df = universe_data.get("SPY")
                 if market_df is None:
                     market_df = next(iter(universe_data.values()), pd.DataFrame())
                 regime, confidence = self.regime_detector.predict_regime(market_df)
             except Exception as e:
                 self._log(f"get_risk_report regime detection failed: {e}")
-                regime, confidence = 'Unknown', 0.0
+                regime, confidence = "Unknown", 0.0
 
         portfolio_metrics = self._calculate_portfolio_metrics(weights, universe_data, regime)
-        report['portfolio_metrics'] = portfolio_metrics
+        report["portfolio_metrics"] = portfolio_metrics
 
-        report['regime'] = {
-            'current_regime': regime,
-            'confidence': float(confidence),
-            'regime_adjustments': self._calculate_regime_adjustments(regime)
+        report["regime"] = {
+            "current_regime": regime,
+            "confidence": float(confidence),
+            "regime_adjustments": self._calculate_regime_adjustments(regime),
         }
 
         if self.risk_model:
             try:
-                risk_decomposition = self.risk_model.get_portfolio_risk_decomposition(weights, universe_data)
-                report['risk_decomposition'] = risk_decomposition
+                risk_decomposition = self.risk_model.get_portfolio_risk_decomposition(
+                    weights, universe_data
+                )
+                report["risk_decomposition"] = risk_decomposition
             except Exception as e:
                 self._log(f"get_risk_report decomposition failed: {e}")
-                report['risk_decomposition'] = {}
+                report["risk_decomposition"] = {}
 
         position_analysis: Dict[str, Dict[str, float]] = {}
         for ticker, weight in weights.items():
@@ -383,22 +423,22 @@ class DynamicRiskAllocator:
                 if ticker not in universe_data:
                     continue
                 df = universe_data[ticker]
-                if df is None or 'close' not in df.columns:
+                if df is None or "close" not in df.columns:
                     continue
-                returns = pd.to_numeric(df['close'], errors='coerce').pct_change().dropna()
+                returns = pd.to_numeric(df["close"], errors="coerce").pct_change().dropna()
                 if len(returns) < 2:
                     continue
                 vol = float(returns.std(ddof=0) * np.sqrt(252))
                 position_analysis[ticker] = {
-                    'weight': float(weight),
-                    'volatility': vol,
-                    'risk_contribution': float(weight * vol)
+                    "weight": float(weight),
+                    "volatility": vol,
+                    "risk_contribution": float(weight * vol),
                 }
             except Exception as e:
                 self._log(f"get_risk_report position skip {ticker}: {e}")
                 continue
 
-        report['position_analysis'] = position_analysis
+        report["position_analysis"] = position_analysis
 
         return report
 
@@ -414,11 +454,11 @@ def main():
 
     universe_data: Dict[str, pd.DataFrame] = {}
     for file in data_files[:10]:
-        ticker = Path(file).stem.split('_')[0]
+        ticker = Path(file).stem.split("_")[0]
         df = pd.read_csv(file)
-        if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        df = df.sort_values('date').reset_index(drop=True)
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.sort_values("date").reset_index(drop=True)
         universe_data[ticker] = df
 
     allocator = DynamicRiskAllocator(target_volatility=0.15, max_position_size=0.10, verbose=True)
@@ -427,7 +467,9 @@ def main():
     # allocator.set_regime_detector(my_regime_detector)
     # allocator.set_risk_model(my_risk_model)
 
-    sample_signals = {ticker: float(np.random.random()) for ticker in list(universe_data.keys())[:5]}
+    sample_signals = {
+        ticker: float(np.random.random()) for ticker in list(universe_data.keys())[:5]
+    }
 
     risk_adjusted_weights = allocator.allocate_risk_budget(sample_signals, universe_data)
     print(f"\n📊 Sample Signals: {sample_signals}")
@@ -439,5 +481,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

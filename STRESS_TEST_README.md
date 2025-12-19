@@ -12,7 +12,7 @@ This stress testing framework validates your Triton system's robustness under ex
 
 1. **Market Crash Scenarios**
    - 2008 Financial Crisis simulation
-   - 2020 COVID crash simulation  
+   - 2020 COVID crash simulation
    - 2022 Inflation crash simulation
    - Custom crash scenarios
 
@@ -62,7 +62,7 @@ python run_stress_test.py
 # Market crash tests only
 python services/stress_test.py --scenarios market_crash
 
-# High volatility tests only  
+# High volatility tests only
 python services/stress_test.py --scenarios high_volatility
 
 # All tests with custom config
@@ -82,7 +82,7 @@ Edit `config/stress_test.json` to customize:
   "risk_tolerance": 0.15,
   "scenarios": [
     "market_crash",
-    "high_volatility", 
+    "high_volatility",
     "model_failure",
     "data_corruption",
     "system_overload"
@@ -253,9 +253,3 @@ For issues or questions:
 ---
 
 **Remember**: Stress testing is crucial for automated trading systems. Never go live without comprehensive validation! 🚀
-
-
-
-
-
-

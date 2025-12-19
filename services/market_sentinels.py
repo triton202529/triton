@@ -27,11 +27,11 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 # Default universe of quick "market health" sentinels
 # (You can tweak freely; non-existent symbols will be skipped gracefully)
 DEFAULT_SENTINELS = [
-    "SPY",   # S&P 500
-    "QQQ",   # Nasdaq 100
-    "IWM",   # Russell 2000
+    "SPY",  # S&P 500
+    "QQQ",  # Nasdaq 100
+    "IWM",  # Russell 2000
     "^VIX",  # VIX (CBOE)
-    "DIA",   # Dow Jones
+    "DIA",  # Dow Jones
 ]
 
 
@@ -121,9 +121,7 @@ def fetch_hist(symbol: str, days: int = 60) -> pd.DataFrame:
     Tries to be robust to different shapes/column names.
     """
     if not YF_OK:
-        raise RuntimeError(
-            "yfinance is not installed. Install with: pip install yfinance"
-        )
+        raise RuntimeError("yfinance is not installed. Install with: pip install yfinance")
 
     # yfinance period accepts strings like "60d"
     period = f"{max(days + 5, days)}d"

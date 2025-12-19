@@ -311,5 +311,3 @@ You now have:
 - ✅ Compliance systems meeting **SEC/FINRA requirements**
 
 **Triton is now competitive with $10B+ hedge funds.**
-
-

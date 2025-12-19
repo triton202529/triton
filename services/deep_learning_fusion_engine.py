@@ -22,18 +22,21 @@ import numpy as np
 try:
     import torch
     import torch.nn as nn
+
     TORCH_AVAILABLE = True
 except Exception:
     TORCH_AVAILABLE = False
 
     class _NNStub:  # minimal stub to avoid NameError
         Module = object
+
     nn = _NNStub()  # type: ignore
 # ------------------------------------------------------------------------------
 
 
 # --------------------------- Torch models (optional) ---------------------------
 if TORCH_AVAILABLE:
+
     class _LSTMBlock(nn.Module):
         def __init__(self, in_dim: int, hidden_dim: int, n_layers: int, dropout: float):
             super().__init__()
@@ -57,9 +60,10 @@ if TORCH_AVAILABLE:
             last = out[:, -1, :]  # [B, H]
             return self.head(last).squeeze(-1)
 
-
     class _TransformerBlock(nn.Module):
-        def __init__(self, in_dim: int, hidden_dim: int, n_heads: int, n_layers: int, dropout: float):
+        def __init__(
+            self, in_dim: int, hidden_dim: int, n_heads: int, n_layers: int, dropout: float
+        ):
             super().__init__()
             encoder_layer = nn.TransformerEncoderLayer(
                 d_model=in_dim, nhead=max(1, n_heads), dropout=dropout, batch_first=True
@@ -74,18 +78,20 @@ if TORCH_AVAILABLE:
 
         def forward(self, x):
             # x: [B, T, F]
-            enc = self.encoder(x)           # [B, T, F]
-            pooled = enc.mean(dim=1)        # mean pool over time -> [B, F]
+            enc = self.encoder(x)  # [B, T, F]
+            pooled = enc.mean(dim=1)  # mean pool over time -> [B, F]
             return self.head(pooled).squeeze(-1)
+
+
 # ------------------------------------------------------------------------------
 
 
 @dataclass
 class FusionConfig:
-    model: str = "lstm"          # "lstm" | "transformer"
+    model: str = "lstm"  # "lstm" | "transformer"
     hidden_dim: int = 64
     n_layers: int = 2
-    n_heads: int = 4             # transformer only
+    n_heads: int = 4  # transformer only
     dropout: float = 0.1
     lr: float = 1e-3
     epochs: int = 5
@@ -102,12 +108,16 @@ class DeepLearningFusionEngine:
 
     def __init__(self, **kwargs):
         # accept only known config keys
-        self.cfg = FusionConfig(**{k: v for k, v in kwargs.items() if k in FusionConfig.__annotations__})
+        self.cfg = FusionConfig(
+            **{k: v for k, v in kwargs.items() if k in FusionConfig.__annotations__}
+        )
         self.model = None
         self._fitted = False
 
         if TORCH_AVAILABLE:
-            self.device = torch.device(self.cfg.device if torch.cuda.is_available() or self.cfg.device == "cpu" else "cpu")
+            self.device = torch.device(
+                self.cfg.device if torch.cuda.is_available() or self.cfg.device == "cpu" else "cpu"
+            )
         else:
             self.device = "cpu"
 
@@ -130,17 +140,27 @@ class DeepLearningFusionEngine:
         N, T, F = X.shape
 
         if self.cfg.model.lower() == "transformer":
-            net = _TransformerBlock(in_dim=F, hidden_dim=self.cfg.hidden_dim, n_heads=self.cfg.n_heads,
-                                    n_layers=self.cfg.n_layers, dropout=self.cfg.dropout)
+            net = _TransformerBlock(
+                in_dim=F,
+                hidden_dim=self.cfg.hidden_dim,
+                n_heads=self.cfg.n_heads,
+                n_layers=self.cfg.n_layers,
+                dropout=self.cfg.dropout,
+            )
         else:
-            net = _LSTMBlock(in_dim=F, hidden_dim=self.cfg.hidden_dim, n_layers=self.cfg.n_layers, dropout=self.cfg.dropout)
+            net = _LSTMBlock(
+                in_dim=F,
+                hidden_dim=self.cfg.hidden_dim,
+                n_layers=self.cfg.n_layers,
+                dropout=self.cfg.dropout,
+            )
 
         net = net.to(self.device)
         opt = torch.optim.Adam(net.parameters(), lr=self.cfg.lr)
         loss_fn = nn.BCELoss()
 
-        X_t = torch.from_numpy(X).float().to(self.device)        # [N, T, F]
-        y_t = torch.from_numpy(y).float().to(self.device)        # [N]
+        X_t = torch.from_numpy(X).float().to(self.device)  # [N, T, F]
+        y_t = torch.from_numpy(y).float().to(self.device)  # [N]
 
         net.train()
         for ep in range(max(1, int(self.cfg.epochs))):
@@ -213,9 +233,16 @@ try:
 except NameError:  # pragma: no cover
     # Fallback aliasing if code above is modified
     class DeepLearningFusionEngine:  # type: ignore
-        def __init__(self, *args, **kwargs): pass
-        def fit(self, *a, **k): return self
-        def predict(self, *a, **k): return []
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def fit(self, *a, **k):
+            return self
+
+        def predict(self, *a, **k):
+            return []
+
+
 # ------------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -227,4 +254,3 @@ if __name__ == "__main__":
     eng = DeepLearningFusionEngine(verbose=True)
     eng.fit(X, y)
     print("Scores:", np.array(eng.predict(X[:5])))
-

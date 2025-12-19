@@ -9,12 +9,14 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
+
 @dataclass
 class BLConfig:
-    risk_aversion: float = 3.0   # λ
-    tau: float = 0.05            # prior uncertainty scaling
-    long_only: bool = True       # clip negative weights
+    risk_aversion: float = 3.0  # λ
+    tau: float = 0.05  # prior uncertainty scaling
+    long_only: bool = True  # clip negative weights
     periods_per_year: int = 252  # to annualize
+
 
 class BlackLittermanOptimizer:
     def __init__(self, cfg: BLConfig | None = None, verbose: bool = False):
@@ -38,7 +40,9 @@ class BlackLittermanOptimizer:
         return mu * ppy, cov * ppy
 
     # ---- views ----
-    def _build_views(self, tickers: list[str], views: Dict[str, Tuple[str, float, float]], cov_ann: np.ndarray):
+    def _build_views(
+        self, tickers: list[str], views: Dict[str, Tuple[str, float, float]], cov_ann: np.ndarray
+    ):
         """
         views: { 'AAPL': ('absolute', 0.12, 0.7), ... }  # 12% annual expected return with 70% confidence
         Returns P (k x n), Q (k,), Omega (k x k)
@@ -49,8 +53,8 @@ class BlackLittermanOptimizer:
         Q = np.zeros(k)
         Omega = np.zeros((k, k))
 
-        idx = {t:i for i,t in enumerate(tickers)}
-        for r,(tkr,(vtype, val, conf)) in enumerate(views.items()):
+        idx = {t: i for i, t in enumerate(tickers)}
+        for r, (tkr, (vtype, val, conf)) in enumerate(views.items()):
             i = idx.get(tkr)
             if i is None:
                 continue
@@ -58,7 +62,7 @@ class BlackLittermanOptimizer:
             # Normalize 12 -> 0.12 if needed
             q = float(val) / 100.0 if abs(val) > 1.5 else float(val)
             Q[r] = q
-            base = self.cfg.tau * (P[r:r+1] @ cov_ann @ P[r:r+1].T)[0,0]
+            base = self.cfg.tau * (P[r : r + 1] @ cov_ann @ P[r : r + 1].T)[0, 0]
             conf = max(1e-6, min(1.0, float(conf)))
             Omega[r, r] = base / conf
         return P, Q, Omega
@@ -68,7 +72,7 @@ class BlackLittermanOptimizer:
         self,
         returns_df: pd.DataFrame,
         market_caps: Dict[str, float],
-        views: Dict[str, Tuple[str, float, float]] | None = None
+        views: Dict[str, Tuple[str, float, float]] | None = None,
     ) -> Dict:
         """
         returns_df: daily returns (decimal) indexed by date, columns=tickers
@@ -81,8 +85,8 @@ class BlackLittermanOptimizer:
         if n == 0:
             raise ValueError("No tickers in returns_df")
 
-        mu = df.mean().values          # daily
-        cov = df.cov().values          # daily
+        mu = df.mean().values  # daily
+        cov = df.cov().values  # daily
         mu_ann, cov_ann = self._annualize(mu, cov)
 
         # market equilibrium weights from market caps
@@ -97,7 +101,9 @@ class BlackLittermanOptimizer:
 
         # incorporate views (absolute only here)
         if not views:
-            P = np.zeros((0, n)); Q = np.zeros(0); Omega = np.zeros((0, 0))
+            P = np.zeros((0, n))
+            Q = np.zeros(0)
+            Omega = np.zeros((0, 0))
         else:
             P, Q, Omega = self._build_views(tickers, views, cov_ann)
 
@@ -134,15 +140,16 @@ class BlackLittermanOptimizer:
         return {
             "optimal_weights": weights,
             "expected_return": exp_ret,  # decimal annual
-            "volatility": vol,           # decimal annual
+            "volatility": vol,  # decimal annual
             "sharpe_ratio": sharpe,
             "posterior_mean": {t: float(mu_bl[i]) for i, t in enumerate(tickers)},
         }
 
+
 if __name__ == "__main__":
     # Simple self-test with random returns
     np.random.seed(7)
-    cols = ["AAPL","MSFT","GOOGL","AMZN","TSLA"]
+    cols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
     r = pd.DataFrame(np.random.normal(0.0005, 0.02, size=(600, len(cols))), columns=cols)
     caps = {t: np.random.uniform(1000, 3000) for t in cols}
     views = {"AAPL": ("absolute", 0.12, 0.7)}  # 12% annual with 70% confidence
@@ -151,5 +158,6 @@ if __name__ == "__main__":
     res = opt.run_black_litterman(r, caps, views)
     print("Volatility:", f"{res['volatility']:.2%}")
     print("Sharpe:", f"{res['sharpe_ratio']:.2f}")
-    print("Top weights:", sorted(res["optimal_weights"].items(), key=lambda x: x[1], reverse=True)[:3])
-
+    print(
+        "Top weights:", sorted(res["optimal_weights"].items(), key=lambda x: x[1], reverse=True)[:3]
+    )
