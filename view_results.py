@@ -1,21 +1,30 @@
-# view_results.py — TOP → Tab 3 (clean integrated version)
-# Includes: project-root detection, helpers, diagnostics, Tabs 0–3 fully functional.
+# view_results.py — TRITON Command Center (Phase 1 Unified Dashboard)
+# Includes:
+#   - project-root detection
+#   - CSV/parquet loaders
+#   - portfolio / guard / market-status helpers
+#   - global header w/ regime + drawdown + BP + timestamp
+#   - sidebar navigation (Sections -> Pages)
+#   - per-page render stubs (to be filled with real tab logic)
 
 import os
 import re
 import json
+import math
+import time
 import numpy as np
 import pandas as pd
 import streamlit as st
-from datetime import datetime
+import streamlit.components.v1 as components
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union, Optional
+import datetime as _dt  # for isinstance checks vs datetime
 
-# Optional libs
+# Optional plotting libs (we'll hook them up in tab bodies later)
 try:
     import plotly.express as px
     import plotly.graph_objects as go
-
     PLOTLY_OK = True
 except Exception:
     px = go = None
@@ -23,24 +32,189 @@ except Exception:
 
 try:
     import matplotlib.pyplot as plt
-
     MPL_OK = True
 except Exception:
     plt = None
     MPL_OK = False
 
+# --- Triton Alpaca env bootstrap (no python-dotenv needed) ---
+import os, re
+
+def _load_dotenv_if_present(path=".env"):
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line=line.strip()
+            if not line or line.startswith("#"): 
+                continue
+            m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)$', line)
+            if not m: 
+                continue
+            k,v = m.group(1), m.group(2)
+            # keep existing process env precedence
+            if k not in os.environ:
+                os.environ[k] = v
+
+def _wire_alpaca_env():
+    # precedence: existing process env; otherwise pull from .env we just loaded
+    key = os.environ.get("APCA_API_KEY_ID") or os.environ.get("ALPACA_KEY_ID")
+    sec = os.environ.get("APCA_API_SECRET_KEY") or os.environ.get("ALPACA_SECRET_KEY")
+    base = os.environ.get("APCA_API_BASE_URL")
+    # respect ALPACA_ENV if base missing
+    if not base:
+        env = (os.environ.get("ALPACA_ENV") or "paper").strip().lower()
+        if env == "paper":
+            base = "https://paper-api.alpaca.markets"
+        else:
+            base = "https://api.alpaca.markets"
+    # write back canonical APCA_* so downstream code can rely on them
+    os.environ.setdefault("APCA_API_KEY_ID", key or "")
+    os.environ.setdefault("APCA_API_SECRET_KEY", sec or "")
+    os.environ["APCA_API_BASE_URL"] = base  # always set base
+
+def _probe_buying_power():
+    key  = os.environ.get("APCA_API_KEY_ID")
+    sec  = os.environ.get("APCA_API_SECRET_KEY")
+    base = (os.environ.get("APCA_API_BASE_URL") or "").rstrip("/")
+    if not (key and sec and base):
+        return 0.0
+    # try alpaca-py first
+    try:
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(key, sec, paper=("paper-api" in base))
+        acct = client.get_account()
+        return float(getattr(acct, "buying_power", 0) or 0)
+    except Exception:
+        pass
+    # fallback: raw HTTP
+    try:
+        import requests
+        r = requests.get(
+            f"{base}/v2/account",
+            headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return float((r.json() or {}).get("buying_power") or 0)
+    except Exception:
+        return 0.0
+
+# --- DataFrame column sanitizer ---
+def sanitize_df_cols(df):
+    """Make column names flat, trimmed, and unique (avoids Arrow duplicate-name error)."""
+    import pandas as pd
+
+    # 1) Flatten MultiIndex columns (if any)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [
+            "_".join(str(x) for x in tup if x is not None and str(x) != "")
+            for tup in df.columns
+        ]
+
+    # 2) Trim + dedupe
+    seen = {}
+    new_cols = []
+    for c in [str(c).strip() for c in df.columns]:
+        if c in seen:
+            seen[c] += 1
+            new_cols.append(f"{c}_{seen[c]}")  # e.g., action -> action_1, action_2, ...
+        else:
+            seen[c] = 0
+            new_cols.append(c)
+    df.columns = new_cols
+    return df
+
+# initialize
+_load_dotenv_if_present(".env")
+_wire_alpaca_env()
+
 # ──────────────────────────────
-# App meta
+# BRAND / THEME CONSTANTS
 # ──────────────────────────────
-st.set_page_config(page_title="Triton AI Unified Dashboard", layout="wide")
 APP_VERSION = "r25-29_2025-09-27a"
-st.title("📊 Triton AI Unified Dashboard")
+
+BRAND_BG = "#0f172a"   # deep navy / slate
+CARD_BG  = "#1e293b"   # slightly lighter card bg
+TEXT_COL = "#f8fafc"   # near-white
+ACCENT   = "#38bdf8"   # cyan accent
 
 
 # ──────────────────────────────
-# Repo-root detection + override
+# PAGE CONFIG (set once)
+# ──────────────────────────────
+st.set_page_config(
+    page_title="TRITON • Command Center",
+    page_icon="🧠",
+    layout="wide",
+)
+
+
+# ──────────────────────────────
+# GLOBAL CSS INJECTION (dark Triton skin)
+# ──────────────────────────────
+st.markdown(
+    f"""
+<style>
+/* page background + default text */
+body {{
+    background-color: {BRAND_BG};
+    color: {TEXT_COL};
+}}
+section.main > div {{
+    padding-top: 0rem;
+}}
+
+.triton-card {{
+    background-color: {CARD_BG};
+    border-radius: 16px;
+    border: 1px solid rgba(148,163,184,0.2);
+    padding: 1rem 1.25rem;
+    color: {TEXT_COL};
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Inter","Roboto","Segoe UI",sans-serif;
+    margin-bottom: 1rem;
+}}
+.triton-card h3 {{
+    margin-top: 0;
+    color: {TEXT_COL};
+    font-size: 1rem;
+    font-weight: 600;
+}}
+.data-label {{
+    font-size: .75rem;
+    color: #94a3b8;
+}}
+.data-value {{
+    font-size: 1rem;
+    font-weight: 600;
+    color: {TEXT_COL};
+}}
+
+/* market pill base */
+.market-pill {{
+    border-radius:8px;
+    padding:0.6rem 0.8rem;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    font-size:0.8rem;
+    line-height:1.3;
+    min-width:220px;
+    max-width:360px;
+    box-shadow:0 1px 2px rgba(0,0,0,0.2);
+}}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# ──────────────────────────────
+# PATHS / PROJECT ROOT SETUP
 # ──────────────────────────────
 def _safe_this_file() -> Path:
+    """
+    Streamlit runs via `streamlit run view_results.py`, which can mess with __file__.
+    Graceful fallback to CWD if needed.
+    """
     try:
         return Path(__file__).resolve()
     except Exception:
@@ -48,53 +222,32 @@ def _safe_this_file() -> Path:
 
 
 THIS_FILE = _safe_this_file()
+
 ENV_ROOT = os.environ.get("TRITON_PROJECT_ROOT", "").strip()
 DEFAULT_PROJECT_ROOT = Path(ENV_ROOT).expanduser().resolve() if ENV_ROOT else THIS_FILE.parent
 
-with st.sidebar:
-    st.subheader("⚙️ Advanced")
-    root_mode = st.radio(
-        "Project root",
-        ["Auto (this file’s folder)", "Manual path"],
-        index=0,
-        key="root_mode_choice",
-    )
-    if root_mode == "Manual path":
-        default_text = str(st.session_state.get("custom_root", DEFAULT_PROJECT_ROOT))
-        custom_root = st.text_input(
-            "Enter absolute path to repo root", value=default_text, key="root_manual_input"
-        )
-        try:
-            PROJECT_ROOT = Path(custom_root).expanduser().resolve()
-            st.session_state["custom_root"] = str(PROJECT_ROOT)
-            st.caption(f"Using custom root: {PROJECT_ROOT}")
-        except Exception as e:
-            st.error(f"Invalid custom root: {e}")
-            PROJECT_ROOT = DEFAULT_PROJECT_ROOT
-    else:
-        PROJECT_ROOT = DEFAULT_PROJECT_ROOT
-        st.caption(f"Using auto root: {PROJECT_ROOT}")
+# (these will be overridden if user sets Manual path in sidebar)
+PROJECT_ROOT: Path = DEFAULT_PROJECT_ROOT
+DATA_ROOT   = PROJECT_ROOT / "data"
+RESULTS_DIR = DATA_ROOT / "results"
+ORDERS_DIR  = DATA_ROOT / "orders"
+PRED_DIR    = DATA_ROOT / "predictions"
+STRESS_DIR  = DATA_ROOT / "stress_test_results"
 
-    st.caption(f"Build: {APP_VERSION}")
-
-DATA_ROOT = PROJECT_ROOT / "data"
-RESULTS_DIR, ORDERS_DIR, PRED_DIR = (
-    DATA_ROOT / "results",
-    DATA_ROOT / "orders",
-    DATA_ROOT / "predictions",
-)
-for p in (RESULTS_DIR, ORDERS_DIR, PRED_DIR):
+for p in (RESULTS_DIR, ORDERS_DIR, PRED_DIR, STRESS_DIR):
     p.mkdir(parents=True, exist_ok=True)
 
-# ──────────────────────────────
-# Helpers (syntax-safe, Python 3.8+)
-# ──────────────────────────────
-from typing import List, Dict, Any, Union
+# key artifact paths
+PORTFOLIO_HISTORY_PATH = RESULTS_DIR / "portfolio_history.csv"
+LIVE_ORDERS_LOG_PATH   = RESULTS_DIR / "live_orders.csv"
+GUARD_SNAPSHOT_PATH    = RESULTS_DIR / "guard_snapshot.json"
 
 
+# ──────────────────────────────
+# BASIC LOADERS
+# ──────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_csv(filename: str, folder: Path = RESULTS_DIR) -> pd.DataFrame:
-    """Load a CSV with friendly errors and caching."""
     path = folder / filename
     if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
@@ -106,13 +259,11 @@ def load_csv(filename: str, folder: Path = RESULTS_DIR) -> pd.DataFrame:
 
 
 def load_csv_from(folder: Path, filename: str) -> pd.DataFrame:
-    """Convenience wrapper to load from a specific folder."""
     return load_csv(filename, folder)
 
 
 @st.cache_data(show_spinner=False)
 def load_parquet(path: Union[str, Path]) -> pd.DataFrame:
-    """Load a Parquet file with graceful fallback."""
     path = Path(path)
     if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
@@ -124,24 +275,20 @@ def load_parquet(path: Union[str, Path]) -> pd.DataFrame:
 
 
 def parse_dates_inplace(df: pd.DataFrame, cols=("date",), normalize: bool = False) -> pd.DataFrame:
-    """
-    Parse given columns as datetime in UTC, then strip tz to naive.
-    Optionally normalize to midnight.
-    """
     for c in cols:
         if c in df.columns:
             s = pd.to_datetime(df[c], errors="coerce", utc=True)
-            df[c] = s.dt.tz_localize(None)  # remove timezone (naive UTC)
+            df[c] = s.dt.tz_localize(None)
             if normalize:
                 df[c] = df[c].dt.normalize()
     return df
 
 
-def ensure_date(df: pd.DataFrame, candidates=None, normalize: bool = False) -> pd.DataFrame:
-    """
-    Ensure df has a 'date' column parsed in UTC then made tz-naive.
-    Try candidate columns; if none exist, create 'date' as NaT.
-    """
+def ensure_date(
+    df: pd.DataFrame,
+    candidates: Optional[List[str]] = None,
+    normalize: bool = False,
+) -> pd.DataFrame:
     if candidates is None:
         candidates = [
             "date",
@@ -153,7 +300,7 @@ def ensure_date(df: pd.DataFrame, candidates=None, normalize: bool = False) -> p
             "created_at",
             "updated_at",
         ]
-    chosen = next((c for c in candidates if c in df.columns), None)
+    chosen = next((c for c in df.columns if c in candidates), None)
     if chosen is not None:
         s = pd.to_datetime(df[chosen], errors="coerce", utc=True)
         df["date"] = s.dt.tz_localize(None)
@@ -164,24 +311,25 @@ def ensure_date(df: pd.DataFrame, candidates=None, normalize: bool = False) -> p
     return df
 
 
-def get_score_col(df: pd.DataFrame):
-    """Return the name of the score column if present."""
-    if "total_score" in df.columns:  # current pipeline
-        return "total_score"
-    if "score" in df.columns:  # legacy
-        return "score"
-    return None
-
-
-def to_numeric(df: pd.DataFrame, cols) -> pd.DataFrame:
-    """Coerce the listed columns to numeric (inplace) and return df."""
+def to_numeric(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     for c in cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 
-def r2_score(y_true, y_pred):
+def get_score_col(df: pd.DataFrame) -> Optional[str]:
+    if "total_score" in df.columns:
+        return "total_score"
+    if "score" in df.columns:
+        return "score"
+    return None
+
+
+# ──────────────────────────────
+# MODEL METRICS (used later in Model Comparison tab)
+# ──────────────────────────────
+def r2_score(y_true, y_pred) -> float:
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
@@ -194,7 +342,7 @@ def r2_score(y_true, y_pred):
     return 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
 
 
-def mae(y_true, y_pred):
+def mae(y_true, y_pred) -> float:
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
@@ -205,7 +353,7 @@ def mae(y_true, y_pred):
     return float(np.mean(np.abs(y_true - y_pred)))
 
 
-def rmse(y_true, y_pred):
+def rmse(y_true, y_pred) -> float:
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
@@ -216,9 +364,10 @@ def rmse(y_true, y_pred):
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
-# Normalization + quick performance stats for equity curves
+# ──────────────────────────────
+# PORTFOLIO / PERFORMANCE HELPERS
+# ──────────────────────────────
 def normalize_to_one(series: pd.Series) -> pd.Series:
-    """Normalize a positive cumulative series to start at 1.0, ignoring leading NaNs."""
     s = pd.to_numeric(series, errors="coerce")
     if s.dropna().empty:
         return s
@@ -229,9 +378,6 @@ def normalize_to_one(series: pd.Series) -> pd.Series:
 
 
 def perf_stats_from_levels(levels: pd.Series, freq_per_year: int = 252) -> dict:
-    """
-    Compute total_return, CAGR, volatility, sharpe (rf=0), max_drawdown from an equity curve (levels).
-    """
     s = pd.to_numeric(levels, errors="coerce").dropna()
     if s.size < 3:
         return {
@@ -241,20 +387,27 @@ def perf_stats_from_levels(levels: pd.Series, freq_per_year: int = 252) -> dict:
             "sharpe": np.nan,
             "max_dd": np.nan,
         }
+
     rets = s.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
     total_return = float(s.iloc[-1] / s.iloc[0] - 1)
-    years = (
-        max((s.index[-1] - s.index[0]).days, 1) / 365.25
-        if hasattr(s.index, "dtype")
-        else len(s) / freq_per_year
-    )
+
+    if hasattr(s.index, "dtype"):
+        days = max((s.index[-1] - s.index[0]).days, 1)
+        years = days / 365.25
+    else:
+        years = len(s) / freq_per_year
+
     cagr = float((s.iloc[-1] / s.iloc[0]) ** (1 / years) - 1) if years > 0 else np.nan
     vol = float(rets.std() * np.sqrt(freq_per_year)) if rets.size else np.nan
     sharpe = (
-        float(rets.mean() / (rets.std() + 1e-12) * np.sqrt(freq_per_year)) if rets.size else np.nan
+        float(rets.mean() / (rets.std() + 1e-12) * np.sqrt(freq_per_year))
+        if rets.size
+        else np.nan
     )
+
     peak = s.cummax()
     dd = (s / peak - 1).min()
+
     return {
         "total_return": total_return,
         "cagr": cagr,
@@ -264,7 +417,9 @@ def perf_stats_from_levels(levels: pd.Series, freq_per_year: int = 252) -> dict:
     }
 
 
-# --- news helpers ---
+# ──────────────────────────────
+# SENTIMENT / NEWS HELPERS
+# ──────────────────────────────
 def strip_html(s):
     if pd.isna(s):
         return s
@@ -281,7 +436,6 @@ def extract_href(s):
 def make_clickable(title, url):
     if pd.isna(url) or not str(url).strip():
         return str(title) if not pd.isna(title) else ""
-    # pass through existing <a ...> safely
     if str(url).strip().startswith("<a "):
         return str(url)
     safe_title = str(title) if (not pd.isna(title) and str(title).strip()) else "Link"
@@ -314,29 +468,38 @@ def load_jsonl(path: Path) -> List[Dict[str, Any]]:
 
 
 def derive_total_value(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure a total_value column exists (accept 'portfolio_value' or cash+market_value)."""
-    if "total_value" in df.columns:
-        df["total_value"] = pd.to_numeric(df["total_value"], errors="coerce")
-        return df
-    if "portfolio_value" in df.columns:
-        df["total_value"] = pd.to_numeric(df["portfolio_value"], errors="coerce")
-        return df
-    if {"cash", "market_value"}.issubset(df.columns):
-        df["total_value"] = pd.to_numeric(df["cash"], errors="coerce").fillna(0) + pd.to_numeric(
-            df["market_value"], errors="coerce"
-        ).fillna(0)
-    return df
+    out = df.copy()
+    if "total_value" in out.columns:
+        out["total_value"] = pd.to_numeric(out["total_value"], errors="coerce")
+        return out
+    if "portfolio_value" in out.columns:
+        out["total_value"] = pd.to_numeric(out["portfolio_value"], errors="coerce")
+        return out
+    if {"cash", "market_value"}.issubset(out.columns):
+        out["total_value"] = (
+            pd.to_numeric(out["cash"], errors="coerce").fillna(0.0)
+            + pd.to_numeric(out["market_value"], errors="coerce").fillna(0.0)
+        )
+    return out
 
 
 def backfill_close_from_parquet(sig_df: pd.DataFrame) -> pd.DataFrame:
-    """If 'close' is missing, try to backfill from {ticker}.parquet last close."""
     out = sig_df.copy()
     if "close" not in out.columns:
         out["close"] = np.nan
+
     need_close = ~out["close"].notna()
     if not need_close.any():
         return out
-    tickers = out.loc[need_close, "ticker"].dropna().astype(str).unique()
+
+    tickers = (
+        out.loc[need_close, "ticker"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
     rows = []
     for t in tickers:
         pq = RESULTS_DIR / f"{t}.parquet"
@@ -348,20 +511,22 @@ def backfill_close_from_parquet(sig_df: pd.DataFrame) -> pd.DataFrame:
             if not ohlc.empty:
                 last_close = float(ohlc["close"].iloc[-1])
         rows.append((t, last_close))
+
     if rows:
         fill = pd.DataFrame(rows, columns=["ticker", "_last_close"])
         out = out.merge(fill, on="ticker", how="left")
-        out["close"] = pd.to_numeric(out["close"], errors="coerce").fillna(out["_last_close"])
+        out["close"] = (
+            pd.to_numeric(out["close"], errors="coerce")
+            .fillna(out["_last_close"])
+        )
         out.drop(columns=["_last_close"], inplace=True, errors="ignore")
+
     return out
 
 
 def stabilize_weights(raw_wide: pd.DataFrame, cap: float) -> pd.DataFrame:
     """
     Row-wise cap & normalize portfolio weights.
-
-    raw_wide: wide df indexed by date with tickers as columns (raw scores/weights).
-    cap: per-ticker cap as a fraction (e.g., 0.15 for 15%). 0 disables capping.
     """
     if raw_wide is None or raw_wide.empty:
         return pd.DataFrame(
@@ -371,7 +536,13 @@ def stabilize_weights(raw_wide: pd.DataFrame, cap: float) -> pd.DataFrame:
         )
 
     avail = raw_wide.notna()
-    W = raw_wide.copy().astype(float).fillna(0.0).clip(lower=0.0)
+    W = (
+        raw_wide.copy()
+        .astype(float)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+
     if cap is not None and np.isfinite(cap) and cap > 0:
         W = W.clip(upper=float(cap))
 
@@ -379,6 +550,7 @@ def stabilize_weights(raw_wide: pd.DataFrame, cap: float) -> pd.DataFrame:
     has_mass = row_sum > 0
 
     W_norm = pd.DataFrame(0.0, index=W.index, columns=W.columns)
+
     if has_mass.any():
         W_norm.loc[has_mass] = W.loc[has_mass].div(row_sum.loc[has_mass], axis=0)
 
@@ -388,237 +560,1430 @@ def stabilize_weights(raw_wide: pd.DataFrame, cap: float) -> pd.DataFrame:
         valid = counts > 0
         if valid.any():
             eq_idx = counts[valid].index
-            W_eq = avail.loc[eq_idx].div(counts.loc[eq_idx], axis=0).astype(float)
+            W_eq = (
+                avail.loc[eq_idx]
+                .div(counts.loc[eq_idx], axis=0)
+                .astype(float)
+            )
             W_norm.loc[eq_idx] = W_eq
 
     return W_norm.fillna(0.0)
 
 
-# ──────────────────────────────
-# Stress results folder (add near RESULTS_DIR / ORDERS_DIR / PRED_DIR)
-# ──────────────────────────────
-STRESS_DIR = DATA_ROOT / "stress_test_results"
-STRESS_DIR.mkdir(parents=True, exist_ok=True)
+def _ensure_columns(df: pd.DataFrame, needed: List[str], defaults: Dict[str, Any]) -> pd.DataFrame:
+    df = df.copy()
+    for col in needed:
+        if col not in df.columns:
+            df[col] = defaults.get(col, "")
+    return df
+
+
+def _safe_pick(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    present = [c for c in columns if c in df.columns]
+    missing = [c for c in columns if c not in df.columns]
+    if missing:
+        st.info(
+            f"Some optional columns are missing and were skipped: {', '.join(missing)}",
+            icon="ℹ️",
+        )
+    return df[present]
 
 
 # ──────────────────────────────
-# Tabs (create all up front; indices 0..30)
+# CAPITAL GUARD / STATUS SNAPSHOT HELPERS
 # ──────────────────────────────
+@st.cache_data(show_spinner=False)
+def load_guard_snapshot(path: Path = GUARD_SNAPSHOT_PATH) -> Dict[str, Any]:
+    if not path.exists() or path.stat().st_size == 0:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        out = {}
+        for k, v in data.items():
+            out[k] = v
+        return out
+    except Exception as e:
+        st.warning(f"⚠️ Could not read {path.name}: {e}")
+        return {}
+
+
+@st.cache_data(show_spinner=False)
+def load_portfolio_history(path: Path = PORTFOLIO_HISTORY_PATH) -> pd.DataFrame:
+    if not path.exists() or path.stat().st_size == 0:
+        return pd.DataFrame(columns=["timestamp", "equity"])
+
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        st.error(f"❌ Could not read {path}: {e}")
+        return pd.DataFrame(columns=["timestamp", "equity"])
+
+    if "timestamp" in df.columns:
+        ts = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+        df["timestamp"] = ts.dt.tz_localize(None)
+        df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
+
+    df["equity"] = pd.to_numeric(df.get("equity", np.nan), errors="coerce")
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def load_open_orders(log_path: Path = LIVE_ORDERS_LOG_PATH) -> pd.DataFrame:
+    if not log_path.exists() or log_path.stat().st_size == 0:
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(log_path)
+    except Exception as e:
+        st.warning(f"⚠️ Could not read {log_path.name}: {e}")
+        return pd.DataFrame()
+
+    if "timestamp" in df.columns:
+        ts = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+        df["timestamp"] = ts.dt.tz_localize(None)
+
+    if "qty" in df.columns:
+        df["qty"] = pd.to_numeric(df["qty"], errors="coerce")
+
+    if "limit_price" in df.columns:
+        df["limit_price"] = pd.to_numeric(df["limit_price"], errors="coerce")
+
+    for c in ("side", "status"):
+        if c in df.columns:
+            df[c] = df[c].astype(str).str.upper()
+
+    if "timestamp" in df.columns:
+        df = df.sort_values("timestamp", ascending=False)
+
+    return df
+
+
+def latest_portfolio_status() -> Dict[str, Any]:
+    out = {
+        "mode": "UNKNOWN",
+        "reason": "",
+        "drawdown_pct": np.nan,
+        "latest_equity": np.nan,
+        "buying_power": np.nan,
+        "reserve_pct": np.nan,
+        "timestamp": "",
+    }
+
+    # equity + drawdown
+    ph = load_portfolio_history()
+    if not ph.empty:
+        latest_equity = float(ph["equity"].iloc[-1])
+        peak_equity   = float(ph["equity"].max())
+        out["latest_equity"] = latest_equity
+        if np.isfinite(latest_equity) and np.isfinite(peak_equity) and peak_equity > 0:
+            dd = (latest_equity / peak_equity) - 1.0
+            out["drawdown_pct"] = float(dd)
+
+    # guard_snapshot.json overrides
+    guard = load_guard_snapshot()
+    if guard:
+        if "mode" in guard:
+            out["mode"] = str(guard.get("mode", out["mode"])).upper() or out["mode"]
+        if "reason" in guard:
+            out["reason"] = guard.get("reason", out["reason"])
+        if "buying_power" in guard and np.isfinite(guard["buying_power"]):
+            out["buying_power"] = float(guard["buying_power"])
+        if "reserve_pct" in guard and np.isfinite(guard["reserve_pct"]):
+            out["reserve_pct"] = float(guard["reserve_pct"])
+        if "latest_equity" in guard and np.isfinite(guard["latest_equity"]):
+            out["latest_equity"] = float(guard["latest_equity"])
+        if "drawdown_pct" in guard and np.isfinite(guard["drawdown_pct"]):
+            out["drawdown_pct"] = float(guard["drawdown_pct"])
+        if "timestamp" in guard:
+            out["timestamp"] = str(guard["timestamp"])
+
+    # fallback mode using last open_orders row if still UNKNOWN
+    if out["mode"] == "UNKNOWN":
+        audit = load_open_orders()
+        if not audit.empty:
+            last_row = audit.iloc[0].to_dict()
+            note_txt   = str(last_row.get("note", "")).upper()
+            status_txt = str(last_row.get("status", "")).upper()
+
+            if "LOCKDOWN" in note_txt:
+                out["mode"] = "LOCKDOWN"
+                out["reason"] = "Capital Preservation / LOCKDOWN referenced in last order note."
+            elif "DEFENSIVE" in note_txt:
+                out["mode"] = "DEFENSIVE"
+                out["reason"] = "Scaled down due to DEFENSIVE posture."
+            elif "OK" in status_txt:
+                out["mode"] = "NORMAL"
+                if not out["reason"]:
+                    out["reason"] = "Orders accepted; looks normal."
+
+    return out
+
+
+# ──────────────────────────────
+# STATUS ACCESSORS (used by header chips)
+# ──────────────────────────────
+def get_current_regime() -> str:
+    snap = latest_portfolio_status()
+    mode = snap.get("mode", "UNKNOWN").upper()
+    if mode == "LOCKDOWN":
+        return "LOCKDOWN"
+    if mode == "DEFENSIVE":
+        return "DEFENSIVE"
+    if mode == "NORMAL":
+        return "NORMAL"
+    return "UNKNOWN"
+
+
+def get_drawdown_pct() -> float:
+    snap = latest_portfolio_status()
+    dd = snap.get("drawdown_pct", np.nan)
+    if dd is None or not np.isfinite(dd):
+        return float("nan")
+    return float(dd * 100.0)  # -0.033 → -3.3
+
+
+def get_buying_power() -> float:
+    snap = latest_portfolio_status()
+    bp = snap.get("buying_power", np.nan)
+    if bp is None or not np.isfinite(bp):
+        return float("nan")
+    return float(bp)
+
+
+def get_guard_timestamp() -> str:
+    snap = latest_portfolio_status()
+    ts = snap.get("timestamp", "")
+    if ts:
+        return ts
+    # fallback: current ET
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    offset = timedelta(hours=-4)
+    now_et = now_utc.astimezone(timezone(offset))
+    return now_et.strftime("%Y-%m-%d %H:%M ET")
+
+
+# ──────────────────────────────
+# MARKET STATUS HELPERS (for the red/green pill)
+# ──────────────────────────────
+def _humanize_any_timedelta(td_obj) -> str:
+    if td_obj is None:
+        return "--"
+    try:
+        total_seconds = td_obj.total_seconds()
+    except Exception:
+        return "--"
+
+    secs = int(max(total_seconds, 0))
+    days = secs // 86400
+    secs -= days * 86400
+    hours = secs // 3600
+    secs -= hours * 3600
+    minutes = secs // 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0 or days > 0:
+        parts.append(f"{hours}h")
+    parts.append(f"{minutes}m")
+    return " ".join(parts)
+
+
+def get_market_status() -> Dict[str, Any]:
+    """
+    Approximate US equities session (ET ~ UTC-4), Mon–Fri 09:30–16:00.
+    """
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    offset = timedelta(hours=-4)
+    now_et = now_utc.astimezone(timezone(offset))
+
+    weekday = now_et.weekday()  # 0=Mon ... 6=Sun
+    open_today  = now_et.replace(hour=9,  minute=30, second=0, microsecond=0)
+    close_today = now_et.replace(hour=16, minute=0,  second=0, microsecond=0)
+
+    is_trading_day = weekday < 5
+
+    if is_trading_day and (now_et >= open_today) and (now_et < close_today):
+        is_open = True
+        next_label = "Next close:"
+        next_ts = close_today
+    else:
+        is_open = False
+        if is_trading_day and now_et < open_today:
+            next_open = open_today
+        else:
+            tmp = now_et + timedelta(days=1)
+            while tmp.weekday() >= 5:
+                tmp += timedelta(days=1)
+            next_open = tmp.replace(hour=9, minute=30, second=0, microsecond=0)
+        next_label = "Next open:"
+        next_ts = next_open
+
+    delta = next_ts - now_et
+
+    return {
+        "is_open": is_open,
+        "now_et": now_et,
+        "next_label": next_label,
+        "next_ts": next_ts,
+        "delta": delta,
+    }
+
+
+def render_market_chip_html() -> str:
+    try:
+        status = get_market_status()
+    except Exception:
+        status = {}
+
+    is_open    = bool(status.get("is_open", False))
+    now_et     = status.get("now_et", None)
+    next_label = status.get("next_label", "Next:")
+    next_ts    = status.get("next_ts", None)
+    delta      = status.get("delta", None)
+
+    icon = "🟢" if is_open else "🔴"
+    state_txt = "OPEN" if is_open else "CLOSED"
+    countdown_txt = _humanize_any_timedelta(delta)
+
+    if isinstance(next_ts, (_dt.datetime, pd.Timestamp)):
+        nxt_str = pd.Timestamp(next_ts).strftime("%Y-%m-%d %H:%M ET")
+    else:
+        nxt_str = "--"
+
+    if hasattr(now_et, "strftime"):
+        last_refresh_str = now_et.strftime("%Y-%m-%d %H:%M ET")
+    else:
+        last_refresh_str = "--"
+
+    bg         = "#e6ffed" if is_open else "#ffecec"
+    border     = "#2ecc71" if is_open else "#e74c3c"
+    text_color = "#0a3622" if is_open else "#511010"
+
+    pill_html = f"""
+    <div class="market-pill" style="
+        display:flex;
+        flex-wrap:wrap;
+        align-items:flex-start;
+        gap:0.5rem;
+        border:1px solid {border};
+        background:{bg};
+        color:{text_color};
+    ">
+        <div style="font-weight:600; font-size:0.8rem; min-width:5rem;">
+            <span style="font-size:0.8rem; margin-right:0.4rem;">{icon}</span>
+            <span style="letter-spacing:0.02em;">Market {state_txt}</span>
+        </div>
+        <div style="display:flex; flex-direction:column; font-size:0.75rem; line-height:1.2; opacity:0.9;">
+            <div>
+                {("closes" if is_open else "opens")} in
+                <strong>{countdown_txt}</strong>
+            </div>
+            <div style="opacity:0.8;">
+                {next_label} {nxt_str}
+            </div>
+            <div style="opacity:0.6; margin-top:0.4rem;">
+                Last update: {last_refresh_str}
+            </div>
+        </div>
+    </div>
+    """
+    return pill_html
+
+
+# ──────────────────────────────
+# GLOBAL HEADER RENDER (dark Triton top block, now via components.html)
+# ──────────────────────────────
+def render_global_header():
+    dd_pct_raw       = get_drawdown_pct()        # may be NaN
+    bp_raw           = get_buying_power()
+    regime_raw       = get_current_regime()
+    ts_raw           = get_guard_timestamp()
+    market_chip_html = render_market_chip_html()
+
+    def _fmt_pct_local(val):
+        if val is None or not np.isfinite(val):
+            return "--"
+        return f"{val:.2f}%"
+
+    def _fmt_dollar_local(val):
+        if val is None or not np.isfinite(val):
+            return "--"
+        return f"${val:,.2f}"
+
+    def _fmt_text_local(s):
+        s = (s or "").strip()
+        return s if s else "--"
+
+    dd_pct = _fmt_pct_local(dd_pct_raw)
+    bp     = _fmt_dollar_local(bp_raw)
+    regime = _fmt_text_local(regime_raw)
+    ts     = _fmt_text_local(ts_raw)
+
+    # NOTE: no HTML comments, all inline styles,
+    # and we render with components.html so Streamlit
+    # doesn't try to "help" or escape it.
+    header_html = f"""
+    <div style="
+        background: radial-gradient(circle at 10% 10%, rgba(56,189,248,0.18) 0%, rgba(15,23,42,0) 60%);
+        border: 1px solid rgba(148,163,184,0.2);
+        border-radius: 16px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1rem;
+        color: {TEXT_COL};
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Inter', 'Roboto', 'Segoe UI', sans-serif;
+        max-width: 1100px;
+    ">
+
+      <div style="
+          display:flex;
+          flex-wrap:wrap;
+          align-items:flex-start;
+          justify-content:space-between;
+          gap:0.75rem;
+      ">
+
+        <div style="display:flex;flex-direction:column;">
+          <div style="
+              font-size:0.8rem;
+              font-weight:500;
+              color:{ACCENT};
+              letter-spacing:.05em;
+              text-transform:uppercase;
+          ">
+            TRITON • COMMAND CENTER
+          </div>
+
+          <div style="
+              font-size:1.25rem;
+              font-weight:600;
+              color:{TEXT_COL};
+              line-height:1.4;
+          ">
+            Blue Atlantic Asset Intelligence
+          </div>
+
+          <div style="
+              font-size:0.8rem;
+              color:#94a3b8;
+              line-height:1.3;
+              white-space:nowrap;
+          ">
+            Capital Preservation First • Adaptive AI Execution • {APP_VERSION}
+          </div>
+        </div>
+
+        <div style="
+            display:flex;
+            flex-wrap:wrap;
+            gap:.5rem .75rem;
+            align-items:flex-start;
+        ">
+
+          <div style="
+              background-color:{CARD_BG};
+              border-radius:999px;
+              border:1px solid rgba(148,163,184,0.35);
+              padding:.4rem .75rem;
+              font-size:.8rem;
+              font-weight:500;
+              line-height:1.2;
+              color:{TEXT_COL};
+              display:flex;
+              align-items:center;
+              gap:.4rem;
+              white-space:nowrap;
+          ">
+            <span style="color:#94a3b8;font-weight:400;">Regime</span>
+            <span>{regime}</span>
+          </div>
+
+          <div style="
+              background-color:{CARD_BG};
+              border-radius:999px;
+              border:1px solid rgba(148,163,184,0.35);
+              padding:.4rem .75rem;
+              font-size:.8rem;
+              font-weight:500;
+              line-height:1.2;
+              color:{TEXT_COL};
+              display:flex;
+              align-items:center;
+              gap:.4rem;
+              white-space:nowrap;
+          ">
+            <span style="color:#94a3b8;font-weight:400;">Max Drawdown</span>
+            <span>{dd_pct}</span>
+          </div>
+
+          <div style="
+              background-color:{CARD_BG};
+              border-radius:999px;
+              border:1px solid rgba(148,163,184,0.35);
+              padding:.4rem .75rem;
+              font-size:.8rem;
+              font-weight:500;
+              line-height:1.2;
+              color:{TEXT_COL};
+              display:flex;
+              align-items:center;
+              gap:.4rem;
+              white-space:nowrap;
+          ">
+            <span style="color:#94a3b8;font-weight:400;">Buying Power</span>
+            <span>{bp}</span>
+          </div>
+
+          <div style="
+              background-color:{CARD_BG};
+              border-radius:999px;
+              border:1px solid rgba(148,163,184,0.35);
+              padding:.4rem .75rem;
+              font-size:.8rem;
+              font-weight:500;
+              line-height:1.2;
+              color:{TEXT_COL};
+              display:flex;
+              align-items:center;
+              gap:.4rem;
+              white-space:nowrap;
+          ">
+            <span style="color:#94a3b8;font-weight:400;">Updated</span>
+            <span>{ts}</span>
+          </div>
+
+        </div>
+      </div>
+
+      <div style="margin-top:0.75rem;">
+        {market_chip_html}
+      </div>
+
+    </div>
+    """
+
+    components.html(header_html, height=240, scrolling=False)
+
+    # refresh button below header iframe
+    if st.button("⟳ Refresh data", key="force_rerun"):
+        st.rerun()
+
+
+# ──────────────────────────────
+# SIMPLE PAGE RENDER STUBS
+# ──────────────────────────────
+def page_portfolio_history():
+    st.markdown(
+        '<div class="triton-card"><h3>📈 Portfolio History</h3>'
+        '<p class="data-label">Cumulative PnL / equity curve / drawdown timeline.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_trade_log():
+    st.markdown(
+        '<div class="triton-card"><h3>📝 Trade Log</h3>'
+        '<p class="data-label">Full trade table with ticker, side, qty, PnL, SL/TP hits.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_allocations():
+    st.markdown(
+        '<div class="triton-card"><h3>🏗 Portfolio Allocations</h3>'
+        '<p class="data-label">Current weights by ticker/sector, plus exposure caps.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_sltp():
+    st.markdown(
+        '<div class="triton-card"><h3>🎯 SL/TP Performance</h3>'
+        '<p class="data-label">Stop loss vs take profit effectiveness, win rate, avg hold time.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_ai_signals():
+    st.markdown(
+        '<div class="triton-card"><h3>🤖 AI Signals</h3>'
+        '<p class="data-label">Latest BUY / SELL / WAIT per ticker, with confidence.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_top_picks():
+    st.markdown(
+        '<div class="triton-card"><h3>⭐ Top Picks</h3>'
+        '<p class="data-label">Ranked candidates from fundamentals + momentum + sentiment fusion.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_feature_importance():
+    st.markdown(
+        '<div class="triton-card"><h3>🔬 Feature Importance</h3>'
+        '<p class="data-label">Which features the model says are driving predictions.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_model_comparison():
+    st.markdown(
+        '<div class="triton-card"><h3>📊 Model Comparison</h3>'
+        '<p class="data-label">RF vs XGBoost vs LSTM vs Baseline, per ticker.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_risk_report():
+    st.markdown(
+        '<div class="triton-card"><h3>🛡 Risk Report</h3>'
+        '<p class="data-label">VaR, CVaR, concentration, capital protection status.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_strategy_diagnostics():
+    st.markdown(
+        '<div class="triton-card"><h3>🧪 Strategy Diagnostics</h3>'
+        '<p class="data-label">Signal accuracy, win/loss distribution, profit per trade.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_adaptive_risk():
+    st.markdown(
+        '<div class="triton-card"><h3>📉 Adaptive Risk / Regime Monitor</h3>'
+        '<p class="data-label">Regime (bull/bear/volatile), exposure targets, defensive mode.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_stress_test():
+    st.markdown(
+        '<div class="triton-card"><h3>🔥 Stress Test Snapshot</h3>'
+        '<p class="data-label">Tail-risk shocks, gap-down scenarios, worst-case drawdown.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_news_sentiment():
+    st.markdown(
+        '<div class="triton-card"><h3>📰 News Sentiment</h3>'
+        '<p class="data-label">Ticker-level sentiment feed & market mood.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_smart_alerts():
+    st.markdown(
+        '<div class="triton-card"><h3>🚨 Smart Alerts</h3>'
+        '<p class="data-label">Alerts Triton is watching (liquidity shocks, unusual flows).</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_econ_calendar():
+    st.markdown(
+        '<div class="triton-card"><h3>📅 Economic Calendar</h3>'
+        '<p class="data-label">Upcoming macro events and impact level.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_baseline_weights():
+    st.markdown(
+        '<div class="triton-card"><h3>📦 Baseline Weights</h3>'
+        '<p class="data-label">Reference portfolio, drift vs target, safety rails.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_advisor_introspection():
+    st.markdown(
+        '<div class="triton-card"><h3>🧠 Advisor Introspection</h3>'
+        '<p class="data-label">How each advisor persona is positioned and performing.</p></div>',
+        unsafe_allow_html=True
+    )
+
+def page_execution_health():
+    st.markdown(
+        '<div class="triton-card"><h3>⚙ Execution / Health</h3>'
+        '<p class="data-label">Broker link, buying power, scheduler heartbeat, open orders health.</p></div>',
+        unsafe_allow_html=True
+    )
+
+
+# ──────────────────────────────
+# BODY ROUTER
+# ──────────────────────────────
+def render_body(section: str, page: str):
+    # Portfolio
+    if section == "Portfolio":
+        if page == "Portfolio History":
+            page_portfolio_history()
+        elif page == "Trade Log":
+            page_trade_log()
+        elif page == "Allocations":
+            page_allocations()
+        elif page == "SL/TP Performance":
+            page_sltp()
+
+    # Signals
+    elif section == "Signals":
+        if page == "AI Signals":
+            page_ai_signals()
+        elif page == "Top Picks":
+            page_top_picks()
+        elif page == "Feature Importance":
+            page_feature_importance()
+        elif page == "Model Comparison":
+            page_model_comparison()
+
+    # Risk & Guardrails
+    elif section == "Risk & Guardrails":
+        if page == "Risk Report":
+            page_risk_report()
+        elif page == "Strategy Diagnostics":
+            page_strategy_diagnostics()
+        elif page == "Adaptive Risk / Regime Monitor":
+            page_adaptive_risk()
+        elif page == "Stress Test Snapshot":
+            page_stress_test()
+
+    # Research / Intel
+    elif section == "Research / Intel":
+        if page == "News Sentiment":
+            page_news_sentiment()
+        elif page == "Smart Alerts":
+            page_smart_alerts()
+        elif page == "Economic Calendar":
+            page_econ_calendar()
+
+    # System
+    elif section == "System":
+        if page == "Baseline Weights":
+            page_baseline_weights()
+        elif page == "Advisor Introspection":
+            page_advisor_introspection()
+        elif page == "Execution / Health":
+            page_execution_health()
+
+
+# ──────────────────────────────
+# SIDEBAR NAVIGATION
+# ──────────────────────────────
+SECTIONS = {
+    "Portfolio": [
+        "Portfolio History",
+        "Trade Log",
+        "Allocations",
+        "SL/TP Performance",
+    ],
+    "Signals": [
+        "AI Signals",
+        "Top Picks",
+        "Feature Importance",
+        "Model Comparison",
+    ],
+    "Risk & Guardrails": [
+        "Risk Report",
+        "Strategy Diagnostics",
+        "Adaptive Risk / Regime Monitor",
+        "Stress Test Snapshot",
+    ],
+    "Research / Intel": [
+        "News Sentiment",
+        "Smart Alerts",
+        "Economic Calendar",
+    ],
+    "System": [
+        "Baseline Weights",
+        "Advisor Introspection",
+        "Execution / Health",
+    ],
+}
+
+
+def _sidebar_controls():
+    global PROJECT_ROOT, DATA_ROOT, RESULTS_DIR, ORDERS_DIR, PRED_DIR, STRESS_DIR
+
+    with st.sidebar:
+        st.title("TRITON Nav")
+
+        # Advanced / project root selector
+        st.subheader("⚙️ Advanced")
+        root_mode = st.radio(
+            "Project root",
+            ["Auto (this file’s folder)", "Manual path"],
+            index=0,
+            key="root_mode_choice",
+        )
+
+        if root_mode == "Manual path":
+            default_text = str(st.session_state.get("custom_root", PROJECT_ROOT))
+            custom_root = st.text_input(
+                "Enter absolute path to repo root",
+                value=default_text,
+                key="root_manual_input",
+            )
+            try:
+                PROJECT_ROOT = Path(custom_root).expanduser().resolve()
+                st.session_state["custom_root"] = str(PROJECT_ROOT)
+                st.caption(f"Using custom root: {PROJECT_ROOT}")
+            except Exception as e:
+                st.error(f"Invalid custom root: {e}")
+        else:
+            st.caption(f"Using auto root: {PROJECT_ROOT}")
+
+        st.caption(f"Build: {APP_VERSION}")
+
+        # Re-derive dirs now that PROJECT_ROOT may have changed
+        DATA_ROOT   = PROJECT_ROOT / "data"
+        RESULTS_DIR = DATA_ROOT / "results"
+        ORDERS_DIR  = DATA_ROOT / "orders"
+        PRED_DIR    = DATA_ROOT / "predictions"
+        STRESS_DIR  = DATA_ROOT / "stress_test_results"
+        for p in (RESULTS_DIR, ORDERS_DIR, PRED_DIR, STRESS_DIR):
+            p.mkdir(parents=True, exist_ok=True)
+
+        st.markdown("---")
+
+        # Main nav
+        section_choice = st.selectbox(
+            "Section",
+            list(SECTIONS.keys()),
+            index=0,
+            help="High-level area of Triton",
+            key="section_choice",
+        )
+
+        subpages = SECTIONS[section_choice]
+        sub_choice = st.radio(
+            "View",
+            subpages,
+            index=0,
+            help="Which view inside that section",
+            key="sub_choice",
+        )
+
+    return section_choice, sub_choice
+
+
+# ──────────────────────────────
+# APP ENTRYPOINT
+# ──────────────────────────────
+def _render_main():
+    section_choice, sub_choice = _sidebar_controls()
+    render_global_header()           # dark header + chips + market pill in iframe
+    render_body(section_choice, sub_choice)
+
+
+# Run it
+_render_main()
+
 tab_labels = [
-    "🔍 Portfolio Drilldown",  # 0
-    "📈 Portfolio History",  # 1
-    "📋 Trade Log",  # 2
-    "📊 Strategy vs Market",  # 3
-    "🧠 AI Signals + Rationale",  # 4
-    "📁 Browse Any CSV",  # 5
-    "📋 Backtest Summary",  # 6
-    "📉 Risk: Portfolio Drawdown",  # 7
-    "📊 Strategy Diagnostics",  # 8
-    "🏦 Portfolio Allocations",  # 9
-    "📽️ Trade Replay",  # 10
-    "📘 Fundamental Data",  # 11
-    "📈 Stock Scores",  # 12
-    "🎯 Top Fundamental Picks",  # 13
-    "📰 News Sentiment",  # 14
-    "🚨 Smart Alerts",  # 15
-    "📆 Economic Calendar",  # 16
-    "🔬 Feature Importance",  # 17
-    "🎯 SL/TP Performance Analysis",  # 18
-    "💬 Sentiment + Signal Fusion",  # 19
-    "📊 Model Comparison",  # 20
-    "🧠 AI Learning Lab",  # 21
-    "🧾 Buffett Orders (current)",  # 22
-    "🗂️ Consolidated Orders (ML × Buffett blend)",  # 23
-    "🤖 AI Feedback (allocator runs)",  # 24
-    "📚 Equal-Weight Portfolio vs Benchmark",  # 25
-    "🧮 Smart-Weight Portfolio vs Benchmark",  # 26
-    "🧪 Confidence Calibration",  # 27
-    "🧪 Confidence-Filtered Portfolio vs Benchmark",  # 28
-    "📊 Confidence × Sharpe Portfolio vs Benchmark",  # 29
-    "🧪 Stress Test Reports",  # 30  <-- NEW
+    "🔍 Portfolio Drilldown",                          # 0
+    "📈 Portfolio History",                            # 1
+    "📋 Trade Log",                                    # 2
+    "📊 Strategy vs Market",                           # 3
+    "🧠 AI Signals + Rationale",                       # 4
+    "📁 Browse Any CSV",                               # 5
+    "📋 Backtest Summary",                             # 6
+    "📉 Risk: Portfolio Drawdown",                     # 7
+    "📊 Strategy Diagnostics",                         # 8
+    "🏦 Portfolio Allocations",                        # 9
+    "📽️ Trade Replay",                                # 10
+    "📘 Fundamental Data",                             # 11
+    "📈 Stock Scores",                                 # 12
+    "🎯 Top Fundamental Picks",                        # 13
+    "📰 News Sentiment",                               # 14
+    "🚨 Smart Alerts",                                 # 15
+    "📆 Economic Calendar",                            # 16
+    "🔬 Feature Importance",                           # 17
+    "🎯 SL/TP Performance Analysis",                   # 18
+    "💬 Sentiment + Signal Fusion",                    # 19
+    "📊 Model Comparison",                             # 20
+    "🧠 AI Learning Lab",                              # 21
+    "🧾 Buffett Orders (current)",                     # 22
+    "🗂️ Consolidated Orders (ML × Buffett blend)",     # 23
+    "🤖 AI Feedback (allocator runs)",                 # 24
+    "📚 Equal-Weight Portfolio vs Benchmark",          # 25
+    "🧮 Smart-Weight Portfolio vs Benchmark",          # 26
+    "🧪 Confidence Calibration",                       # 27
+    "🧪 Confidence-Filtered Portfolio vs Benchmark",   # 28
+    "📊 Confidence × Sharpe Portfolio vs Benchmark",   # 29
+    "🧪 Stress Test Reports & Runner",                 # 30  # NEW
+    "🩺 Market Sentinels",                             # 31  # NEW
 ]
 
 tabs = st.tabs(tab_labels)
 
+# ─────────────────────────────────────────────
+# Market status helper (US equities / NYSE hours)
+# ─────────────────────────────────────────────
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+def _next_weekday(dt, weekday_target):
+    """Return dt moved forward to the next weekday == weekday_target (0=Mon,...4=Fri).
+    If dt is already that weekday and before that day's market open, we return same-day open."""
+    days_ahead = (weekday_target - dt.weekday()) % 7
+    return dt + timedelta(days=days_ahead)
+
+def _next_market_open(now_et: datetime) -> datetime:
+    """
+    Figure out the next regular session open time (9:30 ET Mon-Fri).
+    Does not yet handle US market holidays (future enhancement).
+    """
+    market_open_t = time(9, 30)
+    market_close_t = time(16, 0)
+
+    # If it's a weekday Mon-Fri
+    if now_et.weekday() < 5:
+        # Before open today -> opens today
+        if now_et.time() < market_open_t:
+            return now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+        # During session -> we're already open, so "next open" is actually next session open (next biz day 9:30)
+        if market_open_t <= now_et.time() < market_close_t:
+            # next business day 9:30
+            d = now_et + timedelta(days=1)
+        else:
+            # After 4pm -> next business day 9:30
+            d = now_et + timedelta(days=1)
+    else:
+        # Weekend: jump to Monday
+        d = now_et + timedelta(days=1)
+
+    # move forward until Mon-Fri
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+
+    return d.replace(hour=9, minute=30, second=0, microsecond=0)
+
+def _market_close_today(now_et: datetime) -> datetime | None:
+    """
+    If we are currently inside the regular session, return today's 4:00 PM ET close.
+    Otherwise None.
+    """
+    market_open_t = time(9, 30)
+    market_close_t = time(16, 0)
+
+    if now_et.weekday() < 5 and market_open_t <= now_et.time() < market_close_t:
+        return now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    return None
+
+def _fmt_timedelta(td: timedelta) -> str:
+    """Format a timedelta cleanly like '1d 3h 12m' or '3h 07m'."""
+    total_seconds = int(td.total_seconds())
+    if total_seconds < 0:
+        total_seconds = 0
+    days = total_seconds // 86400
+    hours = (total_seconds % 86400) // 3600
+    mins = (total_seconds % 3600) // 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    parts.append(f"{hours}h")
+    parts.append(f"{mins:02d}m")
+    return " ".join(parts)
+
+def get_market_status():
+    """
+    Returns dict:
+    {
+        "is_open": bool,
+        "label": "OPEN" | "CLOSED",
+        "detail": "closes in 2h 11m" or "opens in 1d 3h 02m",
+        "next_event_ts": datetime (ET),
+        "now_et": datetime (ET),
+    }
+    """
+    et = datetime.now(ZoneInfo("America/New_York"))
+    open_t = time(9, 30)
+    close_t = time(16, 0)
+
+    # Are we in a regular session?
+    in_session = (
+        et.weekday() < 5 and
+        open_t <= et.time() < close_t
+    )
+
+    if in_session:
+        close_ts = _market_close_today(et)
+        if close_ts is None:
+            # fallback, shouldn't normally happen
+            close_ts = et.replace(hour=16, minute=0, second=0, microsecond=0)
+        remaining = close_ts - et
+        return {
+            "is_open": True,
+            "label": "OPEN",
+            "detail": f"closes in {_fmt_timedelta(remaining)}",
+            "next_event_ts": close_ts,
+            "now_et": et,
+        }
+    else:
+        # Market closed. When is next open?
+        nxt = _next_market_open(et)
+        remaining = nxt - et
+        return {
+            "is_open": False,
+            "label": "CLOSED",
+            "detail": f"opens in {_fmt_timedelta(remaining)}",
+            "next_event_ts": nxt,
+            "now_et": et,
+        }
+
+# ─────────────────────────────────────────────
+# Market status banner
+# ─────────────────────────────────────────────
+ms = get_market_status()
+
+# choose color vibe
+if ms["is_open"]:
+    bg = "#e8fff1"   # light green
+    border = "#2e7d32"
+    emoji = "🟢"
+else:
+    bg = "#fff5e6"   # light orange / amber
+    border = "#b26a00"
+    emoji = "🔴"
+
+banner_html = f"""
+<div style="
+    background:{bg};
+    border:1px solid {border};
+    border-radius:8px;
+    padding:0.75rem 1rem;
+    margin-bottom:1rem;
+    font-family:system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display:flex;
+    flex-wrap:wrap;
+    align-items:flex-start;
+    gap:1.5rem;
+">
+  <div style="font-size:0.9rem; line-height:1.4;">
+    <div style="font-weight:600; font-size:1rem;">
+      {emoji} Market {ms['label']}
+    </div>
+    <div style="opacity:0.8;">
+      {ms['detail']}
+    </div>
+  </div>
+
+  <div style="font-size:0.8rem; line-height:1.4; opacity:0.8;">
+    <div>Now (ET): {ms['now_et'].strftime('%Y-%m-%d %H:%M')}</div>
+    <div>Next event: {ms['next_event_ts'].strftime('%Y-%m-%d %H:%M')} ET</div>
+  </div>
+</div>
+"""
+
+st.markdown(banner_html, unsafe_allow_html=True)
+
 # ──────────────────────────────
-# Tab 0 — Portfolio Drilldown
+# Tab 0 — Portfolio Drilldown (live guard + orders + per-ticker deep dive)
 # ──────────────────────────────
 with tabs[0]:
     st.subheader("🔍 Portfolio Drilldown")
 
-    # Load sources
-    tl = load_csv("trade_log.csv", RESULTS_DIR)
+    # --- Top status / capital preservation snapshot ---
+    status = latest_portfolio_status()
+    colA, colB, colC, colD = st.columns(4)
+
+    with colA:
+        latest_eq = status.get("latest_equity", np.nan)
+        st.metric(
+            "Latest Equity",
+            f"${latest_eq:,.2f}" if np.isfinite(latest_eq) else "—",
+        )
+
+    with colB:
+        draw = status.get("drawdown_pct", np.nan)
+        st.metric(
+            "Drawdown",
+            f"{draw:.1%}" if np.isfinite(draw) else "—",
+            help="How far below peak we are right now.",
+        )
+
+    with colC:
+        bp = status.get("buying_power", np.nan)
+        st.metric(
+            "Buying Power",
+            f"${bp:,.0f}" if np.isfinite(bp) else "—",
+            help="From broker /v2/account buying_power.",
+        )
+
+    with colD:
+        reserve = status.get("reserve_pct", np.nan)
+        mode = status.get("mode", "UNKNOWN")
+        mode_label = f"{mode} ({reserve:.0%} reserve)" if np.isfinite(reserve) else mode
+        st.metric(
+            "Guard Mode",
+            mode_label,
+            help=status.get("reason", ""),
+        )
+
+    # --- Most recent order intents (what Triton is trying to execute) ---
+    open_orders_df = load_open_orders()
+    with st.expander("📝 Recent Order Intents (latest first)"):
+        if open_orders_df.empty:
+            st.caption("No recent order intents logged yet.")
+        else:
+            # show top ~30 most recent orders. Cleaner subset of columns.
+            cols = [
+                c
+                for c in [
+                    "timestamp",
+                    "symbol",
+                    "side",
+                    "qty",
+                    "order_type",
+                    "limit_price",
+                    "status",
+                    "note",
+                ]
+                if c in open_orders_df.columns
+            ]
+            st.dataframe(open_orders_df[cols].head(30), use_container_width=True)
+
+    st.markdown("---")
+
+    # --- Load data sources we might drill into for a specific ticker ---
+    tl  = load_csv("trade_log.csv", RESULTS_DIR)
     sig = load_csv("signals_with_rationale.csv", RESULTS_DIR)
     if sig.empty:
         sig = load_csv("signals.csv", RESULTS_DIR)
-    ns = load_csv("news_sentiment.csv", RESULTS_DIR)
-    cur_orders = load_csv("orders_today.csv", ORDERS_DIR)
-    bo = load_csv("buffett_orders.csv", ORDERS_DIR)
 
-    # Build ticker universe from anything we have
+    ns          = load_csv("news_sentiment.csv", RESULTS_DIR)
+    cur_orders  = load_csv("orders_today.csv", ORDERS_DIR)
+    bo          = load_csv("buffett_orders.csv", ORDERS_DIR)
+
+    # Universe of tickers from whatever we have
     tickers = set()
-    for df in (tl, sig, ns, cur_orders, bo):
-        if not df.empty and "ticker" in df.columns:
-            tickers.update(df["ticker"].dropna().astype(str).unique())
+    for df_ in (tl, sig, ns, cur_orders, bo):
+        if not df_.empty and "ticker" in df_.columns:
+            tickers.update(df_["ticker"].dropna().astype(str).unique())
     tickers = sorted(tickers)
 
     if not tickers:
-        st.info("No tickers found.")
-        st.stop()
-
-    # Controls
-    c1, c2, c3 = st.columns([1.2, 1, 1])
-    with c1:
-        sel = st.selectbox("Ticker", tickers, index=0, key="t0_ticker")
-    with c2:
-        lookback = st.slider("Lookback (days)", 30, 365, 180, 15, key="t0_lb")
-    with c3:
-        view = st.selectbox("Price View", ["Line", "Candlestick"], index=0)
-
-    cutoff = pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=lookback)
-
-    # ── Trades (filtered)
-    tl_t = pd.DataFrame()
-    if not tl.empty:
-        tl_t = ensure_date(tl, normalize=True)
-        tl_t = tl_t[(tl_t.get("ticker", "") == sel) & (tl_t["date"] >= cutoff)]
-        if "profit" in tl_t.columns:
-            tl_t["profit"] = pd.to_numeric(tl_t["profit"], errors="coerce")
-
-    # ── Signals (filtered)
-    sig_t = pd.DataFrame()
-    if not sig.empty:
-        sig_t = ensure_date(sig, normalize=True)
-        sig_t = sig_t[(sig_t.get("ticker", "") == sel) & (sig_t["date"] >= cutoff)].copy()
-        # safe numerics
-        for c in ["close", "predicted_close", "confidence"]:
-            if c in sig_t.columns:
-                sig_t[c] = pd.to_numeric(sig_t[c], errors="coerce")
-        # edge %
-        with np.errstate(divide="ignore", invalid="ignore"):
-            sig_t["edge_pct"] = (
-                (sig_t.get("predicted_close", np.nan) - sig_t.get("close", np.nan))
-                / sig_t.get("close", 1)
-            ).replace([np.inf, -np.inf], np.nan)
-
-    # ── News (filtered)
-    ns_t = pd.DataFrame()
-    if not ns.empty:
-        ns_t = ensure_date(ns, normalize=True)
-        ns_t = ns_t[(ns_t.get("ticker", "") == sel) & (ns_t["date"] >= cutoff)].copy()
-        # clickable title if present
-        if {"title", "url"}.issubset(ns_t.columns):
-            ns_t["news"] = ns_t.apply(lambda r: make_clickable(r["title"], r["url"]), axis=1)
-
-    # ── KPIs
-    trades = len(tl_t)
-    wins = int((tl_t["profit"] > 0).sum()) if "profit" in tl_t.columns else 0
-    win_rate = f"{(wins / trades):.0%}" if trades else "0%"
-    cum_pnl = f"{tl_t['profit'].sum():,.2f}" if "profit" in tl_t.columns and trades else "—"
-
-    k1, k2, k3 = st.columns(3)
-    with k1:
-        st.metric("Trades", trades)
-    with k2:
-        st.metric("Win Rate", win_rate)
-    with k3:
-        st.metric("Cum P&L", cum_pnl)
-
-    # ── Price Chart
-    if not PLOTLY_OK:
-        st.warning("Plotly not installed — `pip install plotly` for charts.")
+        st.info("No tickers found across signals / trades / orders / news yet.")
     else:
-        fig = go.Figure()
-        added_price = False
+        # Controls
+        c1, c2, c3 = st.columns([1.2, 1, 1])
+        with c1:
+            sel = st.selectbox("Ticker", tickers, index=0, key="t0_ticker")
+        with c2:
+            lookback = st.slider("Lookback (days)", 30, 365, 180, 15, key="t0_lb")
+        with c3:
+            view = st.selectbox("Price View", ["Line", "Candlestick"], index=0, key="t0_view")
 
-        # Candlestick tries to use OHLC parquet {ticker}.parquet; fallback to line
-        if view == "Candlestick":
-            ohlc_path = RESULTS_DIR / f"{sel}.parquet"
-            ohlc = load_parquet(ohlc_path)
-            if not ohlc.empty and {"date", "open", "high", "low", "close"}.issubset(ohlc.columns):
-                parse_dates_inplace(ohlc, ("date",))
-                ohlc = ohlc.dropna(subset=["date"]).sort_values("date")
-                ohlc = ohlc[ohlc["date"] >= cutoff]
-                if not ohlc.empty:
-                    fig.add_trace(
-                        go.Candlestick(
-                            x=ohlc["date"],
-                            open=pd.to_numeric(ohlc["open"], errors="coerce"),
-                            high=pd.to_numeric(ohlc["high"], errors="coerce"),
-                            low=pd.to_numeric(ohlc["low"], errors="coerce"),
-                            close=pd.to_numeric(ohlc["close"], errors="coerce"),
-                            name="Price",
-                        )
-                    )
-                    added_price = True
+        # We build cutoff timestamp in naive UTC
+        cutoff = pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=lookback)
 
-        # Line fallback from signals data (close)
-        if not added_price and not sig_t.empty and "close" in sig_t.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=sig_t["date"],
-                    y=sig_t["close"],
-                    mode="lines",
-                    name="Close",
-                    opacity=0.85,
+        # ── Trades (filtered for this ticker, recent only)
+        tl_t = pd.DataFrame()
+        if not tl.empty:
+            tl_t = ensure_date(tl, normalize=True).copy()
+            if "ticker" in tl_t.columns:
+                tl_t["ticker"] = tl_t["ticker"].astype(str)
+                tl_t = tl_t[
+                    (tl_t["ticker"] == sel)
+                    & (tl_t["date"] >= cutoff)
+                ].copy()
+            else:
+                tl_t = pd.DataFrame()
+
+            if "profit" in tl_t.columns:
+                tl_t["profit"] = pd.to_numeric(tl_t["profit"], errors="coerce")
+
+        # ── Signals (filtered)
+        sig_t = pd.DataFrame()
+        if not sig.empty:
+            sig_t = ensure_date(sig, normalize=True).copy()
+            if "ticker" in sig_t.columns:
+                sig_t["ticker"] = sig_t["ticker"].astype(str)
+                sig_t = sig_t[
+                    (sig_t["ticker"] == sel)
+                    & (sig_t["date"] >= cutoff)
+                ].copy()
+            else:
+                sig_t = pd.DataFrame()
+
+            # safe numerics
+            for c in ["close", "predicted_close", "confidence"]:
+                if c in sig_t.columns:
+                    sig_t[c] = pd.to_numeric(sig_t[c], errors="coerce")
+
+            # backfill 'close' from {ticker}.parquet if missing
+            if not sig_t.empty and (
+                "close" not in sig_t.columns or sig_t["close"].isna().any()
+            ):
+                sig_t = backfill_close_from_parquet(sig_t)
+
+            # expected edge %
+            with np.errstate(divide="ignore", invalid="ignore"):
+                base = sig_t.get("close")
+                pred = sig_t.get("predicted_close")
+                sig_t["edge_pct"] = np.where(
+                    base.notna() & pred.notna() & (base != 0),
+                    (pred - base) / base,
+                    np.nan,
                 )
-            )
 
-        # Optional predicted_close overlay
-        if not sig_t.empty and "predicted_close" in sig_t.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=sig_t["date"],
-                    y=sig_t["predicted_close"],
-                    mode="lines",
-                    name="Predicted",
-                    opacity=0.55,
+        # ── News (filtered)
+        ns_t = pd.DataFrame()
+        if not ns.empty:
+            ns_t = ensure_date(ns, normalize=True).copy()
+            if "ticker" in ns_t.columns:
+                ns_t["ticker"] = ns_t["ticker"].astype(str)
+                ns_t = ns_t[
+                    (ns_t["ticker"] == sel)
+                    & (ns_t["date"] >= cutoff)
+                ].copy()
+            else:
+                ns_t = pd.DataFrame()
+
+            # Ensure URL column exists (fallbacks) and clean description HTML
+            if "url" not in ns_t.columns or ns_t["url"].isna().all():
+                for alt in ["link", "source_url"]:
+                    if alt in ns_t.columns and ns_t[alt].notna().any():
+                        ns_t["url"] = ns_t[alt]
+                        break
+            if "description" in ns_t.columns:
+                # If url still missing, try extracting from HTML; always strip HTML
+                if "url" not in ns_t.columns or ns_t["url"].isna().all():
+                    ns_t["url"] = ns_t["description"].apply(extract_href)
+                ns_t["description"] = ns_t["description"].apply(strip_html)
+
+            # clickable title if present
+            if {"title", "url"}.issubset(ns_t.columns):
+                ns_t["news"] = ns_t.apply(
+                    lambda r: make_clickable(
+                        r.get("title", ""),
+                        r.get("url", "")
+                    ),
+                    axis=1,
                 )
-            )
 
-        fig.update_layout(
-            title=f"{sel} — Price & Signals",
-            xaxis_title="Date",
-            yaxis_title="Price",
-            xaxis_rangeslider_visible=False if view == "Line" else True,
+        # ── KPIs for this ticker (trades & PnL)
+        trades = int(len(tl_t))
+        wins = int((tl_t["profit"] > 0).sum()) if "profit" in tl_t.columns else 0
+        win_rate = f"{(wins / trades):.0%}" if trades else "0%"
+        cum_pnl = (
+            f"{tl_t['profit'].sum():,.2f}"
+            if "profit" in tl_t.columns and trades
+            else "—"
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-    # Tables
-    with st.expander("Signals Table"):
-        st.dataframe(sig_t.tail(200), use_container_width=True)
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            st.metric("Trades", trades)
+        with k2:
+            st.metric("Win Rate", win_rate)
+        with k3:
+            st.metric("Cum P&L", cum_pnl)
 
-    with st.expander("Related News"):
-        if not ns_t.empty:
-            cols = [
-                c
-                for c in ["date", "ticker", "sentiment", "news", "description", "source"]
-                if c in ns_t.columns or c == "news"
-            ]
-            disp = ns_t[cols] if cols else ns_t
-            st.markdown(disp.to_html(escape=False, index=False), unsafe_allow_html=True)
+        # ── Price / Signal chart for this ticker
+        if not PLOTLY_OK:
+            st.warning("Plotly not installed — `pip install plotly` for charts.")
         else:
-            st.info("No news.")
+            fig = go.Figure()
+            added_price = False
+
+            # Candlestick from OHLC parquet {ticker}.parquet
+            if view == "Candlestick":
+                ohlc_path = RESULTS_DIR / f"{sel}.parquet"
+                ohlc = load_parquet(ohlc_path)
+                if (
+                    not ohlc.empty
+                    and {"date", "open", "high", "low", "close"}.issubset(ohlc.columns)
+                ):
+                    parse_dates_inplace(ohlc, ("date",))
+                    ohlc = (
+                        ohlc.dropna(subset=["date"])
+                        .sort_values("date")
+                        .query("date >= @cutoff")
+                    )
+                    if not ohlc.empty:
+                        fig.add_trace(
+                            go.Candlestick(
+                                x=ohlc["date"],
+                                open=pd.to_numeric(ohlc["open"], errors="coerce"),
+                                high=pd.to_numeric(ohlc["high"], errors="coerce"),
+                                low=pd.to_numeric(ohlc["low"], errors="coerce"),
+                                close=pd.to_numeric(ohlc["close"], errors="coerce"),
+                                name="Price",
+                            )
+                        )
+                        added_price = True
+
+            # Line fallback from signals.close
+            if not added_price and not sig_t.empty and "close" in sig_t.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=sig_t["date"],
+                        y=sig_t["close"],
+                        mode="lines",
+                        name="Close",
+                        opacity=0.85,
+                    )
+                )
+
+            # Predicted_close overlay if present
+            if not sig_t.empty and "predicted_close" in sig_t.columns:
+                fig.add_trace(
+                    go.Scatter(
+                        x=sig_t["date"],
+                        y=sig_t["predicted_close"],
+                        mode="lines",
+                        name="Predicted",
+                        opacity=0.55,
+                    )
+                )
+
+            fig.update_layout(
+                title=f"{sel} — Price & Signals",
+                xaxis_title="Date",
+                yaxis_title="Price",
+                xaxis_rangeslider_visible=(view != "Line"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ── Detailed tables
+        with st.expander("Signals Table"):
+            st.dataframe(sig_t.tail(200), use_container_width=True)
+
+        with st.expander("Related News"):
+            if not ns_t.empty:
+                cols = [
+                    c
+                    for c in [
+                        "date",
+                        "ticker",
+                        "sentiment",
+                        "news",
+                        "description",
+                        "source",
+                    ]
+                    if c in ns_t.columns or c == "news"
+                ]
+                disp = ns_t[cols] if cols else ns_t
+                if "date" in disp.columns:
+                    disp = disp.sort_values("date", ascending=False)
+                st.markdown(
+                    disp.to_html(escape=False, index=False),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("No news for this ticker in the selected window.")
+
 # ──────────────────────────────
-# Tab 1 — Portfolio History
+# Tab 1 — Portfolio History (equity curve + metrics + drawdown inline)
 # ──────────────────────────────
 with tabs[1]:
     st.subheader("📈 Portfolio Value Over Time")
-    df = load_csv("portfolio_history.csv", RESULTS_DIR)
-    if df.empty:
-        st.info("No portfolio_history.csv yet.")
+
+    hist = load_portfolio_history()  # timestamp,equity from live run snapshots
+    guard = latest_portfolio_status()  # in case hist is thin, we still get latest stats
+
+    if hist.empty and (not np.isfinite(guard.get("latest_equity", np.nan))):
+        st.info("No portfolio history yet.")
     else:
-        df = derive_total_value(df)
-        parse_dates_inplace(df, ("date",))
-        df = df.dropna(subset=["date", "total_value"]).sort_values("date")
-        if PLOTLY_OK:
-            fig = go.Figure(
-                go.Scatter(x=df["date"], y=df["total_value"], mode="lines", name="Total Value")
+        # clean curve for plotting / stats
+        df = hist.copy()
+
+        if not df.empty:
+            # ensure timestamp is datetime and monotonic
+            if "timestamp" in df.columns:
+                df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
+                df = df.rename(columns={"timestamp": "date"})
+
+            df["equity"] = pd.to_numeric(df["equity"], errors="coerce")
+            df = df.dropna(subset=["date", "equity"])
+
+        # compute perf stats from the equity series
+        eq_series = (
+            df.set_index("date")["equity"]
+            if (not df.empty and "date" in df.columns)
+            else pd.Series(
+                [guard.get("latest_equity", np.nan)],
+                index=[pd.Timestamp.utcnow().tz_localize(None)],
+                name="equity",
             )
-            fig.update_layout(title="Portfolio Equity Curve")
-            st.plotly_chart(fig, use_container_width=True)
+        )
+
+        stats = perf_stats_from_levels(eq_series)
+
+        # drawdown calc inline for the curve
+        dd_pct = np.nan
+        if eq_series.size > 0:
+            peak_curve = eq_series.cummax()
+            dd_curve = eq_series / peak_curve - 1.0
+            if dd_curve.size > 0:
+                dd_pct = float(dd_curve.min())
+
+        # KPIs row
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "Total Return",
+                (
+                    f"{stats.get('total_return', np.nan):.1%}"
+                    if np.isfinite(stats.get("total_return", np.nan))
+                    else "—"
+                ),
+            )
+        with c2:
+            st.metric(
+                "CAGR",
+                (
+                    f"{stats.get('cagr', np.nan):.1%}"
+                    if np.isfinite(stats.get("cagr", np.nan))
+                    else "—"
+                ),
+            )
+        with c3:
+            st.metric(
+                "Sharpe",
+                (
+                    f"{stats.get('sharpe', np.nan):.2f}"
+                    if np.isfinite(stats.get("sharpe", np.nan))
+                    else "—"
+                ),
+            )
+        with c4:
+            st.metric(
+                "Max Drawdown",
+                f"{dd_pct:.1%}" if np.isfinite(dd_pct) else "—",
+            )
+
+        # Plot
+        if df.empty:
+            st.caption(
+                "Not enough time series to chart yet — only showing latest snapshot from guard info."
+            )
+            st.write(
+                f"Latest Equity: ${guard.get('latest_equity', np.nan):,.2f}  "
+                f"(Mode: {guard.get('mode','UNKNOWN')})"
+            )
         else:
-            st.line_chart(df.set_index("date")["total_value"])
+            if not PLOTLY_OK:
+                st.warning("Plotly not installed — `pip install plotly` for charts.")
+                st.line_chart(df.set_index("date")["equity"].rename("Equity ($)"))
+            else:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=df["date"],
+                        y=df["equity"],
+                        mode="lines",
+                        name="Equity ($)",
+                    )
+                )
+                fig.update_layout(
+                    title="Portfolio Equity Curve",
+                    xaxis_title="Time",
+                    yaxis_title="Equity ($)",
+                    xaxis_rangeslider_visible=False,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        # Download
+        if not df.empty:
+            st.download_button(
+                "⬇️ Download portfolio history (CSV)",
+                data=df.to_csv(index=False).encode("utf-8"),
+                file_name="portfolio_history.csv",
+                mime="text/csv",
+                key="t1_dl",
+            )
 
 # ──────────────────────────────
 # Tab 2 — Trade Log
@@ -1192,99 +2557,161 @@ with tabs[6]:
             key="t6_dl",
         )
 # ──────────────────────────────
-# Tab 7 — Risk Report (Drawdown) [robust]
+# Tab 7 — Risk Report (Drawdown + Guard Mode)
 # ──────────────────────────────
 with tabs[7]:
-    st.subheader("📉 Risk: Portfolio Drawdown")
+    st.subheader("📉 Risk: Portfolio Drawdown & Capital Guard")
 
-    df = load_csv("portfolio_history.csv", RESULTS_DIR)
-    if df.empty:
-        st.info("No portfolio_history.csv yet.")
-    else:
-        # Ensure we have a numeric total_value and a proper date
-        df = derive_total_value(df)
-        parse_dates_inplace(df, ("date",))
-        to_numeric(df, ["total_value"])
+    # Pull live risk posture (guard mode, drawdown) plus equity snapshots
+    guard_status = latest_portfolio_status()          # dict from our helper
+    hist_df      = load_portfolio_history()           # timestamp,equity snapshots
 
-        # Keep clean rows only
-        df = (
-            df.dropna(subset=["date", "total_value"])
-            .query("total_value > 0")
-            .sort_values("date")
-            .copy()
+    # --- Top row: live protection status ---
+    # These are the "are we in DEFENSIVE or LOCKDOWN right now?" talking points.
+    g_mode        = guard_status.get("mode", "UNKNOWN")
+    g_reason      = guard_status.get("reason", "")
+    g_draw        = guard_status.get("drawdown_pct", np.nan)
+    g_bp          = guard_status.get("buying_power", np.nan)
+    g_equity      = guard_status.get("latest_equity", np.nan)
+    g_reserve_pct = guard_status.get("reserve_pct", np.nan)
+
+    cA, cB, cC, cD = st.columns(4)
+    with cA:
+        st.metric(
+            "Guard Mode",
+            f"{g_mode} ({g_reserve_pct:.0%} reserve)"
+            if np.isfinite(g_reserve_pct)
+            else g_mode,
+            help=g_reason or "Capital Preservation Doctrine state.",
         )
-        if df.empty:
-            st.info("No positive portfolio values to chart yet.")
-            st.stop()
+    with cB:
+        st.metric(
+            "Current Drawdown",
+            f"{g_draw:.1%}" if np.isfinite(g_draw) else "—",
+            help="Live drawdown vs prior peak from portfolio_health.",
+        )
+    with cC:
+        st.metric(
+            "Latest Equity",
+            f"${g_equity:,.2f}" if np.isfinite(g_equity) else "—",
+            help="Most recent known portfolio equity.",
+        )
+    with cD:
+        st.metric(
+            "Buying Power",
+            f"${g_bp:,.0f}" if np.isfinite(g_bp) else "—",
+            help="Broker-reported available capital.",
+        )
 
-        # If multiple rows per date, take the last reading of the day
-        if df["date"].duplicated().any():
-            df = df.groupby(df["date"].dt.normalize(), as_index=False).last()
-            df = df.sort_values("date").copy()
+    st.markdown("---")
 
-        # Compute drawdown
-        df["peak"] = df["total_value"].cummax()
-        df["drawdown"] = df["total_value"] / df["peak"] - 1.0
+    # --- Historical drawdown curve from portfolio_history.csv snapshots ---
+    # portfolio_history.csv currently: timestamp,equity (appended every run in place_orders_from_csv.py)
+    if hist_df.empty:
+        st.info("No historical equity snapshots yet. We'll start logging as trades execute.")
+    else:
+        df = hist_df.copy()
 
-        # KPIs
-        max_dd = float(df["drawdown"].min()) if not df.empty else np.nan
-        curr_dd = float(df["drawdown"].iloc[-1]) if not df.empty else np.nan
+        # Normalize schema -> 'date' + numeric equity
+        # We want monotonic time, 1 row per timestamp
+        if "timestamp" in df.columns:
+            df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
+            df = df.rename(columns={"timestamp": "date"})
+        # fallback if somehow already called 'date'
+        df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True).dt.tz_localize(None)
 
-        # Estimate peak→trough info for max drawdown (if available)
+        df["equity"] = pd.to_numeric(df["equity"], errors="coerce")
+        df = df.dropna(subset=["date", "equity"]).copy()
+
+        # If multiple samples land on same day (or same minute), we just keep
+        # them all; but for drawdown math we want strictly forward cumulative peak
+        df = df.sort_values("date")
+        df["peak"] = df["equity"].cummax()
+        df["drawdown"] = df["equity"] / df["peak"] - 1.0
+
+        # Metrics from curve
+        max_dd   = float(df["drawdown"].min()) if not df.empty else np.nan
+        curr_dd  = float(df["drawdown"].iloc[-1]) if not df.empty else np.nan
+        obs_cnt  = len(df)
+
+        # Peak→trough window of worst drawdown
+        # We'll locate the row with worst drawdown, then find the preceding peak.
+        peak_date_str = "—"
+        trough_date_str = "—"
+        dd_days_str = "—"
         try:
             trough_idx = int(df["drawdown"].idxmin())
-            trough_date = df.loc[trough_idx, "date"]
-            # peak is the running max BEFORE the trough
-            pre = df.loc[:trough_idx]
-            peak_idx = int(pre["total_value"].idxmax())
-            peak_date = df.loc[peak_idx, "date"]
-            dd_days = (
-                (trough_date - peak_date).days
-                if pd.notna(trough_date) and pd.notna(peak_date)
-                else np.nan
-            )
-        except Exception:
-            trough_date = peak_date = None
-            dd_days = np.nan
+            trough_row = df.loc[trough_idx]
+            trough_date = trough_row["date"]
 
+            # up to trough_idx, find highest equity (the "peak")
+            sub = df.loc[:trough_idx]
+            peak_idx = int(sub["equity"].idxmax())
+            peak_row = df.loc[peak_idx]
+            peak_date = peak_row["date"]
+
+            peak_date_str = peak_date.strftime("%Y-%m-%d %H:%M:%S")
+            trough_date_str = trough_date.strftime("%Y-%m-%d %H:%M:%S")
+
+            if pd.notna(peak_date) and pd.notna(trough_date):
+                dd_days_val = (trough_date - peak_date).days
+                dd_days_str = str(int(dd_days_val))
+        except Exception:
+            pass
+
+        # KPIs for the historical curve
         k1, k2, k3, k4 = st.columns(4)
         with k1:
-            st.metric("Max Drawdown", f"{max_dd:.1%}" if np.isfinite(max_dd) else "—")
+            st.metric(
+                "Max Drawdown (hist)",
+                f"{max_dd:.1%}" if np.isfinite(max_dd) else "—",
+            )
         with k2:
-            st.metric("Current Drawdown", f"{curr_dd:.1%}" if np.isfinite(curr_dd) else "—")
+            st.metric(
+                "Current Drawdown (hist)",
+                f"{curr_dd:.1%}" if np.isfinite(curr_dd) else "—",
+            )
         with k3:
-            st.metric("Peak → Trough (days)", f"{int(dd_days)}" if np.isfinite(dd_days) else "—")
+            st.metric(
+                "Peak → Trough (days)",
+                dd_days_str,
+                help=f"Peak: {peak_date_str}\nTrough: {trough_date_str}",
+            )
         with k4:
-            st.metric("Observations", len(df))
+            st.metric("Snapshots Logged", obs_cnt)
 
-        # Chart
+        # Drawdown area chart
         if not PLOTLY_OK:
             st.warning("Plotly not installed — `pip install plotly` for charts.")
-            # Fallback simple chart (as positive values for visibility)
+            # fallback: line of drawdown
             st.line_chart(
-                df.set_index("date")[["drawdown"]].rename(columns={"drawdown": "drawdown (neg)"})
+                df.set_index("date")[["drawdown"]]
+                .rename(columns={"drawdown": "drawdown (neg)"})
             )
         else:
             fig = px.area(
                 df,
                 x="date",
                 y="drawdown",
-                title="Drawdown (relative to running peak)",
+                title="Historical Drawdown (vs running peak)",
             )
-            fig.update_traces(hovertemplate="%{x|%Y-%m-%d}<br>Drawdown: %{y:.1%}<extra></extra>")
-            # Format as percent and clamp top at 0%
-            ymin = (
+            fig.update_traces(
+                hovertemplate="%{x|%Y-%m-%d %H:%M}<br>Drawdown: %{y:.1%}<extra></extra>"
+            )
+
+            # clamp top at 0%, bottom at at least -90% (or actual min if worse)
+            y_min = (
                 float(min(-0.9, df["drawdown"].min()))
                 if np.isfinite(df["drawdown"].min())
                 else -1.0
             )
-            fig.update_yaxes(tickformat=".0%", range=[ymin, 0])
-            # Zero line
+            fig.update_yaxes(tickformat=".0%", range=[y_min, 0])
             fig.add_hline(y=0, line_width=1, line_dash="dash", opacity=0.5)
+
             st.plotly_chart(fig, use_container_width=True)
 
-        # Download
-        out_cols = ["date", "total_value", "peak", "drawdown"]
+        # Export
+        out_cols = ["date", "equity", "peak", "drawdown"]
         st.download_button(
             "⬇️ Download drawdown series (CSV)",
             data=df[out_cols].to_csv(index=False).encode("utf-8"),
@@ -1292,6 +2719,7 @@ with tabs[7]:
             mime="text/csv",
             key="t7_dl",
         )
+
 # ──────────────────────────────
 # Tab 8 — Strategy Diagnostics (fixed date slider)
 # ──────────────────────────────
@@ -1350,101 +2778,104 @@ with tabs[8]:
                 date_range = None
 
         # Apply filters
-        f = df.copy()
-        if label_col and sel_labels:
-            f = f[f[label_col].astype(str).isin(sel_labels)]
-        if date_range and "date" in f.columns:
-            d0 = pd.Timestamp(date_range[0])
-            d1 = pd.Timestamp(date_range[1])
-            f = f[
-                (pd.to_datetime(f["date"], errors="coerce") >= d0)
-                & (pd.to_datetime(f["date"], errors="coerce") <= d1)
-            ]
+f = df.copy()
+f = sanitize_df_cols(f)  # <- make columns unique first
 
-        if f.empty:
-            st.info("No rows after filtering.")
-        else:
-            # KPIs
-            trades = len(f)
-            prof = f["profit"] if "profit" in f.columns else pd.Series(dtype=float)
-            wins = int((prof > 0).sum()) if "profit" in f.columns else 0
-            total_pnl = float(prof.sum()) if "profit" in f.columns else np.nan
-            avg_pnl = float(prof.mean()) if "profit" in f.columns else np.nan
-            med_pnl = float(prof.median()) if "profit" in f.columns else np.nan
-            win_rate = (wins / trades) if trades and "profit" in f.columns else np.nan
+if label_col and sel_labels and label_col in f.columns:
+    f = f[f[label_col].astype(str).isin(sel_labels)]
 
-            k1, k2, k3, k4 = st.columns(4)
-            with k1:
-                st.metric("Trades", trades)
-            with k2:
-                st.metric("Win rate", f"{win_rate:.0%}" if np.isfinite(win_rate) else "—")
-            with k3:
-                st.metric("Total P&L", f"{total_pnl:,.2f}" if np.isfinite(total_pnl) else "—")
-            with k4:
-                st.metric(
-                    "Avg / Med P&L",
-                    (
-                        f"{avg_pnl:,.2f} / {med_pnl:,.2f}"
-                        if np.isfinite(avg_pnl) and np.isfinite(med_pnl)
-                        else "—"
-                    ),
-                )
+if date_range and "date" in f.columns:
+    d0 = pd.Timestamp(date_range[0])
+    d1 = pd.Timestamp(date_range[1])
+    # ensure datetime for robust filtering
+    f["date"] = pd.to_datetime(f["date"], errors="coerce")
+    f = f[(f["date"] >= d0) & (f["date"] <= d1)]
 
-            # Charts
-            if PLOTLY_OK:
-                if label_col:
-                    counts = f[label_col].astype(str).value_counts()
-                    fig1 = px.bar(
-                        x=counts.index,
-                        y=counts.values,
-                        labels={"x": label_col.capitalize(), "y": "Count"},
-                        title=f"{label_col.capitalize()} Distribution",
-                    )
-                    st.plotly_chart(fig1, use_container_width=True)
+if f.empty:
+    st.info("No rows after filtering.")
+else:
+    # KPIs
+    trades = len(f)
+    prof_series = f["profit"] if "profit" in f.columns else pd.Series(dtype=float)
+    wins = int((prof_series > 0).sum()) if "profit" in f.columns else 0
+    total_pnl = float(prof_series.sum()) if "profit" in f.columns else np.nan
+    avg_pnl = float(prof_series.mean()) if "profit" in f.columns else np.nan
+    med_pnl = float(prof_series.median()) if "profit" in f.columns else np.nan
+    win_rate = (wins / trades) if trades and "profit" in f.columns else np.nan
 
-                if "profit" in f.columns and f["profit"].notna().any():
-                    fig2 = px.histogram(
-                        f, x="profit", nbins=40, title="P&L per Trade — Distribution"
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.metric("Trades", trades)
+    with k2:
+        st.metric("Win rate", f"{win_rate:.0%}" if np.isfinite(win_rate) else "—")
+    with k3:
+        st.metric("Total P&L", f"{total_pnl:,.2f}" if np.isfinite(total_pnl) else "—")
+    with k4:
+        st.metric(
+            "Avg / Med P&L",
+            (
+                f"{avg_pnl:,.2f} / {med_pnl:,.2f}"
+                if np.isfinite(avg_pnl) and np.isfinite(med_pnl)
+                else "—"
+            ),
+        )
 
-                if "profit" in f.columns and "date" in f.columns and f["date"].notna().any():
-                    tmp = f.dropna(subset=["date", "profit"]).sort_values("date").copy()
-                    tmp["cum_pnl"] = tmp["profit"].cumsum()
-                    fig3 = px.line(tmp, x="date", y="cum_pnl", title="Cumulative P&L")
-                    st.plotly_chart(fig3, use_container_width=True)
-            else:
-                st.caption(
-                    "Plotly not installed — install with `pip install plotly` to see charts."
-                )
-
-            # Table (last 200 for readability)
-            show_cols = [
-                c
-                for c in [
-                    "date",
-                    "ticker",
-                    label_col,
-                    "action",
-                    "side",
-                    "price",
-                    "quantity",
-                    "profit",
-                ]
-                if c and c in f.columns
-            ]
-            st.dataframe(
-                f[show_cols].tail(200) if show_cols else f.tail(200), use_container_width=True
+    # Charts
+    if PLOTLY_OK:
+        if label_col and label_col in f.columns:
+            counts = f[label_col].astype(str).value_counts()
+            fig1 = px.bar(
+                x=counts.index,
+                y=counts.values,
+                labels={"x": label_col.capitalize(), "y": "Count"},
+                title=f"{label_col.capitalize()} Distribution",
             )
+            st.plotly_chart(fig1, use_container_width=True)
 
-            # Download filtered
-            st.download_button(
-                "⬇️ Download filtered trades (CSV)",
-                data=f.to_csv(index=False).encode("utf-8"),
-                file_name="trade_log_filtered.csv",
-                mime="text/csv",
-                key="t8_dl",
+        if "profit" in f.columns and f["profit"].notna().any():
+            fig2 = px.histogram(
+                f, x="profit", nbins=40, title="P&L per Trade — Distribution"
             )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        if "profit" in f.columns and "date" in f.columns and f["date"].notna().any():
+            tmp = f.dropna(subset=["date", "profit"]).sort_values("date").copy()
+            fig3 = px.line(
+                tmp.assign(cum_pnl=lambda d: d["profit"].cumsum()),
+                x="date",
+                y="cum_pnl",
+                title="Cumulative P&L",
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+    else:
+        st.caption("Plotly not installed — install with `pip install plotly` to see charts.")
+
+    # Table (last 200 for readability)
+    candidate_cols = [
+        "date",
+        "ticker",
+        label_col if label_col else None,
+        "action",
+        "side",
+        "price",
+        "quantity",
+        "profit",
+    ]
+    # De-dup and keep only existing columns (preserves order)
+    show_cols = [c for c in dict.fromkeys(candidate_cols) if c and c in f.columns]
+
+    view = f.loc[:, show_cols].tail(200) if show_cols else f.tail(200)
+    st.dataframe(view, use_container_width=True)
+
+    # Download filtered
+    st.download_button(
+        "⬇️ Download filtered trades (CSV)",
+        data=f.to_csv(index=False).encode("utf-8"),
+        file_name="trade_log_filtered.csv",
+        mime="text/csv",
+        key="t8_dl",
+    )
+
 # ──────────────────────────────
 # Tab 9 — Portfolio Allocations (robust, no st.stop)
 # ──────────────────────────────
@@ -1966,7 +3397,7 @@ with tabs[13]:
                 key="t13_dl_fallback",
             )
 # ──────────────────────────────
-# Tab 14 — News Sentiment (with filters, robust)
+# Tab 14 — News Sentiment (anchored window + trusted filter, fixed)
 # ──────────────────────────────
 with tabs[14]:
     st.subheader("📰 News Sentiment")
@@ -1985,29 +3416,28 @@ with tabs[14]:
         else:
             parse_dates_inplace(df, ("date",), normalize=True)
 
-        # 2) Ensure ticker column exists (avoid key errors later)
+        # 2) Ensure ticker column exists
         if "ticker" not in df.columns:
             df["ticker"] = ""
 
-        # 3) Coerce sentiment to numeric safely (keep original)
+        # 3) Sentiment to numeric (keep original)
         if "sentiment" in df.columns:
             df["sentiment_num"] = pd.to_numeric(df["sentiment"], errors="coerce")
         else:
             df["sentiment_num"] = np.nan
 
-        # 4) Build URL column if missing, and clean description HTML
+        # 4) Ensure a URL column; clean description HTML; clickable headline
         if "url" not in df.columns or df["url"].isna().all():
-            for alt in ["link", "source_url"]:
+            for alt in ("link", "source_url"):
                 if alt in df.columns and df[alt].notna().any():
                     df["url"] = df[alt]
                     break
+
         if "description" in df.columns:
-            # If url is still missing, try to extract from HTML
             if "url" not in df.columns or df["url"].isna().all():
                 df["url"] = df["description"].apply(extract_href)
             df["description"] = df["description"].apply(strip_html)
 
-        # 5) Clickable headline cell
         title_col = "title" if "title" in df.columns else None
         url_col = "url" if "url" in df.columns else None
         if title_col or url_col:
@@ -2015,9 +3445,61 @@ with tabs[14]:
                 lambda r: make_clickable(r.get(title_col, ""), r.get(url_col, "")),
                 axis=1,
             )
+        else:
+            df["news"] = ""
+
+        # 5) Canonicalize source from URL domain
+        def _domain(u: str) -> str:
+            try:
+                from urllib.parse import urlparse
+                n = urlparse(str(u)).netloc.lower()
+                parts = [q for q in n.split(".") if q not in ("", "www", "m")]
+                return ".".join(parts[-2:]) if len(parts) >= 2 else n
+            except Exception:
+                return ""
+
+        # If domain missing, derive from url (or empty)
+        if "domain" not in df.columns:
+            base = df["url"] if "url" in df.columns else pd.Series([""] * len(df), index=df.index)
+            df["domain"] = base.apply(_domain)
+
+        CANON = {
+            "bloomberg.com": "Bloomberg",
+            "finance.yahoo.com": "Yahoo Finance",
+            "yahoo.com": "Yahoo Finance",
+            "reuters.com": "Reuters",
+            "wsj.com": "WSJ",
+            "ft.com": "Financial Times",
+            "marketwatch.com": "MarketWatch",
+            "barrons.com": "Barron's",
+            "cnbc.com": "CNBC",
+            "apnews.com": "AP News",
+            "washingtonpost.com": "Washington Post",
+            "businessinsider.com": "Business Insider",
+            "forbes.com": "Forbes",
+            "thestreet.com": "TheStreet",
+            "seekingalpha.com": "Seeking Alpha",
+            "investing.com": "Investing.com",
+            "coindesk.com": "CoinDesk",
+        }
+
+        # Build source_display without .replace(scalar, Series)
+        src_col = df["source"] if "source" in df.columns else pd.Series([""] * len(df), index=df.index)
+        sd = df["domain"].map(CANON)                  # Canonical if known
+        sd = sd.fillna(src_col)                       # else original 'source'
+        sd = sd.astype(str)
+        sd = sd.mask(sd.str.strip() == "", df["domain"])  # if still empty, use domain
+        df["source_display"] = sd
+
+        # Light de-duplication (same ticker+url+title → keep newest date)
+        sort_cols = [c for c in ("date",) if c in df.columns]
+        df = df.sort_values(sort_cols, ascending=[False] if sort_cols else True)
+        dedupe_keys = [c for c in ("ticker", "url", "title") if c in df.columns]
+        if dedupe_keys:
+            df = df.drop_duplicates(subset=dedupe_keys, keep="first")
 
         # 6) Controls
-        c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1.2])
+        c1, c2, c3, c4 = st.columns([1.4, 1, 1, 1.4])
         with c1:
             tickers = (
                 sorted(df["ticker"].dropna().astype(str).unique()) if "ticker" in df.columns else []
@@ -2025,29 +3507,48 @@ with tabs[14]:
             sel_tickers = st.multiselect("Tickers", tickers, default=[], key="t14_tickers")
 
         with c2:
-            days = st.slider("Last N days", 1, 60, 14, 1, key="t14_days")
-            cutoff = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None) - pd.Timedelta(
-                days=days
+            use_latest_anchor = st.toggle(
+                "Anchor to latest in file",
+                value=True,
+                help="When on, the lookback is relative to the newest article in this CSV (not today's date).",
             )
+            days = st.slider("Last N days", 1, 180, 30, 1, key="t14_days")
 
         with c3:
-            # Compute slider bounds from available numeric sentiment values
             s_vals = df["sentiment_num"].replace([np.inf, -np.inf], np.nan)
             finite = s_vals[np.isfinite(s_vals)]
             smin = float(finite.min()) if not finite.empty else -1.0
             smax = float(finite.max()) if not finite.empty else 1.0
-            if smin == smax:  # avoid zero-width slider
+            if smin == smax:
                 smin, smax = smin - 1.0, smax + 1.0
-            sel_sent = st.slider(
-                "Sentiment range", smin, smax, (smin, smax), 0.01, key="t14_srange"
-            )
+            sel_sent = st.slider("Sentiment range", smin, smax, (smin, smax), 0.01, key="t14_srange")
 
         with c4:
             kw = st.text_input("Keyword (title/desc)", "", key="t14_kw")
 
-        # 7) Filtering (in safe order)
-        f = df.copy()
+        # Source filters
+        cS1, cS2 = st.columns([1.2, 1])
+        TRUSTED = {
+            "Bloomberg", "Yahoo Finance", "Reuters", "WSJ", "Financial Times",
+            "MarketWatch", "Barron's", "CNBC", "AP News", "Washington Post",
+            "Business Insider", "Forbes", "TheStreet", "Seeking Alpha", "Investing.com", "CoinDesk",
+        }
+        with cS1:
+            trusted_only = st.checkbox("Trusted outlets only", value=False, key="t14_trusted")
+        with cS2:
+            all_sources = sorted(x for x in df["source_display"].fillna("").unique() if str(x).strip())
+            pick_sources = st.multiselect("Sources", all_sources, default=[], key="t14_sources")
 
+        # 7) Build cutoff date
+        anchor = (
+            df["date"].max()
+            if (use_latest_anchor and "date" in df.columns and df["date"].notna().any())
+            else pd.Timestamp.now(tz="UTC").normalize().tz_localize(None)
+        )
+        cutoff = anchor - pd.Timedelta(days=days)
+
+        # 8) Filtering (safe order)
+        f = df.copy()
         if "date" in f.columns:
             f = f[f["date"].notna() & (f["date"] >= cutoff)]
 
@@ -2057,6 +3558,12 @@ with tabs[14]:
         if "sentiment_num" in f.columns:
             s = f["sentiment_num"]
             f = f[(s >= sel_sent[0]) & (s <= sel_sent[1])]
+
+        if trusted_only and "source_display" in f.columns:
+            f = f[f["source_display"].isin(TRUSTED)]
+
+        if pick_sources:
+            f = f[f["source_display"].isin(pick_sources)]
 
         if kw.strip():
             kw_l = kw.strip().lower()
@@ -2071,38 +3578,42 @@ with tabs[14]:
                     mask = mask | h.str.contains(re.escape(kw_l), na=False)
                 f = f[mask]
 
-        # 8) KPIs
-        cL, cM, cR = st.columns(3)
+        # 9) KPIs (+ empty-state hint)
+        if f.empty:
+            st.warning("No rows match the current filters. Tip: turn off 'Trusted outlets only', clear Sources, or widen the date window.")
+            st.stop()
+
+        cL, cM, cR, cA = st.columns(4)
         with cL:
             st.metric("Rows", int(len(f)))
         with cM:
+            st.metric("Unique tickers", int(f["ticker"].nunique()) if "ticker" in f.columns else 0)
+        with cR:
             if "sentiment_num" in f.columns and f["sentiment_num"].notna().any():
                 st.metric("Avg Sentiment", f"{f['sentiment_num'].mean():.2f}")
             else:
                 st.metric("Avg Sentiment", "—")
-        with cR:
-            st.metric("Unique tickers", int(f["ticker"].nunique()) if "ticker" in f.columns else 0)
+        with cA:
+            if "date" in df.columns and df["date"].notna().any():
+                st.caption(f"Anchor date: {anchor:%Y-%m-%d}")
 
-        # 9) Display (newest first; keep links clickable)
-        show_cols_pref = ["date", "ticker", "sentiment", "news", "description", "source", "author"]
+        # 10) Display (newest first; keep links clickable)
+        show_cols_pref = ["date", "ticker", "sentiment", "source_display", "news", "description", "domain", "author"]
         show_cols = [c for c in show_cols_pref if (c in f.columns or c == "news")]
         disp = f[show_cols] if show_cols else f
         if "date" in disp.columns:
             disp = disp.sort_values("date", ascending=False)
         st.markdown(disp.to_html(escape=False, index=False), unsafe_allow_html=True)
 
-        # 10) Download filtered
+        # 11) Download filtered
         st.download_button(
             "⬇️ Download filtered (CSV)",
-            data=(
-                f.sort_values("date", ascending=False).to_csv(index=False).encode("utf-8")
-                if "date" in f.columns
-                else f.to_csv(index=False).encode("utf-8")
-            ),
+            data=(disp.to_csv(index=False).encode("utf-8")),
             file_name="news_sentiment_filtered.csv",
             mime="text/csv",
             key="t14_dl",
         )
+
 # ──────────────────────────────
 # Tab 15 — Smart Alerts (robust, fixed categorical fillna)
 # ──────────────────────────────
@@ -2445,11 +3956,12 @@ with tabs[18]:
                 round(sl_trades["profit"].mean(), 2) if not sl_trades.empty else 0.0,
             )
 # ──────────────────────────────
-# Tab 19 — Sentiment + Signal Fusion (robust)
+# Tab 19 — Sentiment + Signal Fusion (robust + trusted sources)
 # ──────────────────────────────
 with tabs[19]:
     st.subheader("💬 Sentiment + Signal Fusion")
 
+    # ---------- Load ----------
     sig = load_csv("signals_with_rationale.csv", RESULTS_DIR)
     if sig.empty:
         sig = load_csv("signals.csv", RESULTS_DIR)
@@ -2457,195 +3969,247 @@ with tabs[19]:
 
     if sig.empty or sns.empty:
         st.info("Need both signals_with_rationale.csv (or signals.csv) and news_sentiment.csv.")
+        st.stop()
+
+    # ---------- Signals: clean ----------
+    sig = ensure_date(
+        sig,
+        candidates=["date", "as_of", "timestamp", "time", "datetime", "Date"],
+        normalize=True,
+    )
+    if sig["date"].isna().all():
+        sig["date"] = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None)
+
+    for c in ["ticker", "signal", "rationale"]:
+        if c not in sig.columns:
+            sig[c] = np.nan
+
+    for c in ["close", "predicted_close", "confidence"]:
+        if c not in sig.columns:
+            sig[c] = np.nan
+    to_numeric(sig, ["close", "predicted_close", "confidence"])
+
+    # If close is missing, try to backfill from {ticker}.parquet
+    sig = backfill_close_from_parquet(sig)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sig["delta_pct"] = np.where(
+            sig["close"].notna() & sig["predicted_close"].notna(),
+            (sig["predicted_close"] - sig["close"]) / sig["close"],
+            np.nan,
+        )
+
+    # ---------- News: clean ----------
+    # Normalize date column (naive UTC midnight)
+    if "date" not in sns.columns and "publishedAt" in sns.columns:
+        sns["date"] = (
+            pd.to_datetime(sns["publishedAt"], errors="coerce", utc=True)
+            .dt.tz_localize(None)
+            .dt.normalize()
+        )
     else:
-        # ── Signals cleaning
-        sig = ensure_date(
-            sig,
-            candidates=["date", "as_of", "timestamp", "time", "datetime", "Date"],
-            normalize=True,
+        sns["date"] = (
+            pd.to_datetime(sns.get("date"), errors="coerce", utc=True)
+            .dt.tz_localize(None)
+            .dt.normalize()
         )
-        if sig["date"].isna().all():
-            # if every date missing, set to today to enable a fallback join
-            sig["date"] = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None)
 
-        for c in ["ticker", "signal", "rationale"]:
-            if c not in sig.columns:
-                sig[c] = np.nan
+    # Ensure URL column exists (try alternates if missing)
+    if "url" not in sns.columns or sns["url"].isna().all():
+        for alt in ["link", "source_url"]:
+            if alt in sns.columns and sns[alt].notna().any():
+                sns["url"] = sns[alt]
+                break
 
-        for c in ["close", "predicted_close", "confidence"]:
-            if c not in sig.columns:
-                sig[c] = np.nan
-        to_numeric(sig, ["close", "predicted_close", "confidence"])
-
-        # Optionally backfill missing close from {ticker}.parquet
-        sig = backfill_close_from_parquet(sig)
-
-        with np.errstate(divide="ignore", invalid="ignore"):
-            sig["delta_pct"] = np.where(
-                sig["close"].notna() & sig["predicted_close"].notna(),
-                (sig["predicted_close"] - sig["close"]) / sig["close"],
-                np.nan,
-            )
-
-        # ── News cleaning
-        if "date" not in sns.columns and "publishedAt" in sns.columns:
-            sns["date"] = (
-                pd.to_datetime(sns["publishedAt"], errors="coerce", utc=True)
-                .dt.tz_localize(None)
-                .dt.normalize()
-            )
-        else:
-            sns["date"] = (
-                pd.to_datetime(sns.get("date"), errors="coerce", utc=True)
-                .dt.tz_localize(None)
-                .dt.normalize()
-            )
-
-        # Derive/clean URL
+    # Clean HTML in description and extract URL if still missing
+    if "description" in sns.columns:
         if "url" not in sns.columns or sns["url"].isna().all():
-            for alt in ["link", "source_url"]:
-                if alt in sns.columns and sns[alt].notna().any():
-                    sns["url"] = sns[alt]
-                    break
-        if "description" in sns.columns:
-            # Extract URL from HTML if still missing; always strip HTML
-            if "url" not in sns.columns or sns["url"].isna().all():
-                sns["url"] = sns["description"].apply(extract_href)
-            sns["description"] = sns["description"].apply(strip_html)
+            sns["url"] = sns["description"].apply(extract_href)
+        sns["description"] = sns["description"].apply(strip_html)
 
-        # Sentiment numeric (if present)
-        if "sentiment" in sns.columns:
-            sns["sentiment"] = pd.to_numeric(sns["sentiment"], errors="coerce")
+    # Sentiment numeric
+    if "sentiment" in sns.columns:
+        sns["sentiment"] = pd.to_numeric(sns["sentiment"], errors="coerce")
 
-        # Clickable headline
-        if {"title", "url"}.issubset(sns.columns):
-            sns["news"] = sns.apply(
-                lambda r: make_clickable(r.get("title", ""), r.get("url", "")),
-                axis=1,
+    # Derive domain + canonical source names
+    from urllib.parse import urlparse
+
+    def _domain(u: str) -> str:
+        try:
+            n = urlparse(str(u)).netloc.lower()
+            parts = [q for q in n.split(".") if q not in ("", "www", "m")]
+            return ".".join(parts[-2:]) if len(parts) >= 2 else n
+        except Exception:
+            return ""
+
+    CANON = {
+        "bloomberg.com": "Bloomberg",
+        "finance.yahoo.com": "Yahoo Finance",
+        "yahoo.com": "Yahoo Finance",
+        "marketwatch.com": "MarketWatch",
+        "wsj.com": "WSJ",
+        "washingtonpost.com": "Washington Post",
+        "reuters.com": "Reuters",
+        "apnews.com": "AP News",
+        "cnbc.com": "CNBC",
+        "ft.com": "Financial Times",
+        "seekingalpha.com": "Seeking Alpha",
+        "investing.com": "Investing.com",
+        "barrons.com": "Barron's",
+        "forbes.com": "Forbes",
+        "thestreet.com": "TheStreet",
+        "fool.com": "Motley Fool",
+        "businessinsider.com": "Business Insider",
+        "coindesk.com": "CoinDesk",
+        "cointelegraph.com": "Cointelegraph",
+        "globenewswire.com": "GlobeNewswire",
+        "prnewswire.com": "PR Newswire",
+        "benzinga.com": "Benzinga",
+        "semafor.com": "Semafor",
+    }
+    TRUSTED = set(CANON.values())
+
+    sns["domain"] = sns.get("url", "").apply(_domain)
+    # Prefer canonical name, else fall back to existing 'source'
+    sns["source_display"] = sns["domain"].map(CANON).fillna(sns.get("source", ""))
+
+    # Clickable headline
+    if {"title", "url"}.issubset(sns.columns):
+        sns["news"] = sns.apply(
+            lambda r: make_clickable(r.get("title", ""), r.get("url", "")),
+            axis=1,
+        )
+    else:
+        sns["news"] = ""
+
+    # ---------- UI controls ----------
+    c1, c2, c3 = st.columns([1.4, 1.1, 1.2])
+    with c1:
+        tickers = sorted(sig.get("ticker", pd.Series(dtype=str)).dropna().astype(str).unique())
+        sel_tickers = st.multiselect("Tickers", tickers, default=[], key="t19_tickers")
+    with c2:
+        days = st.slider("Last N days", 1, 90, 30, 1, key="t19_days")
+        min_conf = st.slider("Min confidence", 0.0, 1.0, 0.00, 0.01, key="t19_minconf")
+        trusted_only = st.checkbox("Trusted outlets only", value=False, key="t19_trusted")
+    with c3:
+        # Source multiselect populated from canonical names
+        all_sources = sorted([s for s in sns["source_display"].dropna().astype(str).unique() if s])
+        sel_sources = st.multiselect("Sources", all_sources, default=[], key="t19_sources")
+        if "date" in sns.columns and sns["date"].notna().any():
+            st.caption(f"Anchor date: {sns['date'].max().date()}")
+
+    cutoff = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None) - pd.Timedelta(days=days)
+
+    # ---------- Filter signals ----------
+    sig_f = sig.copy()
+    if sel_tickers:
+        sig_f = sig_f[sig_f["ticker"].astype(str).isin(sel_tickers)]
+    if "confidence" in sig_f.columns:
+        sig_f = sig_f[sig_f["confidence"].fillna(0) >= min_conf]
+    if "date" in sig_f.columns:
+        sig_f = sig_f[sig_f["date"] >= cutoff]
+
+    # ---------- Filter news ----------
+    sns_f = sns.copy()
+    if "date" in sns_f.columns:
+        sns_f = sns_f[sns_f["date"].notna() & (sns_f["date"] >= cutoff)]
+    if trusted_only:
+        sns_f = sns_f[sns_f["source_display"].isin(TRUSTED)]
+    if sel_sources:
+        sns_f = sns_f[sns_f["source_display"].isin(sel_sources)]
+    if sel_tickers and "ticker" in sns_f.columns:
+        sns_f = sns_f[sns_f["ticker"].astype(str).isin(sel_tickers)]
+
+    # One article per ticker-day: strongest |sentiment| first, then latest
+    if {"ticker", "date"}.issubset(sns_f.columns):
+        if "sentiment" in sns_f.columns:
+            sns_f = sns_f.sort_values(
+                ["ticker", "date", "sentiment"], ascending=[True, True, False]
+            ).drop_duplicates(subset=["ticker", "date"], keep="first")
+        else:
+            sns_f = sns_f.sort_values(["ticker", "date"]).drop_duplicates(
+                subset=["ticker", "date"], keep="last"
+            )
+
+    # ---------- Merge strategy ----------
+    can_join_on_date = sig_f["date"].notna().any() and sns_f["date"].notna().any()
+    if can_join_on_date:
+        if "ticker" in sns_f.columns and sns_f["ticker"].notna().any():
+            merged = pd.merge(sig_f, sns_f, on=["ticker", "date"], how="left", suffixes=("", "_news"))
+        else:
+            sns_one = sns_f.sort_values("date").drop_duplicates(subset=["date"], keep="last")
+            merged = pd.merge(
+                sig_f,
+                sns_one.drop(columns=[c for c in ["ticker"] if c in sns_one.columns]),
+                on=["date"],
+                how="left",
+                suffixes=("", "_news"),
+            )
+    else:
+        if "ticker" in sns_f.columns and sns_f["ticker"].notna().any():
+            latest_news = sns_f.sort_values("date").groupby("ticker").tail(1)
+            merged = pd.merge(sig_f, latest_news, on="ticker", how="left", suffixes=("", "_news"))
+        else:
+            latest_row = sns_f.sort_values("date").tail(1)
+            merged = sig_f.copy()
+            if not latest_row.empty:
+                for c in latest_row.columns:
+                    merged[c] = latest_row.iloc[0][c]
+
+    # ---------- Display (robust to missing 'news') ----------
+    # Ensure 'news' exists so slicing never throws
+    if "news" not in merged.columns:
+        merged["news"] = ""
+
+    # Preferred display columns
+    preferred = [
+        "date",
+        "ticker",
+        "news",
+        "close",
+        "predicted_close",
+        "delta_pct",
+        "signal",
+        "confidence",
+        "rationale",
+        "sentiment",
+        "source_display",
+        "domain",
+        "author",
+        "description",
+    ]
+    cols_existing = [c for c in preferred if c in merged.columns]
+
+    # Sort newest first if date exists
+    if "date" in merged.columns:
+        merged = merged.sort_values("date", ascending=False)
+
+    st.markdown(merged[cols_existing].to_html(escape=False, index=False), unsafe_allow_html=True)
+
+    # ---------- KPIs ----------
+    cK1, cK2, cK3 = st.columns(3)
+    with cK1:
+        st.metric("Signals shown", int(len(merged)))
+    with cK2:
+        if "sentiment" in merged.columns:
+            st.metric(
+                "Avg Sentiment (news rows)",
+                f"{pd.to_numeric(merged['sentiment'], errors='coerce').mean():.2f}",
             )
         else:
-            # ensure column exists for display
-            if "news" not in sns.columns:
-                sns["news"] = np.nan
+            st.metric("Avg Sentiment (news rows)", "—")
+    with cK3:
+        st.metric("Unique tickers", int(merged["ticker"].nunique()) if "ticker" in merged.columns else 0)
 
-        # ── UI filters
-        c1, c2, c3 = st.columns([1.4, 1, 1])
-        with c1:
-            tickers = sorted(sig.get("ticker", pd.Series(dtype=str)).dropna().astype(str).unique())
-            sel_tickers = st.multiselect("Tickers", tickers, default=[], key="t19_tickers")
-        with c2:
-            days = st.slider("Last N days", 1, 90, 30, 1, key="t19_days")
-        with c3:
-            min_conf = st.slider("Min confidence", 0.0, 1.0, 0.00, 0.01, key="t19_minconf")
+    # ---------- Download ----------
+    st.download_button(
+        "⬇️ Download fused view (CSV)",
+        data=merged[cols_existing].to_csv(index=False).encode("utf-8"),
+        file_name="sentiment_signal_fusion.csv",
+        mime="text/csv",
+        key="t19_dl",
+    )
 
-        cutoff = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None) - pd.Timedelta(days=days)
-
-        sig_f = sig.copy()
-        if sel_tickers:
-            sig_f = sig_f[sig_f["ticker"].astype(str).isin(sel_tickers)]
-        if "confidence" in sig_f.columns:
-            sig_f = sig_f[sig_f["confidence"].fillna(0) >= min_conf]
-        if "date" in sig_f.columns:
-            sig_f = sig_f[sig_f["date"] >= cutoff]
-
-        sns_f = sns.copy()
-        if "date" in sns_f.columns:
-            sns_f = sns_f[sns_f["date"] >= cutoff]
-        # If user filtered tickers and news has ticker column, align that too
-        if sel_tickers and "ticker" in sns_f.columns:
-            sns_f = sns_f[sns_f["ticker"].astype(str).isin(sel_tickers)]
-
-        # ── Merge strategy
-        # Prefer join on ['ticker','date'] if news has ticker.
-        can_join_on_date = sig_f["date"].notna().any() and sns_f["date"].notna().any()
-        if can_join_on_date:
-            if "ticker" in sns_f.columns and sns_f["ticker"].notna().any():
-                # If multiple news per ticker-day, keep the one with strongest |sentiment|, then latest if available
-                if {"ticker", "date", "sentiment"}.issubset(sns_f.columns):
-                    sns_f = sns_f.sort_values(
-                        ["ticker", "date", "sentiment"], ascending=[True, True, False]
-                    ).drop_duplicates(subset=["ticker", "date"], keep="first")
-                else:
-                    sns_f = sns_f.sort_values(["ticker", "date"]).drop_duplicates(
-                        subset=["ticker", "date"], keep="last"
-                    )
-                merged = pd.merge(sig_f, sns_f, on=["ticker", "date"], how="left")
-            else:
-                # No ticker in news: join on date only
-                sns_one_per_date = sns_f.sort_values("date").drop_duplicates(
-                    subset=["date"], keep="last"
-                )
-                merged = pd.merge(
-                    sig_f,
-                    sns_one_per_date.drop(
-                        columns=[c for c in ["ticker"] if c in sns_one_per_date.columns]
-                    ),
-                    on=["date"],
-                    how="left",
-                )
-        else:
-            # Fall back: latest news per ticker, else global latest
-            if "ticker" in sns_f.columns and sns_f["ticker"].notna().any():
-                latest_news = sns_f.sort_values("date").groupby("ticker").tail(1)
-                merged = pd.merge(sig_f, latest_news, on="ticker", how="left")
-            else:
-                latest_row = sns_f.sort_values("date").tail(1)
-                merged = sig_f.copy()
-                if not latest_row.empty:
-                    for c in latest_row.columns:
-                        merged[c] = latest_row.iloc[0][c]
-
-        # ── Display
-        tidy_cols = [
-            c
-            for c in [
-                "date",
-                "ticker",
-                "news",
-                "close",
-                "predicted_close",
-                "delta_pct",
-                "signal",
-                "confidence",
-                "rationale",
-                "sentiment",
-                "source",
-                "author",
-                "description",
-            ]
-            if c in merged.columns or c == "news"
-        ]
-        if "news" not in tidy_cols:
-            tidy_cols.insert(2, "news")
-
-        # Sort newest first if date exists
-        if "date" in merged.columns:
-            merged = merged.sort_values("date", ascending=False)
-
-        st.markdown(merged[tidy_cols].to_html(escape=False, index=False), unsafe_allow_html=True)
-
-        # KPIs
-        cK1, cK2, cK3 = st.columns(3)
-        with cK1:
-            st.metric("Signals shown", int(len(merged)))
-        with cK2:
-            if "sentiment" in merged.columns:
-                st.metric(
-                    "Avg Sentiment (news rows)",
-                    f"{pd.to_numeric(merged['sentiment'], errors='coerce').mean():.2f}",
-                )
-        with cK3:
-            if "ticker" in merged.columns:
-                st.metric("Unique tickers", int(merged["ticker"].nunique()))
-
-        # Download
-        st.download_button(
-            "⬇️ Download fused view (CSV)",
-            data=merged[tidy_cols].to_csv(index=False).encode("utf-8"),
-            file_name="sentiment_signal_fusion.csv",
-            mime="text/csv",
-            key="t19_dl",
-        )
 # ──────────────────────────────
 # Tab 20 — Model Comparison (clean & robust)
 # ──────────────────────────────
@@ -2954,18 +4518,130 @@ with tabs[21]:
 
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
+# -------------------------------------------------
+# Enhanced guard / posture snapshot helper
+# (place this above Tab 22 so both 22 and 23 can call it)
+# -------------------------------------------------
+def latest_portfolio_status():
+    """
+    Figure out current guard mode, equity, drawdown, and buying power
+    using portfolio_history.csv and live_orders.csv.
 
-# ──────────────────────────────
+    Returns dict:
+        {
+            "mode": str,
+            "reason": str,
+            "drawdown_pct": float or nan,
+            "buying_power": float or nan,
+            "latest_equity": float or nan,
+            "reserve_pct": float or nan
+        }
+    """
+    out = {
+        "mode": "UNKNOWN",
+        "reason": "",
+        "drawdown_pct": np.nan,
+        "buying_power": np.nan,
+        "latest_equity": np.nan,
+        "reserve_pct": np.nan,
+    }
+
+    # --- Pull equity / drawdown / cash from portfolio_history.csv
+    ph = load_csv("portfolio_history.csv", RESULTS_DIR)
+    if not ph.empty:
+        # make sure we have a clean datetime
+        parse_dates_inplace(ph, ("date",))
+
+        # build total_value if it's missing
+        ph = derive_total_value(ph)
+
+        # coerce numerics we care about
+        for c in ["total_value", "buying_power", "cash"]:
+            if c in ph.columns:
+                ph[c] = pd.to_numeric(ph[c], errors="coerce")
+
+        # keep only rows that actually have a total_value
+        if "total_value" in ph.columns:
+            ph = (
+                ph.dropna(subset=["total_value"])
+                .sort_values("date")
+                .copy()
+            )
+        else:
+            ph = pd.DataFrame()  # fallback: nothing usable
+
+        if not ph.empty:
+            # compute running peak + drawdown
+            ph["peak"] = ph["total_value"].cummax()
+            ph["drawdown"] = ph["total_value"] / ph["peak"] - 1.0
+
+            last = ph.iloc[-1]
+
+            out["latest_equity"] = float(last.get("total_value", np.nan))
+            out["drawdown_pct"] = float(last.get("drawdown", np.nan))
+
+            # prefer buying_power if present, else cash
+            if "buying_power" in last and pd.notna(last["buying_power"]):
+                out["buying_power"] = float(last["buying_power"])
+            elif "cash" in last and pd.notna(last["cash"]):
+                out["buying_power"] = float(last["cash"])
+
+    # --- Infer guard mode from live_orders.csv
+    audit = load_csv("live_orders.csv", RESULTS_DIR)
+    if not audit.empty:
+        # pick a timestamp column
+        time_col = "timestamp" if "timestamp" in audit.columns else (
+            "ts" if "ts" in audit.columns else None
+        )
+        if time_col:
+            parse_dates_inplace(audit, (time_col,))
+            audit = audit.sort_values(time_col)
+
+        row = audit.iloc[-1]
+        note_txt = str(row.get("note", "")).upper()
+        stat_txt = str(row.get("status", "")).upper()
+
+        # Priority rules:
+        if "LOCKDOWN" in note_txt:
+            out["mode"] = "LOCKDOWN"
+            out["reason"] = "Explicit LOCKDOWN note"
+        elif "DEFENSIVE" in note_txt:
+            out["mode"] = "DEFENSIVE"
+            out["reason"] = "Explicit DEFENSIVE note"
+        elif stat_txt == "OK" or "OK" in note_txt:
+            out["mode"] = "NORMAL"
+            out["reason"] = "Orders accepted (status OK)"
+        else:
+            # Fallback: infer based on drawdown
+            dd = out.get("drawdown_pct", np.nan)
+            if np.isfinite(dd):
+                if dd <= -0.10:
+                    out["mode"] = "DEFENSIVE"
+                    out["reason"] = "Auto DEFENSIVE (>10% drawdown)"
+                else:
+                    out["mode"] = "NORMAL"
+                    out["reason"] = "Stable drawdown (<10%)"
+
+    return out
+
+# -------------------------------------------------
 # Tab 22 — Buffett Orders (current)
-# ──────────────────────────────
+# -------------------------------------------------
 with tabs[22]:
     st.subheader("🧾 Buffett Orders (current)")
+
     cur = load_csv("buffett_orders.csv", ORDERS_DIR)
-    if cur.empty:
-        st.info("No current buffett_orders.csv in data/orders yet.")
+    # We'll also optionally read recent execution audit for posture
+    exec_audit = load_csv("live_orders.csv", RESULTS_DIR)
+
+    if cur.empty and exec_audit.empty:
+        st.info("No buffett_orders.csv in data/orders yet (and no live_orders.csv).")
     else:
-        # Normalize/clean
-        for c in [
+        # normalize fields in cur, even if it's empty we keep columns
+        if cur.empty:
+            cur = pd.DataFrame()
+
+        want_cols = [
             "date",
             "ticker",
             "action",
@@ -2980,9 +4656,11 @@ with tabs[22]:
             "title",
             "url",
             "source",
-        ]:
+        ]
+        for c in want_cols:
             if c not in cur.columns:
                 cur[c] = np.nan
+
         parse_dates_inplace(cur, ("date",))
         cur["ticker"] = cur["ticker"].astype(str)
         cur["action"] = cur["action"].astype(str).str.upper()
@@ -3000,20 +4678,30 @@ with tabs[22]:
             ],
         )
 
-        # Clickable link
+        # clickable news/title col
         cur["news"] = cur.apply(
-            lambda r: make_clickable(r.get("title", r.get("ticker", "")), r.get("url", "")), axis=1
+            lambda r: make_clickable(
+                r.get("title", r.get("ticker", "")),
+                r.get("url", ""),
+            ),
+            axis=1,
         )
 
         # KPIs
-        n_syms = cur["ticker"].nunique() if "ticker" in cur.columns else len(cur)
-        tw_sum = (
-            float(cur["target_weight"].fillna(0).sum())
-            if "target_weight" in cur.columns
-            else np.nan
-        )
-        buys = cur[cur["action"] == "BUY"] if "action" in cur.columns else pd.DataFrame()
-        sells = cur[cur["action"] == "SELL"] if "action" in cur.columns else pd.DataFrame()
+        if not cur.empty:
+            n_syms = cur["ticker"].nunique()
+            tw_sum = float(cur["target_weight"].fillna(0).sum())
+
+            buys = cur[cur["action"] == "BUY"] if "action" in cur.columns else pd.DataFrame()
+            sells = cur[cur["action"] == "SELL"] if "action" in cur.columns else pd.DataFrame()
+
+            total_buy = sum_safe(buys.get("delta_notional", []))
+            total_sell = sum_safe(sells.get("delta_notional", []))
+        else:
+            n_syms = 0
+            tw_sum = np.nan
+            total_buy = 0.0
+            total_sell = 0.0
 
         c1, c2, c3a, c3b = st.columns(4)
         with c1:
@@ -3021,25 +4709,37 @@ with tabs[22]:
         with c2:
             st.metric("Sum target weights", f"{tw_sum:0.3f}" if np.isfinite(tw_sum) else "—")
         with c3a:
-            st.metric("Total BUY $", f"{sum_safe(buys.get('delta_notional', [])):,.0f}")
+            st.metric("Total BUY $", f"{total_buy:,.0f}")
         with c3b:
-            st.metric("Total SELL $", f"{sum_safe(sells.get('delta_notional', [])):,.0f}")
+            st.metric("Total SELL $", f"{total_sell:,.0f}")
 
         st.write("**Top BUYS by notional**")
-        if not buys.empty:
-            st.dataframe(
-                buys.sort_values("delta_notional", ascending=False).head(10),
-                use_container_width=True,
+        if not cur.empty:
+            buys_sorted = cur[cur["action"] == "BUY"].sort_values(
+                "delta_notional", ascending=False
             )
+            if not buys_sorted.empty:
+                st.dataframe(
+                    buys_sorted.head(10),
+                    use_container_width=True,
+                )
+            else:
+                st.caption("No BUY rows.")
         else:
             st.caption("No BUY rows.")
 
         st.write("**Top SELLS by notional**")
-        if not sells.empty:
-            st.dataframe(
-                sells.sort_values("delta_notional", ascending=True).head(10),
-                use_container_width=True,
+        if not cur.empty:
+            sells_sorted = cur[cur["action"] == "SELL"].sort_values(
+                "delta_notional", ascending=True
             )
+            if not sells_sorted.empty:
+                st.dataframe(
+                    sells_sorted.head(10),
+                    use_container_width=True,
+                )
+            else:
+                st.caption("No SELL rows.")
         else:
             st.caption("No SELL rows.")
 
@@ -3058,50 +4758,195 @@ with tabs[22]:
                     "news",
                     "source",
                 ]
-                if c in cur.columns or c == "news"
+                if (c in cur.columns) or (c == "news")
             ]
-            st.markdown(cur[show_cols].to_html(escape=False, index=False), unsafe_allow_html=True)
+            if not cur.empty and show_cols:
+                st.markdown(
+                    cur[show_cols].to_html(escape=False, index=False),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption("No order rows available.")
 
+        # Historical buffett_orders_* just as info
         hist = sorted(RESULTS_DIR.glob("buffett_orders_*.csv"))
         if hist:
             st.caption(f"Latest history file: {hist[-1].name} (in {RESULTS_DIR})")
 
-# ──────────────────────────────
+        # ---- Capital posture / Guard snapshot
+        st.markdown("### Capital Posture / Guard Status")
+        snap = latest_portfolio_status()
+
+        g1, g2, g3, g4 = st.columns(4)
+        with g1:
+            st.metric("Mode", str(snap.get("mode", "UNKNOWN")))
+        with g2:
+            dd_val = snap.get("drawdown_pct", np.nan)
+            st.metric(
+                "Drawdown (est)",
+                f"{dd_val:.1%}" if np.isfinite(dd_val) else "—",
+            )
+        with g3:
+            eq_val = snap.get("latest_equity", np.nan)
+            st.metric(
+                "Equity (est)",
+                f"${eq_val:,.0f}" if np.isfinite(eq_val) else "—",
+            )
+        with g4:
+            bp_val = snap.get("buying_power", np.nan)
+            st.metric(
+                "Buying Power (est)",
+                f"${bp_val:,.0f}" if np.isfinite(bp_val) else "—",
+            )
+
+        # ---- Execution audit table (what actually got sent)
+        st.markdown("### Execution Audit (what actually got sent)")
+        a = exec_audit.copy()
+        if a.empty:
+            st.caption("No live_orders.csv yet.")
+        else:
+            # Normalize audit columns
+            # rename/ensure consistent naming
+            if "action" not in a.columns and "side" in a.columns:
+                a["action"] = a["side"]
+
+            # handle qty/quantity columns
+            if "quantity" not in a.columns and "qty" in a.columns:
+                a["quantity"] = a["qty"]
+
+            # 'ts' vs 'timestamp'
+            if "timestamp" not in a.columns and "ts" in a.columns:
+                a["timestamp"] = a["ts"]
+
+            # coerce numerics
+            for c in ["quantity", "qty", "limit_price", "price"]:
+                if c in a.columns:
+                    a[c] = pd.to_numeric(a[c], errors="coerce")
+
+            # Est BUY capital attempted
+            est_buy_notional = 0.0
+            try:
+                tmp_buy = a[a["action"].astype(str).str.upper() == "BUY"].copy()
+
+                # pick a price col
+                price_col = None
+                for c in ["limit_price", "price"]:
+                    if c in tmp_buy.columns:
+                        price_col = c
+                        break
+
+                # pick a quantity col
+                qty_col = None
+                for c in ["quantity", "qty"]:
+                    if c in tmp_buy.columns:
+                        qty_col = c
+                        break
+
+                if price_col and qty_col:
+                    px = pd.to_numeric(tmp_buy[price_col], errors="coerce").fillna(0)
+                    qx = pd.to_numeric(tmp_buy[qty_col], errors="coerce").fillna(0)
+                    est_buy_notional = float((px * qx).sum())
+            except Exception:
+                pass
+
+            # Sent OK vs skipped/error
+            ok_mask = a.get("status", pd.Series([], dtype=object)).astype(str).str.upper() == "OK"
+            sent_ok = int(ok_mask.sum()) if "status" in a.columns else 0
+            skipped = int((~ok_mask).sum()) if "status" in a.columns else 0
+
+            k1, k2, k3 = st.columns(3)
+            with k1:
+                st.metric("Sent OK", sent_ok)
+            with k2:
+                st.metric("Skipped / Error", skipped)
+            with k3:
+                st.metric("Est. BUY capital attempted", f"${est_buy_notional:,.0f}")
+
+            # show audit table
+            show_cols = [
+                c
+                for c in [
+                    "timestamp",
+                    "ts",
+                    "ticker",
+                    "action",
+                    "quantity",
+                    "qty",
+                    "order_type",
+                    "tif",
+                    "limit_price",
+                    "price",
+                    "take_profit",
+                    "status",
+                ]
+                if c in a.columns
+            ]
+            st.dataframe(a[show_cols], use_container_width=True)
+
+
+# -------------------------------------------------
 # Tab 23 — Consolidated Orders (ML × Buffett blend)
-# ──────────────────────────────
+# -------------------------------------------------
 with tabs[23]:
     st.subheader("🗂️ Consolidated Orders (ML × Buffett blend)")
 
     ml = load_csv("orders_today.csv", ORDERS_DIR)
     bo = load_csv("buffett_orders.csv", ORDERS_DIR)
 
-    if ml.empty and bo.empty:
-        st.info("No orders_today.csv or buffett_orders.csv in data/orders yet.")
-    else:
-        # Normalize
-        for df_ in [ml, bo]:
-            if not df_.empty:
-                for c in [
-                    "date",
-                    "ticker",
-                    "action",
-                    "quantity",
-                    "price",
-                    "score",
-                    "title",
-                    "url",
-                    "source",
-                ]:
-                    if c not in df_.columns:
-                        df_[c] = np.nan
-                parse_dates_inplace(df_, ("date",))
-                df_["ticker"] = df_["ticker"].astype(str)
-                df_["action"] = df_["action"].astype(str).str.upper()
-                to_numeric(df_, ["quantity", "price", "score"])
+    # Also reuse audit + posture for per-idea audit
+    audit_df = load_csv("live_orders.csv", RESULTS_DIR)
+    snap = latest_portfolio_status()
 
-        if not ml.empty:
+    if ml.empty and bo.empty and audit_df.empty:
+        st.info("No orders_today.csv, no buffett_orders.csv, and no live_orders.csv yet.")
+    else:
+        # ---------- normalize ML
+        if ml.empty:
+            ml = pd.DataFrame()
+        else:
+            need_cols = [
+                "date",
+                "ticker",
+                "action",
+                "quantity",
+                "price",
+                "score",
+                "title",
+                "url",
+                "source",
+            ]
+            for c in need_cols:
+                if c not in ml.columns:
+                    ml[c] = np.nan
+            parse_dates_inplace(ml, ("date",))
+            ml["ticker"] = ml["ticker"].astype(str)
+            ml["action"] = ml["action"].astype(str).str.upper()
+            to_numeric(ml, ["quantity", "price", "score"])
             ml["order_source"] = "ML"
-        if not bo.empty:
+
+        # ---------- normalize Buffett
+        if bo.empty:
+            bo = pd.DataFrame()
+        else:
+            need_cols = [
+                "date",
+                "ticker",
+                "action",
+                "quantity",
+                "price",
+                "score",
+                "title",
+                "url",
+                "source",
+            ]
+            for c in need_cols:
+                if c not in bo.columns:
+                    bo[c] = np.nan
+            parse_dates_inplace(bo, ("date",))
+            bo["ticker"] = bo["ticker"].astype(str)
+            bo["action"] = bo["action"].astype(str).str.upper()
+            # we may not have "score" for Buffett, that's fine
+            to_numeric(bo, ["quantity", "price", "score"])
             bo["order_source"] = "BUFFETT"
 
         combo = (
@@ -3111,20 +4956,27 @@ with tabs[23]:
         )
 
         if combo.empty:
-            st.info("No orders to display.")
+            st.info("No combined orders to display yet.")
         else:
             combo["news"] = combo.apply(
-                lambda r: make_clickable(r.get("title", r.get("ticker", "")), r.get("url", "")),
+                lambda r: make_clickable(
+                    r.get("title", r.get("ticker", "")),
+                    r.get("url", ""),
+                ),
                 axis=1,
             )
 
-            c1, c2, c3 = st.columns([1.2, 1, 1])
+            c1, c2, c3 = st.columns([1.3, 1.1, 1])
             with c1:
                 tickers = sorted(combo["ticker"].dropna().unique())
-                sel_tickers = st.multiselect("Tickers", tickers, default=tickers, key="t23_tickers")
+                sel_tickers = st.multiselect(
+                    "Tickers", tickers, default=tickers, key="t23_tickers"
+                )
             with c2:
                 sources = sorted(combo["order_source"].dropna().unique())
-                sel_sources = st.multiselect("Sources", sources, default=sources, key="t23_sources")
+                sel_sources = st.multiselect(
+                    "Sources", sources, default=sources, key="t23_sources"
+                )
             with c3:
                 days = st.slider("Last N days", 1, 60, 14, 1, key="t23_days")
 
@@ -3133,20 +4985,25 @@ with tabs[23]:
                 f = f[f["ticker"].isin(sel_tickers)]
             if sel_sources:
                 f = f[f["order_source"].isin(sel_sources)]
-            if f["date"].notna().any():
+
+            if "date" in f.columns and f["date"].notna().any():
                 cutoff = pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=days)
-                f = f[f["date"] >= cutoff]
+                f = f[pd.to_datetime(f["date"], errors="coerce") >= cutoff]
 
             f = f.sort_values(["date", "ticker", "order_source"], ascending=[False, True, True])
 
+            # KPI row for this filtered idea list
             k1, k2, k3 = st.columns(3)
             with k1:
                 st.metric("Orders", len(f))
             with k2:
                 st.metric("Unique tickers", f["ticker"].nunique())
             with k3:
-                notional = (f["price"].fillna(0) * f["quantity"].fillna(0)).abs().sum()
-                st.metric("Gross notional", f"${notional:,.0f}")
+                # try to estimate gross notional if price/quantity exist
+                px = pd.to_numeric(f.get("price", np.nan), errors="coerce").fillna(0)
+                qx = pd.to_numeric(f.get("quantity", np.nan), errors="coerce").fillna(0)
+                gross_notional = float((px * qx).abs().sum())
+                st.metric("Gross notional", f"${gross_notional:,.0f}")
 
             show_cols = [
                 c
@@ -3160,9 +5017,9 @@ with tabs[23]:
                     "score",
                     "news",
                 ]
-                if c in f.columns or c == "news"
+                if (c in f.columns) or (c == "news")
             ]
-            st.markdown(f[show_cols].to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.dataframe(f[show_cols], use_container_width=True)
 
             st.download_button(
                 "⬇️ Download consolidated (CSV)",
@@ -3171,6 +5028,103 @@ with tabs[23]:
                 mime="text/csv",
                 key="t23_dl",
             )
+
+        # -------- Guard snapshot for these blended ideas
+        st.markdown("### Capital Posture / Guard Status")
+        g1, g2, g3, g4 = st.columns(4)
+        with g1:
+            st.metric("Mode", str(snap.get("mode", "UNKNOWN")))
+        with g2:
+            dd_val = snap.get("drawdown_pct", np.nan)
+            st.metric("Drawdown (est)", f"{dd_val:.1%}" if np.isfinite(dd_val) else "—")
+        with g3:
+            eq_val = snap.get("latest_equity", np.nan)
+            st.metric(
+                "Equity (est)",
+                f"${eq_val:,.0f}" if np.isfinite(eq_val) else "—",
+            )
+        with g4:
+            bp_val = snap.get("buying_power", np.nan)
+            st.metric(
+                "Buying Power (est)",
+                f"${bp_val:,.0f}" if np.isfinite(bp_val) else "—",
+            )
+
+        # -------- Targeted audit for only these filtered tickers/sources
+        st.markdown("### Execution Audit for These Ideas")
+
+        a = audit_df.copy()
+        if a.empty:
+            st.caption("No live_orders.csv yet.")
+        else:
+            # normalize audit schema just like tab 22
+            if "action" not in a.columns and "side" in a.columns:
+                a["action"] = a["side"]
+            if "quantity" not in a.columns and "qty" in a.columns:
+                a["quantity"] = a["qty"]
+            if "timestamp" not in a.columns and "ts" in a.columns:
+                a["timestamp"] = a["ts"]
+
+            for c in ["quantity", "qty", "limit_price", "price"]:
+                if c in a.columns:
+                    a[c] = pd.to_numeric(a[c], errors="coerce")
+
+            # filter same tickers/time window
+            if "ticker" in a.columns and sel_tickers:
+                a = a[a["ticker"].astype(str).isin(sel_tickers)].copy()
+
+            # est BUY notional for this slice
+            est_buy_notional = 0.0
+            try:
+                tmp_buy = a[a["action"].astype(str).str.upper() == "BUY"].copy()
+                price_col = None
+                for c in ["limit_price", "price"]:
+                    if c in tmp_buy.columns:
+                        price_col = c
+                        break
+                qty_col = None
+                for c in ["quantity", "qty"]:
+                    if c in tmp_buy.columns:
+                        qty_col = c
+                        break
+                if price_col and qty_col:
+                    px = pd.to_numeric(tmp_buy[price_col], errors="coerce").fillna(0)
+                    qx = pd.to_numeric(tmp_buy[qty_col], errors="coerce").fillna(0)
+                    est_buy_notional = float((px * qx).sum())
+            except Exception:
+                pass
+
+            ok_mask = a.get("status", pd.Series([], dtype=object)).astype(str).str.upper() == "OK"
+            sent_ok = int(ok_mask.sum()) if "status" in a.columns else 0
+            skipped = int((~ok_mask).sum()) if "status" in a.columns else 0
+
+            k1, k2, k3 = st.columns(3)
+            with k1:
+                st.metric("Sent OK", sent_ok)
+            with k2:
+                st.metric("Skipped / Error", skipped)
+            with k3:
+                st.metric("Est. BUY capital attempted", f"${est_buy_notional:,.0f}")
+
+            show_cols2 = [
+                c
+                for c in [
+                    "timestamp",
+                    "ts",
+                    "ticker",
+                    "action",
+                    "quantity",
+                    "qty",
+                    "order_type",
+                    "tif",
+                    "limit_price",
+                    "price",
+                    "take_profit",
+                    "status",
+                ]
+                if c in a.columns
+            ]
+            st.dataframe(a[show_cols2], use_container_width=True)
 
 # ──────────────────────────────
 # Tab 24 — AI Feedback (allocator runs)
@@ -4488,168 +6442,116 @@ with tabs[29]:
         else:
             st.caption("No weights to display.")
 
+# ──────────────────────────────
 # Tab 30 — Stress Test Reports + runner button + aggregated chart
+# ──────────────────────────────
 with tabs[30]:
     st.subheader("🧪 Stress Test Reports & Runner")
-    # Where stress test JSONs live
-    STRESS_DIR = DATA_ROOT / "stress_test_results"
-    STRESS_DIR.mkdir(parents=True, exist_ok=True)
     st.caption(f"Looking for JSON results in: {STRESS_DIR}")
 
-    # Option: run quick stress tests from Streamlit (will spawn subprocess)
+    # Runner: quick stress test via subprocess
     st.markdown("**Run quick stress tests**")
     col_run, col_run_notes = st.columns([1, 3])
     with col_run_notes:
-        st.caption(
-            "Click to run `services/stress_test.py --quick`. This runs a subprocess and may take a few minutes."
-        )
+        st.caption("Runs `services/stress_test.py --quick` in a subprocess. May take a few minutes.")
     run_now = col_run.button("▶️ Run quick stress tests (quick)")
 
     if run_now:
         runner_path = PROJECT_ROOT / "run_stress_test.py"
-        alt_runner = PROJECT_ROOT / "services" / "stress_test.py"
-        if not runner_path.exists() and not alt_runner.exists():
-            st.error(
-                "Runner not found. Expected `run_stress_test.py` at project root or `services/stress_test.py`."
-            )
-        else:
-            cmd_path = str(
-                runner_path if runner_path.exists() else runner_path.with_name("run_stress_test.py")
-            )
-            # fallback to direct services script if runner missing
-            if not Path(cmd_path).exists():
-                cmd = [sys.executable, str(alt_runner), "--quick"]
-            else:
-                cmd = [sys.executable, cmd_path, "--quick"]
+        services_runner = PROJECT_ROOT / "services" / "stress_test.py"
 
+        if runner_path.exists():
+            cmd = [sys.executable, str(runner_path), "--quick"]
+        elif services_runner.exists():
+            cmd = [sys.executable, str(services_runner), "--quick"]
+        else:
+            cmd = None
+
+        if not cmd:
+            st.error("Runner not found. Expected `run_stress_test.py` or `services/stress_test.py`.")
+        else:
             st.info(f"Running: {' '.join(cmd)}")
             try:
-                with st.spinner(
-                    "Running stress tests (quick)... this may take a while — output will appear below."
-                ):
+                with st.spinner("Running stress tests (quick)…"):
                     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
                 out = proc.stdout or ""
                 err = proc.stderr or ""
                 status_code = proc.returncode
 
                 st.subheader("Runner output")
-                if out:
+                if out.strip():
                     st.markdown("**stdout**")
                     st.code(out.strip())
-                if err:
+                if err.strip():
                     st.markdown("**stderr**")
                     st.code(err.strip())
 
                 if status_code == 0:
-                    st.success(
-                        "Stress test runner finished with exit code 0. New results (if any) saved to stress_test_results/. Refresh the list below."
-                    )
+                    st.success("Runner finished with exit code 0. Refresh the list below to see new results.")
                 else:
-                    st.error(
-                        f"Runner finished with exit code {status_code}. Check stderr for details above."
-                    )
+                    st.error(f"Runner exited with code {status_code}. Check stderr above.")
             except Exception as e:
                 st.error(f"Failed to run stress test runner: {e}")
 
     # Discover result files
     files = sorted(STRESS_DIR.glob("stress_test_results_*.json"))
     if not files:
-        st.info(
-            "No stress test result files found in stress_test_results/. Run the stress tests to generate results."
-        )
+        st.info("No stress test result files found in stress_test_results/. Run the quick test above.")
     else:
-        # Read & flatten all files into a table for quick scanning
+        # Parse + flatten rows
         rows = []
         for p in files:
             try:
                 j = json.loads(p.read_text(encoding="utf-8"))
             except Exception as e:
-                rows.append(
-                    {
-                        "file": p.name,
-                        "file_path": str(p),
-                        "scenario": "(invalid JSON)",
-                        "test": "(parse_error)",
-                        "survived": False,
-                        "total_return": np.nan,
-                        "max_drawdown": np.nan,
-                        "final_value": np.nan,
-                        "volatility": np.nan,
-                        "notes": f"JSON parse error: {e}",
-                    }
-                )
+                rows.append({
+                    "file": p.name, "file_path": str(p),
+                    "scenario": "(invalid JSON)", "test": "(parse_error)",
+                    "survived": False,
+                    "total_return": np.nan, "max_drawdown": np.nan,
+                    "final_value": np.nan, "volatility": np.nan,
+                    "notes": f"JSON parse error: {e}",
+                })
                 continue
 
             for scenario_name, scenario_results in j.items():
                 if isinstance(scenario_results, dict):
                     for test_name, metrics in scenario_results.items():
                         if not isinstance(metrics, dict):
-                            rows.append(
-                                {
-                                    "file": p.name,
-                                    "file_path": str(p),
-                                    "scenario": scenario_name,
-                                    "test": test_name,
-                                    "survived": False,
-                                    "total_return": np.nan,
-                                    "max_drawdown": np.nan,
-                                    "final_value": np.nan,
-                                    "volatility": np.nan,
-                                    "notes": "Unexpected metrics format",
-                                }
-                            )
+                            rows.append({
+                                "file": p.name, "file_path": str(p),
+                                "scenario": scenario_name, "test": test_name,
+                                "survived": False,
+                                "total_return": np.nan, "max_drawdown": np.nan,
+                                "final_value": np.nan, "volatility": np.nan,
+                                "notes": "Unexpected metrics format",
+                            })
                             continue
-                        rows.append(
-                            {
-                                "file": p.name,
-                                "file_path": str(p),
-                                "scenario": scenario_name,
-                                "test": test_name,
-                                "survived": bool(metrics.get("survived", False)),
-                                "total_return": (
-                                    float(metrics.get("total_return", np.nan))
-                                    if metrics.get("total_return") is not None
-                                    else np.nan
-                                ),
-                                "max_drawdown": (
-                                    float(metrics.get("max_drawdown", np.nan))
-                                    if metrics.get("max_drawdown") is not None
-                                    else np.nan
-                                ),
-                                "final_value": (
-                                    float(metrics.get("final_value", np.nan))
-                                    if metrics.get("final_value") is not None
-                                    else np.nan
-                                ),
-                                "volatility": (
-                                    float(metrics.get("volatility", np.nan))
-                                    if metrics.get("volatility") is not None
-                                    else np.nan
-                                ),
-                                "notes": "",
-                            }
-                        )
+                        rows.append({
+                            "file": p.name, "file_path": str(p),
+                            "scenario": scenario_name, "test": test_name,
+                            "survived": bool(metrics.get("survived", False)),
+                            "total_return": float(metrics.get("total_return", np.nan)) if metrics.get("total_return") is not None else np.nan,
+                            "max_drawdown": float(metrics.get("max_drawdown", np.nan)) if metrics.get("max_drawdown") is not None else np.nan,
+                            "final_value": float(metrics.get("final_value", np.nan)) if metrics.get("final_value") is not None else np.nan,
+                            "volatility": float(metrics.get("volatility", np.nan)) if metrics.get("volatility") is not None else np.nan,
+                            "notes": "",
+                        })
                 else:
-                    rows.append(
-                        {
-                            "file": p.name,
-                            "file_path": str(p),
-                            "scenario": scenario_name,
-                            "test": "(unexpected format)",
-                            "survived": False,
-                            "total_return": np.nan,
-                            "max_drawdown": np.nan,
-                            "final_value": np.nan,
-                            "volatility": np.nan,
-                            "notes": "Scenario entry is not a dict",
-                        }
-                    )
+                    rows.append({
+                        "file": p.name, "file_path": str(p),
+                        "scenario": scenario_name, "test": "(unexpected format)",
+                        "survived": False,
+                        "total_return": np.nan, "max_drawdown": np.nan,
+                        "final_value": np.nan, "volatility": np.nan,
+                        "notes": "Scenario entry is not a dict",
+                    })
 
         summary_df = pd.DataFrame(rows)
         if summary_df.empty:
             st.info("Stress result files were found but no usable rows could be parsed.")
         else:
-            # Overview KPIs
+            # KPIs
             total_runs = int(summary_df["file"].nunique())
             total_tests = int(len(summary_df))
             passed = int(summary_df["survived"].sum())
@@ -4657,16 +6559,12 @@ with tabs[30]:
             success_rate = passed / total_tests if total_tests else 0.0
 
             k1, k2, k3, k4 = st.columns(4)
-            with k1:
-                st.metric("Result files", total_runs)
-            with k2:
-                st.metric("Total tests", total_tests)
-            with k3:
-                st.metric("Passed", passed)
-            with k4:
-                st.metric("Success rate", f"{success_rate:.1%}")
+            with k1: st.metric("Result files", total_runs)
+            with k2: st.metric("Total tests", total_tests)
+            with k3: st.metric("Passed", passed)
+            with k4: st.metric("Success rate", f"{success_rate:.1%}")
 
-            # Aggregate per-scenario
+            # By-scenario aggregation
             agg = (
                 summary_df.groupby(["scenario"])["survived"]
                 .agg(["count", "sum"])
@@ -4680,7 +6578,7 @@ with tabs[30]:
                 use_container_width=True,
             )
 
-            # Aggregated chart: failed count per scenario (prefer Plotly)
+            # Chart
             st.markdown("**Aggregated visualization**")
             agg_chart = agg.sort_values("tests", ascending=False).reset_index(drop=True)
             if PLOTLY_OK:
@@ -4695,39 +6593,23 @@ with tabs[30]:
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                # fallback
-                df_chart = agg_chart.set_index("scenario")[["passed", "failed"]]
-                st.bar_chart(df_chart)
+                st.bar_chart(agg_chart.set_index("scenario")[["passed", "failed"]])
 
-            # Main table with simple filters
-            st.markdown("**All test rows** — filter and explore")
+            # Main table + filters
+            st.markdown("**All test rows — filter and explore**")
             filt_scenarios = sorted(summary_df["scenario"].dropna().unique())
-            sel_scenario = st.selectbox(
-                "Filter scenario (optional)", ["(all)"] + filt_scenarios, key="t30_scen"
-            )
-            sel_file = st.selectbox(
-                "Select a result file to inspect",
-                ["(none)"] + sorted(summary_df["file"].unique()),
-                key="t30_file",
-            )
+            sel_scenario = st.selectbox("Filter scenario (optional)", ["(all)"] + filt_scenarios, key="t30_scen")
+            sel_file = st.selectbox("Select a result file to inspect", ["(none)"] + sorted(summary_df["file"].unique()), key="t30_file")
 
             df_view = summary_df.copy()
             if sel_scenario and sel_scenario != "(all)":
                 df_view = df_view[df_view["scenario"] == sel_scenario]
+
             st.dataframe(
-                df_view[
-                    [
-                        "file",
-                        "scenario",
-                        "test",
-                        "survived",
-                        "total_return",
-                        "max_drawdown",
-                        "final_value",
-                        "volatility",
-                        "notes",
-                    ]
-                ],
+                df_view[[
+                    "file", "scenario", "test", "survived",
+                    "total_return", "max_drawdown", "final_value", "volatility", "notes"
+                ]],
                 use_container_width=True,
             )
 
@@ -4741,27 +6623,16 @@ with tabs[30]:
                     st.write(f"**File:** {sel_file}")
                     with st.expander("Show raw JSON"):
                         st.json(sel_json)
-                    # Show a nicer breakdown for the selected file
+
                     rows_f = [r for r in rows if r["file"] == sel_file]
                     df_f = pd.DataFrame(rows_f)
                     if not df_f.empty:
                         st.markdown("**Selected run — test breakdown**")
                         st.dataframe(
-                            df_f[
-                                [
-                                    "scenario",
-                                    "test",
-                                    "survived",
-                                    "total_return",
-                                    "max_drawdown",
-                                    "final_value",
-                                    "volatility",
-                                ]
-                            ],
+                            df_f[["scenario", "test", "survived", "total_return", "max_drawdown", "final_value", "volatility"]],
                             use_container_width=True,
                         )
 
-                    # Download raw JSON for the run
                     st.download_button(
                         "⬇️ Download raw JSON",
                         data=raw_text.encode("utf-8"),
@@ -4772,23 +6643,165 @@ with tabs[30]:
                 except Exception as e:
                     st.error(f"Could not read selected file: {e}")
 
-            # Combined exports
-            csv_data = summary_df.to_csv(index=False)
+            # Combined export
             st.download_button(
                 "⬇️ Download combined summary (CSV)",
-                data=csv_data.encode("utf-8"),
+                data=summary_df.to_csv(index=False).encode("utf-8"),
                 file_name="stress_tests_summary.csv",
                 mime="text/csv",
                 key="t30_dl_combined",
             )
 
-            # Tips
             with st.expander("🛈 Tips & quick actions"):
                 st.write(
-                    """
-                    - Files are expected to be named `stress_test_results_YYYYMMDD_HHMMSS.json`.
-                    - If a run shows `survived: false`, inspect that file's JSON for the failing scenario.
-                    - Re-run the quick test above to generate new results. Large full-suite runs may take many minutes.
-                    - If you want Streamlit to run the *full* suite, change the button command to call the runner without `--quick` (be careful — long blocking run).
-                    """
+                    "- Files should be named `stress_test_results_YYYYMMDD_HHMMSS.json`.\n"
+                    "- If a row shows `survived: false`, drill into that file's JSON.\n"
+                    "- Re-run quick tests above to generate new results.\n"
+                    "- To run a *full* suite from Streamlit, change the runner to omit `--quick` (may be slow)."
                 )
+
+# ──────────────────────────────
+# Tab 31 — Market Sentinels
+# ──────────────────────────────
+with tabs[31]:
+    st.subheader("🩺 Market Sentinels (quick market health)")
+
+    ms = load_csv("market_sentinels.csv", RESULTS_DIR)
+    if ms.empty:
+        st.info("No market_sentinels.csv yet. Run: python services/market_sentinels.py")
+        st.stop()
+
+    # Coerce numeric columns
+    for c in ["last_close", "ret_5d", "ret_20d", "vol_20d", "rsi_14"]:
+        if c in ms.columns:
+            ms[c] = pd.to_numeric(ms[c], errors="coerce")
+
+    # Traffic-light summary
+    def _status_row(r):
+        badges = []
+        v = r.get("ret_5d", np.nan)
+        if pd.notna(v):
+            badges.append("🟢" if v > 0 else "🔴" if v < 0 else "🟡")
+        rsi = r.get("rsi_14", np.nan)
+        if pd.notna(rsi):
+            badges.append("🟢" if 45 <= rsi <= 65 else "🔴" if (rsi < 30 or rsi > 70) else "🟡")
+        ma_ok = r.get("ma_20_above_ma_50", None)
+        if isinstance(ma_ok, bool):
+            badges.append("🟢" if ma_ok else "🔴")
+        return " ".join(badges)
+
+    ms_disp = ms.copy()
+    ms_disp["status"] = ms_disp.apply(_status_row, axis=1)
+
+    c1, c2 = st.columns([1.25, 1])
+    with c1:
+        cols_to_show = [c for c in [
+            "symbol", "last_date", "last_close", "ret_5d", "ret_20d",
+            "vol_20d", "rsi_14", "ma_20_above_ma_50", "status"
+        ] if c in ms_disp.columns]
+        st.dataframe(ms_disp[cols_to_show], use_container_width=True)
+
+    with c2:
+        def metric_for(sym, label, col, fmt=None):
+            row = ms[ms["symbol"] == sym]
+            if not row.empty and col in row.columns and pd.notna(row.iloc[0][col]):
+                val = row.iloc[0][col]
+                st.metric(f"{label} — {sym}", fmt.format(val) if fmt else f"{val:,.2f}")
+            else:
+                st.metric(f"{label} — {sym}", "—")
+
+        metric_for("SPY", "5D Return", "ret_5d", fmt="{:.2%}")
+        metric_for("SPY", "20D Return", "ret_20d", fmt="{:.2%}")
+        metric_for("^VIX", "Last Close", "last_close")
+
+    st.download_button(
+        "⬇️ Download sentinels (CSV)",
+        data=ms.to_csv(index=False).encode("utf-8"),
+        file_name="market_sentinels.csv",
+        mime="text/csv",
+        key="t31_dl",
+    )
+
+# ──────────────────────────────
+# SIDEBAR CONTROLS
+# ──────────────────────────────
+def _sidebar_controls():
+    """
+    Returns: (section_choice, sub_choice)
+    Sets PROJECT_ROOT / DATA_ROOT / RESULTS_DIR / ORDERS_DIR / PRED_DIR / STRESS_DIR.
+    """
+    global PROJECT_ROOT, DATA_ROOT, RESULTS_DIR, ORDERS_DIR, PRED_DIR, STRESS_DIR
+
+    with st.sidebar:
+        st.title("TRITON Nav")
+
+        # Advanced / project root selector
+        st.subheader("⚙️ Advanced")
+        root_mode = st.radio(
+            "Project root",
+            ["Auto (this file’s folder)", "Manual path"],
+            index=0,
+            key="sb_root_mode",  # unique
+        )
+
+        if root_mode == "Manual path":
+            default_text = str(st.session_state.get("custom_root", DEFAULT_PROJECT_ROOT))
+            custom_root = st.text_input(
+                "Enter absolute path to repo root",
+                value=default_text,
+                key="sb_root_manual_input",  # unique
+            )
+            try:
+                project_root_candidate = Path(custom_root).expanduser().resolve()
+                st.session_state["custom_root"] = str(project_root_candidate)
+                PROJECT_ROOT = project_root_candidate
+                st.caption(f"Using custom root: {PROJECT_ROOT}")
+            except Exception as e:
+                st.error(f"Invalid custom root: {e}")
+                PROJECT_ROOT = DEFAULT_PROJECT_ROOT
+                st.caption(f"Using auto root (fallback): {PROJECT_ROOT}")
+        else:
+            PROJECT_ROOT = DEFAULT_PROJECT_ROOT
+            st.caption(f"Using auto root: {PROJECT_ROOT}")
+
+        st.caption(f"Build: {APP_VERSION}")
+
+        # Ensure canonical dirs exist
+        DATA_ROOT   = PROJECT_ROOT / "data"
+        RESULTS_DIR = DATA_ROOT / "results"
+        ORDERS_DIR  = DATA_ROOT / "orders"
+        PRED_DIR    = DATA_ROOT / "predictions"
+        STRESS_DIR  = DATA_ROOT / "stress_test_results"
+        for p in (RESULTS_DIR, ORDERS_DIR, PRED_DIR, STRESS_DIR):
+            p.mkdir(parents=True, exist_ok=True)
+
+        # Section / subpage navigation
+        section_choice = st.selectbox(
+            "Section",
+            list(SECTIONS.keys()),
+            index=0,
+            help="High-level area of Triton",
+            key="sb_section",  # unique
+        )
+
+        subpages = SECTIONS[section_choice]
+        sub_choice = st.radio(
+            "View",
+            subpages,
+            index=0,
+            help="Which view inside that section",
+            key="sb_subpage",  # unique
+        )
+
+    return section_choice, sub_choice
+
+# ──────────────────────────────
+# APP ENTRYPOINT
+# ──────────────────────────────
+def _render_main():
+    section_choice, sub_choice = _sidebar_controls()
+    render_global_header()
+    render_body(section_choice, sub_choice)
+
+_render_main()
+
