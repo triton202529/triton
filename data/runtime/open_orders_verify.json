@@ -1,0 +1,35 @@
+{
+  "ts": "2025-12-19T20:56:24.452002Z",
+  "status": "OK",
+  "summary": "OK",
+  "counts": {
+    "open_parents": 11,
+    "open_legs": 22,
+    "non_gtc": 0,
+    "dupe_groups": 0,
+    "dupe_orders": 0,
+    "orphan_legs": 0,
+    "broken_parents": 0,
+    "stale": 0
+  },
+  "issues": {
+    "non_gtc": [],
+    "duplicates": [],
+    "orphan_legs": [],
+    "broken_parents": [],
+    "missing_leg_counts": [],
+    "stale": []
+  },
+  "cancel_plan": [],
+  "cancelled": [],
+  "dry_run": false,
+  "policy": {
+    "expect_tif": "gtc",
+    "stale_minutes": 240,
+    "stale_only_day": true,
+    "cancel_non_gtc": false,
+    "cancel_dupes": false,
+    "cancel_orphans": false,
+    "cancel_stale": true
+  }
+}

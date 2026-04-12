@@ -1,5 +1,16 @@
 # services/broker_alpaca.py
+from dotenv import load_dotenv
 import os
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# Force load .env file (project root; works regardless of cwd / IDE terminal settings)
+load_dotenv(os.path.join(ROOT, ".env"))
+load_dotenv(os.path.join(ROOT, "config", ".env"))
+
+print("[ENV CHECK] ALPACA_KEY_ID =", os.getenv("ALPACA_KEY_ID"))
+print("[ENV CHECK] APCA_API_KEY_ID =", os.getenv("APCA_API_KEY_ID"))
+
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Union, Iterable
@@ -10,8 +21,6 @@ import requests
 ALPACA_PAPER_BASE = "https://paper-api.alpaca.markets"
 ALPACA_LIVE_BASE = "https://api.alpaca.markets"
 ALPACA_DATA_BASE = "https://data.alpaca.markets"
-
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 class AlpacaError(RuntimeError):
@@ -37,7 +46,7 @@ def _load_env_files() -> None:
     if have_keys:
         return
 
-    def load_dotenv(path: str) -> None:
+    def _load_env_file_plain(path: str) -> None:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -68,8 +77,8 @@ def _load_env_files() -> None:
             # ignore malformed JSON
             pass
 
-    load_dotenv(os.path.join(ROOT, ".env"))
-    load_dotenv(os.path.join(ROOT, "config", ".env"))
+    _load_env_file_plain(os.path.join(ROOT, ".env"))
+    _load_env_file_plain(os.path.join(ROOT, "config", ".env"))
     load_json(os.path.join(ROOT, "config", "alpaca.json"))
 
 
@@ -126,6 +135,18 @@ class AlpacaBroker:
                 return {"status": r.status_code, "text": r.text}
         return {"status": r.status_code}
 
+    # ---------- Data HTTP helpers ----------
+    def _data_get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """
+        GET against Alpaca Market Data base.
+        Uses the same session/headers (key+secret).
+        """
+        url = f"{self.data_base}{path}"
+        r = self.session.get(url, params=params, timeout=self.timeout)
+        if r.status_code >= 300:
+            raise AlpacaError(f"DATA GET {path} failed {r.status_code}: {r.text}")
+        return r.json()
+
     # ---------- Normalizers ----------
     @staticmethod
     def _normalize_order(o: Dict[str, Any]) -> Dict[str, Any]:
@@ -177,6 +198,16 @@ class AlpacaBroker:
     def get_positions(self) -> List[Dict[str, Any]]:
         return self._get("/v2/positions")
 
+    # Back-compat aliases used elsewhere
+    def list_positions(self) -> List[Dict[str, Any]]:
+        return self.get_positions()
+
+    def account(self) -> Dict[str, Any]:
+        return self.get_account()
+
+    def clock(self) -> Dict[str, Any]:
+        return self.get_clock()
+
     # ---------- Orders (raw) ----------
     def list_orders(
         self,
@@ -185,11 +216,14 @@ class AlpacaBroker:
         after: Optional[str] = None,
         until: Optional[str] = None,
         direction: str = "desc",
+        nested: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Raw Alpaca orders list (no normalization).
+
         status: 'open' | 'closed' | 'all'
         direction: 'asc' | 'desc'
+        nested: include legs for bracket/oco orders
         """
         params: Dict[str, Any] = {
             "status": status,
@@ -200,6 +234,8 @@ class AlpacaBroker:
             params["after"] = after
         if until:
             params["until"] = until
+        if nested:
+            params["nested"] = "true"
         return self._get("/v2/orders", params=params)
 
     def get_order(self, order_id: str) -> Dict[str, Any]:
@@ -208,29 +244,88 @@ class AlpacaBroker:
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
         return self._delete(f"/v2/orders/{order_id}")
 
-    # ---------- Data (prices) ----------
+    # Optional alias some wrappers expect
+    def cancel(self, order_id: str) -> Dict[str, Any]:
+        return self.cancel_order(order_id)
+
+    def cancel_all_orders(self) -> Any:
+        """Cancel all open orders."""
+        return self._delete("/v2/orders")
+
+    # ---------- Data (quotes / trades / prices) ----------
+    def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Alpaca Data v2: latest quote for symbol.
+        Returns dict with bid/ask + timestamp, or None on error.
+        """
+        sym = str(symbol).upper().strip()
+        try:
+            data = self._data_get(f"/v2/stocks/{sym}/quotes/latest")
+            q = data.get("quote") or {}
+            return {
+                "symbol": sym,
+                "bid": q.get("bp"),
+                "ask": q.get("ap"),
+                "bid_size": q.get("bs"),
+                "ask_size": q.get("as"),
+                "ts": q.get("t"),
+                "raw": data,
+            }
+        except Exception:
+            return None
+
+    def get_latest_trade(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Alpaca Data v2: latest trade for symbol.
+        Returns dict with last price + timestamp, or None on error.
+        """
+        sym = str(symbol).upper().strip()
+        try:
+            data = self._data_get(f"/v2/stocks/{sym}/trades/latest")
+            t = data.get("trade") or {}
+            return {
+                "symbol": sym,
+                "last": t.get("p"),
+                "size": t.get("s"),
+                "exchange": t.get("x"),
+                "ts": t.get("t"),
+                "raw": data,
+            }
+        except Exception:
+            return None
+
+    # Friendly names expected by hardening code
+    def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+        return self.get_latest_quote(symbol)
+
+    def get_trade(self, symbol: str) -> Optional[Dict[str, Any]]:
+        return self.get_latest_trade(symbol)
+
     def get_latest_price(self, symbol: str) -> Optional[float]:
         """
         Alpaca Data v2: latest trade price for symbol.
         Returns float or None on error.
         """
-        url = f"{self.data_base}/v2/stocks/{symbol}/trades/latest"
-        r = self.session.get(url, timeout=self.timeout)
-        if r.status_code >= 300:
+        t = self.get_latest_trade(symbol)
+        if not t:
             return None
         try:
-            return float(r.json()["trade"]["p"])
+            return float(t["last"])
         except Exception:
             return None
 
     # ---------- Convenience: open orders ----------
     def get_open_orders(
-        self, symbols: Optional[Iterable[str]] = None, limit: int = 200
+        self,
+        symbols: Optional[Iterable[str]] = None,
+        limit: int = 200,
+        nested: bool = True,
     ) -> List[Dict[str, Any]]:
         """
         Return normalized open orders. Optional `symbols` filter.
+        nested=True includes legs for bracket orders.
         """
-        raw = self.list_orders(status="open", limit=limit, direction="desc")
+        raw = self.list_orders(status="open", limit=limit, direction="desc", nested=nested)
         if symbols:
             symset = {s.upper() for s in symbols}
             raw = [o for o in raw if str(o.get("symbol", "")).upper() in symset]
@@ -244,6 +339,7 @@ class AlpacaBroker:
         older_than_days: Optional[int] = None,  # 0 = older than today's start-of-day (US/Eastern)
         limit: int = 500,
         dry_run: bool = False,
+        nested: bool = True,
     ) -> List[Dict[str, Any]]:
         """
         Cancel open orders, keeping a whitelist and/or anything newer than a cutoff.
@@ -300,7 +396,7 @@ class AlpacaBroker:
         else:
             cutoff_dt = None
 
-        raw = self.list_orders(status="open", limit=limit, direction="desc")
+        raw = self.list_orders(status="open", limit=limit, direction="desc", nested=nested)
         victims = []
         for o in raw:
             sym = str(o.get("symbol", "")).upper()
@@ -330,6 +426,7 @@ class AlpacaBroker:
                     if d["id"] == o.get("id"):
                         d["cancel_error"] = str(e)
                         break
+
         for d in out:
             d["cancelled"] = "cancel_error" not in d
         return out
@@ -352,13 +449,15 @@ class AlpacaBroker:
     ) -> Dict[str, Any]:
         """
         Generic submit_order. For fractional qty, pass a float (if your acct supports it).
+
+        Alpaca expects either qty OR notional (not both). This method is qty-based.
         """
         payload: Dict[str, Any] = {
-            "symbol": symbol,
+            "symbol": symbol.upper().strip(),
             "qty": qty,
-            "side": side.lower(),
-            "type": order_type.lower(),
-            "time_in_force": time_in_force.lower(),
+            "side": side.lower().strip(),
+            "type": order_type.lower().strip(),
+            "time_in_force": time_in_force.lower().strip(),
             "extended_hours": bool(extended_hours),
         }
         if client_order_id:
@@ -368,7 +467,7 @@ class AlpacaBroker:
         if stop_price is not None:
             payload["stop_price"] = round(float(stop_price), 4)
         if order_class:
-            payload["order_class"] = order_class
+            payload["order_class"] = str(order_class).lower().strip()
         if take_profit:
             payload["take_profit"] = take_profit
         if stop_loss:
@@ -395,6 +494,28 @@ class AlpacaBroker:
             extended_hours=extended_hours,
         )
 
+    def submit_limit_order(
+        self,
+        symbol: str,
+        qty: Union[int, float],
+        side: str,
+        limit_price: float,
+        time_in_force: str = "day",
+        client_order_id: Optional[str] = None,
+        extended_hours: bool = False,
+    ) -> Dict[str, Any]:
+        """Convenience: limit order by quantity."""
+        return self.submit_order(
+            symbol=symbol,
+            qty=qty,
+            side=side,
+            order_type="limit",
+            time_in_force=time_in_force,
+            limit_price=limit_price,
+            client_order_id=client_order_id,
+            extended_hours=extended_hours,
+        )
+
     # ---------- Notional order helpers (market) ----------
     def submit_order_notional(
         self,
@@ -409,11 +530,11 @@ class AlpacaBroker:
         Generic notional market order. Alpaca supports 'notional' instead of 'qty'.
         """
         payload: Dict[str, Any] = {
-            "symbol": symbol,
+            "symbol": symbol.upper().strip(),
             "notional": round(float(abs(notional)), 2),
-            "side": side.lower(),
+            "side": side.lower().strip(),
             "type": "market",
-            "time_in_force": time_in_force.lower(),
+            "time_in_force": time_in_force.lower().strip(),
             "extended_hours": bool(extended_hours),
         }
         if client_order_id:
@@ -458,7 +579,7 @@ class AlpacaBroker:
             client_order_id=client_order_id,
         )
 
-    # ---------- Simple bracket wrapper (optional utility) ----------
+    # ---------- Bracket orders ----------
     def place_bracket_market(
         self,
         symbol: str,
@@ -473,11 +594,11 @@ class AlpacaBroker:
         Market bracket (TP/SL) by quantity.
         """
         payload: Dict[str, Any] = {
-            "symbol": symbol,
+            "symbol": symbol.upper().strip(),
             "qty": qty,
-            "side": side.lower(),
+            "side": side.lower().strip(),
             "type": "market",
-            "time_in_force": tif.lower(),
+            "time_in_force": tif.lower().strip(),
             "order_class": "bracket",
             "take_profit": {"limit_price": round(float(take_profit_price), 4)},
             "stop_loss": {"stop_price": round(float(stop_loss_price), 4)},
@@ -485,3 +606,56 @@ class AlpacaBroker:
         if client_order_id:
             payload["client_order_id"] = client_order_id
         return self._post("/v2/orders", payload)
+
+    def place_bracket(
+        self,
+        symbol: str,
+        side: str,
+        qty: Union[int, float],
+        entry_type: str = "market",  # "market" or "limit"
+        entry_limit_price: Optional[float] = None,
+        take_profit_price: float = 0.0,
+        stop_loss_price: float = 0.0,
+        tif: str = "day",
+        client_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Bracket order with MARKET or LIMIT entry (qty-based).
+
+        - entry_type="market": parent fills at market
+        - entry_type="limit": parent rests at entry_limit_price until filled
+
+        take_profit_price -> TP leg limit_price
+        stop_loss_price   -> SL leg stop_price
+        """
+        entry_type = (entry_type or "market").lower().strip()
+        if entry_type not in ("market", "limit"):
+            raise AlpacaError("entry_type must be 'market' or 'limit'")
+
+        if float(take_profit_price) <= 0 or float(stop_loss_price) <= 0:
+            raise AlpacaError("take_profit_price and stop_loss_price must be > 0")
+
+        if entry_type == "limit":
+            if entry_limit_price is None or float(entry_limit_price) <= 0:
+                raise AlpacaError("entry_limit_price required for limit entry")
+
+        # Optional safety sanity (not blocking, but avoids obvious mistakes)
+        side_l = (side or "").lower().strip()
+        if side_l == "buy" and not (float(stop_loss_price) < float(take_profit_price)):
+            raise AlpacaError("BUY bracket requires stop_loss_price < take_profit_price")
+        if side_l == "sell" and not (float(take_profit_price) < float(stop_loss_price)):
+            raise AlpacaError("SELL bracket requires take_profit_price < stop_loss_price")
+
+        return self.submit_order(
+            symbol=symbol,
+            qty=qty,
+            side=side,
+            order_type=entry_type,
+            time_in_force=tif,
+            limit_price=entry_limit_price if entry_type == "limit" else None,
+            client_order_id=client_order_id,
+            order_class="bracket",
+            take_profit={"limit_price": round(float(take_profit_price), 4)},
+            stop_loss={"stop_price": round(float(stop_loss_price), 4)},
+            extended_hours=False,
+        )

@@ -1,0 +1,584 @@
+{
+  "last_batches": [
+    {
+      "count": 15,
+      "fingerprint": "cb5e6c5474b94c654ec724b33f8c9c195ad7750f701e69ac600183265ea44df8",
+      "mode": "paper",
+      "ok": false,
+      "ts_utc": "2026-01-24T14:13:11+00:00"
+    },
+    {
+      "count": 15,
+      "fingerprint": "cb5e6c5474b94c654ec724b33f8c9c195ad7750f701e69ac600183265ea44df8",
+      "mode": "paper",
+      "ok": true,
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    {
+      "failed": 1,
+      "fingerprint": "ae87bfdf5b5b6c08973831d9c431eba2679c1685771decd07313153ae0c1e232",
+      "ok": false,
+      "placed": 3,
+      "ts_utc": "2026-01-24T21:49:47+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "241eb0ea57e11f0b4db6411f5da5319353a5ab574ca546fbb71773ba135be328",
+      "ok": true,
+      "placed": 1,
+      "ts_utc": "2026-01-24T22:07:35+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "341cd1628af9df13fa5e844e6311c8019036703887d57826d8546ee1d69bd0ef",
+      "ok": true,
+      "placed": 24,
+      "ts_utc": "2026-01-24T22:22:37+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "4dbdd98bda34b2ffd3e1fcb55ea0c119afc1a912c125fd12193d6069d6bf21d2",
+      "ok": true,
+      "placed": 24,
+      "session": "2026-01-25_AM",
+      "ts_utc": "2026-01-25T21:57:55+00:00"
+    },
+    {
+      "failed": 21,
+      "fingerprint": "44e0ed3a83904d6e60ef6f7a4f2b68a12e557e2418a2905bb813ba779be1bcb3",
+      "ok": false,
+      "placed": 0,
+      "session": "2026-01-25_AM",
+      "ts_utc": "2026-01-25T21:59:08+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "427f761dc89db9c7c7ca3a51e7740a337e9753e4aa16001315386ccfcc8f3deb",
+      "ok": true,
+      "placed": 24,
+      "session": "2026-01-25_AM_R1",
+      "ts_utc": "2026-01-25T22:03:31+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "dc0d8f3368c4204f9a562d531ed749adc12b31ef58b4b2b47c0234f3ca4b4f5c",
+      "ok": true,
+      "placed": 21,
+      "session": "2026-01-26_AM_R223336Z",
+      "ts_utc": "2026-01-25T22:33:45+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "6dbe8227759b2105ff9f5829e713318e4647230f60fc032bc210312cd7e8eda2",
+      "ok": true,
+      "placed": 24,
+      "session": "2026-01-26_AM_TEST_R232536Z",
+      "ts_utc": "2026-01-25T23:25:43+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a3459ae808bd9bfa8272e41e872931a97bf330f80e72d5f7789ee30c315d1b47",
+      "ok": true,
+      "placed": 24,
+      "session": "2026-01-26_SAFE_RUN_R235309Z",
+      "ts_utc": "2026-01-25T23:53:17+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "142ec16e4346c1966888dc21c0dc76a14f32f1279bc7f6cc144fcf2805f28e9d",
+      "ok": true,
+      "placed": 24,
+      "session": "2026-01-27_AM_R005826Z",
+      "ts_utc": "2026-01-26T00:58:35+00:00"
+    },
+    {
+      "failed": 4,
+      "fingerprint": "27103d50f6aa8d6372d6d1ad55fdc5dddc618a19ad4202aff4425817bf9a0828",
+      "ok": false,
+      "placed": 18,
+      "session": "2026-01-27_AM_R192258Z",
+      "ts_utc": "2026-01-26T19:23:06+00:00"
+    },
+    {
+      "failed": 4,
+      "fingerprint": "1f6d2fecea184236d028b9c6c3003b2e0e41278e81e66686c53d85e7ef3073be",
+      "ok": false,
+      "placed": 16,
+      "session": "2026-01-27_AM_R192333Z",
+      "ts_utc": "2026-01-26T19:23:41+00:00"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "20e85b61cab69856ba2ceb96fb58d061cd3f311c89fe7ff7ad31ec557def5280",
+      "ok": true,
+      "placed": 21,
+      "session": "2026-01-27_AM_R194419Z",
+      "ts_utc": "2026-01-26T19:44:28Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "221ec99eecb8318ab10c5264ce13e076b54cf84ce61cd15f1465fb3ec459c8ed",
+      "ok": true,
+      "placed": 20,
+      "session": "2026-01-27_OPEN_R0930_R204658Z",
+      "ts_utc": "2026-01-26T20:47:07Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "0d6b8d45b64e8939ad695b4111a23ae3643e3bec6a9526a1b8dceaa5481f0889",
+      "ok": true,
+      "placed": 20,
+      "session": "2026-01-27_OPEN_R0930_R045712Z",
+      "ts_utc": "2026-01-28T04:57:19Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "0c07f929afd7836f8eb094cad3b83d1a7b6b5d3844f410ebfefe577d93f82e77",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-01-28_OPEN_R0930",
+      "ts_utc": "2026-01-29T00:12:53Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a6923dae6ae16df3df71247115532e5c9e1601c74bc3fa6a1d519365e15472fe",
+      "ok": true,
+      "placed": 19,
+      "session": "TEST_SESSION_R232503Z",
+      "ts_utc": "2026-01-29T23:25:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "817880ceec884f584cbe49cd568115e9a9757b30b47ca1679cf486142c23e72c",
+      "ok": true,
+      "placed": 19,
+      "session": "TEST_SESSION",
+      "ts_utc": "2026-01-29T23:31:49Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "38c4d71039f36c7172652cc772501b87f0f3149abe8871eedd091f49dc9fdc11",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-01_PAPER",
+      "ts_utc": "2026-02-01T02:38:52Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c148dc851d69b95336eb953069f0559f15fe93e3ddcc217ced1a11db617aee22",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-01_PAPER_R134506Z",
+      "ts_utc": "2026-02-01T13:45:16Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "cdbc94c4b25afa9c1c7a8b64488d2f87cb9bebadb5cbcb3b2f634ea62e0faefe",
+      "ok": true,
+      "placed": 16,
+      "session": "2026-02-02_OPEN_R0930",
+      "ts_utc": "2026-02-01T21:26:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a234a9d438b4fc6c62879ecf6763149f78c274c8a1af7570e7da0879ed416ebb",
+      "ok": true,
+      "placed": 16,
+      "session": "2026-02-02_TEST_R001",
+      "ts_utc": "2026-02-01T21:47:43Z"
+    },
+    {
+      "failed": 16,
+      "fingerprint": "7f2ad20dc3c70fa4b12a3adb670ed9b6e02be55cc67f69fc4f1b0f92f1de075e",
+      "ok": false,
+      "placed": 3,
+      "session": "2026-02-02_OPEN_R0930",
+      "ts_utc": "2026-02-01T22:07:32Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9b8c29086736def42a6c354db9d934ee7d6694c608577835096ae1f96f572387",
+      "ok": true,
+      "placed": 18,
+      "session": "2026-02-02_OPEN_R0930_181239",
+      "ts_utc": "2026-02-01T22:12:53Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f61d9734c2aca1d96e1e25e5291ad89863134974f03dbae036c0bff4282ffbf8",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-01_PAPER_R221416Z",
+      "ts_utc": "2026-02-01T22:14:27Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "dfd30649f9808f9b33052a0ad6ae515380dcb0979203307d0138bba1f0113b4a",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-01_PAPER_R221724Z",
+      "ts_utc": "2026-02-01T22:17:35Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "0debcaeed6255c367f95616332d3a6e8d4153df1b525449dad5259acc72d73f5",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R0930_195707",
+      "ts_utc": "2026-02-01T23:57:20Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "36153d73d9cd5a1fbc3a4560e01de3322cc0277efc346443ee5a12c77c397ad9",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R001726Z",
+      "ts_utc": "2026-02-02T00:17:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "18baeb61dfa42122b192b4577658ac06b3fd19305f60ae5284d7a462c59ef67a",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R002855Z",
+      "ts_utc": "2026-02-02T00:29:06Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "eb6764d0637ef37d92f216f1e206603893e6c5422982b3a0f9b57ba9a518f5e0",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R031954Z",
+      "ts_utc": "2026-02-02T03:20:05Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e9b4dcfd495f91177a5c2f7cc3c867c952bc7f4fda11744dc97f52b62d03fbcd",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R134453Z",
+      "ts_utc": "2026-02-02T13:45:05Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "7b3be3adcab4de40ad10185a11b676f37c180915fbe1b7524ab49cff4e10ba1d",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R181527Z",
+      "ts_utc": "2026-02-02T18:15:38Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "7effa5947fa54ec2e68a8816b5635be8b4db20cf9fe691eadef79587c1e9e9ed",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R152310Z",
+      "ts_utc": "2026-02-02T19:23:17Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a5a9db7dba0c9e05c05b57a88e7c93da420170199e93366f102834c8aa3bdae6",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_OPEN_R153414Z",
+      "ts_utc": "2026-02-02T19:34:20Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "dbb9b94cf2b8532e9b6ca011276163b08b06577e18165fe02781c3060279555e",
+      "ok": true,
+      "placed": 3,
+      "session": "2026-02-02_OPEN_R155146Z",
+      "ts_utc": "2026-02-02T19:51:50Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "1ab89df1cb615aeeded6e6e89c8c0a06b3d28910c0391cdc88fcf3ffe0852b4b",
+      "ok": true,
+      "placed": 19,
+      "session": "2026-02-02_EOD_R200828Z",
+      "ts_utc": "2026-02-02T20:08:35Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "6ebc90ba9adca3ecc4db0c205850f3de72fb6a061dd43ecbe1e9a2a81d87b7c8",
+      "ok": true,
+      "placed": 1,
+      "session": "2026-04-01_PAPER",
+      "ts_utc": "2026-04-01T19:43:19Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "d51f749e082ea4938b98341a58a7f97f8171c5468a512fc1a632f70f842d2cfd",
+      "ok": true,
+      "placed": 3,
+      "session": "2026-04-03_PAPER_OPPS",
+      "ts_utc": "2026-04-03T04:14:34Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "2ed8b680b98881b217990946ee351181f0a8ce28e5689a3dcbd8ce8f298c92bc",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260404_213628",
+      "ts_utc": "2026-04-04T21:36:31Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f46d9b2c4918fe0934b402e8af77b6a5690bfc82e0440834c8f18b2d6c938827",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260405_051500",
+      "ts_utc": "2026-04-05T05:15:06Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "0d7e61498d23453689bb3f717c6987f6cb138956793c1ccedcdb9505c924ed74",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260405_181307",
+      "ts_utc": "2026-04-05T18:13:21Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "360226ae47e7e5b2f0f2c6e4bfd40853e82e099d49dceec59bad5e1a83f5e0f2",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260405_224353",
+      "ts_utc": "2026-04-05T22:44:09Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e037982981320b516c65021f421b539445986d9201b254fa6332dc8bc1be0258",
+      "ok": true,
+      "placed": 18,
+      "session": "exec_trades_20260406_010026",
+      "ts_utc": "2026-04-06T01:00:47Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "8a72238f7e26dd61c8966a184ef7bd4285b2075eedc2f63686d18aa216dc8c32",
+      "ok": true,
+      "placed": 5,
+      "session": "manage_pos_20260406_174702",
+      "ts_utc": "2026-04-06T17:47:05Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "727f510152b6b021894da61dd3b466f71e84e331aef4af54cfb56fb4dc720d68",
+      "ok": true,
+      "placed": 10,
+      "session": "manage_pos_20260406_235427",
+      "ts_utc": "2026-04-06T23:54:32Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f44a0c0d190764cadfb080851e2b54e4e1731c23ac82c2db35f6701fe01077b9",
+      "ok": true,
+      "placed": 2,
+      "session": "manage_pos_20260407_022514",
+      "ts_utc": "2026-04-07T02:25:16Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "0c604a22dd96d1407afea225a2a3ed4b9e7776393a77bc7657e30ba254fd4670",
+      "ok": true,
+      "placed": 18,
+      "session": "exec_trades_20260408_011254",
+      "ts_utc": "2026-04-08T01:13:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c9520804e7ea74c770226332a9a5fc082fd43fc28cb91d41817e7fceb3a710b9",
+      "ok": true,
+      "placed": 10,
+      "session": "manage_pos_20260408_224027",
+      "ts_utc": "2026-04-08T22:40:35Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "94d03f047d6b73ea16977b27ea84cef3957a8962690d1ca648f148a94da4f312",
+      "ok": true,
+      "placed": 7,
+      "session": "exec_trades_20260409_162414",
+      "ts_utc": "2026-04-09T16:24:24Z"
+    },
+    {
+      "failed": 1,
+      "fingerprint": "2cb41b2a6cfe20436f71f5a600ab44828b0a9ea85f2107b3837860a543f096a5",
+      "ok": false,
+      "placed": 4,
+      "session": "TEST_NEW_ACCOUNT_R173039Z",
+      "ts_utc": "2026-04-09T17:30:43Z"
+    },
+    {
+      "failed": 1,
+      "fingerprint": "6186ae2e0632bce70e4011ee24c1710fb64d3ede916067027dfdc7b0eb662002",
+      "ok": false,
+      "placed": 7,
+      "session": "TEST2_R194352Z",
+      "ts_utc": "2026-04-09T19:43:57Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a2a8e3f943cbd91f1465ea8c7d90f5cda05923c198b395122f6231863559bad5",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260410_154646",
+      "ts_utc": "2026-04-10T15:46:51Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "60c3b902806bf7c53b69aaffc748636bc1ebf8d2417789cb200ffca28d29e835",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260410_161057",
+      "ts_utc": "2026-04-10T16:11:08Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "dd84a39b27596411f0ead41b6df495199ac2ad061206da66d4d942f8d834f331",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260410_173310",
+      "ts_utc": "2026-04-10T17:33:20Z"
+    }
+  ],
+  "submitted": {
+    "triton-24bbb1c7f31e4d546cb8": {
+      "mode": "paper",
+      "order_id": "31064bcc-35b6-4623-ab0e-20d7cc663a67",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "AAPL",
+      "ts_utc": "2026-01-24T14:21:58+00:00"
+    },
+    "triton-269bd0bd47e5624301c7": {
+      "mode": "paper",
+      "order_id": "58b1e45a-5f05-4d91-83b2-f239973de946",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "MS",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-41fbc288388c01869545": {
+      "mode": "paper",
+      "order_id": "8728c541-41b0-4641-a1aa-5f18f7f5b79b",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "PEP",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-49e339baa580755aae10": {
+      "mode": "paper",
+      "order_id": "e700bda1-fac3-4895-a576-f4b90f4f454c",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "XLRE",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-5ea466b0e4585052f320": {
+      "mode": "paper",
+      "order_id": "9a64440c-e7c0-4281-bfb5-55e3c346b4fc",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "GBTC",
+      "ts_utc": "2026-01-24T14:21:58+00:00"
+    },
+    "triton-621fb3ccd58751acd779": {
+      "mode": "paper",
+      "order_id": "dc41de2d-71e0-4a74-bedb-161e2770ebf3",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "V",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-69246eea51d307e8c58b": {
+      "mode": "paper",
+      "order_id": "222786b2-5203-48da-869f-f1d5abc0a7d4",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "UNG",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-75460ad139566878563e": {
+      "mode": "paper",
+      "order_id": "bb148526-1a0c-46ec-a8e7-708a2f171fc5",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "NFLX",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-9db7818e57eefbb9927a": {
+      "mode": "paper",
+      "order_id": "7fbd5239-81dd-4f26-9060-199f020ef19c",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "BITO",
+      "ts_utc": "2026-01-24T14:21:58+00:00"
+    },
+    "triton-a97ac51efd8ad63f8b73": {
+      "mode": "paper",
+      "order_id": "ca4105d0-06d2-431a-a5b1-7faa96cbbde1",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "WMT",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-b1c9ca6cb5b7a417281d": {
+      "mode": "paper",
+      "order_id": "7a24b731-1714-44a4-9e94-f33048f4a6db",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "GE",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-cbe135ea65956864a36c": {
+      "mode": "paper",
+      "order_id": "ef2735a3-2276-492f-977a-b0404c15a9f6",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "USO",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-d6c6afaeb3cbdf93569f": {
+      "mode": "paper",
+      "order_id": "c22b8509-524e-452d-9842-f2e1bcc0e8c6",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "XLU",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-dd06e2f7f72cd3667ac7": {
+      "mode": "paper",
+      "order_id": "13843de6-aac9-41da-8cd6-8f119ccc2389",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "MRK",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    },
+    "triton-f2d41ea267acc0f62b5b": {
+      "mode": "paper",
+      "order_id": "3be670d2-6bdb-421d-833a-c2d7ca096822",
+      "qty": 1,
+      "side": "buy",
+      "status": "accepted",
+      "symbol": "HD",
+      "ts_utc": "2026-01-24T14:21:59+00:00"
+    }
+  }
+}

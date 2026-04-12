@@ -1,0 +1,26 @@
+{
+  "ts_utc": "2025-12-19T20:56:24.966483Z",
+  "automation_enabled": true,
+  "mode": "NORMAL",
+  "phase": "1.5",
+  "note": "live_cycle starting",
+  "identity": {
+    "host": "AKIM-WALLACE",
+    "user": "akimw",
+    "pid": 5804
+  },
+  "cycle": {
+    "id": "18e39ce0-3ae7-4e11-b584-53f4907779b8",
+    "status": "DONE",
+    "started_ts_utc": "2025-12-19T20:56:24.443543Z",
+    "ended_ts_utc": "2025-12-19T20:56:24.966483Z",
+    "duration_sec": 0,
+    "success": true,
+    "reason": "verify_completed status=OK",
+    "extra": {
+      "stage": "end",
+      "verify_status": "OK",
+      "summary": "OK"
+    }
+  }
+}

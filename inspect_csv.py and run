@@ -1,0 +1,23 @@
+# save as inspect_csv.py and run: python inspect_csv.py path/to/file.csv
+import sys, pandas as pd
+from collections import Counter
+p = sys.argv[1]
+print("File:", p)
+# show raw header line(s)
+with open(p, 'r', encoding='utf-8', errors='replace') as f:
+    header = f.readline().strip()
+    print("Raw header:\n", header)
+# parse with pandas to list columns
+try:
+    df = pd.read_csv(p, nrows=10)
+    cols = list(df.columns)
+    print("\nParsed columns:", cols)
+    dup = [c for c, cnt in Counter(cols).items() if cnt > 1]
+    if dup:
+        print("Duplicate column names detected:", dup)
+    else:
+        print("No duplicate columns.")
+    print("\nFirst 5 rows:")
+    print(df.head().to_string(index=False))
+except Exception as e:
+    print("Error reading CSV with pandas:", e)

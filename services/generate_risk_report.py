@@ -1,128 +1,158 @@
 # services/generate_risk_report.py
 
-import pandas as pd
-import numpy as np
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, Optional
+
+import numpy as np
+import pandas as pd
 import warnings
 
 warnings.filterwarnings("ignore")
 
 
-def calculate_performance_metrics(portfolio_data: pd.DataFrame) -> Dict[str, float]:
-    """Calculate comprehensive performance metrics."""
-    if len(portfolio_data) < 2:
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RESULTS_DIR = PROJECT_ROOT / "data" / "results"
+
+PORTFOLIO_CANDIDATES = [
+    RESULTS_DIR / "enhanced_portfolio_history.csv",
+    RESULTS_DIR / "portfolio_history.csv",
+]
+
+RISK_REPORT_FILE = RESULTS_DIR / "risk_report.json"
+
+
+# ─────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────
+
+
+def _read_portfolio_file() -> Path:
+    for p in PORTFOLIO_CANDIDATES:
+        if p.exists() and p.stat().st_size > 0:
+            return p
+    tried = ", ".join(str(p) for p in PORTFOLIO_CANDIDATES)
+    raise FileNotFoundError(f"Portfolio file not found or empty. Tried: {tried}")
+
+
+def _coerce_schema(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    required = ["date", "cash", "market_value", "total_value"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Portfolio history missing required columns: {missing}. Found: {list(df.columns)}"
+        )
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["cash"] = pd.to_numeric(df["cash"], errors="coerce")
+    df["market_value"] = pd.to_numeric(df["market_value"], errors="coerce")
+    df["total_value"] = pd.to_numeric(df["total_value"], errors="coerce")
+
+    # Optional fields (do NOT require)
+    if "num_positions" in df.columns:
+        df["num_positions"] = pd.to_numeric(df["num_positions"], errors="coerce")
+    else:
+        df["num_positions"] = np.nan
+
+    if "regime" not in df.columns:
+        df["regime"] = np.nan
+
+    df = df.dropna(subset=["date", "total_value"]).sort_values("date").reset_index(drop=True)
+    return df
+
+
+def _returns(df: pd.DataFrame) -> pd.Series:
+    r = df["total_value"].pct_change()
+    r = r.replace([np.inf, -np.inf], np.nan).dropna()
+    return r
+
+
+def _max_drawdown(values: np.ndarray) -> float:
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return float("nan")
+    peak = np.maximum.accumulate(v)
+    dd = (v / peak) - 1.0
+    return float(dd.min())  # negative
+
+
+# ─────────────────────────────────────────────────────────────
+# Metrics
+# ─────────────────────────────────────────────────────────────
+
+
+def calculate_performance_metrics(df: pd.DataFrame) -> Dict[str, Any]:
+    if df is None or df.empty or df["total_value"].dropna().shape[0] < 2:
         return {}
 
-    # Basic metrics
-    initial_value = portfolio_data["total_value"].iloc[0]
-    final_value = portfolio_data["total_value"].iloc[-1]
-    total_return = (final_value - initial_value) / initial_value
+    tv = df["total_value"].dropna()
+    initial_value = float(tv.iloc[0])
+    final_value = float(tv.iloc[-1])
+    total_return = (final_value - initial_value) / initial_value if initial_value != 0 else 0.0
 
-    # Daily returns
-    portfolio_data["daily_return"] = portfolio_data["total_value"].pct_change()
+    rets = _returns(df)
 
-    # Annualized metrics
-    days = (portfolio_data["date"].iloc[-1] - portfolio_data["date"].iloc[0]).days
-    annualized_return = (1 + total_return) ** (365 / days) - 1 if days > 0 else 0
+    days = int((df["date"].iloc[-1] - df["date"].iloc[0]).days) if len(df) >= 2 else 0
+    annualized_return = (1.0 + total_return) ** (365.0 / days) - 1.0 if days > 0 else 0.0
 
-    # Volatility
-    daily_vol = portfolio_data["daily_return"].std()
-    annualized_vol = daily_vol * np.sqrt(252)
+    daily_vol = float(rets.std(ddof=0)) if not rets.empty else 0.0
+    annualized_vol = daily_vol * float(np.sqrt(252.0)) if daily_vol > 0 else 0.0
 
-    # Sharpe ratio
-    sharpe_ratio = annualized_return / annualized_vol if annualized_vol > 0 else 0
+    sharpe_ratio = (annualized_return / annualized_vol) if annualized_vol > 0 else 0.0
 
-    # Max drawdown
-    cumulative = portfolio_data["total_value"].cummax()
-    drawdown = (portfolio_data["total_value"] - cumulative) / cumulative
-    max_drawdown = drawdown.min()
+    max_dd = _max_drawdown(tv.values)
+    calmar_ratio = (
+        (annualized_return / abs(max_dd)) if max_dd and np.isfinite(max_dd) and max_dd != 0 else 0.0
+    )
 
-    # Calmar ratio
-    calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown != 0 else 0
-
-    # Win rate
-    positive_days = (portfolio_data["daily_return"] > 0).sum()
-    total_days = len(portfolio_data["daily_return"].dropna())
-    win_rate = positive_days / total_days if total_days > 0 else 0
+    positive_days = int((rets > 0).sum()) if not rets.empty else 0
+    total_days = int(rets.shape[0]) if not rets.empty else 0
+    win_rate = (positive_days / total_days) if total_days > 0 else 0.0
 
     return {
-        "total_return": total_return,
-        "annualized_return": annualized_return,
-        "annualized_volatility": annualized_vol,
-        "sharpe_ratio": sharpe_ratio,
-        "max_drawdown": max_drawdown,
-        "calmar_ratio": calmar_ratio,
-        "win_rate": win_rate,
-        "total_days": days,
+        "total_return": float(total_return),
+        "annualized_return": float(annualized_return),
+        "annualized_volatility": float(annualized_vol),
+        "sharpe_ratio": float(sharpe_ratio),
+        "max_drawdown": float(max_dd) if np.isfinite(max_dd) else None,
+        "calmar_ratio": float(calmar_ratio),
+        "win_rate": float(win_rate),
+        "total_days": int(days),
     }
 
 
-def calculate_regime_metrics(portfolio_data: pd.DataFrame) -> Dict[str, any]:
-    """Calculate regime-specific metrics."""
-    regime_metrics = {}
-
-    # Regime distribution
-    regime_counts = portfolio_data["regime"].value_counts()
-    regime_metrics["regime_distribution"] = regime_counts.to_dict()
-
-    # Regime performance
-    regime_performance = {}
-    for regime in portfolio_data["regime"].unique():
-        regime_data = portfolio_data[portfolio_data["regime"] == regime]
-        if len(regime_data) > 1:
-            regime_return = (
-                regime_data["total_value"].iloc[-1] - regime_data["total_value"].iloc[0]
-            ) / regime_data["total_value"].iloc[0]
-            regime_vol = regime_data["total_value"].pct_change().std() * np.sqrt(252)
-            regime_performance[regime] = {
-                "return": regime_return,
-                "volatility": regime_vol,
-                "days": len(regime_data),
-            }
-
-    regime_metrics["regime_performance"] = regime_performance
-
-    # Regime transitions
-    regime_changes = portfolio_data["regime"] != portfolio_data["regime"].shift(1)
-    transition_count = regime_changes.sum()
-    regime_metrics["transition_count"] = transition_count
-    regime_metrics["transition_frequency"] = (
-        transition_count / len(portfolio_data) if len(portfolio_data) > 0 else 0
-    )
-
-    return regime_metrics
-
-
-def calculate_risk_metrics(portfolio_data: pd.DataFrame) -> Dict[str, float]:
-    """Calculate risk-specific metrics."""
-    if len(portfolio_data) < 20:
+def calculate_risk_metrics(df: pd.DataFrame) -> Dict[str, Any]:
+    # Needs enough rows to be meaningful, but don't crash if short.
+    if df is None or df.empty or df.shape[0] < 20:
         return {}
 
-    # Rolling volatility
-    portfolio_data["rolling_vol_20d"] = portfolio_data["total_value"].pct_change().rolling(
-        20
-    ).std() * np.sqrt(252)
+    rets = _returns(df)
+    if rets.empty:
+        return {}
 
-    # VaR calculations
-    returns = portfolio_data["total_value"].pct_change().dropna()
-    var_95 = returns.quantile(0.05)
-    var_99 = returns.quantile(0.01)
+    var_95 = float(rets.quantile(0.05))
+    var_99 = float(rets.quantile(0.01))
 
-    # Expected Shortfall (CVaR)
-    cvar_95 = returns[returns <= var_95].mean()
-    cvar_99 = returns[returns <= var_99].mean()
+    cvar_95 = float(rets[rets <= var_95].mean()) if (rets <= var_95).any() else None
+    cvar_99 = float(rets[rets <= var_99].mean()) if (rets <= var_99).any() else None
 
-    # Skewness and Kurtosis
-    skewness = returns.skew()
-    kurtosis = returns.kurtosis()
+    skewness = float(rets.skew())
+    kurtosis = float(rets.kurtosis())
 
-    # Tail ratio
-    tail_ratio = (
-        abs(returns.quantile(0.05)) / abs(returns.quantile(0.95))
-        if returns.quantile(0.95) != 0
-        else 0
+    q05 = float(rets.quantile(0.05))
+    q95 = float(rets.quantile(0.95))
+    tail_ratio = (abs(q05) / abs(q95)) if q95 != 0 else 0.0
+
+    rolling_vol_20d = rets.rolling(20).std(ddof=0) * np.sqrt(252.0)
+    current_volatility = (
+        float(rolling_vol_20d.iloc[-1])
+        if not rolling_vol_20d.empty and np.isfinite(rolling_vol_20d.iloc[-1])
+        else None
     )
 
     return {
@@ -132,97 +162,128 @@ def calculate_risk_metrics(portfolio_data: pd.DataFrame) -> Dict[str, float]:
         "cvar_99": cvar_99,
         "skewness": skewness,
         "kurtosis": kurtosis,
-        "tail_ratio": tail_ratio,
-        "current_volatility": (
-            portfolio_data["rolling_vol_20d"].iloc[-1]
-            if not pd.isna(portfolio_data["rolling_vol_20d"].iloc[-1])
-            else 0
-        ),
+        "tail_ratio": float(tail_ratio),
+        "current_volatility": current_volatility,
     }
 
 
-def generate_risk_report():
-    """Generate comprehensive risk report."""
+def calculate_regime_metrics(df: pd.DataFrame) -> Dict[str, Any]:
+    # Graceful: if no regime column or it's empty, return a clear status instead of KeyError.
+    if "regime" not in df.columns:
+        return {"status": "unavailable", "reason": "regime column missing"}
+
+    series = df["regime"].dropna()
+    if series.empty:
+        return {"status": "unavailable", "reason": "regime column empty"}
+
+    regime_counts = series.value_counts().to_dict()
+
+    # transitions
+    regime_changes = df["regime"] != df["regime"].shift(1)
+    transition_count = int(regime_changes.sum())
+    transition_frequency = float(transition_count / len(df)) if len(df) > 0 else 0.0
+
+    return {
+        "status": "ok",
+        "regime_distribution": regime_counts,
+        "transition_count": transition_count,
+        "transition_frequency": transition_frequency,
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Main generator
+# ─────────────────────────────────────────────────────────────
+
+
+def generate_risk_report() -> Path:
     print("📊 Generating comprehensive risk report...")
 
-    # Load portfolio data
-    portfolio_file = "data/results/enhanced_portfolio_history.csv"
-    if not Path(portfolio_file).exists():
-        print(f"❌ Portfolio file not found: {portfolio_file}")
-        return
+    portfolio_path = _read_portfolio_file()
+    df_raw = pd.read_csv(portfolio_path)
+    df = _coerce_schema(df_raw)
 
-    portfolio_data = pd.read_csv(portfolio_file)
-    portfolio_data["date"] = pd.to_datetime(portfolio_data["date"])
+    perf = calculate_performance_metrics(df)
+    risk = calculate_risk_metrics(df)
+    regime = calculate_regime_metrics(df)
 
-    # Load existing risk report if available
-    risk_report_file = "data/results/risk_report.json"
-    existing_report = {}
-    if Path(risk_report_file).exists():
-        try:
-            with open(risk_report_file, "r") as f:
-                existing_report = json.load(f)
-        except Exception as e:
-            print(f"⚠️ Error loading existing risk report: {e}")
+    # Dashboard-friendly "portfolio_metrics" (RiskDashboard expects this key)
+    # expected_volatility: use annualized_volatility if present
+    expected_vol = perf.get("annualized_volatility", None)
+    risk_adj = perf.get("sharpe_ratio", None)
 
-    # Calculate metrics
-    performance_metrics = calculate_performance_metrics(portfolio_data)
-    regime_metrics = calculate_regime_metrics(portfolio_data)
-    risk_metrics = calculate_risk_metrics(portfolio_data)
+    # Portfolio summary: safe defaults if optional cols missing
+    tv = df["total_value"].dropna()
+    initial_value = float(tv.iloc[0]) if not tv.empty else None
+    final_value = float(tv.iloc[-1]) if not tv.empty else None
 
-    # Create comprehensive report
-    risk_report = {
+    last_num_pos = (
+        df["num_positions"].dropna().iloc[-1] if df["num_positions"].notna().any() else None
+    )
+    last_regime = df["regime"].dropna().iloc[-1] if df["regime"].notna().any() else None
+
+    report: Dict[str, Any] = {
         "report_date": pd.Timestamp.now().isoformat(),
-        "portfolio_summary": {
-            "initial_value": portfolio_data["total_value"].iloc[0],
-            "final_value": portfolio_data["total_value"].iloc[-1],
-            "total_positions": portfolio_data["num_positions"].iloc[-1],
-            "current_regime": portfolio_data["regime"].iloc[-1],
-            "days_traded": len(portfolio_data),
+        "meta": {
+            "portfolio_source": str(portfolio_path),
+            "rows": int(len(df)),
+            "min_date": str(df["date"].min().date()) if df["date"].notna().any() else None,
+            "max_date": str(df["date"].max().date()) if df["date"].notna().any() else None,
         },
-        "performance_metrics": performance_metrics,
-        "regime_metrics": regime_metrics,
-        "risk_metrics": risk_metrics,
-        "portfolio_history": portfolio_data.to_dict("records"),
+        "portfolio_summary": {
+            "initial_value": initial_value,
+            "final_value": final_value,
+            "total_positions": (
+                int(last_num_pos)
+                if last_num_pos is not None and np.isfinite(last_num_pos)
+                else None
+            ),
+            "current_regime": str(last_regime) if last_regime is not None else None,
+            "days_traded": int(len(df)),
+        },
+        # ✅ What RiskDashboard reads
+        "portfolio_metrics": {
+            "expected_volatility": float(expected_vol) if expected_vol is not None else None,
+            "diversification_ratio": None,  # needs positions/covariance; placeholder
+            "risk_adjusted_return": float(risk_adj) if risk_adj is not None else None,
+            "max_drawdown": perf.get("max_drawdown", None),
+            "return_total_pct": (
+                (float(perf["total_return"]) * 100.0) if "total_return" in perf else None
+            ),
+            "return_annualized_pct": (
+                (float(perf["annualized_return"]) * 100.0) if "annualized_return" in perf else None
+            ),
+        },
+        # Keep your existing outputs too
+        "performance_metrics": perf,
+        "regime_metrics": regime,
+        "risk_metrics": risk,
+        # Placeholders (stabilizes UI expectations)
+        "risk_decomposition": {},
+        "position_analysis": {},
+        "factor_weights": {},
+        "risk_limits": {},
+        "regime_adjustments": {},
+        "performance_attribution": {},
     }
 
-    # Merge with existing report data
-    if existing_report:
-        risk_report.update(existing_report)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(RISK_REPORT_FILE, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, default=str)
 
-    # Save report
-    Path("data/results").mkdir(parents=True, exist_ok=True)
-    with open(risk_report_file, "w") as f:
-        json.dump(risk_report, f, indent=2, default=str)
-
-    # Generate summary
-    print("\n📈 Risk Report Summary:")
-    print("=" * 50)
-
-    if performance_metrics:
-        print(f"Total Return: {performance_metrics['total_return']:.2%}")
-        print(f"Annualized Return: {performance_metrics['annualized_return']:.2%}")
-        print(f"Annualized Volatility: {performance_metrics['annualized_volatility']:.2%}")
-        print(f"Sharpe Ratio: {performance_metrics['sharpe_ratio']:.2f}")
-        print(f"Max Drawdown: {performance_metrics['max_drawdown']:.2%}")
-        print(f"Calmar Ratio: {performance_metrics['calmar_ratio']:.2f}")
-        print(f"Win Rate: {performance_metrics['win_rate']:.2%}")
-
-    if regime_metrics:
-        print(f"\nRegime Distribution: {regime_metrics['regime_distribution']}")
-        print(f"Regime Transitions: {regime_metrics['transition_count']}")
-
-    if risk_metrics:
-        print(f"\nVaR (95%): {risk_metrics['var_95']:.2%}")
-        print(f"VaR (99%): {risk_metrics['var_99']:.2%}")
-        print(f"Skewness: {risk_metrics['skewness']:.2f}")
-        print(f"Kurtosis: {risk_metrics['kurtosis']:.2f}")
-
-    print(f"\n✅ Risk report saved to: {risk_report_file}")
+    print(f"\n✅ Risk report saved to: {RISK_REPORT_FILE}")
+    return RISK_REPORT_FILE
 
 
-def main():
-    """Main function."""
-    generate_risk_report()
+def main() -> None:
+    try:
+        generate_risk_report()
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        raise SystemExit(1)
+    except Exception as e:
+        print(f"❌ Failed generating risk report: {e}")
+        raise
 
 
 if __name__ == "__main__":
