@@ -1,9 +1,20 @@
 import os
+import sys
 import tempfile
+import types
 import unittest
 
 from cleanup_failed_tickers import clean_failed_tickers
 from scripts.failed_ticker_utils import load_failed_tickers, parse_failed_ticker_line
+
+pandas_stub = types.ModuleType("pandas")
+pandas_stub.DataFrame = object
+sys.modules.setdefault("pandas", pandas_stub)
+sys.modules.setdefault("yfinance", types.ModuleType("yfinance"))
+tqdm_stub = types.ModuleType("tqdm")
+tqdm_stub.tqdm = lambda iterable, *args, **kwargs: iterable
+sys.modules.setdefault("tqdm", tqdm_stub)
+
 from scripts.fetch_and_prepare import clear_old_ticker_results
 
 
