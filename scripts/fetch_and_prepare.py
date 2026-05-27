@@ -29,15 +29,23 @@ os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
 os.makedirs(os.path.dirname(FAILED_LOG), exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Clear old results & log
-for file in os.listdir(RESULTS_DIR):
-    file_path = os.path.join(RESULTS_DIR, file)
-    if os.path.isfile(file_path):
-        os.remove(file_path)
-print("🧹 Cleared old files from data/results/")
-
 # Start with empty failed tickers set
 failed_tickers = set()
+
+def clear_old_ticker_results(results_dir=RESULTS_DIR):
+    """Remove generated ticker parquet files without deleting CSV artifacts."""
+    removed = 0
+    for file in os.listdir(results_dir):
+        file_path = os.path.join(results_dir, file)
+        if os.path.isfile(file_path) and file.endswith(".parquet"):
+            os.remove(file_path)
+            removed += 1
+    return removed
+
+def reset_failed_ticker_log():
+    failed_tickers.clear()
+    with open(FAILED_LOG, "w") as log:
+        log.write("")
 
 def log_failed_ticker(ticker, reason="fetch error"):
     """Logs a failed ticker without duplicates"""
@@ -76,6 +84,10 @@ def fetch_data(ticker, retries=3, wait=2):
 
 def main():
     all_data = []
+
+    removed = clear_old_ticker_results()
+    print(f"🧹 Cleared {removed} old ticker parquet files from data/results/")
+    reset_failed_ticker_log()
 
     print(f"📊 Fetching data for {len(TICKERS)} tickers...")
     for ticker in tqdm(TICKERS):

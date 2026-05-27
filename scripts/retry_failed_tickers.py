@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 # Allow importing from the parent directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from services.feature_generator import add_technical_indicators
+from scripts.failed_ticker_utils import load_failed_tickers
 
 # Paths
 FAILED_INPUT_FILE = "data/logs/failed_tickers_unique.txt"
@@ -22,12 +23,6 @@ RESULTS_DIR = "data/results"
 os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
 os.makedirs(os.path.dirname(RETRY_FAILED_LOG), exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
-
-# Load tickers
-with open(FAILED_INPUT_FILE, "r") as file:
-    tickers = sorted(set(line.strip() for line in file if line.strip()))
-
-print(f"🔁 Retrying {len(tickers)} failed tickers...")
 
 def fetch_data(ticker, retries=3, wait=2):
     for attempt in range(1, retries + 1):
@@ -61,6 +56,9 @@ def fetch_data(ticker, retries=3, wait=2):
 
 def main():
     all_data = []
+    tickers = load_failed_tickers(FAILED_INPUT_FILE)
+
+    print(f"🔁 Retrying {len(tickers)} failed tickers...")
 
     for ticker in tqdm(tickers):
         df = fetch_data(ticker)
