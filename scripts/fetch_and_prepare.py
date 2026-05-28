@@ -29,15 +29,15 @@ os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
 os.makedirs(os.path.dirname(FAILED_LOG), exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Clear old results & log
-for file in os.listdir(RESULTS_DIR):
-    file_path = os.path.join(RESULTS_DIR, file)
-    if os.path.isfile(file_path):
-        os.remove(file_path)
-print("🧹 Cleared old files from data/results/")
-
 # Start with empty failed tickers set
 failed_tickers = set()
+
+def clear_generated_ticker_files(results_dir=RESULTS_DIR):
+    """Remove stale per-ticker parquet outputs without deleting CSV reports."""
+    for file in os.listdir(results_dir):
+        file_path = os.path.join(results_dir, file)
+        if os.path.isfile(file_path) and file.endswith(".parquet"):
+            os.remove(file_path)
 
 def log_failed_ticker(ticker, reason="fetch error"):
     """Logs a failed ticker without duplicates"""
@@ -93,14 +93,13 @@ def main():
     spy_df = full_df[full_df["ticker"] == "SPY"]
 
     enhanced_frames = []
+    enhanced_by_ticker = []
     for ticker in full_df["ticker"].unique():
         df = full_df[full_df["ticker"] == ticker].copy()
         try:
             df = add_technical_indicators(df, spy_df)
             enhanced_frames.append(df)
-
-            output_path = os.path.join(RESULTS_DIR, f"{ticker}.parquet")
-            df.to_parquet(output_path, index=False)
+            enhanced_by_ticker.append((ticker, df))
         except Exception as e:
             print(f"⚠️ Skipping {ticker} due to indicator error: {e}")
             log_failed_ticker(ticker, "indicator error")
@@ -108,6 +107,13 @@ def main():
     if not enhanced_frames:
         print("❌ All feature generation failed. Nothing to save.")
         return
+
+    clear_generated_ticker_files()
+    print("🧹 Cleared old ticker parquet files from data/results/")
+
+    for ticker, df in enhanced_by_ticker:
+        output_path = os.path.join(RESULTS_DIR, f"{ticker}.parquet")
+        df.to_parquet(output_path, index=False)
 
     final_df = pd.concat(enhanced_frames).dropna()
     final_df.to_parquet(PROCESSED_FILE, index=False)
