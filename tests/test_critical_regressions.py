@@ -1,12 +1,29 @@
 import importlib
+import sys
 import tempfile
+import types
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
 class FetchAndPrepareCleanupTests(unittest.TestCase):
     def test_cleanup_only_removes_generated_parquet_outputs(self):
-        fetch_and_prepare = importlib.import_module("scripts.fetch_and_prepare")
+        fake_tqdm = types.ModuleType("tqdm")
+        fake_tqdm.tqdm = lambda values: values
+        fake_feature_generator = types.ModuleType("services.feature_generator")
+        fake_feature_generator.add_technical_indicators = lambda df, spy_df=None: df
+
+        import_stubs = {
+            "pandas": types.ModuleType("pandas"),
+            "tqdm": fake_tqdm,
+            "yfinance": types.ModuleType("yfinance"),
+            "services.feature_generator": fake_feature_generator,
+        }
+
+        sys.modules.pop("scripts.fetch_and_prepare", None)
+        with patch.dict(sys.modules, import_stubs):
+            fetch_and_prepare = importlib.import_module("scripts.fetch_and_prepare")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             results_dir = Path(tmpdir)
