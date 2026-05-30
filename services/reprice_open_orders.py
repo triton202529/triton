@@ -22,6 +22,16 @@ from services.manage_open_orders import (
     load_open_orders_snapshot_or_broker,
 )
 from services.place_live_orders import DEFAULT_LOG_CSV, append_log_row, utc_now_iso
+from services.execution_intelligence import (
+    ExecutionIntelligenceConfig,
+    evaluate_quote_quality,
+    evaluate_liquidity,
+    recommend_execution_style,
+    recommend_partial_fill_action,
+    compute_slippage_diagnostics,
+    compute_execution_quality_score,
+    classify_execution_risk_flag,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
@@ -133,6 +143,9 @@ def _iter_eligible_stale_buys(
             continue
         old_lp = _safe_float(r.get("limit_price") or r.get("price"))
         sess = session_map.get(oid, str(r.get("session") or ""))
+        # Capture fill context for execution-intelligence partial-fill annotations.
+        filled_qty = _safe_float(r.get("filled_qty") or r.get("filled_quantity") or 0.0) or 0.0
+        filled_avg = _safe_float(r.get("filled_avg_price") or r.get("avg_fill_price"))
         out.append(
             {
                 "order_id": oid,
@@ -143,6 +156,8 @@ def _iter_eligible_stale_buys(
                 "status": st,
                 "age_minutes": round(age, 3),
                 "session": sess,
+                "filled_qty": float(filled_qty),
+                "filled_avg_price": filled_avg,
             }
         )
     return out
@@ -279,6 +294,59 @@ def run(
         except Exception as ex:
             ref_src = f"error:{ex}"
 
+        # ── Execution-intelligence annotations (read-only; never raise) ──
+        ei_quote: Dict[str, Any] = {}
+        ei_partial: Dict[str, Any] = {}
+        ei_slippage: Dict[str, Any] = {}
+        ei_quality: Dict[str, Any] = {}
+        ei_risk_flag = "UNKNOWN"
+        try:
+            _ei_cfg = ExecutionIntelligenceConfig()
+            _bid = _ask = _qts = None
+            if ref_broker is not None:
+                try:
+                    q = ref_broker.get_quote(sym) or {}
+                    _bid = _safe_float(q.get("bid"))
+                    _ask = _safe_float(q.get("ask"))
+                    _qts = q.get("timestamp") or q.get("ts") or q.get("t")
+                except Exception:
+                    pass
+            ei_quote = evaluate_quote_quality(_bid, _ask, _qts, _ei_cfg)
+            ei_partial = recommend_partial_fill_action(
+                filled_qty=e.get("filled_qty"),
+                total_qty=qty,
+                order_age_minutes=e.get("age_minutes"),
+                quote=ei_quote,
+                cfg=_ei_cfg,
+            )
+            ei_slippage = compute_slippage_diagnostics(
+                side=e.get("side"),
+                intended_price=old_lp,
+                submitted_limit_price=new_lp if new_lp is not None else old_lp,
+                fill_price=e.get("filled_avg_price"),
+                decision_mid_price=ei_quote.get("mid"),
+            )
+            # Quality score + risk flag are diagnostics built from the same
+            # quote / liquidity / style signals already used above.
+            _ei_liq = evaluate_liquidity(
+                close=ei_quote.get("mid") or old_lp,
+                avg_volume=None,
+                order_qty=qty,
+                cfg=_ei_cfg,
+            )
+            _ei_style = recommend_execution_style(
+                action="REPRICE", quote=ei_quote, liquidity=_ei_liq, cfg=_ei_cfg
+            )
+            ei_quality = compute_execution_quality_score(
+                quote=ei_quote, liquidity=_ei_liq, style=_ei_style
+            )
+            ei_risk_flag = classify_execution_risk_flag(
+                ei_quality.get("execution_quality_score"),
+                used_fallback=bool(ei_quality.get("execution_quality_used_fallback", False)),
+            )
+        except Exception:
+            pass
+
         base_row = {
             "timestamp": _utc_iso(),
             "order_id": oid,
@@ -293,6 +361,19 @@ def run(
             "replacement_session": replacement_session if replacement_session else "",
             "reference_price": ref if ref is not None else "",
             "reference_source": ref_src,
+            # ── Execution-intelligence (additive; safe defaults when missing) ──
+            "fill_pct": ei_partial.get("fill_pct"),
+            "partial_fill_action": ei_partial.get("partial_fill_action"),
+            "partial_fill_reason": ei_partial.get("partial_fill_reason"),
+            "quote_age_sec": ei_quote.get("quote_age_sec"),
+            "quote_is_stale": ei_quote.get("quote_is_stale"),
+            "spread_bps": ei_quote.get("spread_bps"),
+            "spread_bucket": ei_quote.get("spread_bucket"),
+            "decision_mid_price": ei_slippage.get("decision_mid_price"),
+            "expected_slippage_bps": ei_slippage.get("expected_slippage_bps"),
+            "realized_slippage_bps": ei_slippage.get("realized_slippage_bps"),
+            "execution_quality_score": ei_quality.get("execution_quality_score"),
+            "execution_risk_flag": ei_risk_flag,
         }
 
         if dry_run or not execute:
@@ -467,10 +548,28 @@ def _write_all(rows: List[Dict[str, Any]], summary: Dict[str, Any]) -> None:
         "replacement_session",
         "reference_price",
         "reference_source",
+        # ── Execution intelligence (additive; safe blanks when missing) ──
+        "fill_pct",
+        "partial_fill_action",
+        "partial_fill_reason",
+        "quote_age_sec",
+        "quote_is_stale",
+        "spread_bps",
+        "spread_bucket",
+        "decision_mid_price",
+        "expected_slippage_bps",
+        "realized_slippage_bps",
+        "execution_quality_score",
+        "execution_risk_flag",
     ]
     try:
         if rows:
-            pd.DataFrame(rows).to_csv(OUT_CSV, index=False)
+            df_rows = pd.DataFrame(rows)
+            # Preserve existing legacy columns first, then append any new ones in `cols`.
+            legacy_cols = [c for c in df_rows.columns if c not in cols]
+            ordered = [c for c in cols if c in df_rows.columns] + legacy_cols
+            df_rows = df_rows.reindex(columns=ordered)
+            df_rows.to_csv(OUT_CSV, index=False)
         else:
             pd.DataFrame(columns=cols).to_csv(OUT_CSV, index=False)
     except Exception:

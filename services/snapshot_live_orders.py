@@ -7,6 +7,9 @@
 #   data/results/recent_orders.csv        (recent/all orders)
 #   data/results/positions_snapshot.csv   (positions)
 #
+# execute_trades may invoke this module once before placement when CSV snapshots are stale
+# (see snapshot_hygiene_* in execute_trades config) — does not replace MasterExecutionGate checks.
+#
 # IMPORTANT:
 # - live_orders.csv is the append-only EVENT LOG used by:
 #     - place_live_orders.py  (action=submit)

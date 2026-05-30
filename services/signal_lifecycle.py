@@ -48,26 +48,52 @@ class LifecycleLogicConfig:
     """Thresholds for LONG-position stance quality (config/lifecycle_logic.json)."""
 
     enabled: bool = True
-    add_confidence_min: float = 0.62
-    add_delta_pct_min: float = 0.01
+    add_confidence_min: float = 0.60
+    add_delta_pct_min: float = 0.008
     hold_delta_floor: float = -0.002
-    hold_delta_ceiling: float = 0.008
-    trim_delta_pct_threshold: float = -0.002
-    exit_delta_pct_threshold: float = -0.006
-    exit_confidence_min: float = 0.58
+    hold_delta_ceiling: float = 0.006
+    trim_delta_pct_threshold: float = -0.001
+    exit_delta_pct_threshold: float = -0.004
+    exit_confidence_min: float = 0.55
+
+
+# ------------------------------------------------------------
+# State-aware decision engine thresholds
+# ------------------------------------------------------------
+
+
+@dataclass
+class DecisionLogicConfig:
+    """
+    Thresholds for the state-aware decision_action layer.
+    Independent from LifecycleLogicConfig so broker/execution behavior is unchanged.
+    """
+
+    entry_confidence_min: float = 0.68
+    add_confidence_min: float = 0.74
+    trim_confidence_floor: float = 0.55
+    exit_confidence_max: float = 0.45
+    confidence_delta_for_add: float = 0.04
+    confidence_drop_for_trim: float = -0.08
+    score_delta_for_add: float = 0.03
+    score_drop_for_trim: float = -0.05
+
+
+def default_decision_logic() -> DecisionLogicConfig:
+    return DecisionLogicConfig()
 
 
 def default_lifecycle_logic_dict() -> Dict[str, Any]:
     """Defaults match config/lifecycle_logic.json (single source for JSON + dict loaders)."""
     return {
         "enabled": True,
-        "add_confidence_min": 0.62,
-        "add_delta_pct_min": 0.01,
+        "add_confidence_min": 0.60,
+        "add_delta_pct_min": 0.008,
         "hold_delta_floor": -0.002,
-        "hold_delta_ceiling": 0.008,
-        "trim_delta_pct_threshold": -0.002,
-        "exit_delta_pct_threshold": -0.006,
-        "exit_confidence_min": 0.58,
+        "hold_delta_ceiling": 0.006,
+        "trim_delta_pct_threshold": -0.001,
+        "exit_delta_pct_threshold": -0.004,
+        "exit_confidence_min": 0.55,
     }
 
 
@@ -417,6 +443,122 @@ def decide_action(
 
 
 # ------------------------------------------------------------
+# State-aware decision engine (decision_action layer)
+# ------------------------------------------------------------
+
+
+_ALLOWED_DECISION_ACTIONS = {"BUY", "HOLD", "ADD", "TRIM", "EXIT", "WAIT"}
+
+
+def _safe_number(x: Any, default: float = float("nan")) -> float:
+    try:
+        if x is None:
+            return default
+        v = float(x)
+        if not math.isfinite(v):
+            return default
+        return v
+    except Exception:
+        return default
+
+
+def decide_state_aware_action(
+    *,
+    signal: str,
+    confidence: float,
+    score: float,
+    prior_signal: Optional[str],
+    prior_confidence: float,
+    prior_score: float,
+    held_state: str,
+    cfg: DecisionLogicConfig,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Decide one of {BUY, HOLD, ADD, TRIM, EXIT, WAIT} with a short reason, given:
+      - current signal/confidence/score
+      - prior signal/confidence/score (may be missing)
+      - held_state: "FLAT" or "LONG"
+
+    Returns (action, reason, diagnostics).
+    diagnostics contains: confidence_change, score_change, signal_changed,
+                          strengthening, weakening.
+
+    No shorting logic.
+    """
+    sig = (signal or "").strip().upper()
+    held = (held_state or "FLAT").strip().upper()
+    if held not in ("FLAT", "LONG"):
+        held = "FLAT"
+
+    c_now = _safe_number(confidence)
+    s_now = _safe_number(score)
+    c_prev = _safe_number(prior_confidence)
+    s_prev = _safe_number(prior_score)
+
+    conf_change = (c_now - c_prev) if (math.isfinite(c_now) and math.isfinite(c_prev)) else 0.0
+    score_change = (s_now - s_prev) if (math.isfinite(s_now) and math.isfinite(s_prev)) else 0.0
+
+    prior_sig_norm = (prior_signal or "").strip().upper() if prior_signal else ""
+    signal_changed = bool(prior_sig_norm) and prior_sig_norm != sig
+
+    # If score feed is unavailable for either side, fall back to confidence-only for strengthening/weakening.
+    score_available = math.isfinite(s_now) and math.isfinite(s_prev)
+    if score_available:
+        strengthening = (conf_change > cfg.confidence_delta_for_add) and (
+            score_change > cfg.score_delta_for_add
+        )
+        weakening = (conf_change < cfg.confidence_drop_for_trim) and (
+            score_change < cfg.score_drop_for_trim
+        )
+    else:
+        strengthening = conf_change > cfg.confidence_delta_for_add
+        weakening = conf_change < cfg.confidence_drop_for_trim
+
+    diagnostics = {
+        "confidence_change": float(conf_change),
+        "score_change": float(score_change),
+        "signal_changed": bool(signal_changed),
+        "strengthening": bool(strengthening),
+        "weakening": bool(weakening),
+    }
+
+    # --- Rule 3: FLAT + SELL => WAIT (no shorts) ---
+    if held == "FLAT":
+        if sig == "BUY" and math.isfinite(c_now) and c_now >= cfg.entry_confidence_min:
+            return "BUY", "new bullish entry", diagnostics
+        if sig == "BUY":
+            return "WAIT", "bullish signal below entry confidence", diagnostics
+        if sig == "SELL":
+            return "WAIT", "no shorts: flat and bearish", diagnostics
+        return "WAIT", "flat with non-actionable signal", diagnostics
+
+    # --- held_state == LONG ---
+    c_now_val = c_now if math.isfinite(c_now) else 0.0
+
+    # EXIT must be checked before anything that keeps position.
+    # Trigger on explicit SELL OR confidence collapsing below exit_confidence_max.
+    if sig == "SELL" or c_now_val <= cfg.exit_confidence_max:
+        return "EXIT", "bearish deterioration / broken setup", diagnostics
+
+    if sig == "BUY":
+        if math.isfinite(c_now) and c_now >= cfg.add_confidence_min and strengthening:
+            return "ADD", "bullish signal strengthened while already long", diagnostics
+        # Bullish but not materially stronger -> keep the position.
+        return "HOLD", "bullish signal intact while already long", diagnostics
+
+    if sig == "HOLD":
+        # Weakening while long but not broken -> TRIM; else HOLD.
+        if weakening and c_now_val < cfg.trim_confidence_floor:
+            return "TRIM", "signal weakening while long", diagnostics
+        if c_now_val < cfg.trim_confidence_floor and (conf_change < cfg.confidence_drop_for_trim):
+            return "TRIM", "conviction fell below trim floor", diagnostics
+        return "HOLD", "conviction softened but not enough to reduce", diagnostics
+
+    # Unknown/missing signal while long -> keep position, flag as HOLD.
+    return "HOLD", "unknown signal while long", diagnostics
+
+
+# ------------------------------------------------------------
 # Apply lifecycle over signals dataframe
 # ------------------------------------------------------------
 
@@ -427,9 +569,17 @@ def apply_lifecycle(
     state_path: Path,
     cfg: LifecycleConfig,
     lifecycle_logic: Optional[LifecycleLogicConfig] = None,
+    decision_state_path: Optional[Path] = None,
+    decision_logic: Optional[DecisionLogicConfig] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     logic = lifecycle_logic or load_lifecycle_logic_config()
     df = signals_df.copy()
+
+    # Separate state file for the state-aware decision layer so we don't conflict
+    # with other writers of signal_state.json (e.g. place_live_orders.py).
+    if decision_state_path is None:
+        decision_state_path = Path(state_path).parent / "decision_prior_state.json"
+    prior_state = load_state(decision_state_path)
 
     if "ticker" not in df.columns:
         raise ValueError("signals_df must include 'ticker'")
@@ -465,11 +615,27 @@ def apply_lifecycle(
 
     state = load_state(state_path)
 
+    # State-aware decision layer config (kept separate from lifecycle thresholds
+    # so broker/execution behavior is unchanged).
+    decision_cfg = decision_logic or default_decision_logic()
+
     lifecycle_actions = []
     lifecycle_decision_reasons: list[str] = []
     position_states = []
     last_actions = []
     state_changed_flags = []
+
+    # Parallel buffers for the new decision_action layer.
+    decision_actions: list[str] = []
+    decision_reasons: list[str] = []
+    prior_signals: list[str] = []
+    prior_confidences: list[float] = []
+    prior_scores: list[float] = []
+    confidence_changes: list[float] = []
+    score_changes: list[float] = []
+    signal_changed_flags: list[bool] = []
+    held_states: list[str] = []
+    state_transitions: list[str] = []
 
     for i in range(len(df)):
         row = df.iloc[i]
@@ -485,6 +651,7 @@ def apply_lifecycle(
         sig = row["_signal_norm"]
         delta_pct = _scalar_float(row.get("delta_pct"))
         confidence = _scalar_float(row.get("confidence"))
+        score_val = _scalar_float(row.get("score"))
 
         action, decision_reason = decide_action(
             cfg=cfg,
@@ -497,6 +664,42 @@ def apply_lifecycle(
             cooldown_until=cooldown_until,
             as_of_date=as_of,
         )
+
+        # --- State-aware decision_action layer (non-authoritative; parallel to lifecycle) ---
+        pstate = prior_state.get(ticker, {}) if isinstance(prior_state, dict) else {}
+        if not isinstance(pstate, dict):
+            pstate = {}
+        prior_sig = str(pstate.get("prior_signal") or "") or ""
+        prior_conf = _scalar_float(pstate.get("prior_confidence"))
+        prior_sc = _scalar_float(pstate.get("prior_score"))
+        held_now = "LONG" if str(pos_state).upper() == "LONG" else "FLAT"
+
+        decision_action, decision_reason_new, diag = decide_state_aware_action(
+            signal=sig,
+            confidence=confidence,
+            score=score_val,
+            prior_signal=prior_sig,
+            prior_confidence=prior_conf,
+            prior_score=prior_sc,
+            held_state=held_now,
+            cfg=decision_cfg,
+        )
+
+        # Derive state_transition label from held_state + decision_action.
+        if held_now == "FLAT":
+            if decision_action == "BUY":
+                state_transition = "FLAT_TO_LONG"
+            else:
+                state_transition = "FLAT_WAIT"
+        else:  # LONG
+            if decision_action == "ADD":
+                state_transition = "LONG_ADD"
+            elif decision_action == "TRIM":
+                state_transition = "LONG_TRIM"
+            elif decision_action == "EXIT":
+                state_transition = "LONG_EXIT"
+            else:
+                state_transition = "LONG_HOLD"
 
         changed = False
 
@@ -532,12 +735,23 @@ def apply_lifecycle(
             if pos_state == "LONG":
                 last_action = "HOLD"
 
-        # persist
+        # persist lifecycle state (unchanged, shared with other writers)
         tstate["position_state"] = pos_state
         tstate["last_action"] = last_action
         tstate["last_change_date"] = str(last_change_date) if last_change_date else None
         tstate["cooldown_until"] = str(cooldown_until) if cooldown_until else None
         _set_ticker_state(state, ticker, tstate)
+
+        # Snapshot CURRENT row into the decision-layer state (separate file).
+        prior_state[ticker] = {
+            "prior_signal": sig,
+            "prior_confidence": (
+                float(confidence) if math.isfinite(_scalar_float(confidence)) else None
+            ),
+            "prior_score": (float(score_val) if math.isfinite(_scalar_float(score_val)) else None),
+            "held_state": held_now,
+            "last_updated_asof": str(as_of) if as_of else None,
+        }
 
         lifecycle_actions.append(action)
         lifecycle_decision_reasons.append(decision_reason)
@@ -545,12 +759,40 @@ def apply_lifecycle(
         last_actions.append(last_action)
         state_changed_flags.append(bool(changed))
 
+        decision_actions.append(decision_action)
+        decision_reasons.append(decision_reason_new)
+        prior_signals.append(prior_sig or "")
+        prior_confidences.append(float(prior_conf) if math.isfinite(prior_conf) else float("nan"))
+        prior_scores.append(float(prior_sc) if math.isfinite(prior_sc) else float("nan"))
+        confidence_changes.append(float(diag["confidence_change"]))
+        score_changes.append(float(diag["score_change"]))
+        signal_changed_flags.append(bool(diag["signal_changed"]))
+        held_states.append(held_now)
+        state_transitions.append(state_transition)
+
     df["lifecycle_action"] = lifecycle_actions
     df["lifecycle_decision_reason"] = lifecycle_decision_reasons
     df["stance"] = df["lifecycle_action"]  # backwards compat
     df["position_state"] = position_states
     df["last_action"] = last_actions
     df["state_changed"] = state_changed_flags
+
+    # --- New state-aware decision columns (safe, downstream may ignore) ---
+    df["decision_action"] = decision_actions
+    df["decision_reason"] = decision_reasons
+    df["prior_signal"] = prior_signals
+    df["prior_confidence"] = prior_confidences
+    df["prior_score"] = prior_scores
+    df["confidence_change"] = confidence_changes
+    df["score_change"] = score_changes
+    df["signal_changed"] = signal_changed_flags
+    df["held_state"] = held_states
+    df["state_transition"] = state_transitions
+
+    # Fill NaNs in new numeric columns with 0.0 (safe defaults for first-seen tickers).
+    for _col in ("prior_confidence", "prior_score", "confidence_change", "score_change"):
+        if _col in df.columns:
+            df[_col] = pd.to_numeric(df[_col], errors="coerce").fillna(0.0)
 
     df = df.drop(columns=["_signal_norm", "_asof"], errors="ignore")
 
@@ -580,9 +822,20 @@ def apply_lifecycle(
         "stance",
         "lifecycle_action",
         "lifecycle_decision_reason",
+        "decision_action",
+        "decision_reason",
+        "state_transition",
+        "held_state",
         "position_state",
         "last_action",
         "confidence",
+        "score",
+        "prior_signal",
+        "prior_confidence",
+        "prior_score",
+        "confidence_change",
+        "score_change",
+        "signal_changed",
         "delta_pct",
         "edge_pct",
         "as_of_date",
@@ -591,5 +844,11 @@ def apply_lifecycle(
     front = [c for c in preserve_order if c in df.columns]
     rest = [c for c in df.columns if c not in front]
     df = df[front + rest]
+
+    # Persist decision-layer prior state (isolated file; no impact on signal_state.json).
+    try:
+        save_state(decision_state_path, prior_state)
+    except Exception:
+        pass
 
     return df, state

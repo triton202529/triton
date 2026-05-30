@@ -45,17 +45,35 @@ PATCH (2026-04-01):
 
 PATCH (2026-04-01 lifecycle):
 - ✅ After snapshot_live_orders (when changes > 0), best-effort run services.apply_signal_lifecycle
+
+PATCH (2026-05-26 ghost reconciliation):
+- ✅ Detect & resolve "ghost" pending orders whose latest local status is
+    pending_new / accepted / new but which are NOT in broker open orders AND
+    NOT in the recent-orders snapshot. When such an order has been quiet for
+    longer than --stale-pending-hours (default 24h = 1 trading day) it is
+    marked as `canceled_stale` in live_orders_log.csv so:
+      * subsequent polls ignore it (canceled_stale is TERMINAL),
+      * downstream lifecycle (apply_signal_lifecycle / build_effective_lifecycle)
+        no longer treats the symbol as having an in-flight order, and
+      * POSITION_NOT_FOUND noise from manage_positions stops being triggered
+        by stale local execution state.
+    Safety guarantees:
+      * Never touches filled / partially_filled orders (now or in history).
+      * Never calls the broker to cancel — purely local state reconciliation.
+      * Skipped automatically if the broker open-orders fetch was degraded
+        this run (we will not classify ghosts off an unreliable snapshot).
 """
 
 import argparse
 import csv
+import json
 import os
 import sys
 import shutil
 import time
 import subprocess
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Path bootstrap
@@ -65,10 +83,99 @@ if ROOT not in sys.path:
 
 import pandas as pd
 from services.broker_alpaca import AlpacaBroker, AlpacaError
+from services.broker_call_resilience import (
+    call_with_transient_retry,
+    is_transient_broker_error,
+    transient_failure_kind,
+)
 from services.notify import notify  # noqa: F401  (kept for compatibility)
+
+
+# -----------------------------------------------------------
+# Lifecycle-sync helpers
+# Ensures signal_lifecycle_effective.csv is always refreshed
+# immediately after signal_lifecycle.csv, eliminating repeated
+# STALE_EFFECTIVE / LIFECYCLE_GATE_BLOCK events.
+# -----------------------------------------------------------
+def _run_module_checked(
+    module_name: str,
+    label: str,
+    extra_args: Optional[List[str]] = None,
+    *,
+    allow_fail: bool = False,
+) -> bool:
+    """Run `python -m <module_name>`; return False on failure if allow_fail else raise."""
+    cmd = [sys.executable, "-m", module_name] + list(extra_args or [])
+    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        if allow_fail:
+            print(
+                f"[POLL_RECON] {label} failed rc={result.returncode} (degraded, local state preserved)",
+                flush=True,
+            )
+            if result.stdout:
+                print(result.stdout, flush=True)
+            if result.stderr:
+                print(result.stderr, flush=True)
+            return False
+        raise RuntimeError(
+            f"{label} failed rc={result.returncode}\n" f"{result.stdout}\n{result.stderr}"
+        )
+    return True
+
+
+def _refresh_effective_lifecycle(*, allow_fail: bool = False) -> bool:
+    """Rebuild `signal_lifecycle_effective.csv` right after `signal_lifecycle.csv`."""
+    print("[RECON] refreshing effective lifecycle...")
+    ok = _run_module_checked(
+        "services.build_effective_lifecycle", "build_effective_lifecycle", allow_fail=allow_fail
+    )
+    if ok:
+        print("[RECON] effective lifecycle refreshed")
+    return bool(ok)
+
 
 RESULTS_DIR = os.path.join("data", "results")
 LIVE_ORDERS_LOG = os.path.join(RESULTS_DIR, "live_orders_log.csv")
+POLL_FAILED_CACHE = os.path.join(RESULTS_DIR, "poll_failed_order_cache.json")
+RECENT_ORDERS_SNAPSHOT = os.path.join(RESULTS_DIR, "recent_orders.csv")
+
+STALE_HOURS_DEFAULT = 24.0
+SUPPRESS_AFTER_FAILS_DEFAULT = 5
+MAX_DETAIL_FAILS_PER_RUN_DEFAULT = 5
+CACHE_RETENTION_DAYS = 30
+
+# Default ghost-cleanup window: an order quiet for ≥ this many hours
+# AND missing from both the broker open list and the recent-orders snapshot
+# is treated as a local-state ghost (broker has no record of it).
+STALE_PENDING_HOURS_DEFAULT = 24.0
+
+# Statuses considered "in-flight" locally. If the broker can't see the order
+# at all and the row hasn't moved in STALE_PENDING_HOURS_DEFAULT, the row is
+# a ghost left behind from a prior degraded broker round-trip.
+STALE_PENDING_STATUSES: Set[str] = {"pending_new", "accepted", "new"}
+
+# Statuses we must NEVER reconcile away — touching these would erase real fills.
+NEVER_RECONCILE_STATUSES: Set[str] = {"filled", "partially_filled"}
+
+# Broker statuses in recent_orders.csv that mean "the broker is still
+# working this order" — reconciling pending_new → canceled_stale here
+# would lie about live broker state.
+BROKER_ALIVE_RECENT_STATUSES: Set[str] = {
+    "new",
+    "accepted",
+    "pending_new",
+    "pending_cancel",
+    "pending_replace",
+    "held",
+    "open",
+    "submitted",
+}
+
+# Broker statuses in recent_orders.csv that prove a fill exists. Never
+# overwrite these with canceled_stale; they require a real poll/repair.
+BROKER_FILL_RECENT_STATUSES: Set[str] = {"filled", "partially_filled"}
 
 EXPECTED_COLS = [
     "timestamp",
@@ -90,13 +197,42 @@ EXPECTED_COLS = [
 
 TERMINAL = {
     "filled",
+    "filled_reconciled",  # locally imported broker fill (see _reconcile_ghost_pending_orders)
     "canceled",
+    "canceled_stale",  # locally-reconciled ghost (see _reconcile_ghost_pending_orders)
     "expired",
     "rejected",
     "stopped",
     "suspended",
     "calculated",
     "replaced",
+    "done_for_day",
+}
+
+# ---- Session-summary status buckets ---------------------------------
+# These govern ONLY the session-summary / reporting layer; broker calls,
+# polling, and execution logic remain unchanged.
+#
+# An order is "active" in a session summary iff its LATEST row (by
+# parsed timestamp, not csv position) has a status in this set. Anything
+# else is filtered out so reconciled ghosts (canceled_stale) and other
+# terminal noise can never resurface as a fake "GLD pending_new" row.
+ACTIVE_SUMMARY_STATUSES: Set[str] = {
+    "pending_new",
+    "accepted",
+    "new",
+    "partially_filled",
+    "filled",
+}
+
+# Latest status in this set => the order is done; drop it from active view.
+TERMINAL_SUMMARY_STATUSES: Set[str] = {
+    "canceled",
+    "canceled_stale",
+    "filled_reconciled",  # broker-confirmed fill imported into local log
+    "expired",
+    "rejected",
+    "failed",
     "done_for_day",
 }
 
@@ -524,6 +660,119 @@ def _parse_ts(ts: str) -> Optional[datetime]:
         return None
 
 
+# -----------------------------------------------------------
+# Failed-order cache + classification
+#
+# Persists across runs at data/results/poll_failed_order_cache.json
+# Used to suppress hammering broker API for old/stale unresolved IDs.
+# -----------------------------------------------------------
+def _load_failed_cache() -> Dict[str, Dict[str, Any]]:
+    try:
+        if not os.path.exists(POLL_FAILED_CACHE):
+            return {}
+        with open(POLL_FAILED_CACHE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+        out: Dict[str, Dict[str, Any]] = {}
+        for k, v in data.items():
+            if isinstance(v, dict):
+                out[str(k)] = v
+        return out
+    except Exception:
+        return {}
+
+
+def _prune_failed_cache(cache: Dict[str, Dict[str, Any]], retention_days: int) -> None:
+    if not cache or retention_days <= 0:
+        return
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    drop: List[str] = []
+    for oid, e in cache.items():
+        last = _parse_ts(str(e.get("last_failed_at") or ""))
+        if last is None or last < cutoff:
+            drop.append(oid)
+    for oid in drop:
+        cache.pop(oid, None)
+
+
+def _save_failed_cache(cache: Dict[str, Dict[str, Any]]) -> None:
+    try:
+        os.makedirs(RESULTS_DIR, exist_ok=True)
+        tmp = POLL_FAILED_CACHE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, sort_keys=True)
+        os.replace(tmp, POLL_FAILED_CACHE)
+    except Exception:
+        pass
+
+
+def _classify_failure(exc: BaseException) -> str:
+    """
+    Categorize a get_order failure for compact summary logging.
+
+    Returns one of:
+      - not_found       (broker has no record / 404)
+      - network         (timeouts, DNS, resets, connection issues)
+      - broker_error    (5xx or other AlpacaError HTTP errors)
+      - auth            (401/403; preserved as a real safety signal)
+      - unknown         (anything else)
+    """
+    if exc is None:
+        return "unknown"
+    if is_transient_broker_error(exc):
+        return "network"
+    s = str(exc) or ""
+    sl = s.lower()
+    if (
+        " 401" in s
+        or " 403" in s
+        or "unauthorized" in sl
+        or "forbidden" in sl
+        or "authentication" in sl
+    ):
+        return "auth"
+    if " 404" in s or "not found" in sl or "not_found" in sl:
+        return "not_found"
+    if any(code in s for code in (" 500", " 502", " 503", " 504")):
+        return "broker_error"
+    if type(exc).__name__ == "AlpacaError":
+        return "broker_error"
+    return "unknown"
+
+
+def _record_failure(
+    cache: Dict[str, Dict[str, Any]], oid: str, reason: str, now_iso_str: str
+) -> Dict[str, Any]:
+    e = cache.get(oid) or {}
+    if "first_failed_at" not in e or not str(e.get("first_failed_at") or "").strip():
+        e["first_failed_at"] = now_iso_str
+    e["last_failed_at"] = now_iso_str
+    e["last_failure_reason"] = reason
+    e["failure_count"] = int(e.get("failure_count", 0)) + 1
+    cache[oid] = e
+    return e
+
+
+def _clear_failure(cache: Dict[str, Dict[str, Any]], oid: str) -> None:
+    cache.pop(oid, None)
+
+
+def _last_ts_for_oid_map(df_hist: pd.DataFrame) -> Dict[str, datetime]:
+    """Map of order_id -> latest log timestamp (UTC datetime)."""
+    if df_hist is None or df_hist.empty:
+        return {}
+    df = df_hist[df_hist["order_id"].astype(str).str.strip() != ""].copy()
+    if df.empty:
+        return {}
+    df["__ts_dt"] = df["timestamp"].astype(str).apply(_parse_ts)
+    df = df[df["__ts_dt"].notna()]
+    if df.empty:
+        return {}
+    last = df.sort_values("__ts_dt").groupby("order_id", as_index=False).last()
+    return {str(r["order_id"]).strip(): r["__ts_dt"] for _, r in last.iterrows()}
+
+
 def _latest_submit_burst_order_ids(
     df_all: pd.DataFrame, session: str, burst_window_sec: int
 ) -> Set[str]:
@@ -556,17 +805,68 @@ def _latest_submit_burst_order_ids(
     return set([x for x in oids.tolist() if x and _is_uuid_like(x)])
 
 
+def _latest_row_per_order_id(df_all: pd.DataFrame, order_ids: Set[str]) -> pd.DataFrame:
+    """
+    Returns one row per order_id — the row with the MAX parsed timestamp.
+
+    Using idxmax on a parsed datetime guarantees the true latest row wins,
+    independent of CSV write order or pandas groupby.last() per-column
+    skipna behaviour. This is what makes canceled_stale supersede an older
+    pending_new row in the same order_id's history.
+    """
+    if not order_ids or df_all is None or df_all.empty:
+        return pd.DataFrame(
+            columns=["order_id", "status", "filled_qty", "filled_avg_price", "symbol", "qty"]
+        )
+
+    sub = df_all[df_all["order_id"].astype(str).str.strip().isin(order_ids)].copy()
+    if sub.empty:
+        return pd.DataFrame(
+            columns=["order_id", "status", "filled_qty", "filled_avg_price", "symbol", "qty"]
+        )
+
+    sub["__ts_dt"] = sub["timestamp"].astype(str).apply(_parse_ts)
+    sub = sub[sub["__ts_dt"].notna()].copy()
+    if sub.empty:
+        return pd.DataFrame(
+            columns=["order_id", "status", "filled_qty", "filled_avg_price", "symbol", "qty"]
+        )
+
+    # idxmax across the parsed datetime picks the single latest row per oid.
+    idx = sub.groupby("order_id")["__ts_dt"].idxmax()
+    cols = ["order_id", "status", "filled_qty", "filled_avg_price", "symbol", "qty"]
+    return sub.loc[idx, cols].reset_index(drop=True)
+
+
 def _summarize_order_ids(df_all: pd.DataFrame, order_ids: Set[str], label: str) -> bool:
+    """
+    Render the per-session active-orders table.
+
+    Filtering rules (summary/reporting layer only — broker untouched):
+      * Use the LATEST row per order_id (by parsed timestamp).
+      * Keep rows whose latest status is in ACTIVE_SUMMARY_STATUSES.
+      * Drop rows whose latest status is in TERMINAL_SUMMARY_STATUSES
+        (counted as `terminal_filtered`) — this is what hides reconciled
+        ghosts like GLD canceled_stale from the LATEST_BURST view.
+      * Drop everything else as `stale_filtered` (unknown / submitted /
+        empty / etc.) so we never surface stale historical state as active.
+    """
     if not order_ids:
         print(f"{label}: no usable broker order_ids found.")
+        print(
+            "[SESSION_SUMMARY_FILTER] active_rows=0 terminal_filtered=0 stale_filtered=0",
+            flush=True,
+        )
         return False
 
-    last = (
-        df_all[df_all["order_id"].astype(str).str.strip().isin(order_ids)]
-        .sort_values("timestamp")
-        .groupby("order_id", as_index=False)
-        .last()[["order_id", "status", "filled_qty", "filled_avg_price", "symbol", "qty"]]
-    )
+    last = _latest_row_per_order_id(df_all, order_ids)
+    if last.empty:
+        print(f"{label}: no rows match given order_ids.")
+        print(
+            "[SESSION_SUMMARY_FILTER] active_rows=0 terminal_filtered=0 stale_filtered=0",
+            flush=True,
+        )
+        return True
 
     last["qty"] = pd.to_numeric(last["qty"], errors="coerce").fillna(0).astype(int)
     last["filled_qty"] = pd.to_numeric(last["filled_qty"], errors="coerce").fillna(0).astype(int)
@@ -579,12 +879,35 @@ def _summarize_order_ids(df_all: pd.DataFrame, order_ids: Set[str], label: str) 
         .replace({"": "unknown", "nan": "unknown"})
     )
 
-    total_qty = int(last["qty"].sum())
-    total_filled = int(last["filled_qty"].sum())
+    # ── Classify each order_id by its LATEST status ──────────────────
+    is_active = last["status"].isin(ACTIVE_SUMMARY_STATUSES)
+    is_terminal = last["status"].isin(TERMINAL_SUMMARY_STATUSES)
+    is_stale = (~is_active) & (~is_terminal)
+
+    active_rows = int(is_active.sum())
+    terminal_filtered = int(is_terminal.sum())
+    stale_filtered = int(is_stale.sum())
+
+    print(
+        f"[SESSION_SUMMARY_FILTER] active_rows={active_rows} "
+        f"terminal_filtered={terminal_filtered} stale_filtered={stale_filtered}",
+        flush=True,
+    )
+
+    last_active = last[is_active].copy()
+    if last_active.empty:
+        print(
+            f"{label}: no active orders (all {terminal_filtered + stale_filtered} "
+            f"order_ids are terminal/stale)."
+        )
+        return True
+
+    total_qty = int(last_active["qty"].sum())
+    total_filled = int(last_active["filled_qty"].sum())
     fill_pct = (100.0 * total_filled / total_qty) if total_qty else 0.0
     print(f"{label}: total_qty={total_qty} total_filled={total_filled} fill_pct={fill_pct:.2f}%")
 
-    br = last.groupby("symbol", as_index=False).agg(
+    br = last_active.groupby("symbol", as_index=False).agg(
         qty=("qty", "sum"),
         filled=("filled_qty", "sum"),
         status=("status", "last"),
@@ -697,7 +1020,370 @@ def _live_summary(
     return True
 
 
-def main() -> None:
+# -----------------------------------------------------------
+# Ghost-order reconciliation
+#
+# An order is a "ghost" when:
+#   - its latest row in live_orders_log.csv shows pending_new / accepted / new
+#   - it is NOT in the broker's current open-orders list
+#   - it is NOT in the recent-orders snapshot from snapshot_live_orders
+#   - the row has been quiet for longer than the stale threshold
+#
+# These rows survive degraded round-trips (e.g. a submit got through but
+# the broker confirmation never landed; or a manual cancel happened at the
+# broker side). They cause manage_positions to chase POSITION_NOT_FOUND
+# and pollute lifecycle gating. We resolve them locally by appending a
+# terminal `canceled_stale` row — we never call the broker to cancel.
+# -----------------------------------------------------------
+def _load_recent_orders_broker_map() -> Optional[Dict[str, Dict[str, Any]]]:
+    """
+    Returns {order_id: {"status", "filled_qty", "filled_avg_price"}} from
+    recent_orders.csv (i.e. broker truth as captured by snapshot_live_orders),
+    or None when the snapshot is missing / malformed so the caller can fall
+    back to the broker `not_found` signal. An empty {} is a valid result —
+    the snapshot is present and broker reported zero recent orders.
+
+    The fill data is carried so a pending_new row whose oid appears in
+    recent_orders.csv with broker_status=filled / partially_filled can be
+    reconciled into a `filled_reconciled` row containing the broker's real
+    filled_qty / filled_avg_price (see _reconcile_ghost_pending_orders).
+    """
+    if not os.path.exists(RECENT_ORDERS_SNAPSHOT):
+        return None
+    try:
+        df = pd.read_csv(RECENT_ORDERS_SNAPSHOT, keep_default_na=False)
+    except Exception:
+        return None
+
+    if df.empty:
+        return {}
+
+    # snapshot_live_orders writes 'id' or 'order_id' depending on the
+    # broker payload shape; accept both.
+    id_col = next((c for c in ("id", "order_id") if c in df.columns), None)
+    if id_col is None or "status" not in df.columns:
+        # Malformed snapshot: refuse to classify based on it.
+        return None
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for _, r in df.iterrows():
+        oid = str(r.get(id_col, "") or "").strip()
+        if not oid or not _is_uuid_like(oid):
+            continue
+        out[oid] = {
+            "status": str(r.get("status", "") or "").strip().lower(),
+            "filled_qty": r.get("filled_qty", "") if "filled_qty" in df.columns else "",
+            "filled_avg_price": (
+                r.get("filled_avg_price", "") if "filled_avg_price" in df.columns else ""
+            ),
+        }
+    return out
+
+
+def _reconcile_ghost_pending_orders(
+    *,
+    df_hist: pd.DataFrame,
+    open_ids: Set[str],
+    recent_broker_map: Optional[Dict[str, Dict[str, Any]]],
+    failed_cache: Dict[str, Dict[str, Any]],
+    cli_session: str,
+    session_map: Dict[str, str],
+    latest_session: str,
+    stale_hours: float,
+    open_orders_fetched_ok: bool,
+) -> int:
+    """
+    Append terminal-state reconciliation rows for ghost / contradicted
+    pending orders. Returns total reconciliation rows written
+    (canceled_stale + filled_reconciled).
+
+    Two reconciliation flavors, both append-only (history is never edited):
+
+      A. `canceled_stale` — broker has no live record of the order
+         (either missing from recent_orders snapshot, or recent_orders shows
+         a broker-terminal status like canceled/expired/rejected) AND the
+         local row is older than --stale-pending-hours.
+
+      B. `filled_reconciled` — local row says pending_new / accepted / new
+         but recent_orders.csv proves the broker filled (or partially filled)
+         this order_id. Local state is updated to reflect broker truth using
+         the broker's filled_qty / filled_avg_price so downstream lifecycle
+         and outcomes stop treating the symbol as in-flight.
+
+    Logging:
+      [STALE_ORDER_CLEANUP]      one line per canceled_stale reconciliation
+      [FILLED_STATE_RECONCILE]   one line per filled_reconciled reconciliation
+      [STALE_ORDER_CLEANUP_SKIP] one line per candidate that was skipped, with
+                                 the concrete reason — e.g. broker_alive_in_recent,
+                                 too_young, filled_in_history, etc.
+      [STALE_ORDER_CLEANUP_SUMMARY] single end-of-pass summary with both counts.
+
+    Safety:
+      - Returns 0 if the broker open-orders fetch was degraded this run.
+      - Skips any order_id whose ANY historical row was filled/partially_filled.
+      - Never modifies broker state; never rewrites existing rows.
+    """
+    if not open_orders_fetched_ok:
+        return 0
+    if df_hist is None or df_hist.empty:
+        return 0
+    if stale_hours <= 0:
+        return 0
+
+    df = df_hist[df_hist["order_id"].astype(str).str.strip() != ""].copy()
+    if df.empty:
+        return 0
+    df["__ts_dt"] = df["timestamp"].astype(str).apply(_parse_ts)
+    df = df[df["__ts_dt"].notna()]
+    if df.empty:
+        return 0
+    df_sorted = df.sort_values("__ts_dt")
+    latest_per_oid = df_sorted.groupby("order_id", as_index=False).last()
+
+    # Order_ids that EVER reached a fill state — sacred, never reconcile
+    # even if their latest log row somehow regressed to a pending status.
+    ever_filled_ids: Set[str] = set(
+        df_sorted[df_sorted["status"].isin(NEVER_RECONCILE_STATUSES)]["order_id"]
+        .astype(str)
+        .str.strip()
+        .tolist()
+    )
+
+    now_dt = datetime.now(timezone.utc)
+    ghosts_written = 0  # canceled_stale rows appended
+    filled_reconciled_written = 0  # filled_reconciled rows appended
+
+    def _emit_skip(symbol: str, oid: str, status: str, reason: str) -> None:
+        print(
+            f"[STALE_ORDER_CLEANUP_SKIP] symbol={symbol or '?'} "
+            f"order_id={oid} "
+            f"status={status} "
+            f"reason={reason}",
+            flush=True,
+        )
+
+    def _coerce_int(val: Any) -> int:
+        try:
+            return int(float(val))
+        except Exception:
+            return 0
+
+    for _, row in latest_per_oid.iterrows():
+        oid = str(row.get("order_id") or "").strip()
+        if not oid:
+            continue
+        status = str(row.get("status") or "").strip().lower()
+        # Only orders whose LATEST status is pending_new / accepted / new
+        # are candidates. Everything else is silently skipped (not "skipped"
+        # in the diagnostic sense — they were never candidates).
+        if status not in STALE_PENDING_STATUSES:
+            continue
+
+        symbol = str(row.get("symbol") or "").strip().upper()
+
+        if not _is_uuid_like(oid):
+            _emit_skip(symbol, oid, status, "non_uuid_order_id")
+            continue
+        if oid in ever_filled_ids:
+            _emit_skip(symbol, oid, status, "filled_in_history")
+            continue
+        if oid in open_ids:
+            _emit_skip(symbol, oid, status, "currently_open_at_broker")
+            continue
+
+        # Defensive: never reconcile a pending row that already carries a fill.
+        try:
+            filled_qty = int(float(row.get("filled_qty", 0) or 0))
+        except Exception:
+            filled_qty = 0
+        if filled_qty > 0:
+            _emit_skip(symbol, oid, status, "filled_qty_nonzero")
+            continue
+
+        last_ts = row.get("__ts_dt")
+        try:
+            age_h = (now_dt - last_ts).total_seconds() / 3600.0
+        except Exception:
+            _emit_skip(symbol, oid, status, "unparseable_timestamp")
+            continue
+        if age_h < stale_hours:
+            _emit_skip(
+                symbol,
+                oid,
+                status,
+                f"too_young age_hours={age_h:.2f} threshold={stale_hours:.2f}",
+            )
+            continue
+
+        # ── Broker cross-check via recent_orders.csv ──────────────────
+        # recent_orders.csv (status="all") legitimately contains every
+        # broker-side state. Classify the broker's view of this oid:
+        #   - alive   → skip (broker is still working it)
+        #   - filled  → BROKER-CONFIRMED FILL: reconcile local pending_new
+        #                to filled_reconciled, importing broker fill data
+        #   - terminal-but-not-filled (canceled/expired/rejected/etc.)
+        #     or missing-from-snapshot → reconcile to canceled_stale
+        broker_status: Optional[str] = None
+        broker_filled_qty: Optional[int] = None
+        broker_filled_avg: str = ""
+        broker_row = recent_broker_map.get(oid) if recent_broker_map is not None else None
+        if broker_row is not None:
+            broker_status = str(broker_row.get("status") or "").strip().lower() or None
+            broker_filled_qty = _coerce_int(broker_row.get("filled_qty"))
+            broker_filled_avg = str(broker_row.get("filled_avg_price") or "").strip()
+
+        if recent_broker_map is None:
+            # No snapshot to cross-check; require an explicit "not_found"
+            # from a get_order attempt before we touch local state.
+            cache_e = failed_cache.get(oid) or {}
+            broker_says_not_found = (
+                str(cache_e.get("last_failure_reason") or "").strip().lower() == "not_found"
+            )
+            if not broker_says_not_found:
+                _emit_skip(
+                    symbol,
+                    oid,
+                    status,
+                    "no_recent_snapshot_and_no_not_found",
+                )
+                continue
+            # Fall through to canceled_stale path below.
+        else:
+            if broker_status in BROKER_ALIVE_RECENT_STATUSES:
+                _emit_skip(
+                    symbol,
+                    oid,
+                    status,
+                    f"broker_alive_in_recent broker_status={broker_status}",
+                )
+                continue
+
+            if broker_status in BROKER_FILL_RECENT_STATUSES:
+                # ── Filled-state reconciliation ─────────────────────
+                # Broker truth says this order filled (or partially); local
+                # row was stuck at pending_new. Append a terminal local row
+                # that mirrors the broker's fill so lifecycle/outcomes stop
+                # treating the symbol as in-flight. We DO NOT call the
+                # broker, DO NOT rewrite the older pending_new row, and DO
+                # NOT touch any other history.
+                side_f = str(row.get("side") or "").strip().lower()
+                try:
+                    qty_f = int(float(row.get("qty", 0) or 0))
+                except Exception:
+                    qty_f = 0
+                otype_f = str(row.get("type") or "").strip().lower()
+                limit_price_f = row.get("limit_price", "")
+                client_order_id_f = row.get("client_order_id", "") or ""
+                tp_limit_f = row.get("tp_limit", "") or ""
+                sl_stop_f = row.get("sl_stop", "") or ""
+
+                # Prefer broker's filled_qty; fall back to the row's qty so the
+                # reconciliation row is never misleadingly zero.
+                fq_final = int(broker_filled_qty or 0)
+                if fq_final <= 0 and broker_status == "filled":
+                    fq_final = qty_f
+                fap_final = broker_filled_avg or (row.get("filled_avg_price", "") or "")
+
+                sess_f = _choose_session(cli_session, oid, session_map, latest_session)
+
+                _append_log_row_dict(
+                    {
+                        "timestamp": _now_iso(),
+                        "session": sess_f,
+                        "action": "poll",
+                        "symbol": symbol,
+                        "side": side_f,
+                        "qty": qty_f,
+                        "type": otype_f,
+                        "limit_price": limit_price_f,
+                        "order_id": oid,
+                        "status": "filled_reconciled",
+                        "filled_qty": fq_final,
+                        "filled_avg_price": fap_final,
+                        "client_order_id": client_order_id_f,
+                        "tp_limit": tp_limit_f,
+                        "sl_stop": sl_stop_f,
+                    }
+                )
+                filled_reconciled_written += 1
+                print(
+                    f"[FILLED_STATE_RECONCILE] symbol={symbol or '?'} "
+                    f"order_id={oid} "
+                    f"old_status={status} "
+                    f"broker_status={broker_status} "
+                    f"action=mark_filled_reconciled "
+                    f"broker_filled_qty={fq_final} "
+                    f"broker_filled_avg_price={fap_final or 'NA'} "
+                    f"age_hours={age_h:.2f} "
+                    f"reconciled_from_pending=True "
+                    f"broker_confirmed_fill=True",
+                    flush=True,
+                )
+                continue
+
+            # broker_status is None (oid missing from snapshot) or a
+            # broker-terminal status (canceled / expired / rejected /
+            # done_for_day / replaced / suspended / stopped / calculated)
+            # → safe to mark canceled_stale below.
+
+        # ── Reconcile: append canceled_stale terminal row ─────────────
+        side = str(row.get("side") or "").strip().lower()
+        try:
+            qty = int(float(row.get("qty", 0) or 0))
+        except Exception:
+            qty = 0
+        otype = str(row.get("type") or "").strip().lower()
+        limit_price = row.get("limit_price", "")
+        filled_avg_price = row.get("filled_avg_price", "") or ""
+        client_order_id = row.get("client_order_id", "") or ""
+        tp_limit = row.get("tp_limit", "") or ""
+        sl_stop = row.get("sl_stop", "") or ""
+
+        sess = _choose_session(cli_session, oid, session_map, latest_session)
+
+        _append_log_row_dict(
+            {
+                "timestamp": _now_iso(),
+                "session": sess,
+                "action": "poll",
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "type": otype,
+                "limit_price": limit_price,
+                "order_id": oid,
+                "status": "canceled_stale",
+                "filled_qty": filled_qty,
+                "filled_avg_price": filled_avg_price,
+                "client_order_id": client_order_id,
+                "tp_limit": tp_limit,
+                "sl_stop": sl_stop,
+            }
+        )
+        ghosts_written += 1
+        print(
+            f"[STALE_ORDER_CLEANUP] symbol={symbol or '?'} "
+            f"old_status={status} "
+            f"action=mark_stale_cancelled "
+            f"age_hours={age_h:.2f} "
+            f"order_id={oid} "
+            f"broker_recent_status={broker_status or 'not_in_snapshot'} "
+            f"stale_missing_at_broker=True",
+            flush=True,
+        )
+
+    total_written = ghosts_written + filled_reconciled_written
+    if total_written > 0:
+        print(
+            f"[STALE_ORDER_CLEANUP_SUMMARY] canceled_stale={ghosts_written} "
+            f"filled_reconciled={filled_reconciled_written} "
+            f"threshold_hours={stale_hours:.2f}",
+            flush=True,
+        )
+    return total_written
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="Poll orders; tag sessions; summarize.")
     parser.add_argument("--mode", default="paper", choices=["paper", "live"])
     parser.add_argument(
@@ -718,35 +1404,122 @@ def main() -> None:
         default=60,
         help="For latest-burst summary: include submit rows within this many seconds of latest submit.",
     )
+    parser.add_argument(
+        "--stale-hours",
+        type=float,
+        default=STALE_HOURS_DEFAULT,
+        help="Outstanding ids whose last log timestamp is older than this (and not currently open at broker) "
+        "are suppressed from polling instead of being hammered.",
+    )
+    parser.add_argument(
+        "--suppress-after-fails",
+        type=int,
+        default=SUPPRESS_AFTER_FAILS_DEFAULT,
+        help="Once an outstanding id (not currently open at broker) has failed at least this many times across runs, "
+        "stop calling get_order on it.",
+    )
+    parser.add_argument(
+        "--detail-max-fails-per-run",
+        type=int,
+        default=MAX_DETAIL_FAILS_PER_RUN_DEFAULT,
+        help="Print full per-id failure lines for at most this many failures per run; the rest go to the summary.",
+    )
+    parser.add_argument(
+        "--stale-pending-hours",
+        type=float,
+        default=STALE_PENDING_HOURS_DEFAULT,
+        help="Pending-state rows (pending_new/accepted/new) missing from broker open orders AND "
+        "recent-orders snapshot for at least this many hours are reconciled to canceled_stale.",
+    )
+    parser.add_argument(
+        "--no-cleanup-stale-pending",
+        dest="cleanup_stale_pending",
+        action="store_false",
+        help="Disable ghost-order reconciliation for this run (default: enabled).",
+    )
+    parser.set_defaults(cleanup_stale_pending=True)
 
     args = parser.parse_args()
+
+    rstats: Dict[str, int] = {
+        "attempted": 0,
+        "retried": 0,
+        "degraded": 0,
+        "updated": 0,
+        "failed_ids": 0,
+    }
+    bcounts: Dict[str, int] = {"retried": 0}
+    step_degraded: Optional[str] = None
 
     _ensure_log()
     _upgrade_log_schema_if_needed()
 
+    broker: Any = None
     try:
-        broker = AlpacaBroker(mode=args.mode)
+        broker = call_with_transient_retry(
+            "broker_init", lambda: AlpacaBroker(mode=args.mode), out_counts=bcounts
+        )
     except Exception as e:
-        print("Broker init failed:", e)
-        return
+        rstats["degraded"] = 1
+        if is_transient_broker_error(e):
+            step_degraded = transient_failure_kind(e)
+        else:
+            step_degraded = "network"
+        print(f"[POLL] broker init failed: {e}", flush=True)
+        print(
+            f"[POLL] DEGRADED reason={step_degraded} (broker init)",
+            flush=True,
+        )
+        print(
+            f"[POLL_STATUS_SUMMARY] attempted={rstats['attempted']} retried={bcounts.get('retried', 0)} "
+            f"degraded=1 updated=0 failed_ids=0",
+            flush=True,
+        )
+        return 1
 
     try:
         df_hist = _read_log_df(repair=True)
     except Exception as e:
-        print("[BLOCK]", e)
-        return
+        print(f"[BLOCK] {e}", flush=True)
+        print(
+            f"[POLL_STATUS_SUMMARY] attempted={rstats['attempted']} retried={bcounts.get('retried', 0)} "
+            f"degraded=1 updated=0 failed_ids=0",
+            flush=True,
+        )
+        return 2
 
     session_map = _build_session_map(df_hist)
     latest_session = _latest_session_from_log(df_hist) or ""
     cli_session = (args.session or "").strip()
 
     # Open orders
+    rstats["attempted"] = 1
+    open_orders: List[Dict[str, Any]] = []
+    open_orders_fetched_ok = False
     try:
-        open_orders = broker.list_orders(status="open", nested=True, limit=500) or []
-    except AlpacaError:
+        open_orders = call_with_transient_retry(
+            "list_orders",
+            lambda: broker.list_orders(status="open", nested=True, limit=500) or [],
+            out_counts=bcounts,
+        )
+        open_orders_fetched_ok = True
+    except Exception as e:
+        rstats["degraded"] = 1
+        rstats["failed_ids"] = 0
+        if is_transient_broker_error(e) and not step_degraded:
+            step_degraded = transient_failure_kind(e)
+        print(f"[POLL] list_orders failed after retries: {e}", flush=True)
+        try:
+            print(
+                f"[POLL] step DEGRADED reason={step_degraded or 'broker_timeout'} (empty open set)",
+                flush=True,
+            )
+        except Exception:
+            pass
         open_orders = []
 
     open_ids = {str(o.get("id", "") or "").strip() for o in open_orders}
+    open_ids = {x for x in open_ids if x}
 
     # Outstanding IDs
     outstanding_ids: Set[str] = set()
@@ -772,8 +1545,51 @@ def main() -> None:
             oid for oid in outstanding_ids if oid and oid not in open_ids and _is_uuid_like(oid)
         }
 
+    # ----------------------------------------------------------------
+    # Stale-id suppression: do not hammer the broker for old IDs that
+    # are not currently open and that have either aged out of our window
+    # or failed repeatedly across prior runs. We KEEP the cache and KEEP
+    # the log untouched; we only stop calling get_order on them.
+    # ----------------------------------------------------------------
+    failed_cache = _load_failed_cache()
+    last_ts_map = _last_ts_for_oid_map(df_hist)
+    now_dt = datetime.now(timezone.utc)
+    stale_hours = float(args.stale_hours)
+    suppress_after = int(args.suppress_after_fails)
+    detail_budget = int(args.detail_max_fails_per_run)
+
+    suppressed_ids: Set[str] = set()
+    suppressed_reasons: Dict[str, str] = {}
+    pollable_outstanding: List[str] = []
+
+    for oid in sorted(outstanding_ids):
+        cache_e = failed_cache.get(oid) or {}
+        fcount = int(cache_e.get("failure_count", 0) or 0)
+        last_log_ts = last_ts_map.get(oid)
+        age_h: Optional[float] = None
+        if last_log_ts is not None:
+            try:
+                age_h = (now_dt - last_log_ts).total_seconds() / 3600.0
+            except Exception:
+                age_h = None
+        not_open_now = oid not in open_ids
+        if not_open_now and fcount >= suppress_after:
+            suppressed_ids.add(oid)
+            suppressed_reasons[oid] = "repeated_failures"
+            continue
+        if not_open_now and age_h is not None and age_h >= stale_hours:
+            suppressed_ids.add(oid)
+            suppressed_reasons[oid] = "stale_old_order"
+            continue
+        pollable_outstanding.append(oid)
+
     changes = 0
     outstanding_orders: List[Dict[str, Any]] = []
+    by_reason: Dict[str, int] = {}
+    fresh_failed = 0
+    stale_failed = 0
+    auth_failed = 0
+    detail_printed = 0
 
     if args.refresh:
         for o in open_orders:
@@ -781,81 +1597,186 @@ def main() -> None:
             last = _last_state(df_hist, oid)
             if _write_poll_if_changed(cli_session, session_map, latest_session, o, last):
                 changes += 1
+            # broker confirms this id; clear any prior failure history.
+            if oid:
+                _clear_failure(failed_cache, oid)
 
-        for oid in sorted(outstanding_ids):
+        for oid in pollable_outstanding:
+            o: Optional[Dict[str, Any]] = None
             try:
-                o = broker.get_order(oid)
-            except AlpacaError:
+                o = call_with_transient_retry(
+                    f"get_order({oid})",
+                    lambda oi=oid: broker.get_order(oi),
+                    out_counts=bcounts,
+                )
+            except Exception as e:
+                reason = _classify_failure(e)
+                _record_failure(failed_cache, oid, reason, _now_iso())
+                by_reason[reason] = by_reason.get(reason, 0) + 1
+                rstats["failed_ids"] = int(rstats.get("failed_ids", 0)) + 1
+
+                last_log_ts = last_ts_map.get(oid)
+                age_h2: Optional[float] = None
+                if last_log_ts is not None:
+                    try:
+                        age_h2 = (now_dt - last_log_ts).total_seconds() / 3600.0
+                    except Exception:
+                        age_h2 = None
+                is_open_now = oid in open_ids
+                is_fresh = is_open_now or (age_h2 is not None and age_h2 < stale_hours)
+
+                # Auth errors always count as "fresh" because they reflect a real
+                # broker-credential problem we must not hide.
+                if reason == "auth":
+                    auth_failed += 1
+                    fresh_failed += 1
+                elif is_fresh:
+                    fresh_failed += 1
+                else:
+                    stale_failed += 1
+
+                if is_transient_broker_error(e) and not step_degraded:
+                    step_degraded = transient_failure_kind(e)
+
+                if detail_printed < detail_budget:
+                    print(
+                        f"[POLL] get_order skipped id={oid} after retries: "
+                        f"type={type(e).__name__} reason={reason} "
+                        f"fresh={'1' if is_fresh else '0'} "
+                        f"failure_count={int(failed_cache.get(oid, {}).get('failure_count', 0))}",
+                        flush=True,
+                    )
+                    detail_printed += 1
                 continue
             if isinstance(o, dict):
                 outstanding_orders.append(o)
+                _clear_failure(failed_cache, oid)
                 last = _last_state(df_hist, oid)
                 if _write_poll_if_changed(cli_session, session_map, latest_session, o, last):
                     changes += 1
 
+    # Apply degradation rule: do NOT degrade just because old historical IDs
+    # are gone. Only fresh/open failures (or auth errors) should degrade.
+    if fresh_failed > 0 or auth_failed > 0:
+        rstats["degraded"] = 1
+
+    rstats["updated"] = changes
+    rstats["retried"] = int(bcounts.get("retried", 0))
+
+    # ----------------------------------------------------------------
+    # Compact failure summary (replaces what used to be hundreds of
+    # repeated [POLL] get_order skipped lines).
+    # ----------------------------------------------------------------
+    by_reason_sorted = dict(sorted(by_reason.items()))
     print(
-        f"Polled {len(open_orders)} open + {len(outstanding_ids)} outstanding; wrote {changes} changes."
+        f"[POLL_FAILURE_SUMMARY] failed_ids={int(rstats.get('failed_ids', 0))} "
+        f"suppressed_ids={len(suppressed_ids)} "
+        f"fresh_failed={fresh_failed} stale_failed={stale_failed} "
+        f"by_reason={by_reason_sorted}",
+        flush=True,
     )
+    if suppressed_ids:
+        suppressed_breakdown: Dict[str, int] = {}
+        for r in suppressed_reasons.values():
+            suppressed_breakdown[r] = suppressed_breakdown.get(r, 0) + 1
+        print(
+            f"[POLL_SUPPRESSION] count={len(suppressed_ids)} "
+            f"by_reason={dict(sorted(suppressed_breakdown.items()))} "
+            f"stale_hours={stale_hours} suppress_after_fails={suppress_after}",
+            flush=True,
+        )
+
+    # Trim cache to keep the file small over time and persist it.
+    _prune_failed_cache(failed_cache, CACHE_RETENTION_DAYS)
+    _save_failed_cache(failed_cache)
+
+    print(
+        f"Polled {len(open_orders)} open + {len(outstanding_ids)} outstanding "
+        f"(suppressed={len(suppressed_ids)}, polled={len(pollable_outstanding)}); wrote {changes} changes."
+    )
+    if step_degraded and int(rstats.get("degraded", 0)):
+        print(
+            f"[POLL] DEGRADED reason={step_degraded} (broker/network — local log and prior state kept)",
+            flush=True,
+        )
 
     # ------------------------------------------------------------
-    # ✅ RECONCILIATION STEP (post-fill / post-change refresh)
+    # GHOST-ORDER RECONCILIATION
+    # Marks orphaned pending_new/accepted/new rows as canceled_stale
+    # when the broker no longer knows about them. Runs BEFORE the
+    # snapshot/lifecycle refresh below so the new terminal rows are
+    # immediately reflected in apply_signal_lifecycle output.
+    # ------------------------------------------------------------
+    ghost_changes = 0
+    if args.cleanup_stale_pending:
+        try:
+            df_for_ghosts = _read_log_df(repair=False)
+        except Exception as e:
+            print(f"[STALE_ORDER_CLEANUP] skipped: cannot reread log ({e})", flush=True)
+            df_for_ghosts = None
+
+        if df_for_ghosts is not None:
+            recent_broker_map = _load_recent_orders_broker_map()
+            if recent_broker_map is None:
+                print(
+                    "[STALE_ORDER_CLEANUP] recent_orders.csv unavailable/malformed — "
+                    "falling back to broker not_found signal only",
+                    flush=True,
+                )
+            ghost_changes = _reconcile_ghost_pending_orders(
+                df_hist=df_for_ghosts,
+                open_ids=open_ids,
+                recent_broker_map=recent_broker_map,
+                failed_cache=failed_cache,
+                cli_session=cli_session,
+                session_map=session_map,
+                latest_session=latest_session,
+                stale_hours=float(args.stale_pending_hours),
+                open_orders_fetched_ok=open_orders_fetched_ok,
+            )
+            if ghost_changes > 0:
+                # The function itself emits [STALE_ORDER_CLEANUP_SUMMARY] with
+                # the per-flavor breakdown (canceled_stale vs filled_reconciled).
+                changes += ghost_changes
+                rstats["updated"] = changes
+
+    # ------------------------------------------------------------
+    # RECONCILIATION STEP (post-fill / post-change refresh)
     # ------------------------------------------------------------
     if changes > 0:
-        try:
-            print("[RECON] refreshing broker snapshots after status changes...")
+        print("[RECON] refreshing broker snapshots after status changes...")
+        recon_degraded = not _run_module_checked(
+            "services.snapshot_live_orders",
+            "snapshot_live_orders",
+            extra_args=["--mode", args.mode],
+            allow_fail=True,
+        )
+        if not recon_degraded:
+            print("[RECON] snapshot_live_orders complete")
+        if recon_degraded:
+            rstats["degraded"] = 1
 
-            cmd = [
-                sys.executable,
-                "-m",
-                "services.snapshot_live_orders",
-                "--mode",
-                args.mode,
-            ]
-
-            result = subprocess.run(
-                cmd,
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-            )
-
-            if result.returncode == 0:
-                print("[RECON] snapshot_live_orders complete")
-            else:
-                print("[RECON_WARN] snapshot_live_orders failed:")
-                if result.stdout:
-                    print(result.stdout)
-                if result.stderr:
-                    print(result.stderr)
-
-        except Exception as e:
-            print(f"[RECON_WARN] snapshot_live_orders exception: {e}")
-
-        try:
-            print("[RECON] refreshing signal lifecycle after status changes...")
-            lc_cmd = [sys.executable, "-m", "services.apply_signal_lifecycle"]
-            lc_result = subprocess.run(
-                lc_cmd,
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-            )
-            if lc_result.returncode == 0:
-                print("[RECON] apply_signal_lifecycle complete")
-            else:
-                print("[RECON_WARN] apply_signal_lifecycle failed:")
-                if lc_result.stdout:
-                    print(lc_result.stdout)
-                if lc_result.stderr:
-                    print(lc_result.stderr)
-        except Exception as e:
-            print(f"[RECON_WARN] apply_signal_lifecycle exception: {e}")
+        print("[RECON] refreshing signal lifecycle after status changes...")
+        r2 = _run_module_checked(
+            "services.apply_signal_lifecycle", "apply_signal_lifecycle", allow_fail=True
+        )
+        if r2:
+            print("[RECON] apply_signal_lifecycle complete")
+        if not r2:
+            rstats["degraded"] = 1
+        if not _refresh_effective_lifecycle(allow_fail=True):
+            rstats["degraded"] = 1
 
     try:
         df_all = _read_log_df(repair=True)
     except Exception as e:
         print("[BLOCK]", e)
-        return
+        print(
+            f"[POLL_STATUS_SUMMARY] attempted={rstats['attempted']} retried={rstats.get('retried', 0)} "
+            f"degraded=1 updated={rstats.get('updated', 0)} failed_ids={rstats.get('failed_ids', 0)}",
+            flush=True,
+        )
+        return 2
 
     latest_in_log = (_latest_session_from_log(df_all) or "").strip()
     chosen = (cli_session or latest_in_log or "").strip()
@@ -865,7 +1786,14 @@ def main() -> None:
 
     if not chosen:
         print("No session found to summarize.")
-        return
+        ret = 1 if int(rstats.get("degraded", 0)) else 0
+        print(
+            f"[POLL_STATUS_SUMMARY] attempted={rstats['attempted']} retried={rstats.get('retried', 0)} "
+            f"degraded={int(rstats.get('degraded', 0))} updated={rstats.get('updated', 0)} "
+            f"failed_ids={rstats.get('failed_ids', 0)}",
+            flush=True,
+        )
+        return ret
 
     had_rows = _summarize_session(
         df_all,
@@ -891,6 +1819,15 @@ def main() -> None:
                 burst_window_sec=int(args.burst_window_sec),
             )
 
+    ret = 1 if int(rstats.get("degraded", 0)) else 0
+    print(
+        f"[POLL_STATUS_SUMMARY] attempted={rstats['attempted']} retried={rstats.get('retried', 0)} "
+        f"degraded={int(rstats.get('degraded', 0))} updated={rstats.get('updated', 0)} "
+        f"failed_ids={rstats.get('failed_ids', 0)}",
+        flush=True,
+    )
+    return ret
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

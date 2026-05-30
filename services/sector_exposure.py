@@ -19,7 +19,9 @@ WARN_PCT_DEFAULT = 0.40
 CRITICAL_PCT_DEFAULT = 0.60
 BLOCK_PCT_DEFAULT = 0.40  # block new BUY/ADD if projected sector pct > this
 
-# Ticker -> sector. ETFs mapped to thematic sector where applicable; unknown -> Other.
+# Ticker -> sector. ETFs mapped to thematic sector where applicable.
+# Unmapped tickers resolve to UNKNOWN_SECTOR_LABEL in get_sector() (never removed).
+# Brokers may use BRK.B while files use BRK-B — both keys listed where relevant.
 _TICKER_SECTOR: Dict[str, str] = {
     # Energy
     "XOM": "Energy",
@@ -73,6 +75,8 @@ _TICKER_SECTOR: Dict[str, str] = {
     "GS": "Financials",
     "MS": "Financials",
     "SCHW": "Financials",
+    "MA": "Financials",
+    "V": "Financials",
     "BLK": "Financials",
     "AXP": "Financials",
     "USB": "Financials",
@@ -193,14 +197,26 @@ _TICKER_SECTOR: Dict[str, str] = {
     "DIA": "Diversified",
     "ITOT": "Diversified",
     "SCHB": "Diversified",
+    "BRK-B": "Diversified",
+    "BRK.B": "Diversified",
 }
 
 
+UNKNOWN_SECTOR_LABEL = "Unknown"
+
+
 def get_sector(symbol: str) -> str:
+    """Ticker → sector; unmapped symbols are Unknown (not silently ignored)."""
     s = str(symbol or "").strip().upper()
     if not s:
-        return "Other"
-    return _TICKER_SECTOR.get(s, "Other")
+        return UNKNOWN_SECTOR_LABEL
+    return _TICKER_SECTOR.get(s, UNKNOWN_SECTOR_LABEL)
+
+
+def has_explicit_sector_mapping(symbol: str) -> bool:
+    """Debug/tests: True iff ticker exists in _TICKER_SECTOR (else get_sector returns Unknown)."""
+    s = str(symbol or "").strip().upper()
+    return bool(s) and s in _TICKER_SECTOR
 
 
 def _row_value(row: pd.Series) -> float:
@@ -337,6 +353,25 @@ def load_exposure_for_planning(
     return payload
 
 
+def current_sector_pct(
+    sector: str,
+    exposure: Dict[str, Any],
+    pending_sector_add: Dict[str, float],
+    pending_total_add: float,
+) -> float:
+    """Portfolio weight of sector before this order (includes prior in-run adds)."""
+    total_value = float(exposure.get("total_value") or 0.0)
+    denom = total_value + float(pending_total_add)
+    if denom <= 1e-12:
+        return 0.0
+    sv = exposure.get("sector_values") or {}
+    if isinstance(sv, dict):
+        base_sec = float(sv.get(sector, 0.0)) + float(pending_sector_add.get(sector, 0.0))
+    else:
+        base_sec = float(pending_sector_add.get(sector, 0.0))
+    return base_sec / denom
+
+
 def projected_sector_pct_after_buy(
     sector: str,
     add_notional: float,
@@ -365,17 +400,20 @@ def should_block_buy_for_sector(
     pending_sector_add: Dict[str, float],
     pending_total_add: float,
     block_pct: float = BLOCK_PCT_DEFAULT,
+    allow_unknown_sector: bool = True,
 ) -> Tuple[bool, str]:
     """
-    Block new BUY/ADD if projected sector weight exceeds block_pct.
-    "Other" / "Diversified" are not blocked (additive safety).
+    Legacy single-threshold block (used when sector_caps_enabled is false).
+    Diversified is not blocked. Unknown: block when allow_unknown_sector is false.
     No block when there is no portfolio baseline (denom ~ 0) — avoids first-buy deadlock.
     """
     block_pct = float(block_pct)
     if add_notional <= 0:
         return False, ""
     sector = get_sector(symbol)
-    if sector in ("Other", "Diversified"):
+    if sector == UNKNOWN_SECTOR_LABEL and not allow_unknown_sector:
+        return True, "UNKNOWN_SECTOR_BLOCK"
+    if sector in ("Diversified",):
         return False, ""
 
     total_value = float(exposure.get("total_value") or 0.0)
@@ -400,3 +438,92 @@ def should_block_buy_for_sector(
     if proj > block_pct:
         return True, f"projected_{sector}_pct={proj:.2%}>{block_pct:.0%}"
     return False, ""
+
+
+def evaluate_sector_cap(
+    symbol: str,
+    stance: str,
+    add_notional: float,
+    exposure: Dict[str, Any],
+    *,
+    pending_sector_add: Dict[str, float],
+    pending_total_add: float,
+    cfg: Dict[str, Any],
+) -> Tuple[bool, str, float, float, str]:
+    """
+    Config-driven soft/hard caps for BUY vs ADD.
+    Returns (blocked, reason_code, current_pct, projected_pct, sector).
+    """
+    st = str(stance or "").strip().upper()
+    if st not in ("BUY", "ADD") or add_notional <= 0:
+        return False, "", 0.0, 0.0, ""
+
+    sector = get_sector(symbol)
+    allow_unknown = bool(cfg.get("allow_unknown_sector", False))
+    if sector == UNKNOWN_SECTOR_LABEL and not allow_unknown:
+        return True, "UNKNOWN_SECTOR_BLOCK", 0.0, 0.0, sector
+
+    total_value = float(exposure.get("total_value") or 0.0)
+    if total_value <= 1e-9:
+        return False, "", 0.0, 0.0, sector
+
+    cur = current_sector_pct(sector, exposure, pending_sector_add, pending_total_add)
+    sector_values = exposure.get("sector_values") or {}
+    if isinstance(sector_values, dict):
+        sv = {str(k): float(v) for k, v in sector_values.items()}
+    else:
+        sv = {}
+    proj = projected_sector_pct_after_buy(
+        sector,
+        add_notional,
+        total_value=total_value,
+        sector_values=sv,
+        pending_sector_add=pending_sector_add,
+        pending_total_add=pending_total_add,
+    )
+
+    if sector in ("Diversified",):
+        return False, "", cur, proj, sector
+
+    hard_buy = float(cfg.get("sector_hard_cap_pct", 0.40))
+    soft_buy = float(cfg.get("sector_soft_cap_pct", 0.30))
+    hard_add = float(cfg.get("sector_add_hard_cap_pct", 0.35))
+    soft_add = float(cfg.get("sector_add_soft_cap_pct", 0.30))
+    allow_buy_to_hard = bool(cfg.get("allow_new_position_under_hard_cap", True))
+    add_soft_only = bool(cfg.get("allow_adds_under_soft_cap_only", True))
+
+    if st == "BUY":
+        if proj > hard_buy:
+            return True, "BUY_BLOCKED_BY_SECTOR_HARD", cur, proj, sector
+        if not allow_buy_to_hard and proj > soft_buy:
+            return True, "BUY_BLOCKED_BY_SECTOR_SOFT", cur, proj, sector
+        return False, "", cur, proj, sector
+
+    if st == "ADD":
+        if proj > hard_add:
+            return True, "ADD_BLOCKED_BY_SECTOR_HARD", cur, proj, sector
+        if add_soft_only and proj > soft_add:
+            return True, "ADD_BLOCKED_BY_SECTOR_SOFT", cur, proj, sector
+        return False, "", cur, proj, sector
+
+    return False, "", cur, proj, sector
+
+
+def sector_exposure_pcts(
+    exposure: Dict[str, Any],
+    extra_sector_add: Optional[Dict[str, float]] = None,
+    extra_total_add: float = 0.0,
+) -> Dict[str, float]:
+    """Sector → portfolio fraction after optional notionals added."""
+    total_value = float(exposure.get("total_value") or 0.0)
+    sv0 = exposure.get("sector_values") or {}
+    if not isinstance(sv0, dict):
+        sv0 = {}
+    merged: Dict[str, float] = {str(k): float(v) for k, v in sv0.items()}
+    if extra_sector_add:
+        for k, v in extra_sector_add.items():
+            merged[k] = merged.get(k, 0.0) + float(v)
+    tot = total_value + float(extra_total_add)
+    if tot <= 1e-12:
+        return {}
+    return {k: round(v / tot, 6) for k, v in merged.items() if v > 1e-12}

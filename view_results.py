@@ -208,15 +208,48 @@ SESSION_FILL_PRESSURE_PATH = RESULTS_DIR / "session_fill_pressure.json"
 OPEN_ORDER_PRESSURE_PATH = RESULTS_DIR / "open_order_pressure.json"
 STALE_OPEN_ORDERS_CSV_PATH = RESULTS_DIR / "stale_open_orders.csv"
 REPRICE_OPEN_ORDERS_PATH = RESULTS_DIR / "reprice_open_orders.json"
+REPRICE_OPEN_ORDERS_CSV_PATH = RESULTS_DIR / "reprice_open_orders.csv"
+EXECUTION_INTELLIGENCE_CSV_PATH = RESULTS_DIR / "execution_intelligence.csv"
+FEEDBACK_LOOP_REPORT_CSV_PATH = RESULTS_DIR / "feedback_loop_report.csv"
+FEEDBACK_RECOMMENDATIONS_CSV_PATH = RESULTS_DIR / "feedback_recommendations.csv"
+FEEDBACK_LOOP_SUMMARY_JSON_PATH = RESULTS_DIR / "feedback_loop_summary.json"
+ADAPTATION_PROPOSALS_CSV_PATH = RESULTS_DIR / "adaptation_proposals.csv"
+ADAPTATION_REVIEW_QUEUE_CSV_PATH = RESULTS_DIR / "adaptation_review_queue.csv"
+ADAPTATION_SUMMARY_JSON_PATH = RESULTS_DIR / "adaptation_summary.json"
+APPLIED_ADJUSTMENTS_CSV_PATH = RESULTS_DIR / "applied_adjustments.csv"
+APPLIED_ADJUSTMENTS_JSON_PATH = RESULTS_DIR / "applied_adjustments.json"
+APPLY_LOG_CSV_PATH = RESULTS_DIR / "apply_log.csv"
+APPLY_SUMMARY_JSON_PATH = RESULTS_DIR / "apply_summary.json"
+ADAPTATION_SIMULATION_CSV_PATH = RESULTS_DIR / "adaptation_simulation.csv"
+ADAPTATION_SIMULATION_SUMMARY_JSON_PATH = RESULTS_DIR / "adaptation_simulation_summary.json"
 REPRICE_LADDER_RUN_PATH = RESULTS_DIR / "reprice_ladder_run.json"
 SIGNAL_LIFECYCLE_EFFECTIVE_PATH = RESULTS_DIR / "signal_lifecycle_effective.csv"
 OPEN_ORDERS_SNAPSHOT_PATH = RESULTS_DIR / "open_orders_snapshot.csv"
 RECENT_ORDERS_PATH = RESULTS_DIR / "recent_orders.csv"
 LIVE_ORDERS_LOG_PATH = RESULTS_DIR / "live_orders_log.csv"
+PERFORMANCE_INTELLIGENCE_CSV_PATH = RESULTS_DIR / "performance_intelligence.csv"
+PERFORMANCE_INTELLIGENCE_BY_SYMBOL_CSV_PATH = RESULTS_DIR / "performance_intelligence_by_symbol.csv"
+PERFORMANCE_INTELLIGENCE_SUMMARY_JSON_PATH = RESULTS_DIR / "performance_intelligence_summary.json"
+PERFORMANCE_RISK_OVERLAY_CSV_PATH = RESULTS_DIR / "performance_risk_overlay.csv"
 
 # Nice-to-have (do not force FAIL)
 MODEL_COMPARISON_PATH = RESULTS_DIR / "model_comparison.csv"
 FEATURE_IMPORTANCE_PATH = RESULTS_DIR / "feature_importance.csv"
+
+# Research / Intel (optional; dashboard-only)
+NEWS_SENTIMENT_PATH = RESULTS_DIR / "news_sentiment.csv"
+SMART_ALERTS_PATH = RESULTS_DIR / "smart_alerts.csv"
+ECONOMIC_CALENDAR_PATH = RESULTS_DIR / "economic_calendar.csv"
+
+# --- Dashboard CSV inventory (read-only; all loads go through read_csv_dashboard / load_csv) ---
+# Core: portfolio_history.csv, trade_log.csv, positions_snapshot.csv, signals_with_rationale.csv,
+#   signals.csv, signal_lifecycle.csv, target_weights.csv, stock_scores.csv, trade_opportunities.csv,
+#   lifecycle_reconciliation.csv, live_orders.csv
+# Diagnostics / execution observability: execution_plan.csv, manage_positions_plan.csv,
+#   reallocation_plan.csv, execution_drop_diagnostics.csv, signal_pressure_diagnostics.csv,
+#   stale_open_orders.csv, signal_lifecycle_effective.csv, open_orders_snapshot.csv, recent_orders.csv,
+#   live_orders_log.csv, paper_trade_cycle_log.csv
+# Research / Intelligence: news_sentiment.csv, smart_alerts.csv, economic_calendar.csv
 
 # ──────────────────────────────
 # OPTIONAL PAGES — DETECT BY FILE EXISTS (NO IMPORTS HERE)
@@ -281,38 +314,111 @@ def _short_err(e: Exception, limit: int = 280) -> str:
     return msg or repr(e)
 
 
+def empty_table(columns: Optional[List[str]] = None) -> pd.DataFrame:
+    """Minimal empty DataFrame for placeholder tables (dashboard display only)."""
+    if columns:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame()
+
+
 @st.cache_data(show_spinner=False)
 def _read_csv_bytesafe(path_str: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-    """Cached CSV loader with safe error return (no Streamlit side effects inside cache)."""
+    """
+    Cached CSV read (no Streamlit side effects). Returns (df, err):
+      - missing path      → (None, None)
+      - empty (0 bytes)   → (empty_table(), "empty")
+      - OS error          → (None, "os: …")
+      - parse / other     → (None, short message)
+      - success           → (df, None); 0 rows after parse → (empty_table(), "empty")
+    """
     path = Path(path_str)
-    if (not path.exists()) or path.stat().st_size == 0:
-        return None, None
+    try:
+        if not path.exists():
+            return None, None
+    except OSError as e:
+        return None, f"os: {_short_err(e)}"
+    try:
+        if path.stat().st_size == 0:
+            return empty_table(), "empty"
+    except OSError as e:
+        return None, f"os: {_short_err(e)}"
     try:
         df = pd.read_csv(path)
-        df = sanitize_df_cols(df)
-        return df, None
+    except OSError as e:
+        return None, f"os: {_short_err(e)}"
     except Exception as e:
         return None, _short_err(e)
+    try:
+        df = sanitize_df_cols(df)
+    except Exception as e:
+        return None, _short_err(e)
+    if df.empty:
+        return empty_table(), "empty"
+    return df, None
 
 
 def load_csv(path: Path, *, show_error: bool = True) -> Optional[pd.DataFrame]:
     """
-    CSV loader.
-      - show_error=True: emits st.error on load failure (good for pages)
-      - show_error=False: silent failure (required for validator to avoid DeltaGenerator noise)
+    CSV loader for validators and internal use.
+      - show_error=True: emits st.error on parse/OS failure (not for missing or empty file)
+      - show_error=False: silent
+    Returns None on missing, parse failure, or OS failure; returns empty DataFrame when file is empty.
     """
     df, err = _read_csv_bytesafe(str(path))
+    if err == "empty":
+        return df
     if err and show_error:
         st.error(f"❌ Failed loading {path.name}: {err}")
+    if err:
+        return None
     return df
 
 
-def load_first_nonempty_csv(paths: List[Path]) -> Optional[pd.DataFrame]:
-    """Try CSVs in order; return first that loads and has at least 1 row."""
+def load_first_nonempty_csv(
+    paths: List[Path],
+    *,
+    label: str = "CSV",
+    columns: Optional[List[str]] = None,
+) -> Optional[pd.DataFrame]:
+    """
+    Try paths in order; return first non-empty readable DataFrame.
+    Emits at most one warning if all candidates fail due to parse/OS errors (not missing/empty).
+    `columns` is reserved for future empty placeholders; unused for now.
+    """
+    _ = columns
+    hard_errors: List[str] = []
     for p in paths:
-        df = load_csv(p, show_error=True)
-        if df is not None and not df.empty:
+        df, err = _read_csv_bytesafe(str(p))
+        if err is None and df is not None and not df.empty:
             return df
+        if err and err != "empty":
+            hard_errors.append(f"{p.name}: {err}")
+    if hard_errors:
+        st.warning(
+            f"{label}: no usable file found. "
+            + " · ".join(hard_errors[:3])
+            + ("…" if len(hard_errors) > 3 else "")
+        )
+    return None
+
+
+def read_csv_dashboard(path: Path) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """
+    Dashboard CSV load. Returns (df, err):
+      - (None, None)           — file missing
+      - (empty_df, "empty")    — empty or zero-byte file
+      - (None, "os: …")        — exists/stat/read OS error
+      - (None, msg)            — pandas parse error or malformed content
+      - (df, None)             — success with ≥1 row
+    """
+    return _read_csv_bytesafe(str(path))
+
+
+def csv_usable_rows(path: Path) -> Optional[pd.DataFrame]:
+    """Optional CSV panels: return a DataFrame only when rows exist; else None (silent)."""
+    df, err = read_csv_dashboard(path)
+    if err is None and df is not None and not df.empty:
+        return df
     return None
 
 
@@ -320,11 +426,21 @@ def load_first_nonempty_csv(paths: List[Path]) -> Optional[pd.DataFrame]:
 def _read_json_bytesafe(path_str: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Cached JSON loader with safe error return (no Streamlit side effects inside cache)."""
     path = Path(path_str)
-    if (not path.exists()) or path.stat().st_size == 0:
-        return None, None
+    try:
+        if not path.exists():
+            return None, None
+    except OSError as e:
+        return None, f"os: {_short_err(e)}"
+    try:
+        if path.stat().st_size == 0:
+            return None, None
+    except OSError as e:
+        return None, f"os: {_short_err(e)}"
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f), None
+    except OSError as e:
+        return None, f"os: {_short_err(e)}"
     except Exception as e:
         return None, _short_err(e)
 
@@ -1238,7 +1354,7 @@ def validate_all_contracts() -> List[ContractResult]:
                 "exchange",
             ],
             min_rows=1,
-            allow_empty=False,
+            allow_empty=True,
             coerce={"snapshot_ts": "datetime64[ns]", "qty": "float64"},
             max_null_frac_by_col={"snapshot_ts": 0.0, "symbol": 0.0, "qty": 0.0},
         ),
@@ -1295,6 +1411,7 @@ def validate_all_contracts() -> List[ContractResult]:
             coerce={"date": "datetime64[ns]", "pred": "float64", "confidence": "float64"},
             max_null_frac_by_col={"date": 0.0, "ticker": 0.0},
             custom_checks=[_signals_check],
+            allow_empty=True,
         ),
         DataContract(
             name="Signals (Fallback)",
@@ -1308,6 +1425,7 @@ def validate_all_contracts() -> List[ContractResult]:
             coerce={"date": "datetime64[ns]", "pred": "float64", "confidence": "float64"},
             max_null_frac_by_col={"date": 0.0, "ticker": 0.0},
             custom_checks=[_signals_check],
+            allow_empty=True,
         ),
         DataContract(
             name="Signal Lifecycle",
@@ -1367,6 +1485,7 @@ def validate_all_contracts() -> List[ContractResult]:
                 "score": "float64",
             },
             max_null_frac_by_col={"ticker": 0.0},
+            allow_empty=True,
         ),
         DataContract(
             name="Target Weights",
@@ -1457,9 +1576,22 @@ def contracts_badge(summary: Dict[str, Any]) -> Tuple[str, str]:
 
 def run_contracts_if_needed(force: bool = False) -> None:
     if force or ("contract_results" not in st.session_state):
-        results = validate_all_contracts()
-        st.session_state["contract_results"] = results
-        st.session_state["contract_summary"] = contracts_summary(results)
+        try:
+            results = validate_all_contracts()
+            st.session_state["contract_results"] = results
+            st.session_state["contract_summary"] = contracts_summary(results)
+            st.session_state.pop("contracts_validation_crash", None)
+        except Exception as e:
+            st.session_state["contract_results"] = []
+            st.session_state["contract_summary"] = {
+                "total": 0,
+                "ok": 0,
+                "failed": 1,
+                "error_count": 1,
+                "warn_count": 0,
+                "info_count": 0,
+            }
+            st.session_state["contracts_validation_crash"] = _short_err(e)
 
     cs = st.session_state.get("contract_summary", {})
     failing = (cs.get("failed", 0) > 0) or (cs.get("error_count", 0) > 0)
@@ -1567,9 +1699,13 @@ def compute_pipeline_health() -> Dict[str, Any]:
             if hb_status == "⚪":
                 hb_status = "🟢"
 
-    rationale_exists = SIGNALS_RATIONALE_PATH.exists() and (
-        SIGNALS_RATIONALE_PATH.stat().st_size > 0
-    )
+    rationale_exists = False
+    try:
+        rationale_exists = SIGNALS_RATIONALE_PATH.is_file() and (
+            SIGNALS_RATIONALE_PATH.stat().st_size > 0
+        )
+    except OSError:
+        rationale_exists = False
 
     tracked: List[Tuple[str, Path, float, float, bool]] = [
         (
@@ -2231,6 +2367,14 @@ def page_data_contracts() -> None:
 
     run_contracts_if_needed(force=run_now)
 
+    crash = st.session_state.get("contracts_validation_crash")
+    if crash:
+        st.warning(
+            "Contract validator raised an unexpected error (dashboard stays usable). "
+            f"Details: {crash}",
+            icon="⚠️",
+        )
+
     results: List[ContractResult] = st.session_state.get("contract_results", [])
     summary = st.session_state.get("contract_summary", contracts_summary(results))
     badge, badge_detail = contracts_badge(summary)
@@ -2299,9 +2443,14 @@ def page_data_contracts() -> None:
 def page_portfolio_history() -> None:
     st.markdown("### 📈 Portfolio History")
 
-    df = load_csv(PORTFOLIO_HISTORY_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(PORTFOLIO_HISTORY_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read portfolio_history.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.warning("No portfolio history available (portfolio_history.csv missing/empty).")
+        st.info("No portfolio history yet — **portfolio_history.csv** is missing or empty.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df)
@@ -2430,20 +2579,30 @@ def page_positions_exposure() -> None:
         "Read-only, real-data snapshot from **positions_snapshot.csv** (preferred). No broker calls."
     )
 
-    df = load_csv(POSITIONS_SNAPSHOT_PATH, show_error=False)
+    df, snap_err = read_csv_dashboard(POSITIONS_SNAPSHOT_PATH)
+    if snap_err and snap_err != "empty":
+        st.warning(f"Could not read positions_snapshot.csv: {snap_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
 
     if (df is None or df.empty) and PORTFOLIO_HISTORY_PATH.exists():
-        legacy = load_csv(PORTFOLIO_HISTORY_PATH, show_error=False)
-        if legacy is not None and (
-            "ticker" in legacy.columns or "symbol" in legacy.columns or "sym" in legacy.columns
+        legacy, leg_err = read_csv_dashboard(PORTFOLIO_HISTORY_PATH)
+        if (
+            (not leg_err or leg_err == "empty")
+            and legacy is not None
+            and not legacy.empty
+            and (
+                "ticker" in legacy.columns or "symbol" in legacy.columns or "sym" in legacy.columns
+            )
         ):
             df = legacy
 
     if df is None or df.empty:
-        st.warning(
-            "No positions snapshot available. Create **data/results/positions_snapshot.csv** "
-            "(recommended), or write per-ticker rows into portfolio_history.csv (legacy)."
+        st.info(
+            "No positions snapshot yet. Add **data/results/positions_snapshot.csv** "
+            "(recommended), or per-ticker rows in **portfolio_history.csv** (legacy)."
         )
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     _positions_trace_snapshot(df, "positions.AFTER_CSV_LOAD")
@@ -2621,9 +2780,14 @@ def page_positions_exposure() -> None:
 
 def page_trade_log() -> None:
     st.markdown("### 📜 Trade Log")
-    df = load_csv(TRADE_LOG_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(TRADE_LOG_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read trade_log.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.warning("No trade log available (trade_log.csv missing/empty).")
+        st.info("No trade log yet — **trade_log.csv** is missing or empty.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
     # Display-only formatting (best-effort)
     df2 = sanitize_df_cols(df.copy())
@@ -2657,13 +2821,20 @@ def page_signal_lifecycle() -> None:
         "This page reads the STATE artifact (one row per ticker)."
     )
 
-    df = load_csv(SIGNAL_LIFECYCLE_PATH, show_error=False)
+    df, csv_err = read_csv_dashboard(SIGNAL_LIFECYCLE_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read signal_lifecycle.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.error("signal_lifecycle.csv not found or empty.")
+        st.info(
+            "No **signal_lifecycle.csv** yet (or it is empty). Generate it from your lifecycle step."
+        )
         st.code(
             "python services/build_signal_lifecycle_state.py --results-dir data/results",
             language="bash",
         )
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df)
@@ -2784,13 +2955,25 @@ def page_trade_opportunities() -> None:
         "Execution-ready rows from **trade_opportunities.csv** — same file **place_live_orders** uses first when present."
     )
 
-    if not TRADE_OPPORTUNITIES_PATH.exists():
-        st.info("No trade opportunities available")
+    try:
+        has_file = (
+            TRADE_OPPORTUNITIES_PATH.is_file() and TRADE_OPPORTUNITIES_PATH.stat().st_size > 0
+        )
+    except OSError:
+        has_file = False
+    if not has_file:
+        st.info("No **trade_opportunities.csv** yet (or file is empty).")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
-    df = load_csv(TRADE_OPPORTUNITIES_PATH, show_error=False)
+    df, csv_err = read_csv_dashboard(TRADE_OPPORTUNITIES_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read trade_opportunities.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None:
-        st.info("No trade opportunities available")
+        st.info("No trade opportunities available.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df.copy())
@@ -2877,11 +3060,16 @@ def page_reconciliation() -> None:
         "Lifecycle STATE vs broker positions snapshot (from **lifecycle_reconciliation.csv**). Run `python -m services.reconcile_lifecycle_vs_positions` to refresh."
     )
 
-    df = load_csv(LIFECYCLE_RECONCILIATION_PATH, show_error=False)
+    df, csv_err = read_csv_dashboard(LIFECYCLE_RECONCILIATION_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read lifecycle_reconciliation.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
         st.info(
             "No reconciliation data yet. Generate **data/results/lifecycle_reconciliation.csv** with `python -m services.reconcile_lifecycle_vs_positions`."
         )
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df.copy())
@@ -2897,7 +3085,7 @@ def page_reconciliation() -> None:
     ]
     missing = [c for c in cols if c not in df.columns]
     if missing:
-        st.error(f"lifecycle_reconciliation.csv missing columns: {missing}")
+        st.warning(f"lifecycle_reconciliation.csv missing expected columns: {missing}")
         st.dataframe(df.head(50), use_container_width=True)
         return
 
@@ -2937,9 +3125,14 @@ def page_ai_signals() -> None:
     df: Optional[pd.DataFrame] = None
 
     if not stale:
-        if SIGNAL_LIFECYCLE_PATH.exists() and SIGNAL_LIFECYCLE_PATH.stat().st_size > 0:
-            df = load_csv(SIGNAL_LIFECYCLE_PATH, show_error=True)
-            if df is None or df.empty:
+        lc_ok = False
+        try:
+            lc_ok = SIGNAL_LIFECYCLE_PATH.is_file() and SIGNAL_LIFECYCLE_PATH.stat().st_size > 0
+        except OSError:
+            lc_ok = False
+        if lc_ok:
+            df, _lc_err = read_csv_dashboard(SIGNAL_LIFECYCLE_PATH)
+            if (_lc_err and _lc_err != "empty") or df is None or df.empty:
                 df = None
 
     if df is None or df.empty:
@@ -2948,12 +3141,17 @@ def page_ai_signals() -> None:
                 "signal_lifecycle.csv is older than signals_with_rationale.csv / signals.csv. "
                 "Showing rationale or raw signals until lifecycle is regenerated."
             )
-        df = load_first_nonempty_csv([SIGNALS_RATIONALE_PATH, SIGNALS_PATH])
+        df = load_first_nonempty_csv(
+            [SIGNALS_RATIONALE_PATH, SIGNALS_PATH],
+            label="Signals (rationale or raw)",
+        )
 
     if df is None or df.empty:
-        st.warning(
-            "No signals available (signal_lifecycle.csv / signals_with_rationale.csv / signals.csv missing or empty)."
+        st.info(
+            "No signals to display yet — **signal_lifecycle.csv**, **signals_with_rationale.csv**, "
+            "and **signals.csv** are missing, empty, or unreadable."
         )
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df)
@@ -2980,9 +3178,14 @@ def page_ai_signals() -> None:
 
 def page_trade_rationale() -> None:
     st.markdown("### 🧠 Trade Rationale")
-    df = load_csv(SIGNALS_RATIONALE_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(SIGNALS_RATIONALE_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read signals_with_rationale.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
         st.info("No signals_with_rationale.csv found yet. Run your training step that writes it.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
     df = sanitize_df_cols(df)
     df = ensure_date_col(df)
@@ -3005,11 +3208,16 @@ def page_target_weights() -> None:
         "Reads: data/results/target_weights.csv (real allocation targets; no synthetic numbers)."
     )
 
-    df = load_csv(TARGET_WEIGHTS_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(TARGET_WEIGHTS_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read target_weights.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
         st.info(
             "No target_weights.csv found yet. Generate it from your weighting step (e.g., allocator)."
         )
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df)
@@ -3051,9 +3259,14 @@ def page_target_weights() -> None:
 
 def page_top_picks() -> None:
     st.markdown("### ⭐ Top Picks")
-    df = load_csv(STOCK_SCORES_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(STOCK_SCORES_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read stock_scores.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.warning("No scores available (stock_scores.csv missing/empty).")
+        st.info("No scores yet — **stock_scores.csv** is missing or empty.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df2 = sanitize_df_cols(df.copy())
@@ -3090,9 +3303,14 @@ def page_top_picks() -> None:
 
 def page_feature_importance() -> None:
     st.markdown("### 🧠 Feature Importance")
-    df = load_csv(FEATURE_IMPORTANCE_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(FEATURE_IMPORTANCE_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read feature_importance.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
         st.info("No feature_importance.csv yet. Your train step writes it when available.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
     df = sanitize_df_cols(df)
     df_disp = format_df_for_display(
@@ -3105,9 +3323,14 @@ def page_feature_importance() -> None:
 
 def page_model_comparison() -> None:
     st.markdown("### 📊 Model Comparison")
-    df = load_csv(MODEL_COMPARISON_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(MODEL_COMPARISON_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read model_comparison.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
         st.info("No model_comparison.csv yet. Your train step writes it when available.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
     st.dataframe(df, use_container_width=True)
 
@@ -3137,9 +3360,14 @@ def page_risk_report() -> None:
 
 def page_strategy_diagnostics() -> None:
     st.markdown("### 🧪 Strategy Diagnostics")
-    df = load_csv(TRADE_LOG_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(TRADE_LOG_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read trade_log.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.warning("No trade log available (trade_log.csv missing/empty).")
+        st.info("No trade log yet — **trade_log.csv** is missing or empty.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df)
@@ -3169,27 +3397,43 @@ def page_strategy_diagnostics() -> None:
 
 def page_news_sentiment() -> None:
     st.markdown("### 📰 News Sentiment")
-    df = load_csv(RESULTS_DIR / "news_sentiment.csv", show_error=True)
+    df, csv_err = read_csv_dashboard(NEWS_SENTIMENT_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not load news sentiment: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.warning("No news sentiment available (news_sentiment.csv missing/empty).")
+        st.info("No news sentiment data available yet.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
     st.dataframe(df, use_container_width=True)
 
 
 def page_smart_alerts() -> None:
     st.markdown("### 🚨 Smart Alerts")
-    df = load_csv(RESULTS_DIR / "smart_alerts.csv", show_error=True)
+    df, csv_err = read_csv_dashboard(SMART_ALERTS_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not load smart alerts: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.info("No smart alerts yet (smart_alerts.csv missing/empty).")
+        st.info("Smart alerts file is missing or empty.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
     st.dataframe(df, use_container_width=True)
 
 
 def page_econ_calendar() -> None:
     st.markdown("### 📅 Economic Calendar")
-    df = load_csv(RESULTS_DIR / "economic_calendar.csv", show_error=True)
+    df, csv_err = read_csv_dashboard(ECONOMIC_CALENDAR_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning("Economic calendar data could not be loaded.")
+        st.caption(str(csv_err))
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None or df.empty:
-        st.info("No economic calendar file found (economic_calendar.csv missing/empty).")
+        st.info("No economic calendar data available yet.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
     st.dataframe(df, use_container_width=True)
 
@@ -3201,19 +3445,23 @@ def page_execution_health() -> None:
 
     with c1:
         st.caption("Open orders log (live_orders.csv)")
-        df = load_csv(LIVE_ORDERS_PATH, show_error=True)
-        if df is not None and not df.empty:
+        df, csv_err = read_csv_dashboard(LIVE_ORDERS_PATH)
+        if csv_err and csv_err != "empty":
+            st.warning(f"Could not read live_orders.csv: {csv_err}")
+            st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        elif df is not None and not df.empty:
             st.dataframe(df.tail(50), use_container_width=True)
         else:
             st.info("No live_orders.csv yet.")
+            st.dataframe(empty_table(), use_container_width=True, hide_index=True)
 
     with c2:
         st.caption("Guard snapshot (guard_snapshot.json)")
-        guard = load_json(GUARD_SNAPSHOT_PATH, show_error=True)
+        guard = load_json(GUARD_SNAPSHOT_PATH, show_error=False)
         if guard:
             st.json(guard)
         else:
-            st.info("No guard_snapshot.json yet.")
+            st.info("No guard_snapshot.json yet (or file could not be read).")
 
 
 def _truncate_preview(s: Any, limit: int = 220) -> str:
@@ -3353,7 +3601,7 @@ def page_execution_dashboard() -> None:
         wr = epj.get("warnings")
         if isinstance(wr, list) and wr:
             st.warning("warnings: " + "; ".join(str(x) for x in wr))
-    ep_csv = load_csv(EXECUTION_PLAN_CSV_PATH, show_error=False)
+    ep_csv = csv_usable_rows(EXECUTION_PLAN_CSV_PATH)
     if ep_csv is not None and not ep_csv.empty:
         want = ["symbol", "stance", "status", "skip_reason", "qty", "side", "planned_notional"]
         show = [c for c in want if c in ep_csv.columns]
@@ -3418,7 +3666,7 @@ def page_execution_dashboard() -> None:
             )
         else:
             ap4.metric("Top skip reasons", "—")
-    mp_csv = load_csv(MANAGE_POSITIONS_PLAN_CSV_PATH, show_error=False)
+    mp_csv = csv_usable_rows(MANAGE_POSITIONS_PLAN_CSV_PATH)
     if mp_csv is not None and not mp_csv.empty:
         want_m = [
             "symbol",
@@ -3504,7 +3752,7 @@ def page_execution_dashboard() -> None:
         st.info(
             "No **capital_reallocation.json** yet (run `manage_positions` dry-run or `--execute`)."
         )
-    rp_csv = load_csv(REALLOCATION_PLAN_CSV_PATH, show_error=False)
+    rp_csv = csv_usable_rows(REALLOCATION_PLAN_CSV_PATH)
     if rp_csv is not None and not rp_csv.empty:
         want_rp = [
             "symbol",
@@ -3581,7 +3829,7 @@ def page_execution_dashboard() -> None:
                     "**Interpretation:** Planned activity was recorded but nothing new was submitted — see dropped rows below "
                     "(often illegal sells, limits, batch limits, or validation)."
                 )
-    edf = load_csv(EXEC_DROP_CSV_PATH, show_error=False)
+    edf = csv_usable_rows(EXEC_DROP_CSV_PATH)
     if edf is not None and not edf.empty:
         edf = sanitize_df_cols(edf)
         fcols = ["phase", "status", "reason_code", "symbol"]
@@ -3686,7 +3934,7 @@ def page_execution_dashboard() -> None:
         nts = spd.get("notes")
         if isinstance(nts, list) and nts:
             st.caption("**Notes:** " + " · ".join(str(x) for x in nts[:6]))
-    spd_csv = load_csv(SIGNAL_PRESSURE_DIAG_CSV_PATH, show_error=False)
+    spd_csv = csv_usable_rows(SIGNAL_PRESSURE_DIAG_CSV_PATH)
     if spd_csv is not None and not spd_csv.empty:
         spd_csv = sanitize_df_cols(spd_csv)
         sub = spd_csv.copy()
@@ -3800,7 +4048,7 @@ def page_execution_dashboard() -> None:
         st_caption = oop.get("notes")
         if isinstance(st_caption, list) and st_caption:
             st.caption("**Notes:** " + " · ".join(str(x) for x in st_caption[:4]))
-        so = load_csv(STALE_OPEN_ORDERS_CSV_PATH, show_error=False)
+        so = csv_usable_rows(STALE_OPEN_ORDERS_CSV_PATH)
         if so is not None and not so.empty:
             want_so = [
                 c
@@ -3870,7 +4118,7 @@ def page_execution_dashboard() -> None:
 
     # ── Section 5 — Lifecycle distribution ───────────────────────────────
     st.subheader("5 — Lifecycle distribution (effective)")
-    le = load_csv(SIGNAL_LIFECYCLE_EFFECTIVE_PATH, show_error=False)
+    le = csv_usable_rows(SIGNAL_LIFECYCLE_EFFECTIVE_PATH)
     if le is None or le.empty:
         st.info("No **signal_lifecycle_effective.csv** (or empty).")
     else:
@@ -3912,10 +4160,10 @@ def page_execution_dashboard() -> None:
 
     # ── Section 6 — Broker / snapshots ───────────────────────────────────
     st.subheader("6 — Broker / snapshot overview")
-    oos = load_csv(OPEN_ORDERS_SNAPSHOT_PATH, show_error=False)
-    ror = load_csv(RECENT_ORDERS_PATH, show_error=False)
-    pss = load_csv(POSITIONS_SNAPSHOT_PATH, show_error=False)
-    lol = load_csv(LIVE_ORDERS_LOG_PATH, show_error=False)
+    oos = csv_usable_rows(OPEN_ORDERS_SNAPSHOT_PATH)
+    ror = csv_usable_rows(RECENT_ORDERS_PATH)
+    pss = csv_usable_rows(POSITIONS_SNAPSHOT_PATH)
+    lol = csv_usable_rows(LIVE_ORDERS_LOG_PATH)
 
     n_open = len(oos) if oos is not None else 0
     n_rec = len(ror) if ror is not None else 0
@@ -3958,7 +4206,7 @@ def page_execution_dashboard() -> None:
 
     # ── Section 7 — Paper cycle log ──────────────────────────────────────
     st.subheader("7 — Recent paper cycle log")
-    pcl = load_csv(PAPER_TRADE_CYCLE_LOG_PATH, show_error=False)
+    pcl = csv_usable_rows(PAPER_TRADE_CYCLE_LOG_PATH)
     if pcl is None or pcl.empty:
         st.info("No **paper_trade_cycle_log.csv** yet.")
     else:
@@ -4010,14 +4258,20 @@ def page_live_orders_panel() -> None:
     st.markdown("### 🚦 Live Orders Panel (Read-only)")
     st.caption("Reads **data/results/live_orders.csv**. No broker actions here (display only).")
 
-    df = load_csv(LIVE_ORDERS_PATH, show_error=True)
+    df, csv_err = read_csv_dashboard(LIVE_ORDERS_PATH)
+    if csv_err and csv_err != "empty":
+        st.warning(f"Could not read live_orders.csv: {csv_err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
     if df is None:
-        st.warning("live_orders.csv not found.")
+        st.info("**live_orders.csv** is not available yet.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     df = sanitize_df_cols(df)
     if df.empty:
         st.info("live_orders.csv loaded, but contains 0 rows.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
 
     # Normalize common columns
@@ -4259,6 +4513,4437 @@ def page_live_run() -> None:
 
 
 # ──────────────────────────────
+# Ticker Decision Timeline (observability)
+# ──────────────────────────────
+# Dashboard-only helpers. All side effects are read-only.
+
+_TDT_HISTORY_CANDIDATES: Tuple[str, ...] = (
+    "signals_lifecycle.csv",  # plural; often multi-day history if present
+    "lifecycle_history.csv",
+    "signal_lifecycle_history.csv",
+)
+
+_TDT_PREFERRED_COLUMNS: Tuple[str, ...] = (
+    "date",
+    "ticker",
+    "signal",
+    "decision_action",
+    "state_transition",
+    "held_state",
+    "confidence",
+    "prior_confidence",
+    "confidence_change",
+    "score",
+    "prior_score",
+    "score_change",
+    "delta_pct",
+    "close",
+    "predicted_close",
+    "rationale",
+    "decision_reason",
+    "stance",
+    "lifecycle_action",
+    "position_state",
+    "last_action",
+)
+
+
+def _tdt_select_existing_columns(df: pd.DataFrame, preferred: Tuple[str, ...]) -> List[str]:
+    """Return preferred columns that actually exist in df, in preferred order."""
+    return [c for c in preferred if c in df.columns]
+
+
+def _tdt_safe_metric(row: Optional[pd.Series], col: str, default: str = "N/A") -> str:
+    """Read a scalar from a row safely, formatting floats compactly."""
+    if row is None or col not in row.index:
+        return default
+    val = row.get(col)
+    try:
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return default
+    except Exception:
+        return default
+    if isinstance(val, float):
+        return f"{val:.4f}"
+    s = str(val).strip()
+    return s if s else default
+
+
+def _tdt_parse_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """Best-effort: add a _ts datetime column from 'date' or 'as_of_date' if available."""
+    df = df.copy()
+    ts = None
+    if "date" in df.columns:
+        ts = pd.to_datetime(df["date"], errors="coerce")
+    if (ts is None or ts.isna().all()) and "as_of_date" in df.columns:
+        ts = pd.to_datetime(df["as_of_date"], errors="coerce")
+    df["_ts"] = ts if ts is not None else pd.NaT
+    return df
+
+
+def _tdt_load_primary() -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    """Load signal_lifecycle.csv (current-state, one row per ticker)."""
+    df, err = read_csv_dashboard(SIGNAL_LIFECYCLE_PATH)
+    if err == "empty":
+        return df, "empty"
+    if err:
+        return None, err
+    if df is None or df.empty:
+        return None, "empty"
+    return sanitize_df_cols(df), None
+
+
+def _tdt_load_history_optional() -> Optional[pd.DataFrame]:
+    """Optional multi-day history source (best-effort, silent on missing)."""
+    for name in _TDT_HISTORY_CANDIDATES:
+        p = RESULTS_DIR / name
+        if not p.is_file() or p.stat().st_size == 0:
+            continue
+        df, err = read_csv_dashboard(p)
+        if err or df is None or df.empty:
+            continue
+        return sanitize_df_cols(df)
+    return None
+
+
+def _tdt_build_timeline_for_ticker(
+    primary: pd.DataFrame, history: Optional[pd.DataFrame], ticker: str
+) -> pd.DataFrame:
+    """
+    Combine primary (1 row per ticker) with optional history (many rows per ticker),
+    keep only rows for `ticker`, sort ascending by date.
+    """
+    frames: List[pd.DataFrame] = []
+    for src in (history, primary):
+        if src is None or src.empty:
+            continue
+        if "ticker" not in src.columns:
+            continue
+        sel = src[src["ticker"].astype(str).str.upper() == str(ticker).upper()].copy()
+        if not sel.empty:
+            frames.append(sel)
+    if not frames:
+        return pd.DataFrame()
+
+    combined = pd.concat(frames, axis=0, ignore_index=True, sort=False)
+    combined = _tdt_parse_dates(combined)
+
+    # De-dupe: prefer rows that carry decision_action (from the newer primary) when a
+    # history row and a primary row share the same date.
+    if "_ts" in combined.columns:
+        combined["_has_decision"] = (
+            combined["decision_action"].notna().astype(int)
+            if "decision_action" in combined.columns
+            else 0
+        )
+        combined = combined.sort_values(
+            ["_ts", "_has_decision"], ascending=[True, True], na_position="last"
+        )
+        combined = combined.drop_duplicates(subset=["_ts"], keep="last")
+        combined = combined.drop(columns=["_has_decision"], errors="ignore")
+        combined = combined.sort_values("_ts", ascending=True, na_position="last").reset_index(
+            drop=True
+        )
+    return combined
+
+
+def _tdt_compute_change_rows(df_ticker: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return rows that represent meaningful changes:
+      - signal_changed is truthy, OR
+      - decision_action differs from previous row, OR
+      - state_transition is non-empty and not a pure hold-default, OR
+      - |confidence_change| >= 0.04, OR
+      - |score_change| >= 0.03
+    """
+    if df_ticker.empty:
+        return df_ticker
+
+    df = df_ticker.copy().reset_index(drop=True)
+    mask = pd.Series(False, index=df.index)
+
+    if "signal_changed" in df.columns:
+        sc = df["signal_changed"]
+        # Coerce both strings ("True"/"False") and booleans to a proper bool mask.
+        sc_bool = sc.map(
+            lambda v: (
+                str(v).strip().lower() in ("true", "1", "yes")
+                if v is not None and not (isinstance(v, float) and pd.isna(v))
+                else False
+            )
+        )
+        mask = mask | sc_bool.astype(bool)
+
+    if "decision_action" in df.columns:
+        prev = df["decision_action"].shift(1)
+        mask = mask | (df["decision_action"].fillna("") != prev.fillna(""))
+        # Don't flag the very first row solely on "differs from prev NaN"
+        if len(mask):
+            mask.iloc[0] = bool(mask.iloc[0]) and False
+
+    if "state_transition" in df.columns:
+        st_col = df["state_transition"].astype(str).fillna("")
+        interesting = ~st_col.isin(["", "LONG_HOLD", "FLAT_WAIT", "nan", "NaN"])
+        mask = mask | interesting
+
+    if "confidence_change" in df.columns:
+        mask = mask | (pd.to_numeric(df["confidence_change"], errors="coerce").abs() >= 0.04)
+
+    if "score_change" in df.columns:
+        mask = mask | (pd.to_numeric(df["score_change"], errors="coerce").abs() >= 0.03)
+
+    # Always include the most recent row so the user sees the current state.
+    if len(df):
+        mask.iloc[-1] = True
+
+    return df[mask].reset_index(drop=True)
+
+
+def _tdt_display_decision_value(row: Optional[pd.Series]) -> str:
+    """
+    Display-only fallback for the summary "Decision" card.
+
+    Strict priority (read-only, never writes back to files):
+      1. decision_action if present and non-empty
+      2. FLAT              -> "WAIT"
+      3. LONG + BUY        -> "HOLD"
+      4. LONG + HOLD       -> "HOLD"
+      5. LONG + SELL       -> "EXIT"
+      6. "N/A"
+    """
+    if row is None:
+        return "N/A"
+
+    raw = row.get("decision_action") if "decision_action" in row.index else None
+    if raw is not None and not (isinstance(raw, float) and pd.isna(raw)):
+        s = str(raw).strip()
+        if s and s.lower() not in ("nan", "none", "nat"):
+            return s.upper()
+
+    held = str(row.get("held_state") or "").strip().upper() if "held_state" in row.index else ""
+    signal = str(row.get("signal") or "").strip().upper() if "signal" in row.index else ""
+
+    if held == "FLAT":
+        return "WAIT"
+    if held == "LONG":
+        if signal == "BUY":
+            return "HOLD"
+        if signal == "HOLD":
+            return "HOLD"
+        if signal == "SELL":
+            return "EXIT"
+    return "N/A"
+
+
+# Display-only fallbacks for missing values in the timeline/events tables.
+# Text defaults use sentinel strings; numeric defaults use empty strings ("blank").
+_TDT_TEXT_FILL_DEFAULTS: Dict[str, str] = {
+    "decision_action": "INIT",
+    "state_transition": "INIT",
+    "held_state": "FLAT",
+    "decision_reason": "",
+    "prior_signal": "",
+    "rationale": "",
+    "signal": "",
+    "stance": "",
+    "lifecycle_action": "",
+    "position_state": "",
+    "last_action": "",
+}
+_TDT_NUMERIC_BLANK_COLS: Tuple[str, ...] = (
+    "prior_confidence",
+    "prior_score",
+    "confidence_change",
+    "score_change",
+)
+
+
+def _tdt_display_fillna(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a copy of df with None/NaN/NaT replaced by display-friendly values.
+
+    This only affects rendering — source CSVs are NEVER mutated.
+    """
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    for col, default in _TDT_TEXT_FILL_DEFAULTS.items():
+        if col not in out.columns:
+            continue
+        ser = out[col]
+        # Map anything that looks like a missing value to the default.
+        out[col] = ser.map(
+            lambda v, _d=default: (
+                _d
+                if v is None
+                or (isinstance(v, float) and pd.isna(v))
+                or str(v).strip().lower() in ("nan", "none", "nat", "")
+                else str(v)
+            )
+        )
+
+    # Numeric columns: keep valid floats (formatted to 4dp), blank out everything else.
+    for col in _TDT_NUMERIC_BLANK_COLS:
+        if col not in out.columns:
+            continue
+        num = pd.to_numeric(out[col], errors="coerce")
+        out[col] = num.map(lambda v: "" if pd.isna(v) else f"{float(v):+.4f}")
+
+    return out
+
+
+def _tdt_smoothed_series(df: pd.DataFrame, col: str, window: int = 5) -> Optional[pd.DataFrame]:
+    """
+    Build a chart-friendly frame with the raw series + a rolling-mean smoothed series.
+
+    Returns a DataFrame with columns like `{col}` and `{col}_smooth`, or None if the
+    input column is absent/empty. The smoothed series uses min_periods=1 so it renders
+    immediately on short timelines and converges to a true 5-bar mean when enough rows
+    exist. When the timeline is shorter than `window`, the smoothed line is identical
+    to the raw series by design, so the chart still reads clearly.
+    """
+    if col not in df.columns:
+        return None
+    raw = pd.to_numeric(df[col], errors="coerce")
+    if raw.notna().sum() == 0:
+        return None
+
+    smooth_name = f"{col}_smooth"
+    out = pd.DataFrame({col: raw, smooth_name: raw.rolling(window=window, min_periods=1).mean()})
+    # Chart is cleanest when the smoothed line is the primary visual; raw is a thin echo.
+    return out[[smooth_name, col]]
+
+
+def _tdt_describe_change(delta: Any, label: str) -> Optional[str]:
+    """Compact English phrase for a signed change value; None if not material."""
+    try:
+        if delta is None or (isinstance(delta, float) and pd.isna(delta)):
+            return None
+        v = float(delta)
+    except Exception:
+        return None
+    if not np.isfinite(v):
+        return None
+    mag = abs(v)
+    # Threshold mirrors the "meaningful changes" detector (0.04 for confidence, 0.03 for score).
+    min_mag = 0.04 if label == "confidence" else 0.03
+    if mag < min_mag:
+        return None
+    direction = "rose" if v > 0 else "fell"
+    return f"{label} {direction} by {mag:.2f}"
+
+
+def _tdt_event_sentence(row: pd.Series) -> str:
+    """
+    Render one timeline row as a single human-readable sentence.
+
+    Priority of sources: decision_action → state_transition → signal/rationale.
+    When confidence_change or score_change is materially non-zero, it is woven into
+    the sentence in plain English (no awkward slash phrases).
+    """
+    ts = row.get("_ts") if "_ts" in row.index else None
+    if ts is None or (isinstance(ts, float) and pd.isna(ts)) or pd.isna(ts):
+        ts = row.get("date") or row.get("as_of_date") or ""
+    try:
+        date_label = pd.to_datetime(ts).strftime("%Y-%m-%d")
+    except Exception:
+        date_label = str(ts) if ts else "(no date)"
+
+    action = str(row.get("decision_action") or "").strip().upper()
+    transition = str(row.get("state_transition") or "").strip().upper()
+    signal = str(row.get("signal") or "").strip().upper()
+    rationale = str(row.get("rationale") or "").strip()
+
+    conf_change = row.get("confidence_change") if "confidence_change" in row.index else None
+    score_change = row.get("score_change") if "score_change" in row.index else None
+    conf_phrase = _tdt_describe_change(conf_change, "confidence")
+    score_phrase = _tdt_describe_change(score_change, "score")
+    # Prefer confidence phrasing; fall back to score if confidence isn't material.
+    change_phrase = conf_phrase or score_phrase
+
+    # Compose the core phrase (with inline change context when available).
+    def _with_change(base: str, on_movement: str, fallback: str) -> str:
+        if change_phrase:
+            return f"{base} {on_movement} {change_phrase}."
+        return f"{base}{fallback}"
+
+    if action == "BUY" or transition == "FLAT_TO_LONG":
+        phrase = _with_change(
+            "New bullish entry triggered",
+            "as",
+            ".",
+        )
+    elif action == "ADD" or transition == "LONG_ADD":
+        phrase = _with_change(
+            "Conviction improved; added to the position",
+            "as",
+            ".",
+        )
+    elif action == "HOLD" or transition == "LONG_HOLD":
+        # HOLD rarely needs a movement suffix; keep it calm unless a material change exists.
+        if change_phrase:
+            phrase = f"Bullish signal remained intact; held position ({change_phrase})."
+        else:
+            phrase = "Bullish signal remained intact; held position."
+    elif action == "TRIM" or transition == "LONG_TRIM":
+        phrase = _with_change(
+            "Signal weakened; trimmed exposure",
+            "as conviction softened —",
+            " as conviction softened.",
+        )
+    elif action == "EXIT" or transition == "LONG_EXIT":
+        phrase = _with_change(
+            "Bearish deterioration triggered exit",
+            "after",
+            ".",
+        )
+    elif action == "WAIT" or transition == "FLAT_WAIT":
+        phrase = "No actionable setup; waiting."
+    elif signal in ("BUY", "SELL", "HOLD"):
+        phrase = f"Signal: {signal}."
+        if change_phrase:
+            phrase = f"Signal: {signal} ({change_phrase})."
+    elif rationale:
+        phrase = rationale if rationale.endswith(".") else rationale + "."
+    else:
+        phrase = "Status update."
+
+    return f"{date_label}: {phrase}"
+
+
+def page_ticker_decision_timeline() -> None:
+    """Observability page: per-ticker day-by-day decision timeline."""
+    st.markdown("### 📜 Ticker Decision Timeline")
+    st.caption(
+        "Shows signal, decision_action, confidence, score, and lifecycle history for the "
+        "selected ticker. Read-only observability view — no changes to signals, lifecycle, "
+        "or execution."
+    )
+
+    # --- Load primary source safely ---
+    primary, err = _tdt_load_primary()
+    if err == "empty":
+        st.info(
+            "No **signal_lifecycle.csv** yet (or it is empty). "
+            "Run the lifecycle step to populate it."
+        )
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
+    if err:
+        st.warning(f"Could not read signal_lifecycle.csv: {err}")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
+    if primary is None or primary.empty:
+        st.info("No lifecycle rows available.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
+
+    if "ticker" not in primary.columns:
+        st.warning("signal_lifecycle.csv is missing the required `ticker` column.")
+        st.dataframe(primary.head(50), use_container_width=True)
+        return
+
+    # --- Ticker selector ---
+    tickers = sorted(
+        [t for t in primary["ticker"].dropna().astype(str).str.upper().unique().tolist() if t]
+    )
+    if not tickers:
+        st.info("No tickers found in signal_lifecycle.csv.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
+
+    default_idx = 0
+    preferred_default = st.session_state.get("tdt_last_ticker")
+    if preferred_default in tickers:
+        default_idx = tickers.index(preferred_default)
+
+    ticker = st.selectbox(
+        "Select a ticker",
+        options=tickers,
+        index=default_idx,
+        key="tdt_ticker",
+        help="Type to filter. All tickers present in signal_lifecycle.csv.",
+    )
+    st.session_state["tdt_last_ticker"] = ticker
+
+    # --- Optional history augment ---
+    history = _tdt_load_history_optional()
+    timeline = _tdt_build_timeline_for_ticker(primary, history, ticker)
+
+    if timeline.empty:
+        st.info(f"No timeline rows found for **{ticker}**.")
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+        return
+
+    # --- Summary cards (latest row) ---
+    latest = timeline.iloc[-1] if len(timeline) else None
+    first_ts = timeline["_ts"].min() if "_ts" in timeline.columns else None
+    last_ts = timeline["_ts"].max() if "_ts" in timeline.columns else None
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    with m1:
+        st.metric("Signal", _tdt_safe_metric(latest, "signal"))
+    with m2:
+        # Display-only fallback: never show "N/A" when held_state + signal can imply a read.
+        st.metric("Decision", _tdt_display_decision_value(latest))
+    with m3:
+        st.metric("Held", _tdt_safe_metric(latest, "held_state", default="FLAT"))
+    with m4:
+        st.metric("Confidence", _tdt_safe_metric(latest, "confidence"))
+    with m5:
+        st.metric("Score", _tdt_safe_metric(latest, "score"))
+    with m6:
+        st.metric("Rows", f"{len(timeline)}")
+
+    def _fmt_ts(x: Any) -> str:
+        try:
+            if x is None or pd.isna(x):
+                return "N/A"
+            return pd.to_datetime(x).strftime("%Y-%m-%d")
+        except Exception:
+            return "N/A"
+
+    st.caption(
+        f"Timeline span: **{_fmt_ts(first_ts)}** → **{_fmt_ts(last_ts)}**  ·  "
+        f"Source: signal_lifecycle.csv"
+        + (" (+ optional history file)" if history is not None else "")
+    )
+
+    # --- Full timeline table ---
+    st.markdown("#### Full timeline")
+    display_cols = _tdt_select_existing_columns(timeline, _TDT_PREFERRED_COLUMNS)
+    if "date" not in display_cols and "_ts" in timeline.columns:
+        # Expose a derived date column if user has no native date column
+        timeline = timeline.assign(date=timeline["_ts"].dt.strftime("%Y-%m-%d"))
+        display_cols = ["date"] + [c for c in display_cols if c != "date"]
+
+    if not display_cols:
+        st.warning("No recognizable columns to display.")
+        st.dataframe(timeline.head(100), use_container_width=True, hide_index=True)
+    else:
+        # Display-only NaN/None/NaT cleanup; does not mutate source files.
+        tl_display = _tdt_display_fillna(timeline[display_cols].reset_index(drop=True))
+        st.dataframe(
+            tl_display,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # --- Meaningful changes ---
+    st.markdown("#### Meaningful changes")
+    st.caption(
+        "Rows where the signal flipped, the decision_action changed, a non-trivial "
+        "state transition fired, or confidence/score moved materially."
+    )
+    events = _tdt_compute_change_rows(timeline)
+    if events.empty:
+        st.info("No meaningful changes detected in the available history for this ticker.")
+    else:
+        ev_cols = _tdt_select_existing_columns(events, _TDT_PREFERRED_COLUMNS)
+        if "date" not in ev_cols and "_ts" in events.columns:
+            events = events.assign(date=events["_ts"].dt.strftime("%Y-%m-%d"))
+            ev_cols = ["date"] + [c for c in ev_cols if c != "date"]
+        # Display-only NaN/None/NaT cleanup; does not mutate source files.
+        ev_display = _tdt_display_fillna(
+            events[ev_cols].reset_index(drop=True) if ev_cols else events
+        )
+        st.dataframe(
+            ev_display,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # --- Charts (Streamlit native; each gated on column availability) ---
+    st.markdown("#### Charts")
+    chart_df = timeline.copy()
+    if "_ts" in chart_df.columns:
+        chart_df = chart_df.dropna(subset=["_ts"]).set_index("_ts")
+
+    rendered_any = False
+
+    # --- Confidence: prefer a 5-row rolling mean for readability; show raw as thin echo. ---
+    conf_frame = _tdt_smoothed_series(chart_df, "confidence", window=5)
+    if conf_frame is not None:
+        try:
+            n_real = int(pd.to_numeric(chart_df["confidence"], errors="coerce").notna().sum())
+            label = (
+                "**Confidence over time** (5-row smoothed, raw overlay)"
+                if n_real >= 5
+                else "**Confidence over time**"
+            )
+            st.markdown(label)
+            st.line_chart(conf_frame)
+            rendered_any = True
+        except Exception as e:
+            # Graceful fallback to raw series if smoothing/plotting fails.
+            try:
+                st.markdown("**Confidence over time**")
+                st.line_chart(pd.to_numeric(chart_df["confidence"], errors="coerce"))
+                rendered_any = True
+            except Exception:
+                st.caption(f"Confidence chart unavailable: {_short_err(e)}")
+
+    # --- Score: same smoothing treatment when the column is present. ---
+    score_frame = _tdt_smoothed_series(chart_df, "score", window=5)
+    if score_frame is not None:
+        try:
+            n_real = int(pd.to_numeric(chart_df["score"], errors="coerce").notna().sum())
+            label = (
+                "**Score over time** (5-row smoothed, raw overlay)"
+                if n_real >= 5
+                else "**Score over time**"
+            )
+            st.markdown(label)
+            st.line_chart(score_frame)
+            rendered_any = True
+        except Exception as e:
+            try:
+                st.markdown("**Score over time**")
+                st.line_chart(pd.to_numeric(chart_df["score"], errors="coerce"))
+                rendered_any = True
+            except Exception:
+                st.caption(f"Score chart unavailable: {_short_err(e)}")
+
+    if "close" in chart_df.columns and chart_df["close"].notna().any():
+        try:
+            st.markdown("**Close over time**")
+            st.line_chart(pd.to_numeric(chart_df["close"], errors="coerce"))
+            rendered_any = True
+        except Exception as e:
+            st.caption(f"Close chart unavailable: {_short_err(e)}")
+
+    if not rendered_any:
+        st.info("No numeric series available to chart for this ticker.")
+
+    # --- Plain-English event feed ---
+    st.markdown("#### Decision feed")
+    if events.empty:
+        st.caption("Nothing to narrate yet.")
+    else:
+        for _, r in events.iterrows():
+            st.write(f"• {_tdt_event_sentence(r)}")
+
+
+# ──────────────────────────────
+# EXECUTION INTELLIGENCE PAGE
+# (dashboard-only; reads execution_intelligence.csv,
+#  execution_plan.csv, reprice_open_orders.csv)
+# ──────────────────────────────
+
+
+def _ei_select_existing_columns(df: pd.DataFrame, preferred: List[str]) -> List[str]:
+    """Return preferred columns that actually exist in df, preserving order."""
+    if df is None or df.empty:
+        return []
+    cols = list(df.columns)
+    return [c for c in preferred if c in cols]
+
+
+def _ei_safe_col(df: pd.DataFrame, col: str) -> Optional[pd.Series]:
+    """Return df[col] if present, else None. Never raises."""
+    try:
+        if df is None or df.empty or col not in df.columns:
+            return None
+        return df[col]
+    except Exception:
+        return None
+
+
+def _ei_safe_numeric(df: pd.DataFrame, col: str) -> Optional[pd.Series]:
+    """Return df[col] coerced to numeric (NaNs dropped), else None."""
+    s = _ei_safe_col(df, col)
+    if s is None:
+        return None
+    try:
+        out = pd.to_numeric(s, errors="coerce").dropna()
+        return out if not out.empty else None
+    except Exception:
+        return None
+
+
+def _ei_safe_metric(
+    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.4f}", default: str = "N/A"
+) -> str:
+    """Compute a single aggregate metric on a numeric column with safe fallback."""
+    s = _ei_safe_numeric(df, col)
+    if s is None:
+        return default
+    try:
+        if agg == "mean":
+            v = float(s.mean())
+        elif agg == "median":
+            v = float(s.median())
+        elif agg == "min":
+            v = float(s.min())
+        elif agg == "max":
+            v = float(s.max())
+        elif agg == "sum":
+            v = float(s.sum())
+        elif agg == "count":
+            v = int(s.shape[0])
+            return f"{v:,}"
+        else:
+            return default
+        if not np.isfinite(v):
+            return default
+        return fmt.format(v)
+    except Exception:
+        return default
+
+
+def _ei_value_counts_table(
+    df: pd.DataFrame, col: str, order: Optional[List[str]] = None
+) -> Optional[pd.DataFrame]:
+    """Return a tidy value-counts DataFrame with stable column names."""
+    s = _ei_safe_col(df, col)
+    if s is None:
+        return None
+    try:
+        s = s.fillna("").astype(str).str.strip().replace({"": "(missing)"})
+        vc = s.value_counts(dropna=False)
+        if order:
+            present = [v for v in order if v in vc.index]
+            tail = [v for v in vc.index if v not in present]
+            vc = vc.reindex(present + tail).fillna(0).astype(int)
+        out = vc.reset_index()
+        out.columns = [col, "count"]
+        total = int(out["count"].sum())
+        if total > 0:
+            out["pct"] = (out["count"] / total * 100.0).round(1)
+        return out
+    except Exception:
+        return None
+
+
+def _ei_top_reason_table(df: pd.DataFrame, col: str, top_n: int = 10) -> Optional[pd.DataFrame]:
+    """Top-N value counts for a free-form text column (e.g. reasons)."""
+    vc = _ei_value_counts_table(df, col)
+    if vc is None or vc.empty:
+        return None
+    return vc.head(top_n).reset_index(drop=True)
+
+
+def _ei_normalize_symbol_col(df: pd.DataFrame) -> pd.DataFrame:
+    """Add a 'symbol' column if only 'ticker' is present (non-destructive copy)."""
+    if df is None or df.empty:
+        return df
+    if "symbol" in df.columns:
+        return df
+    if "ticker" in df.columns:
+        out = df.copy()
+        out["symbol"] = out["ticker"]
+        return out
+    return df
+
+
+def _ei_pick_time_col(df: pd.DataFrame) -> Optional[str]:
+    """Pick the best timestamp-like column we know how to render."""
+    if df is None or df.empty:
+        return None
+    for c in (
+        "timestamp",
+        "submitted_at",
+        "created_at",
+        "generated_at",
+        "ts",
+        "time",
+        "snapshot_ts",
+    ):
+        if c in df.columns:
+            return c
+    return None
+
+
+def _ei_truthy_count(df: pd.DataFrame, col: str) -> Optional[int]:
+    """Count True-ish values in a column. Returns None if column missing."""
+    s = _ei_safe_col(df, col)
+    if s is None:
+        return None
+    try:
+        s2 = s.astype(str).str.strip().str.lower()
+        return int(s2.isin(["true", "1", "yes", "t"]).sum())
+    except Exception:
+        return None
+
+
+def _ei_pct_of(numer: Optional[int], denom: int) -> str:
+    if numer is None or denom <= 0:
+        return "N/A"
+    return f"{(numer / denom * 100.0):.1f}%"
+
+
+def _ei_render_table(
+    df: Optional[pd.DataFrame],
+    *,
+    height: Optional[int] = None,
+    empty_msg: str = "No rows to display.",
+) -> None:
+    """Render a DataFrame with a friendly fallback when empty/None."""
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.caption(empty_msg)
+        return
+    try:
+        if height is not None:
+            st.dataframe(df, use_container_width=True, height=height)
+        else:
+            st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.caption(f"Table unavailable: {_short_err(e)}")
+
+
+def _ei_load(path: Path, label: str) -> Optional[pd.DataFrame]:
+    """Wrap dashboard CSV loader and emit one st.warning on hard errors."""
+    df, err = read_csv_dashboard(path)
+    if err is None:
+        return df
+    if err == "empty":
+        return df  # empty df renders cleanly downstream
+    st.warning(f"{label}: could not read {path.name} ({err}).")
+    return None
+
+
+def page_execution_intelligence() -> None:
+    """⚙️ Execution Intelligence — observability of EI annotations."""
+    st.title("⚙️ Execution Intelligence")
+    st.caption(
+        "Execution quality, quote conditions, liquidity pressure, slippage, "
+        "and partial-fill follow-up diagnostics."
+    )
+
+    ei_df = _ei_load(EXECUTION_INTELLIGENCE_CSV_PATH, "Execution Intelligence log")
+    plan_df = _ei_load(EXECUTION_PLAN_CSV_PATH, "Execution Plan")
+    reprice_df = _ei_load(REPRICE_OPEN_ORDERS_CSV_PATH, "Reprice / Partial Fill follow-up")
+
+    ei_df = _ei_normalize_symbol_col(ei_df) if ei_df is not None else ei_df
+    plan_df = _ei_normalize_symbol_col(plan_df) if plan_df is not None else plan_df
+    reprice_df = _ei_normalize_symbol_col(reprice_df) if reprice_df is not None else reprice_df
+
+    # Pick the "primary" enriched orders source: prefer the EI sidecar (per-submit
+    # rows), fall back to the planning CSV when the sidecar is empty.
+    primary: Optional[pd.DataFrame] = None
+    primary_label = ""
+    if ei_df is not None and not ei_df.empty:
+        primary, primary_label = ei_df, "execution_intelligence.csv"
+    elif plan_df is not None and not plan_df.empty:
+        primary, primary_label = plan_df, "execution_plan.csv"
+
+    if primary is None or primary.empty:
+        st.info(
+            "No execution-intelligence rows found yet. "
+            "Run a planning or placement cycle to populate "
+            "`data/results/execution_intelligence.csv` or "
+            "`data/results/execution_plan.csv`."
+        )
+
+    # ── 1) TOP SUMMARY METRICS ────────────────────────────────────────
+    st.markdown("### Summary")
+    n_rows = int(primary.shape[0]) if primary is not None and not primary.empty else 0
+    avg_q = (
+        _ei_safe_metric(primary, "execution_quality_score", "mean", "{:.3f}")
+        if primary is not None
+        else "N/A"
+    )
+
+    risk_counts: Dict[str, int] = {}
+    if primary is not None and "execution_risk_flag" in primary.columns:
+        try:
+            tmp = primary["execution_risk_flag"].fillna("").astype(str).str.strip().str.upper()
+            risk_counts = tmp.value_counts(dropna=False).to_dict()
+        except Exception:
+            risk_counts = {}
+    pct_low = _ei_pct_of(risk_counts.get("LOW", 0), n_rows) if n_rows else "N/A"
+    pct_high = _ei_pct_of(risk_counts.get("HIGH", 0), n_rows) if n_rows else "N/A"
+
+    stale_count = _ei_truthy_count(primary, "quote_is_stale") if primary is not None else None
+    skip_flag_count = (
+        _ei_truthy_count(primary, "execution_skip_flag") if primary is not None else None
+    )
+
+    defer_skip_count: Optional[int] = None
+    if primary is not None and "execution_style" in primary.columns:
+        try:
+            es = primary["execution_style"].fillna("").astype(str).str.strip().str.upper()
+            defer_skip_count = int(es.isin(["DEFER", "SKIP"]).sum())
+        except Exception:
+            defer_skip_count = None
+
+    partial_action_count: Optional[int] = None
+    if (
+        reprice_df is not None
+        and not reprice_df.empty
+        and "partial_fill_action" in reprice_df.columns
+    ):
+        try:
+            pa = reprice_df["partial_fill_action"].fillna("").astype(str).str.strip().str.upper()
+            partial_action_count = int((pa != "").sum())
+        except Exception:
+            partial_action_count = None
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Rows (primary)", f"{n_rows:,}" if n_rows else "0")
+    c2.metric("Avg quality score", avg_q)
+    c3.metric("% LOW risk", pct_low)
+    c4.metric("% HIGH risk", pct_high)
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Stale quotes", f"{stale_count:,}" if isinstance(stale_count, int) else "N/A")
+    c6.metric(
+        "DEFER+SKIP styles", f"{defer_skip_count:,}" if isinstance(defer_skip_count, int) else "N/A"
+    )
+    c7.metric(
+        "Skip flag count", f"{skip_flag_count:,}" if isinstance(skip_flag_count, int) else "N/A"
+    )
+    c8.metric(
+        "Partial-fill actions",
+        f"{partial_action_count:,}" if isinstance(partial_action_count, int) else "N/A",
+    )
+
+    if primary is not None and not primary.empty:
+        st.caption(f"Primary source: `{primary_label}` ({n_rows:,} rows)")
+
+    # ── 2) EXECUTION RISK DISTRIBUTION ────────────────────────────────
+    st.markdown("### Execution risk distribution")
+    risk_table = (
+        _ei_value_counts_table(
+            primary,
+            "execution_risk_flag",
+            order=["LOW", "MEDIUM", "HIGH", "UNKNOWN"],
+        )
+        if primary is not None
+        else None
+    )
+    if risk_table is None or risk_table.empty:
+        st.caption("No `execution_risk_flag` column available.")
+    else:
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            _ei_render_table(risk_table)
+        with col_b:
+            try:
+                chart_df = risk_table.set_index("execution_risk_flag")[["count"]]
+                st.bar_chart(chart_df)
+            except Exception as e:
+                st.caption(f"Risk chart unavailable: {_short_err(e)}")
+
+    # ── 3) EXECUTION QUALITY DISTRIBUTION ─────────────────────────────
+    st.markdown("### Execution quality score")
+    q_series = _ei_safe_numeric(primary, "execution_quality_score") if primary is not None else None
+    if q_series is None or q_series.empty:
+        st.caption("No `execution_quality_score` data available.")
+    else:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Mean", f"{q_series.mean():.3f}")
+        m2.metric("Median", f"{q_series.median():.3f}")
+        m3.metric("Min", f"{q_series.min():.3f}")
+        m4.metric("Max", f"{q_series.max():.3f}")
+
+        try:
+            bins = [0.0, 0.15, 0.30, 0.45, 0.60, 0.75, 0.90, 1.000001]
+            labels = [
+                "0.00–0.15",
+                "0.15–0.30",
+                "0.30–0.45",
+                "0.45–0.60",
+                "0.60–0.75",
+                "0.75–0.90",
+                "0.90–1.00",
+            ]
+            binned = pd.cut(q_series, bins=bins, labels=labels, include_lowest=True, right=False)
+            hist_df = binned.value_counts().reindex(labels).fillna(0).astype(int)
+            hist_df = hist_df.rename_axis("score_bin").reset_index(name="count")
+            col_h1, col_h2 = st.columns([1, 2])
+            with col_h1:
+                _ei_render_table(hist_df)
+            with col_h2:
+                st.bar_chart(hist_df.set_index("score_bin"))
+        except Exception as e:
+            st.caption(f"Histogram unavailable: {_short_err(e)}")
+
+        # Optional: line chart of score by order sequence
+        if primary is not None:
+            tcol = _ei_pick_time_col(primary)
+            if tcol is not None and "execution_quality_score" in primary.columns:
+                try:
+                    trend = primary[[tcol, "execution_quality_score"]].copy()
+                    trend["execution_quality_score"] = pd.to_numeric(
+                        trend["execution_quality_score"], errors="coerce"
+                    )
+                    trend = trend.dropna(subset=["execution_quality_score"])
+                    if not trend.empty:
+                        try:
+                            trend[tcol] = pd.to_datetime(trend[tcol], errors="coerce", utc=True)
+                            trend = trend.dropna(subset=[tcol])
+                        except Exception:
+                            pass
+                        if not trend.empty:
+                            trend = trend.sort_values(tcol).reset_index(drop=True)
+                            st.line_chart(trend.set_index(tcol)[["execution_quality_score"]])
+                except Exception as e:
+                    st.caption(f"Quality trend chart unavailable: {_short_err(e)}")
+
+    # ── 4) SPREAD / QUOTE QUALITY ─────────────────────────────────────
+    st.markdown("### Spread & quote quality")
+    spread_table = (
+        _ei_value_counts_table(
+            primary,
+            "spread_bucket",
+            order=["TIGHT", "NORMAL", "WIDE", "TOO_WIDE", "UNKNOWN"],
+        )
+        if primary is not None
+        else None
+    )
+    stale_table = _ei_value_counts_table(primary, "quote_is_stale") if primary is not None else None
+
+    sp_a, sp_b, sp_c = st.columns(3)
+    sp_a.metric(
+        "Avg spread (bps)",
+        _ei_safe_metric(primary, "spread_bps", "mean", "{:.2f}") if primary is not None else "N/A",
+    )
+    sp_b.metric(
+        "Avg quote age (s)",
+        (
+            _ei_safe_metric(primary, "quote_age_sec", "mean", "{:.1f}")
+            if primary is not None
+            else "N/A"
+        ),
+    )
+    sp_c.metric("Stale quote rows", f"{stale_count:,}" if isinstance(stale_count, int) else "N/A")
+
+    sb_col, st_col = st.columns(2)
+    with sb_col:
+        st.markdown("**Spread bucket counts**")
+        _ei_render_table(spread_table, empty_msg="No `spread_bucket` data.")
+    with st_col:
+        st.markdown("**Quote-is-stale counts**")
+        _ei_render_table(stale_table, empty_msg="No `quote_is_stale` data.")
+
+    # ── 5) EXECUTION STYLE ───────────────────────────────────────────
+    st.markdown("### Execution style")
+    style_table = (
+        _ei_value_counts_table(
+            primary,
+            "execution_style",
+            order=["AGGRESSIVE_LIMIT", "NORMAL_LIMIT", "PASSIVE_LIMIT", "DEFER", "SKIP"],
+        )
+        if primary is not None
+        else None
+    )
+    skipflag_table = (
+        _ei_value_counts_table(primary, "execution_skip_flag") if primary is not None else None
+    )
+
+    es_a, es_b = st.columns(2)
+    with es_a:
+        st.markdown("**Style counts**")
+        _ei_render_table(style_table, empty_msg="No `execution_style` data.")
+    with es_b:
+        st.markdown("**Skip flag counts**")
+        _ei_render_table(skipflag_table, empty_msg="No `execution_skip_flag` data.")
+
+    rs_a, rs_b = st.columns(2)
+    with rs_a:
+        st.markdown("**Top execution_reason values**")
+        _ei_render_table(
+            _ei_top_reason_table(primary, "execution_reason", 10),
+            empty_msg="No `execution_reason` data.",
+        )
+    with rs_b:
+        st.markdown("**Top execution_skip_reason values**")
+        _ei_render_table(
+            _ei_top_reason_table(primary, "execution_skip_reason", 10),
+            empty_msg="No `execution_skip_reason` data.",
+        )
+
+    # ── 6) LIQUIDITY PRESSURE ────────────────────────────────────────
+    st.markdown("### Liquidity pressure")
+    if primary is None or primary.empty:
+        st.caption("No primary EI source available.")
+    else:
+        l1, l2, l3 = st.columns(3)
+        l1.metric(
+            "Avg order_notional", _ei_safe_metric(primary, "order_notional", "mean", "{:,.0f}")
+        )
+        l2.metric(
+            "Avg liquidity_proxy", _ei_safe_metric(primary, "liquidity_proxy", "mean", "{:,.0f}")
+        )
+        l3.metric(
+            "Avg notional / liquidity",
+            _ei_safe_metric(primary, "notional_vs_liquidity", "mean", "{:.4f}"),
+        )
+
+        if "notional_vs_liquidity" in primary.columns:
+            try:
+                worst = primary.copy()
+                worst["__nvl"] = pd.to_numeric(worst["notional_vs_liquidity"], errors="coerce")
+                worst = worst.dropna(subset=["__nvl"]).sort_values("__nvl", ascending=False)
+                cols_top = _ei_select_existing_columns(
+                    worst,
+                    [
+                        "symbol",
+                        "side",
+                        "qty",
+                        "order_notional",
+                        "liquidity_proxy",
+                        "notional_vs_liquidity",
+                        "spread_bucket",
+                        "execution_style",
+                        "execution_quality_score",
+                        "execution_risk_flag",
+                    ],
+                )
+                if cols_top:
+                    st.markdown("**Top notional vs liquidity**")
+                    _ei_render_table(
+                        worst[cols_top].head(10), height=320, empty_msg="No rows to rank."
+                    )
+            except Exception as e:
+                st.caption(f"Liquidity ranking unavailable: {_short_err(e)}")
+
+    # ── 7) PARTIAL FILL INTELLIGENCE ─────────────────────────────────
+    st.markdown("### Partial-fill follow-up (reprice_open_orders.csv)")
+    if reprice_df is None:
+        st.info("`data/results/reprice_open_orders.csv` not found.")
+    elif reprice_df.empty:
+        st.caption("No reprice / partial-fill rows yet.")
+    else:
+        pf_a, pf_b = st.columns(2)
+        with pf_a:
+            st.markdown("**partial_fill_action counts**")
+            _ei_render_table(
+                _ei_value_counts_table(
+                    reprice_df,
+                    "partial_fill_action",
+                    order=["KEEP_WORKING", "REPRICE", "CANCEL", "DEFER_REPRICE"],
+                ),
+                empty_msg="No `partial_fill_action` column.",
+            )
+        with pf_b:
+            st.markdown("**Top partial_fill_reason values**")
+            _ei_render_table(
+                _ei_top_reason_table(reprice_df, "partial_fill_reason", 10),
+                empty_msg="No `partial_fill_reason` column.",
+            )
+
+        cols_pf = _ei_select_existing_columns(
+            reprice_df,
+            [
+                "symbol",
+                "side",
+                "status",
+                "fill_pct",
+                "partial_fill_action",
+                "partial_fill_reason",
+                "spread_bucket",
+                "spread_bps",
+                "quote_is_stale",
+                "quote_age_sec",
+                "execution_quality_score",
+                "execution_risk_flag",
+            ],
+        )
+        if cols_pf:
+            st.markdown("**Reprice rows (curated columns)**")
+            _ei_render_table(reprice_df[cols_pf], height=360, empty_msg="No rows.")
+
+    # ── 8) SLIPPAGE DIAGNOSTICS ──────────────────────────────────────
+    st.markdown("### Slippage diagnostics")
+
+    slip_sources: List[Tuple[str, Optional[pd.DataFrame]]] = [
+        ("execution_intelligence.csv", ei_df),
+        ("reprice_open_orders.csv", reprice_df),
+        ("execution_plan.csv", plan_df),
+    ]
+    rendered_any_slip = False
+    for src_label, src_df in slip_sources:
+        if src_df is None or src_df.empty:
+            continue
+        if not any(c in src_df.columns for c in ("expected_slippage_bps", "realized_slippage_bps")):
+            continue
+        rendered_any_slip = True
+        st.markdown(f"**Source:** `{src_label}`")
+        s1, s2 = st.columns(2)
+        s1.metric(
+            "Avg expected slippage (bps)",
+            _ei_safe_metric(src_df, "expected_slippage_bps", "mean", "{:.2f}"),
+        )
+        s2.metric(
+            "Avg realized slippage (bps)",
+            _ei_safe_metric(src_df, "realized_slippage_bps", "mean", "{:.2f}"),
+        )
+
+        if "realized_slippage_bps" in src_df.columns:
+            try:
+                w = src_df.copy()
+                w["__rs"] = pd.to_numeric(w["realized_slippage_bps"], errors="coerce")
+                w = w.dropna(subset=["__rs"]).sort_values("__rs", ascending=False)
+                cols_slip = _ei_select_existing_columns(
+                    w,
+                    [
+                        "symbol",
+                        "side",
+                        "qty",
+                        "intended_price",
+                        "submitted_limit_price",
+                        "decision_mid_price",
+                        "fill_price",
+                        "expected_slippage_bps",
+                        "realized_slippage_bps",
+                        "execution_quality_score",
+                        "execution_risk_flag",
+                    ],
+                )
+                if cols_slip and not w.empty:
+                    st.markdown("Top realized slippage rows")
+                    _ei_render_table(
+                        w[cols_slip].head(10), height=320, empty_msg="No realized slippage rows."
+                    )
+                    try:
+                        rs_series = pd.to_numeric(
+                            src_df["realized_slippage_bps"], errors="coerce"
+                        ).dropna()
+                        if not rs_series.empty:
+                            st.markdown("Realized slippage distribution (bps)")
+                            bins = [-100, -50, -20, -5, 0, 5, 20, 50, 100, 1e9]
+                            labels = [
+                                "<-50",
+                                "-50..-20",
+                                "-20..-5",
+                                "-5..0",
+                                "0..5",
+                                "5..20",
+                                "20..50",
+                                "50..100",
+                                ">100",
+                            ]
+                            binned = pd.cut(
+                                rs_series,
+                                bins=bins,
+                                labels=labels,
+                                include_lowest=True,
+                                right=False,
+                            )
+                            sd = binned.value_counts().reindex(labels).fillna(0).astype(int)
+                            sd = sd.rename_axis("bin").reset_index(name="count")
+                            st.bar_chart(sd.set_index("bin"))
+                    except Exception as e:
+                        st.caption(f"Slippage chart unavailable: {_short_err(e)}")
+            except Exception as e:
+                st.caption(f"Slippage ranking unavailable: {_short_err(e)}")
+
+    if not rendered_any_slip:
+        st.caption("No slippage columns found in any EI source yet.")
+
+    # ── 9) DETAILED RAW TABLES ───────────────────────────────────────
+    st.markdown("### Detailed tables")
+
+    curated_orders = [
+        "timestamp",
+        "submitted_at",
+        "created_at",
+        "generated_at",
+        "session",
+        "symbol",
+        "action",
+        "side",
+        "qty",
+        "status",
+        "execution_quality_score",
+        "execution_risk_flag",
+        "execution_quality_reason",
+        "execution_style",
+        "execution_aggressiveness",
+        "execution_reason",
+        "execution_skip_flag",
+        "execution_skip_reason",
+        "spread_bucket",
+        "spread_bps",
+        "quote_is_stale",
+        "quote_age_sec",
+        "liquidity_proxy",
+        "order_notional",
+        "notional_vs_liquidity",
+        "expected_slippage_bps",
+        "realized_slippage_bps",
+    ]
+    curated_reprice = [
+        "timestamp",
+        "symbol",
+        "side",
+        "status",
+        "fill_pct",
+        "partial_fill_action",
+        "partial_fill_reason",
+        "spread_bucket",
+        "spread_bps",
+        "quote_is_stale",
+        "quote_age_sec",
+        "decision_mid_price",
+        "expected_slippage_bps",
+        "realized_slippage_bps",
+        "execution_quality_score",
+        "execution_risk_flag",
+    ]
+
+    with st.expander("Planned orders (execution_plan.csv)", expanded=False):
+        if plan_df is None:
+            st.info("`data/results/execution_plan.csv` not found.")
+        elif plan_df.empty:
+            st.caption("No planned orders in the current cycle.")
+        else:
+            cols_p = _ei_select_existing_columns(plan_df, curated_orders) or list(plan_df.columns)
+            _ei_render_table(plan_df[cols_p], height=360)
+            with st.expander("Show full raw planned-orders table", expanded=False):
+                _ei_render_table(plan_df, height=360)
+
+    with st.expander("Submitted orders (execution_intelligence.csv)", expanded=False):
+        if ei_df is None:
+            st.info("`data/results/execution_intelligence.csv` not found.")
+        elif ei_df.empty:
+            st.caption("No submitted-order EI rows yet.")
+        else:
+            cols_e = _ei_select_existing_columns(ei_df, curated_orders) or list(ei_df.columns)
+            _ei_render_table(ei_df[cols_e], height=360)
+            with st.expander("Show full raw submitted-orders table", expanded=False):
+                _ei_render_table(ei_df, height=360)
+
+    with st.expander("Reprice / Partial-fill follow-up (reprice_open_orders.csv)", expanded=False):
+        if reprice_df is None:
+            st.info("`data/results/reprice_open_orders.csv` not found.")
+        elif reprice_df.empty:
+            st.caption("No reprice rows in the current cycle.")
+        else:
+            cols_r = _ei_select_existing_columns(reprice_df, curated_reprice) or list(
+                reprice_df.columns
+            )
+            _ei_render_table(reprice_df[cols_r], height=360)
+            with st.expander("Show full raw reprice table", expanded=False):
+                _ei_render_table(reprice_df, height=360)
+
+
+# ──────────────────────────────
+# FEEDBACK INTELLIGENCE PAGE
+# (dashboard-only; reads feedback_loop_report.csv,
+#  feedback_recommendations.csv, feedback_loop_summary.json)
+# ──────────────────────────────
+
+# Friendly labels for the aggregate-performance group keys emitted by
+# services/feedback_loop.py — render only the ones that exist.
+_FB_GROUP_LABELS: List[Tuple[str, str]] = [
+    ("by_execution_risk_flag", "By execution risk flag"),
+    ("by_spread_bucket", "By spread bucket"),
+    ("by_execution_style", "By execution style"),
+    ("by_sizing_bucket", "By sizing bucket"),
+    ("by_signal", "By signal"),
+    ("by_decision_action", "By decision action"),
+    ("by_quote_is_stale", "By quote-is-stale"),
+    ("by_liquidity_pressure_bucket", "By liquidity pressure bucket"),
+    ("by_partial_fill_action", "By partial-fill action"),
+    ("by_action", "By action"),
+]
+
+
+def _fb_load_csv(path: Path, label: str) -> Optional[pd.DataFrame]:
+    """Wrap dashboard CSV loader with a friendly per-file warning on hard errors."""
+    df, err = read_csv_dashboard(path)
+    if err is None:
+        return df
+    if err == "empty":
+        return df
+    st.warning(f"{label}: could not read {path.name} ({err}).")
+    return None
+
+
+def _fb_load_json(path: Path, label: str) -> Optional[Dict[str, Any]]:
+    """Read a JSON file safely. Returns None on missing/error, dict otherwise."""
+    try:
+        if not path.exists():
+            return None
+        try:
+            if path.stat().st_size == 0:
+                return None
+        except OSError:
+            pass
+        text = path.read_text(encoding="utf-8")
+        if not text.strip():
+            return None
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+        return {"value": obj}
+    except Exception as e:
+        st.warning(f"{label}: could not read {path.name} ({_short_err(e)}).")
+        return None
+
+
+def _fb_select_existing_columns(df: pd.DataFrame, preferred: List[str]) -> List[str]:
+    return _ei_select_existing_columns(df, preferred)
+
+
+def _fb_value_counts_table(
+    df: pd.DataFrame, col: str, order: Optional[List[str]] = None
+) -> Optional[pd.DataFrame]:
+    return _ei_value_counts_table(df, col, order=order)
+
+
+def _fb_safe_metric(
+    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.3f}", default: str = "N/A"
+) -> str:
+    return _ei_safe_metric(df, col, agg=agg, fmt=fmt, default=default)
+
+
+def _fb_top_recommendations(df: pd.DataFrame, top_n: int = 10) -> Optional[pd.DataFrame]:
+    """Return the top-N recommendations sorted by confidence then evidence count."""
+    if df is None or df.empty:
+        return None
+    out = df.copy()
+    if "recommendation_confidence" in out.columns:
+        out["recommendation_confidence"] = pd.to_numeric(
+            out["recommendation_confidence"], errors="coerce"
+        )
+    if "evidence_count" in out.columns:
+        out["evidence_count"] = pd.to_numeric(out["evidence_count"], errors="coerce")
+    sort_cols: List[str] = []
+    if "recommendation_confidence" in out.columns:
+        sort_cols.append("recommendation_confidence")
+    if "evidence_count" in out.columns:
+        sort_cols.append("evidence_count")
+    if sort_cols:
+        out = out.sort_values(sort_cols, ascending=False, na_position="last")
+    return out.head(top_n).reset_index(drop=True)
+
+
+def _fb_safe_json_table(obj: Optional[Dict[str, Any]], key: str) -> Optional[pd.DataFrame]:
+    """
+    Convert a nested dict-of-dicts (e.g. summary['aggregate_performance'][group])
+    into a tidy table indexed by category name. Returns None if missing/empty.
+    """
+    if not obj or not isinstance(obj, dict):
+        return None
+    sub = obj.get(key)
+    if not sub or not isinstance(sub, dict):
+        return None
+    try:
+        df = pd.DataFrame(sub).T
+        df.index.name = key.replace("by_", "")
+        df = df.reset_index()
+        for c in df.columns:
+            if c == key.replace("by_", ""):
+                continue
+            try:
+                coerced = pd.to_numeric(df[c], errors="coerce")
+                # Only adopt the numeric cast if it didn't wipe every value;
+                # otherwise leave the column as-is (e.g. for true-string fields).
+                if coerced.notna().any():
+                    df[c] = coerced
+            except Exception:
+                pass
+        return df if not df.empty else None
+    except Exception:
+        return None
+
+
+def _fb_summary_table_sources(summary: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    sa = summary.get("source_availability") if isinstance(summary, dict) else None
+    if not sa or not isinstance(sa, dict):
+        return None
+    rows: List[Dict[str, Any]] = []
+    for name, meta in sa.items():
+        m = meta if isinstance(meta, dict) else {}
+        rows.append(
+            {
+                "source": name,
+                "status": str(m.get("status", "")),
+                "rows": int(m.get("rows", 0) or 0),
+                "path": str(m.get("path", "")),
+            }
+        )
+    if not rows:
+        return None
+    df = pd.DataFrame(rows).sort_values(["status", "source"], ascending=[True, True])
+    return df.reset_index(drop=True)
+
+
+def _fb_best_worst_from_groups(
+    summary: Dict[str, Any],
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    """
+    Build flat best / worst tables across all aggregate-performance groups.
+
+    Each row is one (group, category) pair. Returns (best_by_pnl, worst_by_pnl)
+    sorted respectively. Returns (None, None) when no usable data exists.
+    """
+    if not summary or not isinstance(summary, dict):
+        return None, None
+    agg = summary.get("aggregate_performance") or {}
+    if not isinstance(agg, dict) or not agg:
+        return None, None
+
+    rows: List[Dict[str, Any]] = []
+    for group, table in agg.items():
+        if not isinstance(table, dict):
+            continue
+        for category, stats in table.items():
+            if not isinstance(stats, dict):
+                continue
+            rows.append(
+                {
+                    "group": str(group).replace("by_", ""),
+                    "category": str(category),
+                    "count": stats.get("count"),
+                    "avg_pnl": stats.get("avg_pnl"),
+                    "win_rate": stats.get("win_rate"),
+                    "avg_realized_slippage_bps": stats.get("avg_realized_slippage_bps"),
+                    "fill_rate": stats.get("fill_rate"),
+                }
+            )
+    if not rows:
+        return None, None
+    df = pd.DataFrame(rows)
+    for c in ("count", "avg_pnl", "win_rate", "avg_realized_slippage_bps", "fill_rate"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    pnl_df = df.dropna(subset=["avg_pnl"]).copy()
+    if pnl_df.empty:
+        return None, None
+    best = pnl_df.sort_values("avg_pnl", ascending=False).head(10).reset_index(drop=True)
+    worst = pnl_df.sort_values("avg_pnl", ascending=True).head(10).reset_index(drop=True)
+    return best, worst
+
+
+def page_feedback_intelligence() -> None:
+    """🧠 Feedback Intelligence — observability of the feedback-loop layer."""
+    st.title("🧠 Feedback Intelligence")
+    st.caption(
+        "Observed trade outcomes, execution conditions, evidence strength, "
+        "and advisory recommendations from Triton's feedback loop."
+    )
+
+    report_df = _fb_load_csv(FEEDBACK_LOOP_REPORT_CSV_PATH, "Feedback report")
+    rec_df = _fb_load_csv(FEEDBACK_RECOMMENDATIONS_CSV_PATH, "Feedback recommendations")
+    summary = _fb_load_json(FEEDBACK_LOOP_SUMMARY_JSON_PATH, "Feedback summary")
+
+    no_report = report_df is None or report_df.empty
+    no_recs = rec_df is None or rec_df.empty
+    no_summary = summary is None or not isinstance(summary, dict) or not summary
+
+    if no_report and no_recs and no_summary:
+        st.info(
+            "No feedback-loop outputs found yet. "
+            "Run `python -m services.feedback_loop` (or `python services/feedback_loop.py`) "
+            "to populate `data/results/feedback_loop_report.csv`, "
+            "`data/results/feedback_recommendations.csv`, and "
+            "`data/results/feedback_loop_summary.json`."
+        )
+
+    # ── 1) TOP SUMMARY METRICS ───────────────────────────────────────
+    st.markdown("### Summary")
+    n_records = 0 if no_report else int(report_df.shape[0])
+    n_recs = 0 if no_recs else int(rec_df.shape[0])
+
+    high_evid_count = 0
+    if not no_recs and "evidence_strength" in rec_df.columns:
+        try:
+            high_evid_count = int(
+                rec_df["evidence_strength"].astype(str).str.upper().eq("HIGH").sum()
+            )
+        except Exception:
+            high_evid_count = 0
+
+    avg_conf = _fb_safe_metric(
+        rec_df if not no_recs else pd.DataFrame(), "recommendation_confidence", "mean", "{:.2f}"
+    )
+
+    sources_avail = "N/A"
+    missing_count: Optional[int] = None
+    if isinstance(summary, dict):
+        sa = summary.get("source_availability") or {}
+        if isinstance(sa, dict) and sa:
+            ok = sum(1 for v in sa.values() if isinstance(v, dict) and str(v.get("status")) == "ok")
+            sources_avail = f"{ok}/{len(sa)}"
+        missing = summary.get("missing_inputs")
+        if isinstance(missing, list):
+            missing_count = len(missing)
+
+    fb_quality_high = 0
+    if not no_report and "feedback_quality" in report_df.columns:
+        try:
+            fb_quality_high = int(
+                report_df["feedback_quality"].astype(str).str.upper().eq("HIGH").sum()
+            )
+        except Exception:
+            fb_quality_high = 0
+
+    advisory_only = "N/A"
+    if isinstance(summary, dict) and "advisory_only" in summary:
+        advisory_only = "Yes" if bool(summary.get("advisory_only")) else "No"
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Feedback records", f"{n_records:,}")
+    c2.metric("Recommendations", f"{n_recs:,}")
+    c3.metric("HIGH evidence recs", f"{high_evid_count:,}")
+    c4.metric("Avg recommendation conf.", avg_conf)
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Sources available", sources_avail)
+    c6.metric(
+        "Missing inputs",
+        f"{missing_count:,}" if isinstance(missing_count, int) else "N/A",
+    )
+    c7.metric("HIGH-quality records", f"{fb_quality_high:,}")
+    c8.metric("Advisory-only", advisory_only)
+
+    if isinstance(summary, dict):
+        gen_at = summary.get("generated_at_utc")
+        spine = (
+            (summary.get("record_counts") or {}).get("spine_source")
+            if isinstance(summary.get("record_counts"), dict)
+            else None
+        )
+        bits = []
+        if gen_at:
+            bits.append(f"generated_at_utc=`{gen_at}`")
+        if spine:
+            bits.append(f"spine=`{spine}`")
+        if advisory_only != "N/A":
+            bits.append(f"advisory_only=`{advisory_only}`")
+        if bits:
+            st.caption(" • ".join(bits))
+
+    # ── 2) SOURCE AVAILABILITY ───────────────────────────────────────
+    st.markdown("### Source availability")
+    if no_summary:
+        st.caption("No `feedback_loop_summary.json` available.")
+    else:
+        src_table = _fb_summary_table_sources(summary)
+        if src_table is None or src_table.empty:
+            st.caption("Summary JSON has no `source_availability` block.")
+        else:
+            _ei_render_table(src_table)
+        missing = summary.get("missing_inputs") if isinstance(summary, dict) else None
+        if isinstance(missing, list) and missing:
+            st.warning("Missing or unreadable inputs: " + ", ".join(str(m) for m in missing))
+        notes = summary.get("notes") if isinstance(summary, dict) else None
+        if isinstance(notes, list) and notes:
+            with st.expander("Summary notes", expanded=False):
+                for n in notes:
+                    st.write(f"• {n}")
+
+    # ── 3) RECOMMENDATION OVERVIEW ───────────────────────────────────
+    st.markdown("### Recommendation overview")
+    if no_recs:
+        st.info(
+            "No recommendations have been emitted yet — `feedback_recommendations.csv` is empty."
+        )
+    else:
+        type_table = _fb_value_counts_table(rec_df, "recommendation_type")
+        evid_table = _fb_value_counts_table(
+            rec_df,
+            "evidence_strength",
+            order=["LOW", "MEDIUM", "HIGH"],
+        )
+
+        col_t, col_e = st.columns(2)
+        with col_t:
+            st.markdown("**Counts by recommendation type**")
+            _ei_render_table(type_table, empty_msg="No `recommendation_type` data.")
+        with col_e:
+            st.markdown("**Counts by evidence strength**")
+            _ei_render_table(evid_table, empty_msg="No `evidence_strength` data.")
+
+        # Avg confidence by recommendation_type
+        if (
+            "recommendation_type" in rec_df.columns
+            and "recommendation_confidence" in rec_df.columns
+        ):
+            try:
+                tmp = rec_df[["recommendation_type", "recommendation_confidence"]].copy()
+                tmp["recommendation_confidence"] = pd.to_numeric(
+                    tmp["recommendation_confidence"], errors="coerce"
+                )
+                conf_by_type = (
+                    tmp.dropna(subset=["recommendation_confidence"])
+                    .groupby("recommendation_type")["recommendation_confidence"]
+                    .agg(["mean", "median", "count"])
+                    .round(3)
+                    .reset_index()
+                    .rename(
+                        columns={
+                            "mean": "avg_confidence",
+                            "median": "median_confidence",
+                            "count": "count",
+                        }
+                    )
+                    .sort_values("avg_confidence", ascending=False)
+                    .reset_index(drop=True)
+                )
+                st.markdown("**Average confidence by recommendation type**")
+                _ei_render_table(conf_by_type)
+            except Exception as e:
+                st.caption(f"Confidence-by-type unavailable: {_short_err(e)}")
+
+        # Top recommendations
+        st.markdown("**Top recommendations**")
+        top_recs = _fb_top_recommendations(rec_df, top_n=10)
+        curated = _fb_select_existing_columns(
+            top_recs,
+            [
+                "recommendation_type",
+                "recommendation_text",
+                "evidence_count",
+                "evidence_strength",
+                "recommendation_confidence",
+                "related_bucket",
+                "related_flag",
+                "related_style",
+                "metric_snapshot",
+            ],
+        )
+        view = top_recs[curated] if (top_recs is not None and curated) else top_recs
+        _ei_render_table(view, height=320, empty_msg="No recommendations to rank.")
+
+    # ── 4) EVIDENCE STRENGTH / CONFIDENCE ────────────────────────────
+    st.markdown("### Evidence strength & confidence")
+    if no_recs:
+        st.caption("No recommendations to summarize.")
+    else:
+        evid_counts = _fb_value_counts_table(
+            rec_df,
+            "evidence_strength",
+            order=["LOW", "MEDIUM", "HIGH"],
+        )
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            _ei_render_table(evid_counts, empty_msg="No `evidence_strength` data.")
+        with col_b:
+            try:
+                if evid_counts is not None and not evid_counts.empty:
+                    chart_df = evid_counts.set_index("evidence_strength")[["count"]]
+                    st.bar_chart(chart_df)
+            except Exception as e:
+                st.caption(f"Evidence chart unavailable: {_short_err(e)}")
+
+        conf_series = _ei_safe_numeric(rec_df, "recommendation_confidence")
+        if conf_series is None or conf_series.empty:
+            st.caption("No `recommendation_confidence` data available.")
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Mean", f"{conf_series.mean():.3f}")
+            m2.metric("Median", f"{conf_series.median():.3f}")
+            m3.metric("Min", f"{conf_series.min():.3f}")
+            m4.metric("Max", f"{conf_series.max():.3f}")
+
+            try:
+                bins = [0.0, 0.20, 0.40, 0.60, 0.80, 1.000001]
+                labels = ["0.00–0.20", "0.20–0.40", "0.40–0.60", "0.60–0.80", "0.80–1.00"]
+                binned = pd.cut(
+                    conf_series, bins=bins, labels=labels, include_lowest=True, right=False
+                )
+                hist_df = (
+                    binned.value_counts()
+                    .reindex(labels)
+                    .fillna(0)
+                    .astype(int)
+                    .rename_axis("confidence_bin")
+                    .reset_index(name="count")
+                )
+                col_h1, col_h2 = st.columns([1, 2])
+                with col_h1:
+                    _ei_render_table(hist_df)
+                with col_h2:
+                    st.bar_chart(hist_df.set_index("confidence_bin"))
+            except Exception as e:
+                st.caption(f"Confidence histogram unavailable: {_short_err(e)}")
+
+    # ── 5) AGGREGATE PERFORMANCE ─────────────────────────────────────
+    st.markdown("### Aggregate performance")
+    if no_summary:
+        st.caption("No `feedback_loop_summary.json` available.")
+    else:
+        agg = summary.get("aggregate_performance") if isinstance(summary, dict) else None
+        if not agg or not isinstance(agg, dict):
+            st.caption("Summary JSON has no `aggregate_performance` block.")
+        else:
+            rendered_any = False
+            for key, label in _FB_GROUP_LABELS:
+                tbl = _fb_safe_json_table(agg, key)
+                if tbl is None or tbl.empty:
+                    continue
+                rendered_any = True
+                st.markdown(f"**{label}**")
+                _ei_render_table(tbl)
+                if "avg_pnl" in tbl.columns:
+                    try:
+                        cat_col = tbl.columns[0]
+                        chart = tbl[[cat_col, "avg_pnl"]].copy()
+                        chart["avg_pnl"] = pd.to_numeric(chart["avg_pnl"], errors="coerce")
+                        chart = chart.dropna(subset=["avg_pnl"])
+                        if not chart.empty:
+                            st.bar_chart(chart.set_index(cat_col)[["avg_pnl"]])
+                    except Exception as e:
+                        st.caption(f"Chart unavailable for {label}: {_short_err(e)}")
+            if not rendered_any:
+                st.caption("Aggregate-performance block was present but empty.")
+
+    # ── 6) BEST / WORST CONDITIONS ───────────────────────────────────
+    st.markdown("### Best & worst observed conditions")
+    if no_summary:
+        st.caption("No summary JSON; cannot rank best/worst conditions.")
+    else:
+        best, worst = _fb_best_worst_from_groups(summary)
+        if best is None and worst is None:
+            st.caption("Not enough PnL data across groups to rank best/worst conditions.")
+        else:
+            col_b, col_w = st.columns(2)
+            with col_b:
+                st.markdown("**Best (highest avg PnL)**")
+                _ei_render_table(best, empty_msg="No best-condition rows.")
+            with col_w:
+                st.markdown("**Worst (lowest avg PnL)**")
+                _ei_render_table(worst, empty_msg="No worst-condition rows.")
+
+        if not no_recs and "recommendation_type" in rec_df.columns:
+            POS = {"EDGE_VALIDATION", "SIGNAL_TRUST_BOOST"}
+            try:
+                tmp = rec_df.copy()
+                tmp["recommendation_confidence"] = pd.to_numeric(
+                    tmp.get("recommendation_confidence"), errors="coerce"
+                )
+                tmp["evidence_count"] = pd.to_numeric(tmp.get("evidence_count"), errors="coerce")
+                pos = tmp[tmp["recommendation_type"].astype(str).isin(POS)]
+                neg = tmp[~tmp["recommendation_type"].astype(str).isin(POS)]
+                if not pos.empty:
+                    sp = pos.sort_values(
+                        ["recommendation_confidence", "evidence_count"],
+                        ascending=False,
+                        na_position="last",
+                    ).iloc[0]
+                    st.success(
+                        f"**Strongest positive recommendation** "
+                        f"({sp.get('recommendation_type','?')} · "
+                        f"conf={sp.get('recommendation_confidence','?')} · "
+                        f"n={sp.get('evidence_count','?')}): "
+                        f"{sp.get('recommendation_text','')}"
+                    )
+                if not neg.empty:
+                    sn = neg.sort_values(
+                        ["recommendation_confidence", "evidence_count"],
+                        ascending=False,
+                        na_position="last",
+                    ).iloc[0]
+                    st.warning(
+                        f"**Strongest caution recommendation** "
+                        f"({sn.get('recommendation_type','?')} · "
+                        f"conf={sn.get('recommendation_confidence','?')} · "
+                        f"n={sn.get('evidence_count','?')}): "
+                        f"{sn.get('recommendation_text','')}"
+                    )
+            except Exception as e:
+                st.caption(f"Strongest-recommendation rendering unavailable: {_short_err(e)}")
+
+    # ── 7) FEEDBACK QUALITY ──────────────────────────────────────────
+    st.markdown("### Feedback quality")
+    if no_report:
+        st.info("No `feedback_loop_report.csv` rows to summarize quality.")
+    else:
+        col_q, col_s = st.columns(2)
+        with col_q:
+            st.markdown("**Counts by feedback_quality**")
+            _ei_render_table(
+                _fb_value_counts_table(
+                    report_df,
+                    "feedback_quality",
+                    order=["LOW", "MEDIUM", "HIGH"],
+                ),
+                empty_msg="No `feedback_quality` column.",
+            )
+        with col_s:
+            st.markdown("**Counts by spine_source**")
+            _ei_render_table(
+                _fb_value_counts_table(report_df, "spine_source"),
+                empty_msg="No `spine_source` column.",
+            )
+
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric(
+            "Avg matched_sources_count",
+            _fb_safe_metric(report_df, "matched_sources_count", "mean", "{:.2f}"),
+        )
+        col_m2.metric(
+            "Median matched_sources_count",
+            _fb_safe_metric(report_df, "matched_sources_count", "median", "{:.1f}"),
+        )
+        col_m3.metric("Records", f"{int(report_df.shape[0]):,}")
+
+        st.markdown("**Recent feedback rows**")
+        curated_report = _fb_select_existing_columns(
+            report_df,
+            [
+                "symbol",
+                "date",
+                "session",
+                "side",
+                "action",
+                "signal",
+                "decision_action",
+                "execution_style",
+                "execution_risk_flag",
+                "execution_quality_score",
+                "spread_bucket",
+                "quote_is_stale",
+                "partial_fill_action",
+                "pnl",
+                "pnl_pct",
+                "feedback_quality",
+                "matched_sources_count",
+                "spine_source",
+            ],
+        )
+        view = report_df[curated_report] if curated_report else report_df
+        try:
+            if "date" in view.columns:
+                view = view.copy()
+                view["__sort"] = pd.to_datetime(view["date"], errors="coerce", utc=True)
+                view = view.sort_values("__sort", ascending=False, na_position="last")
+                view = view.drop(columns=["__sort"])
+        except Exception:
+            pass
+        _ei_render_table(view.head(50), height=380, empty_msg="No report rows available.")
+
+    # ── 8) RECOMMENDATIONS TABLE (curated + raw) ─────────────────────
+    st.markdown("### Recommendations table")
+    if no_recs:
+        st.caption("No recommendations to display.")
+    else:
+        curated_recs = _fb_select_existing_columns(
+            rec_df,
+            [
+                "recommendation_type",
+                "recommendation_text",
+                "evidence_count",
+                "evidence_strength",
+                "recommendation_confidence",
+                "related_bucket",
+                "related_flag",
+                "related_style",
+                "metric_snapshot",
+            ],
+        )
+        view = rec_df[curated_recs] if curated_recs else rec_df
+        try:
+            view = view.copy()
+            if "recommendation_confidence" in view.columns:
+                view["recommendation_confidence"] = pd.to_numeric(
+                    view["recommendation_confidence"], errors="coerce"
+                )
+            if "evidence_count" in view.columns:
+                view["evidence_count"] = pd.to_numeric(view["evidence_count"], errors="coerce")
+            sort_cols = [
+                c for c in ("recommendation_confidence", "evidence_count") if c in view.columns
+            ]
+            if sort_cols:
+                view = view.sort_values(sort_cols, ascending=False, na_position="last")
+        except Exception:
+            pass
+        _ei_render_table(view, height=420)
+        with st.expander("Show full raw recommendations table", expanded=False):
+            _ei_render_table(rec_df, height=360)
+
+    # ── 9) DETAILED DATA EXPANDERS ───────────────────────────────────
+    st.markdown("### Raw data")
+    with st.expander("Feedback Report (raw)", expanded=False):
+        if no_report:
+            st.caption("`feedback_loop_report.csv` is empty or missing.")
+        else:
+            st.caption(f"{report_df.shape[0]:,} rows × {report_df.shape[1]:,} columns")
+            _ei_render_table(report_df, height=420)
+
+    with st.expander("Feedback Recommendations (raw)", expanded=False):
+        if no_recs:
+            st.caption("`feedback_recommendations.csv` is empty or missing.")
+        else:
+            st.caption(f"{rec_df.shape[0]:,} rows × {rec_df.shape[1]:,} columns")
+            _ei_render_table(rec_df, height=360)
+
+    with st.expander("Feedback Summary (key sections)", expanded=False):
+        if no_summary:
+            st.caption("`feedback_loop_summary.json` is empty or missing.")
+        else:
+            try:
+                meta = {
+                    k: summary.get(k)
+                    for k in (
+                        "generated_at_utc",
+                        "schema_version",
+                        "advisory_only",
+                        "missing_inputs",
+                        "record_counts",
+                        "recommendation_counts_by_type",
+                        "notes",
+                    )
+                    if k in summary
+                }
+                st.json(meta)
+                with st.expander("Full summary JSON", expanded=False):
+                    st.json(summary)
+            except Exception as e:
+                st.caption(f"Summary rendering unavailable: {_short_err(e)}")
+
+
+# ──────────────────────────────
+# ADAPTATION INTELLIGENCE PAGE
+# (dashboard-only; reads adaptation_proposals.csv,
+#  adaptation_review_queue.csv, adaptation_summary.json)
+# ──────────────────────────────
+
+
+def _ad_load_csv(path: Path, label: str) -> Optional[pd.DataFrame]:
+    """Wrap dashboard CSV loader with a friendly per-file warning on hard errors."""
+    df, err = read_csv_dashboard(path)
+    if err is None:
+        return df
+    if err == "empty":
+        return df
+    st.warning(f"{label}: could not read {path.name} ({err}).")
+    return None
+
+
+def _ad_load_json(path: Path, label: str) -> Optional[Dict[str, Any]]:
+    """Read a JSON file safely. Returns None on missing/error, dict otherwise."""
+    try:
+        if not path.exists():
+            return None
+        try:
+            if path.stat().st_size == 0:
+                return None
+        except OSError:
+            pass
+        text = path.read_text(encoding="utf-8")
+        if not text.strip():
+            return None
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+        return {"value": obj}
+    except Exception as e:
+        st.warning(f"{label}: could not read {path.name} ({_short_err(e)}).")
+        return None
+
+
+# Re-use the well-tested EI helpers — same contracts (df-shape-agnostic,
+# column-existence-aware, never raises). Thin wrappers keep call-sites readable.
+def _ad_select_existing_columns(df: pd.DataFrame, preferred: List[str]) -> List[str]:
+    return _ei_select_existing_columns(df, preferred)
+
+
+def _ad_value_counts_table(
+    df: pd.DataFrame, col: str, order: Optional[List[str]] = None
+) -> Optional[pd.DataFrame]:
+    return _ei_value_counts_table(df, col, order=order)
+
+
+def _ad_safe_metric(
+    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.3f}", default: str = "N/A"
+) -> str:
+    return _ei_safe_metric(df, col, agg=agg, fmt=fmt, default=default)
+
+
+def _ad_truthy_count(df: pd.DataFrame, col: str) -> Optional[int]:
+    return _ei_truthy_count(df, col)
+
+
+def _ad_safe_json_table(obj: Optional[Dict[str, Any]], key: str) -> Optional[pd.DataFrame]:
+    """
+    Generic JSON-section flattener. Handles the two shapes the adaptation
+    summary actually emits:
+
+      - {<category>: {<metric>: value, ...}}        → multi-column tidy table
+      - {<category>: <int>}                         → 2-column count table
+    """
+    if not obj or not isinstance(obj, dict):
+        return None
+    sub = obj.get(key)
+    if sub is None:
+        return None
+    try:
+        if isinstance(sub, dict):
+            if not sub:
+                return None
+            sample = next(iter(sub.values()))
+            if isinstance(sample, dict):
+                df = pd.DataFrame(sub).T
+                df.index.name = key.replace("by_", "")
+                df = df.reset_index()
+                for c in df.columns:
+                    if c == key.replace("by_", ""):
+                        continue
+                    try:
+                        coerced = pd.to_numeric(df[c], errors="coerce")
+                        if coerced.notna().any():
+                            df[c] = coerced
+                    except Exception:
+                        pass
+                return df if not df.empty else None
+            # Flat dict-of-scalars (e.g. count-by-target)
+            df = pd.Series(sub, name="count").rename_axis(key.replace("by_", "")).reset_index()
+            try:
+                df["count"] = pd.to_numeric(df["count"], errors="coerce").fillna(0).astype(int)
+            except Exception:
+                pass
+            return df if not df.empty else None
+        if isinstance(sub, list):
+            df = pd.DataFrame(sub)
+            return df if not df.empty else None
+    except Exception:
+        return None
+    return None
+
+
+def _ad_top_proposals(df: pd.DataFrame, top_n: int = 10) -> Optional[pd.DataFrame]:
+    """Top-N proposals: priority desc → confidence desc → evidence desc, thin-data last."""
+    if df is None or df.empty:
+        return None
+    out = df.copy()
+    pri_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "": 3}
+    if "review_priority" in out.columns:
+        out["__pri"] = (
+            out["review_priority"].astype(str).str.upper().map(lambda p: pri_order.get(p, 3))
+        )
+    else:
+        out["__pri"] = 3
+    if "thin_data_flag" in out.columns:
+        out["__thin"] = (
+            out["thin_data_flag"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .isin(["true", "1", "yes", "t"])
+            .map(lambda b: 1 if b else 0)
+        )
+    else:
+        out["__thin"] = 0
+    if "proposal_confidence" in out.columns:
+        out["__conf"] = pd.to_numeric(out["proposal_confidence"], errors="coerce").fillna(0.0)
+    else:
+        out["__conf"] = 0.0
+    if "evidence_count" in out.columns:
+        out["__evid"] = pd.to_numeric(out["evidence_count"], errors="coerce").fillna(0)
+    else:
+        out["__evid"] = 0
+    out = out.sort_values(
+        ["__thin", "__pri", "__conf", "__evid"],
+        ascending=[True, True, False, False],
+    )
+    out = out.drop(columns=["__pri", "__thin", "__conf", "__evid"])
+    return out.head(top_n).reset_index(drop=True)
+
+
+def _ad_summary_table_sources(summary: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    sa = summary.get("source_availability") if isinstance(summary, dict) else None
+    if not sa or not isinstance(sa, dict):
+        return None
+    rows: List[Dict[str, Any]] = []
+    for name, meta in sa.items():
+        m = meta if isinstance(meta, dict) else {}
+        rows.append(
+            {
+                "source": name,
+                "status": str(m.get("status", "")),
+                "rows": int(m.get("rows", 0) or 0),
+                "path": str(m.get("path", "")),
+            }
+        )
+    if not rows:
+        return None
+    df = pd.DataFrame(rows).sort_values(["status", "source"], ascending=[True, True])
+    return df.reset_index(drop=True)
+
+
+# Friendly labels for the adaptation summary's `*_by_*` count blocks.
+_AD_GROUP_LABELS: List[Tuple[str, str]] = [
+    ("proposal_count_by_target", "By adaptation target"),
+    ("proposal_count_by_type", "By proposal type"),
+    ("proposal_count_by_priority", "By review priority"),
+    ("proposal_count_by_evidence_strength", "By evidence strength"),
+]
+
+# Direction-set heuristics for "best/strongest" splits.
+_AD_CAUTION_DIRECTIONS: set = {"DECREASE"}
+_AD_CAUTION_TYPES: set = {
+    "DECREASE_TRUST",
+    "DECREASE_AGGRESSIVENESS",
+    "INCREASE_PENALTY",
+    "INCREASE_CAUTION",
+    "ADJUST_BUCKET",
+}
+_AD_POSITIVE_TYPES: set = {
+    "MAINTAIN_OR_SLIGHTLY_INCREASE",
+    "ADJUST_SIGNAL_TRUST",  # split further by direction below
+}
+
+
+def page_adaptation_intelligence() -> None:
+    """🛠️ Adaptation Intelligence — observability of advisory adaptation proposals."""
+    st.title("🛠️ Adaptation Intelligence")
+    st.caption(
+        "Advisory-only adaptation proposals, confidence, evidence, guardrails, "
+        "and review priority from Triton's controlled adaptation layer."
+    )
+
+    proposals = _ad_load_csv(ADAPTATION_PROPOSALS_CSV_PATH, "Adaptation proposals")
+    review_q = _ad_load_csv(ADAPTATION_REVIEW_QUEUE_CSV_PATH, "Adaptation review queue")
+    summary = _ad_load_json(ADAPTATION_SUMMARY_JSON_PATH, "Adaptation summary")
+
+    no_props = proposals is None or proposals.empty
+    no_rq = review_q is None or review_q.empty
+    no_summary = summary is None or not isinstance(summary, dict) or not summary
+
+    if no_props and no_rq and no_summary:
+        st.info(
+            "No adaptation-layer outputs found yet. "
+            "Run `python -m services.adaptation_layer` (or `python services/adaptation_layer.py`) "
+            "to populate `data/results/adaptation_proposals.csv`, "
+            "`data/results/adaptation_review_queue.csv`, and "
+            "`data/results/adaptation_summary.json`."
+        )
+
+    # ── 1) TOP SUMMARY METRICS ───────────────────────────────────────
+    st.markdown("### Summary")
+    n_props = 0 if no_props else int(proposals.shape[0])
+
+    high_pri_count = 0
+    if not no_props and "review_priority" in proposals.columns:
+        try:
+            high_pri_count = int(
+                proposals["review_priority"].astype(str).str.upper().eq("HIGH").sum()
+            )
+        except Exception:
+            high_pri_count = 0
+
+    high_evid_count = 0
+    if not no_props and "evidence_strength" in proposals.columns:
+        try:
+            high_evid_count = int(
+                proposals["evidence_strength"].astype(str).str.upper().eq("HIGH").sum()
+            )
+        except Exception:
+            high_evid_count = 0
+
+    avg_conf = _ad_safe_metric(
+        proposals if not no_props else pd.DataFrame(),
+        "proposal_confidence",
+        "mean",
+        "{:.2f}",
+    )
+
+    thin_count = _ad_truthy_count(proposals, "thin_data_flag") if not no_props else None
+    advisory_only = "N/A"
+    auto_apply = "N/A"
+    phase_str = "N/A"
+    if isinstance(summary, dict):
+        if "advisory_only" in summary:
+            advisory_only = "Yes" if bool(summary.get("advisory_only")) else "No"
+        if "auto_apply_allowed" in summary:
+            auto_apply = "Yes" if bool(summary.get("auto_apply_allowed")) else "No"
+        ph = summary.get("phase")
+        if ph:
+            phase_str = str(ph)
+
+    sources_avail = "N/A"
+    if isinstance(summary, dict):
+        sa = summary.get("source_availability") or {}
+        if isinstance(sa, dict) and sa:
+            ok = sum(1 for v in sa.values() if isinstance(v, dict) and str(v.get("status")) == "ok")
+            sources_avail = f"{ok}/{len(sa)}"
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Proposals", f"{n_props:,}")
+    c2.metric("HIGH priority", f"{high_pri_count:,}")
+    c3.metric("HIGH evidence", f"{high_evid_count:,}")
+    c4.metric("Avg confidence", avg_conf)
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Thin-data proposals", f"{thin_count:,}" if isinstance(thin_count, int) else "N/A")
+    c6.metric("Advisory-only", advisory_only)
+    c7.metric("Auto-apply allowed", auto_apply)
+    c8.metric("Sources available", sources_avail)
+
+    if isinstance(summary, dict):
+        gen_at = summary.get("generated_at_utc")
+        bits = []
+        if gen_at:
+            bits.append(f"generated_at_utc=`{gen_at}`")
+        if phase_str != "N/A":
+            bits.append(f"phase=`{phase_str}`")
+        if bits:
+            st.caption(" • ".join(bits))
+
+    # ── 2) GOVERNANCE STATUS ─────────────────────────────────────────
+    st.markdown("### Governance status")
+    if no_summary:
+        st.caption("No `adaptation_summary.json` available — governance status unknown.")
+    else:
+        # Always make the review-only nature explicit, even when fields missing.
+        gov_msgs: List[str] = []
+        if advisory_only == "Yes":
+            gov_msgs.append("`advisory_only = True` — proposals are review-only.")
+        if auto_apply == "No":
+            gov_msgs.append(
+                "`auto_apply_allowed = False` — no proposal will be applied automatically."
+            )
+        if phase_str != "N/A":
+            gov_msgs.append(f"Phase: `{phase_str}`.")
+        if gov_msgs:
+            st.success(" ".join(gov_msgs))
+        else:
+            st.info("Governance flags missing from summary — treat all proposals as review-only.")
+
+        missing = summary.get("missing_inputs") if isinstance(summary, dict) else None
+        if isinstance(missing, list) and missing:
+            st.warning(
+                f"Missing or unreadable inputs ({len(missing)}): "
+                + ", ".join(str(m) for m in missing)
+            )
+        notes = summary.get("notes") if isinstance(summary, dict) else None
+        if isinstance(notes, list) and notes:
+            with st.expander("Summary notes", expanded=False):
+                for n in notes:
+                    st.write(f"• {n}")
+
+    # ── 3) SOURCE AVAILABILITY ───────────────────────────────────────
+    st.markdown("### Source availability")
+    if no_summary:
+        st.caption("No `adaptation_summary.json` available.")
+    else:
+        src_table = _ad_summary_table_sources(summary)
+        if src_table is None or src_table.empty:
+            st.caption("Summary JSON has no `source_availability` block.")
+        else:
+            _ei_render_table(src_table)
+
+    # ── 4) PROPOSAL OVERVIEW ─────────────────────────────────────────
+    st.markdown("### Proposal overview")
+    if no_props:
+        st.info("No proposals to summarize — `adaptation_proposals.csv` is empty.")
+    else:
+        col_t, col_p = st.columns(2)
+        with col_t:
+            st.markdown("**Counts by adaptation target**")
+            _ei_render_table(
+                _ad_value_counts_table(proposals, "adaptation_target"),
+                empty_msg="No `adaptation_target` data.",
+            )
+        with col_p:
+            st.markdown("**Counts by proposal type**")
+            _ei_render_table(
+                _ad_value_counts_table(proposals, "proposal_type"),
+                empty_msg="No `proposal_type` data.",
+            )
+
+        col_r, col_e = st.columns(2)
+        with col_r:
+            st.markdown("**Counts by review priority**")
+            _ei_render_table(
+                _ad_value_counts_table(
+                    proposals,
+                    "review_priority",
+                    order=["HIGH", "MEDIUM", "LOW"],
+                ),
+                empty_msg="No `review_priority` data.",
+            )
+        with col_e:
+            st.markdown("**Counts by evidence strength**")
+            _ei_render_table(
+                _ad_value_counts_table(
+                    proposals,
+                    "evidence_strength",
+                    order=["LOW", "MEDIUM", "HIGH"],
+                ),
+                empty_msg="No `evidence_strength` data.",
+            )
+
+        if "adaptation_target" in proposals.columns and "proposal_confidence" in proposals.columns:
+            try:
+                tmp = proposals[["adaptation_target", "proposal_confidence"]].copy()
+                tmp["proposal_confidence"] = pd.to_numeric(
+                    tmp["proposal_confidence"], errors="coerce"
+                )
+                conf_by_target = (
+                    tmp.dropna(subset=["proposal_confidence"])
+                    .groupby("adaptation_target")["proposal_confidence"]
+                    .agg(["mean", "median", "count"])
+                    .round(3)
+                    .reset_index()
+                    .rename(columns={"mean": "avg_confidence", "median": "median_confidence"})
+                    .sort_values("avg_confidence", ascending=False)
+                    .reset_index(drop=True)
+                )
+                st.markdown("**Average confidence by adaptation target**")
+                _ei_render_table(conf_by_target)
+            except Exception as e:
+                st.caption(f"Confidence-by-target unavailable: {_short_err(e)}")
+
+    # ── 5) PROPOSAL CONFIDENCE & EVIDENCE ────────────────────────────
+    st.markdown("### Proposal confidence & evidence")
+    if no_props:
+        st.caption("No proposals to summarize.")
+    else:
+        evid_counts = _ad_value_counts_table(
+            proposals,
+            "evidence_strength",
+            order=["LOW", "MEDIUM", "HIGH"],
+        )
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            _ei_render_table(evid_counts, empty_msg="No `evidence_strength` data.")
+        with col_b:
+            try:
+                if evid_counts is not None and not evid_counts.empty:
+                    st.bar_chart(evid_counts.set_index("evidence_strength")[["count"]])
+            except Exception as e:
+                st.caption(f"Evidence chart unavailable: {_short_err(e)}")
+
+        conf_series = _ei_safe_numeric(proposals, "proposal_confidence")
+        if conf_series is None or conf_series.empty:
+            st.caption("No `proposal_confidence` data available.")
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Mean", f"{conf_series.mean():.3f}")
+            m2.metric("Median", f"{conf_series.median():.3f}")
+            m3.metric("Min", f"{conf_series.min():.3f}")
+            m4.metric("Max", f"{conf_series.max():.3f}")
+
+            try:
+                bins = [0.0, 0.20, 0.40, 0.60, 0.80, 1.000001]
+                labels = ["0.00–0.20", "0.20–0.40", "0.40–0.60", "0.60–0.80", "0.80–1.00"]
+                binned = pd.cut(
+                    conf_series, bins=bins, labels=labels, include_lowest=True, right=False
+                )
+                hist_df = (
+                    binned.value_counts()
+                    .reindex(labels)
+                    .fillna(0)
+                    .astype(int)
+                    .rename_axis("confidence_bin")
+                    .reset_index(name="count")
+                )
+                col_h1, col_h2 = st.columns([1, 2])
+                with col_h1:
+                    _ei_render_table(hist_df)
+                with col_h2:
+                    st.bar_chart(hist_df.set_index("confidence_bin"))
+            except Exception as e:
+                st.caption(f"Confidence histogram unavailable: {_short_err(e)}")
+
+        thin_table = _ad_value_counts_table(proposals, "thin_data_flag")
+        st.markdown("**Thin-data flag counts**")
+        _ei_render_table(thin_table, empty_msg="No `thin_data_flag` data.")
+
+    # ── 6) GUARDRAILS ────────────────────────────────────────────────
+    st.markdown("### Guardrails")
+    if no_props:
+        st.caption("No proposals to inspect for guardrails.")
+    else:
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            st.markdown("**bounded_change_applied counts**")
+            _ei_render_table(
+                _ad_value_counts_table(proposals, "bounded_change_applied"),
+                empty_msg="No `bounded_change_applied` column.",
+            )
+            st.markdown("**requires_manual_review counts**")
+            _ei_render_table(
+                _ad_value_counts_table(proposals, "requires_manual_review"),
+                empty_msg="No `requires_manual_review` column.",
+            )
+        with col_g2:
+            st.markdown("**auto_apply_allowed counts**")
+            _ei_render_table(
+                _ad_value_counts_table(proposals, "auto_apply_allowed"),
+                empty_msg="No `auto_apply_allowed` column.",
+            )
+            st.markdown("**proposal_direction counts**")
+            _ei_render_table(
+                _ad_value_counts_table(proposals, "proposal_direction"),
+                empty_msg="No `proposal_direction` column.",
+            )
+
+        # Bounded-vs-unbounded summary metrics
+        bounded_n = _ad_truthy_count(proposals, "bounded_change_applied")
+        review_n = _ad_truthy_count(proposals, "requires_manual_review")
+        autoapply_n = _ad_truthy_count(proposals, "auto_apply_allowed")
+        gm1, gm2, gm3 = st.columns(3)
+        gm1.metric("Bounded changes", f"{bounded_n:,}" if isinstance(bounded_n, int) else "N/A")
+        gm2.metric("Require manual review", f"{review_n:,}" if isinstance(review_n, int) else "N/A")
+        gm3.metric("Auto-apply rows", f"{autoapply_n:,}" if isinstance(autoapply_n, int) else "N/A")
+
+        st.markdown("**Curated guardrail view**")
+        guard_cols = _ad_select_existing_columns(
+            proposals,
+            [
+                "adaptation_target",
+                "proposal_type",
+                "proposed_delta",
+                "min_allowed_value",
+                "max_allowed_value",
+                "bounded_change_applied",
+                "requires_manual_review",
+                "auto_apply_allowed",
+                "advisory_only",
+            ],
+        )
+        view = proposals[guard_cols] if guard_cols else proposals
+        _ei_render_table(view, height=320, empty_msg="No proposal rows to display.")
+
+    # ── 7) REVIEW QUEUE ──────────────────────────────────────────────
+    st.markdown("### Review queue")
+    if no_rq:
+        st.info(
+            "No `adaptation_review_queue.csv` rows. The review queue is "
+            "regenerated each time the adaptation layer runs."
+        )
+    else:
+        st.markdown("**Counts by review priority**")
+        _ei_render_table(
+            _ad_value_counts_table(
+                review_q,
+                "review_priority",
+                order=["HIGH", "MEDIUM", "LOW"],
+            ),
+            empty_msg="No `review_priority` data.",
+        )
+
+        st.markdown("**Top of the review queue**")
+        rq_curated = _ad_select_existing_columns(
+            review_q,
+            [
+                "proposal_id",
+                "adaptation_target",
+                "proposal_type",
+                "proposal_direction",
+                "proposal_strength",
+                "proposal_confidence",
+                "evidence_count",
+                "evidence_strength",
+                "review_priority",
+                "thin_data_flag",
+                "proposal_reason",
+                "related_bucket",
+                "related_flag",
+                "related_style",
+            ],
+        )
+        view = review_q[rq_curated] if rq_curated else review_q
+        sorted_view = _ad_top_proposals(view, top_n=25)
+        if sorted_view is None or sorted_view.empty:
+            sorted_view = view
+        _ei_render_table(sorted_view, height=420, empty_msg="No queue entries to display.")
+
+    # ── 8) PROPOSAL DETAIL / EXPLANATION ─────────────────────────────
+    st.markdown("### Proposal detail & explanation")
+    if no_props:
+        st.caption("No proposals to detail.")
+    else:
+        detail_cols = _ad_select_existing_columns(
+            proposals,
+            [
+                "adaptation_target",
+                "proposal_type",
+                "recommendation_type",
+                "source_recommendation_text",
+                "proposal_reason",
+                "proposal_note",
+                "observed_group",
+                "observed_metric",
+                "observed_value",
+                "baseline_value",
+                "effect_direction",
+                "current_value",
+                "proposed_value",
+                "proposed_delta",
+            ],
+        )
+        view = proposals[detail_cols] if detail_cols else proposals
+        _ei_render_table(view, height=420, empty_msg="No proposal detail rows.")
+
+    # ── 9) BEST / STRONGEST PROPOSALS ────────────────────────────────
+    st.markdown("### Highest-confidence & strongest proposals")
+    if no_props:
+        st.caption("No proposals to rank.")
+    else:
+        # Highest-confidence
+        try:
+            hc = proposals.copy()
+            hc["proposal_confidence"] = pd.to_numeric(
+                hc.get("proposal_confidence"), errors="coerce"
+            )
+            hc = hc.dropna(subset=["proposal_confidence"]).sort_values(
+                "proposal_confidence", ascending=False
+            )
+            hc_curated = _ad_select_existing_columns(
+                hc,
+                [
+                    "adaptation_target",
+                    "proposal_type",
+                    "proposal_direction",
+                    "proposal_confidence",
+                    "evidence_strength",
+                    "evidence_count",
+                    "review_priority",
+                    "thin_data_flag",
+                    "related_bucket",
+                    "related_flag",
+                    "related_style",
+                ],
+            )
+            view = hc[hc_curated] if hc_curated else hc
+            st.markdown("**Top by proposal confidence**")
+            _ei_render_table(view.head(10), empty_msg="No ranked proposals to show.")
+        except Exception as e:
+            st.caption(f"Highest-confidence ranking unavailable: {_short_err(e)}")
+
+        # Strongest caution / strongest positive
+        try:
+            tmp = proposals.copy()
+            ptype = tmp.get("proposal_type", pd.Series([], dtype=object))
+            pdir = tmp.get("proposal_direction", pd.Series([], dtype=object))
+            pdelta = pd.to_numeric(tmp.get("proposed_delta"), errors="coerce")
+            pconf = pd.to_numeric(tmp.get("proposal_confidence"), errors="coerce")
+
+            type_upper = ptype.astype(str).str.upper()
+            dir_upper = pdir.astype(str).str.upper()
+
+            caution_mask = type_upper.isin(_AD_CAUTION_TYPES) | dir_upper.isin(
+                _AD_CAUTION_DIRECTIONS
+            )
+            positive_mask = type_upper.eq("MAINTAIN_OR_SLIGHTLY_INCREASE") | (
+                type_upper.eq("ADJUST_SIGNAL_TRUST") & (pdelta.fillna(0) > 0)
+            )
+
+            curated_strong = _ad_select_existing_columns(
+                tmp,
+                [
+                    "adaptation_target",
+                    "proposal_type",
+                    "proposal_direction",
+                    "proposed_delta",
+                    "proposal_confidence",
+                    "evidence_strength",
+                    "evidence_count",
+                    "review_priority",
+                    "thin_data_flag",
+                    "related_bucket",
+                    "related_flag",
+                    "related_style",
+                ],
+            )
+
+            col_caut, col_pos = st.columns(2)
+            with col_caut:
+                st.markdown("**Strongest caution proposals**")
+                caut = tmp[caution_mask].copy()
+                if "proposal_confidence" in caut.columns:
+                    caut["__conf"] = pd.to_numeric(
+                        caut["proposal_confidence"], errors="coerce"
+                    ).fillna(0.0)
+                    caut["__abs_delta"] = (
+                        pd.to_numeric(caut.get("proposed_delta"), errors="coerce").abs().fillna(0.0)
+                    )
+                    caut = caut.sort_values(["__conf", "__abs_delta"], ascending=False).drop(
+                        columns=["__conf", "__abs_delta"]
+                    )
+                view = caut[curated_strong] if curated_strong else caut
+                _ei_render_table(view.head(8), empty_msg="No caution-type proposals.")
+            with col_pos:
+                st.markdown("**Strongest positive proposals**")
+                pos = tmp[positive_mask].copy()
+                if "proposal_confidence" in pos.columns:
+                    pos["__conf"] = pd.to_numeric(
+                        pos["proposal_confidence"], errors="coerce"
+                    ).fillna(0.0)
+                    pos["__delta"] = pd.to_numeric(
+                        pos.get("proposed_delta"), errors="coerce"
+                    ).fillna(0.0)
+                    pos = pos.sort_values(["__conf", "__delta"], ascending=False).drop(
+                        columns=["__conf", "__delta"]
+                    )
+                view = pos[curated_strong] if curated_strong else pos
+                _ei_render_table(view.head(8), empty_msg="No positive-type proposals.")
+        except Exception as e:
+            st.caption(f"Caution/positive split unavailable: {_short_err(e)}")
+
+    # ── 10) DETAILED TABLES ──────────────────────────────────────────
+    st.markdown("### Raw data")
+    with st.expander("Adaptation Proposals (raw)", expanded=False):
+        if no_props:
+            st.caption("`adaptation_proposals.csv` is empty or missing.")
+        else:
+            st.caption(f"{proposals.shape[0]:,} rows × {proposals.shape[1]:,} columns")
+            _ei_render_table(proposals, height=420)
+
+    with st.expander("Adaptation Review Queue (raw)", expanded=False):
+        if no_rq:
+            st.caption("`adaptation_review_queue.csv` is empty or missing.")
+        else:
+            st.caption(f"{review_q.shape[0]:,} rows × {review_q.shape[1]:,} columns")
+            _ei_render_table(review_q, height=360)
+
+    with st.expander("Adaptation Summary (key sections)", expanded=False):
+        if no_summary:
+            st.caption("`adaptation_summary.json` is empty or missing.")
+        else:
+            try:
+                meta = {
+                    k: summary.get(k)
+                    for k in (
+                        "generated_at_utc",
+                        "schema_version",
+                        "advisory_only",
+                        "auto_apply_allowed",
+                        "phase",
+                        "missing_inputs",
+                        "proposal_count",
+                        "thin_data_proposal_count",
+                        "proposal_count_by_target",
+                        "proposal_count_by_type",
+                        "proposal_count_by_priority",
+                        "proposal_count_by_evidence_strength",
+                        "notes",
+                    )
+                    if k in summary
+                }
+                st.json(meta)
+                with st.expander("Adaptation targets registry", expanded=False):
+                    targets = summary.get("adaptation_targets")
+                    if isinstance(targets, list) and targets:
+                        try:
+                            _ei_render_table(pd.DataFrame(targets))
+                        except Exception:
+                            st.json(targets)
+                    else:
+                        st.caption("No `adaptation_targets` block in summary.")
+                with st.expander("Top proposals (from summary)", expanded=False):
+                    top = summary.get("top_proposals")
+                    if isinstance(top, list) and top:
+                        try:
+                            _ei_render_table(pd.DataFrame(top))
+                        except Exception:
+                            st.json(top)
+                    else:
+                        st.caption("No `top_proposals` block in summary.")
+                with st.expander("Full summary JSON", expanded=False):
+                    st.json(summary)
+            except Exception as e:
+                st.caption(f"Summary rendering unavailable: {_short_err(e)}")
+
+
+# ──────────────────────────────
+# APPLIED ADJUSTMENTS PAGE
+# (dashboard-only; reads applied_adjustments.csv,
+#  applied_adjustments.json, apply_log.csv, apply_summary.json)
+# ──────────────────────────────
+
+
+def _ap_load_csv(path: Path, label: str) -> Optional[pd.DataFrame]:
+    """Wrap dashboard CSV loader with a friendly per-file warning on hard errors."""
+    df, err = read_csv_dashboard(path)
+    if err is None:
+        return df
+    if err == "empty":
+        return df
+    st.warning(f"{label}: could not read {path.name} ({err}).")
+    return None
+
+
+def _ap_load_json(path: Path, label: str) -> Optional[Dict[str, Any]]:
+    """Read a JSON file safely. Returns None on missing/error, dict otherwise."""
+    try:
+        if not path.exists():
+            return None
+        try:
+            if path.stat().st_size == 0:
+                return None
+        except OSError:
+            pass
+        text = path.read_text(encoding="utf-8")
+        if not text.strip():
+            return None
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+        return {"value": obj}
+    except Exception as e:
+        st.warning(f"{label}: could not read {path.name} ({_short_err(e)}).")
+        return None
+
+
+# Reuse the battle-tested EI helpers; thin wrappers keep call-sites consistent.
+def _ap_select_existing_columns(df: pd.DataFrame, preferred: List[str]) -> List[str]:
+    return _ei_select_existing_columns(df, preferred)
+
+
+def _ap_value_counts_table(
+    df: pd.DataFrame, col: str, order: Optional[List[str]] = None
+) -> Optional[pd.DataFrame]:
+    return _ei_value_counts_table(df, col, order=order)
+
+
+def _ap_safe_metric(
+    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.3f}", default: str = "N/A"
+) -> str:
+    return _ei_safe_metric(df, col, agg=agg, fmt=fmt, default=default)
+
+
+def _ap_truthy_count(df: pd.DataFrame, col: str) -> Optional[int]:
+    return _ei_truthy_count(df, col)
+
+
+def _ap_safe_json_table(obj: Optional[Dict[str, Any]], key: str) -> Optional[pd.DataFrame]:
+    """Generic JSON-section flattener (same contract as _ad_safe_json_table)."""
+    return _ad_safe_json_table(obj, key)
+
+
+def _ap_top_rows(
+    df: pd.DataFrame, by_cols: List[str], top_n: int = 10, ascending: Optional[List[bool]] = None
+) -> Optional[pd.DataFrame]:
+    """Sort by the given columns (desc by default) and return the top N rows."""
+    if df is None or df.empty or not by_cols:
+        return df
+    present = [c for c in by_cols if c in df.columns]
+    if not present:
+        return df.head(top_n).reset_index(drop=True)
+    asc = ascending if ascending is not None else [False] * len(present)
+    if len(asc) != len(present):
+        asc = [False] * len(present)
+    out = df.copy()
+    try:
+        out = out.sort_values(present, ascending=asc, kind="mergesort")
+    except Exception:
+        pass
+    return out.head(top_n).reset_index(drop=True)
+
+
+def _ap_summary_table_sources(summary: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    """Normalize apply_summary.json `source_availability` into a tidy table."""
+    sa = summary.get("source_availability") if isinstance(summary, dict) else None
+    if not sa or not isinstance(sa, dict):
+        return None
+    rows: List[Dict[str, Any]] = []
+    for name, meta in sa.items():
+        m = meta if isinstance(meta, dict) else {}
+        rows.append(
+            {
+                "source": name,
+                "status": str(m.get("status", "")),
+                "rows": int(m.get("rows", 0) or 0),
+                "path": str(m.get("path", "")),
+            }
+        )
+    if not rows:
+        return None
+    df = pd.DataFrame(rows).sort_values(["status", "source"], ascending=[True, True])
+    return df.reset_index(drop=True)
+
+
+def _ap_active_mask(df: pd.DataFrame) -> Optional[pd.Series]:
+    """Boolean mask of active rows, using _ei_truthy_count's truthiness set."""
+    if df is None or df.empty or "active_flag" not in df.columns:
+        return None
+    try:
+        truthy = {"true", "1", "yes", "t", "y"}
+        return df["active_flag"].astype(str).str.strip().str.lower().isin(truthy)
+    except Exception:
+        return None
+
+
+# Canonical status order used whenever we render applied-row status counts.
+_AP_STATUS_ORDER: List[str] = ["APPLIED", "INACTIVE", "ROLLED_BACK"]
+
+_AP_EVENT_ORDER: List[str] = ["APPLY", "SKIP", "ROLLBACK", "SUPERSEDE", "NOOP"]
+
+
+def page_applied_adjustments() -> None:
+    """✅ Applied Adjustments — observability of the applied-state registry."""
+    st.title("✅ Applied Adjustments")
+    st.caption(
+        "Applied adjustment registry, active state, rollback history, "
+        "supersession history, and audit log from Triton's controlled apply layer."
+    )
+
+    applied = _ap_load_csv(APPLIED_ADJUSTMENTS_CSV_PATH, "Applied adjustments")
+    applied_json = _ap_load_json(APPLIED_ADJUSTMENTS_JSON_PATH, "Applied adjustments JSON")
+    apply_log = _ap_load_csv(APPLY_LOG_CSV_PATH, "Apply log")
+    summary = _ap_load_json(APPLY_SUMMARY_JSON_PATH, "Apply summary")
+
+    no_applied = applied is None or applied.empty
+    no_log = apply_log is None or apply_log.empty
+    no_json = applied_json is None or not isinstance(applied_json, dict)
+    no_summary = summary is None or not isinstance(summary, dict) or not summary
+
+    if no_applied and no_log and no_json and no_summary:
+        st.info(
+            "No apply-layer outputs found yet. "
+            "Run `python -m services.apply_layer` "
+            "(or `python services/apply_layer.py`) to populate "
+            "`data/results/applied_adjustments.csv`, "
+            "`data/results/applied_adjustments.json`, "
+            "`data/results/apply_log.csv`, and "
+            "`data/results/apply_summary.json`."
+        )
+
+    # ── 1) TOP SUMMARY METRICS ───────────────────────────────────────
+    st.markdown("### Summary")
+
+    active_mask = _ap_active_mask(applied) if not no_applied else None
+    active_count = int(active_mask.sum()) if active_mask is not None else 0
+    inactive_count = int((~active_mask).sum()) if active_mask is not None else 0
+
+    proposals_applied = summary.get("proposals_applied") if isinstance(summary, dict) else None
+    proposals_rolled_back = (
+        summary.get("proposals_rolled_back") if isinstance(summary, dict) else None
+    )
+    proposals_skipped = summary.get("proposals_skipped") if isinstance(summary, dict) else None
+    supersessions = summary.get("supersessions") if isinstance(summary, dict) else None
+
+    advisory_only = "N/A"
+    auto_apply = "N/A"
+    approvals_source = "N/A"
+    if isinstance(summary, dict):
+        if "advisory_only_source" in summary:
+            advisory_only = "Yes" if bool(summary.get("advisory_only_source")) else "No"
+        if "auto_apply_allowed" in summary:
+            auto_apply = "Yes" if bool(summary.get("auto_apply_allowed")) else "No"
+        if "approvals_source" in summary:
+            approvals_source = str(summary.get("approvals_source") or "N/A")
+
+    sources_avail = "N/A"
+    if isinstance(summary, dict):
+        sa = summary.get("source_availability") or {}
+        if isinstance(sa, dict) and sa:
+            ok = sum(1 for v in sa.values() if isinstance(v, dict) and str(v.get("status")) == "ok")
+            sources_avail = f"{ok}/{len(sa)}"
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Active adjustments", f"{active_count:,}")
+    c2.metric("Inactive adjustments", f"{inactive_count:,}")
+    c3.metric(
+        "Proposals applied",
+        f"{int(proposals_applied):,}" if isinstance(proposals_applied, (int, float)) else "N/A",
+    )
+    c4.metric(
+        "Rolled back",
+        (
+            f"{int(proposals_rolled_back):,}"
+            if isinstance(proposals_rolled_back, (int, float))
+            else "N/A"
+        ),
+    )
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric(
+        "Skipped",
+        f"{int(proposals_skipped):,}" if isinstance(proposals_skipped, (int, float)) else "N/A",
+    )
+    c6.metric(
+        "Supersessions",
+        f"{int(supersessions):,}" if isinstance(supersessions, (int, float)) else "N/A",
+    )
+    c7.metric("Advisory-only source", advisory_only)
+    c8.metric("Sources available", sources_avail)
+
+    bits: List[str] = []
+    if isinstance(summary, dict):
+        gen_at = summary.get("generated_at_utc")
+        phase = summary.get("phase")
+        if gen_at:
+            bits.append(f"generated_at_utc=`{gen_at}`")
+        if phase:
+            bits.append(f"phase=`{phase}`")
+        if approvals_source != "N/A":
+            bits.append(f"approvals_source=`{approvals_source}`")
+    if bits:
+        st.caption(" • ".join(bits))
+
+    # ── 2) GOVERNANCE / STATUS ───────────────────────────────────────
+    st.markdown("### Governance status")
+    if no_summary:
+        st.caption("No `apply_summary.json` available — governance status unknown.")
+    else:
+        gov_msgs: List[str] = []
+        if advisory_only == "Yes":
+            gov_msgs.append("`advisory_only_source = True` — proposals originated as advisory.")
+        if auto_apply == "No":
+            gov_msgs.append(
+                "`auto_apply_allowed = False` — nothing is being applied automatically."
+            )
+        phase_s = summary.get("phase")
+        if phase_s:
+            gov_msgs.append(f"Phase: `{phase_s}`.")
+        if gov_msgs:
+            st.success(" ".join(gov_msgs))
+        else:
+            st.info("Governance flags missing from summary — treat this registry as advisory only.")
+
+        st.info(
+            "This page is an **audit view** of the applied-state registry. "
+            "Applied rows are written to `data/results/applied_adjustments.*` and "
+            "are **not yet consumed by live trading code** unless a future component "
+            "explicitly opts in."
+        )
+
+        # Compact status grid from the summary itself
+        st.markdown("**Apply counters (from summary)**")
+        counter_rows = [
+            ("proposals_seen", summary.get("proposals_seen")),
+            ("proposals_approved", summary.get("proposals_approved")),
+            ("proposals_applied", summary.get("proposals_applied")),
+            ("proposals_skipped", summary.get("proposals_skipped")),
+            ("proposals_rolled_back", summary.get("proposals_rolled_back")),
+            ("supersessions", summary.get("supersessions")),
+            ("active_adjustments_count", summary.get("active_adjustments_count")),
+            ("inactive_adjustments_count", summary.get("inactive_adjustments_count")),
+        ]
+        counter_rows = [(k, v) for k, v in counter_rows if v is not None]
+        if counter_rows:
+            cdf = pd.DataFrame(counter_rows, columns=["metric", "value"])
+            try:
+                cdf["value"] = pd.to_numeric(cdf["value"], errors="coerce").fillna(0).astype(int)
+            except Exception:
+                pass
+            _ei_render_table(cdf)
+
+        missing = summary.get("missing_inputs")
+        if isinstance(missing, list) and missing:
+            st.warning(
+                f"Missing or unreadable inputs ({len(missing)}): "
+                + ", ".join(str(m) for m in missing)
+            )
+        notes = summary.get("notes")
+        if isinstance(notes, list) and notes:
+            with st.expander("Summary notes", expanded=False):
+                for n in notes:
+                    st.write(f"• {n}")
+
+    # ── 3) SOURCE AVAILABILITY ───────────────────────────────────────
+    st.markdown("### Source availability")
+    if no_summary:
+        st.caption("No `apply_summary.json` available.")
+    else:
+        src_table = _ap_summary_table_sources(summary)
+        if src_table is None or src_table.empty:
+            st.caption("Summary JSON has no `source_availability` block.")
+        else:
+            _ei_render_table(src_table)
+
+    # ── 4) ACTIVE ADJUSTMENTS ────────────────────────────────────────
+    st.markdown("### Active adjustments")
+    if no_applied:
+        st.info("No `applied_adjustments.csv` rows yet.")
+    elif active_mask is None:
+        st.caption("`active_flag` column missing from `applied_adjustments.csv`.")
+    elif not active_mask.any():
+        st.caption("No currently-active applied adjustments in the registry.")
+    else:
+        st.caption(f"{active_count:,} active row(s)")
+        active_df = applied[active_mask].copy()
+        active_cols = _ap_select_existing_columns(
+            active_df,
+            [
+                "application_id",
+                "proposal_id",
+                "applied_at_utc",
+                "adaptation_target",
+                "proposal_type",
+                "proposal_direction",
+                "proposal_strength",
+                "proposal_confidence",
+                "effective_delta",
+                "min_allowed_value",
+                "max_allowed_value",
+                "active_flag",
+                "status",
+                "applied_by",
+                "apply_reason",
+                "related_bucket",
+                "related_flag",
+                "related_style",
+            ],
+        )
+        view = active_df[active_cols] if active_cols else active_df
+        sorted_view = _ap_top_rows(view, ["proposal_confidence", "applied_at_utc"], top_n=50)
+        _ei_render_table(sorted_view, height=380, empty_msg="No active rows to display.")
+
+    # ── 5) REGISTRY STATUS BREAKDOWN ─────────────────────────────────
+    st.markdown("### Registry status breakdown")
+    if no_applied:
+        st.caption("No registry rows to summarize.")
+    else:
+        col_s, col_af = st.columns(2)
+        with col_s:
+            st.markdown("**Count by status**")
+            _ei_render_table(
+                _ap_value_counts_table(applied, "status", order=_AP_STATUS_ORDER),
+                empty_msg="No `status` data.",
+            )
+        with col_af:
+            st.markdown("**Count by active_flag**")
+            _ei_render_table(
+                _ap_value_counts_table(applied, "active_flag"),
+                empty_msg="No `active_flag` data.",
+            )
+
+        col_r, col_t = st.columns(2)
+        with col_r:
+            st.markdown("**Count by rollback_eligible**")
+            _ei_render_table(
+                _ap_value_counts_table(applied, "rollback_eligible"),
+                empty_msg="No `rollback_eligible` data.",
+            )
+        with col_t:
+            st.markdown("**Count by adaptation_target**")
+            _ei_render_table(
+                _ap_value_counts_table(applied, "adaptation_target"),
+                empty_msg="No `adaptation_target` data.",
+            )
+
+        if "adaptation_target" in applied.columns and "proposal_confidence" in applied.columns:
+            try:
+                tmp = applied[["adaptation_target", "proposal_confidence"]].copy()
+                tmp["proposal_confidence"] = pd.to_numeric(
+                    tmp["proposal_confidence"], errors="coerce"
+                )
+                conf_by_target = (
+                    tmp.dropna(subset=["proposal_confidence"])
+                    .groupby("adaptation_target")["proposal_confidence"]
+                    .agg(["mean", "median", "count"])
+                    .round(3)
+                    .reset_index()
+                    .rename(columns={"mean": "avg_confidence", "median": "median_confidence"})
+                    .sort_values("avg_confidence", ascending=False)
+                    .reset_index(drop=True)
+                )
+                st.markdown("**Average confidence by adaptation target**")
+                _ei_render_table(conf_by_target)
+            except Exception as e:
+                st.caption(f"Confidence-by-target unavailable: {_short_err(e)}")
+
+    # ── 6) ROLLBACK / SUPERSESSION HISTORY ───────────────────────────
+    st.markdown("### Rollback & supersession history")
+    if no_applied:
+        st.caption("No registry rows to inspect.")
+    else:
+        # Rollback history: status == ROLLED_BACK
+        rb_mask = None
+        if "status" in applied.columns:
+            try:
+                rb_mask = applied["status"].astype(str).str.upper() == "ROLLED_BACK"
+            except Exception:
+                rb_mask = None
+
+        st.markdown("**Rollback history**")
+        if rb_mask is None or not rb_mask.any():
+            st.caption("No rolled-back rows.")
+        else:
+            rb_df = applied[rb_mask].copy()
+            rb_cols = _ap_select_existing_columns(
+                rb_df,
+                [
+                    "application_id",
+                    "proposal_id",
+                    "adaptation_target",
+                    "status",
+                    "rollback_parent_application_id",
+                    "applied_at_utc",
+                    "apply_reason",
+                    "apply_note",
+                ],
+            )
+            view = rb_df[rb_cols] if rb_cols else rb_df
+            _ei_render_table(
+                _ap_top_rows(view, ["applied_at_utc"], top_n=50),
+                height=280,
+                empty_msg="No rollback rows to display.",
+            )
+
+        # Supersession history: superseded_by_application_id populated
+        sup_mask = None
+        if "superseded_by_application_id" in applied.columns:
+            try:
+                sup_series = applied["superseded_by_application_id"].astype(str).str.strip()
+                sup_mask = sup_series.ne("") & ~sup_series.str.lower().isin(["nan", "none"])
+            except Exception:
+                sup_mask = None
+
+        st.markdown("**Supersession history**")
+        if sup_mask is None or not sup_mask.any():
+            st.caption("No superseded rows.")
+        else:
+            sup_df = applied[sup_mask].copy()
+            sup_cols = _ap_select_existing_columns(
+                sup_df,
+                [
+                    "application_id",
+                    "proposal_id",
+                    "adaptation_target",
+                    "status",
+                    "superseded_by_application_id",
+                    "applied_at_utc",
+                    "proposal_confidence",
+                    "effective_delta",
+                ],
+            )
+            view = sup_df[sup_cols] if sup_cols else sup_df
+            _ei_render_table(
+                _ap_top_rows(view, ["applied_at_utc"], top_n=50),
+                height=280,
+                empty_msg="No supersession rows to display.",
+            )
+
+    # ── 7) APPLY LOG ─────────────────────────────────────────────────
+    st.markdown("### Apply log")
+    if no_log:
+        st.info("No `apply_log.csv` events yet.")
+    else:
+        col_e, col_er = st.columns(2)
+        with col_e:
+            st.markdown("**Count by event_type**")
+            _ei_render_table(
+                _ap_value_counts_table(apply_log, "event_type", order=_AP_EVENT_ORDER),
+                empty_msg="No `event_type` data.",
+            )
+        with col_er:
+            st.markdown("**Top reasons**")
+            reason_tbl = _ap_value_counts_table(apply_log, "reason")
+            if reason_tbl is not None and not reason_tbl.empty:
+                _ei_render_table(reason_tbl.head(12))
+            else:
+                st.caption("No `reason` data.")
+
+        st.markdown("**Recent apply log rows**")
+        log_cols = _ap_select_existing_columns(
+            apply_log,
+            [
+                "event_time_utc",
+                "event_type",
+                "application_id",
+                "proposal_id",
+                "adaptation_target",
+                "result",
+                "reason",
+                "note",
+            ],
+        )
+        view = apply_log[log_cols] if log_cols else apply_log
+        # Log is append-only → last rows are most recent.
+        try:
+            recent = view.tail(50).iloc[::-1].reset_index(drop=True)
+        except Exception:
+            recent = view
+        _ei_render_table(recent, height=360, empty_msg="No apply-log rows to display.")
+
+    # ── 8) APPLIED JSON SNAPSHOT ─────────────────────────────────────
+    st.markdown("### Applied JSON snapshot")
+    if no_json:
+        st.caption("No `applied_adjustments.json` available.")
+    else:
+        active_list = applied_json.get("active_adjustments") or []
+        all_list = applied_json.get("all_adjustments") or []
+        notes_list = applied_json.get("notes") or []
+        gen_at = applied_json.get("generated_at_utc")
+
+        jm1, jm2 = st.columns(2)
+        jm1.metric("active_adjustments", f"{len(active_list):,}")
+        jm2.metric("all_adjustments", f"{len(all_list):,}")
+        if gen_at:
+            st.caption(f"snapshot generated_at_utc=`{gen_at}`")
+
+        if isinstance(active_list, list) and active_list:
+            try:
+                active_snap = pd.DataFrame(active_list)
+                snap_cols = _ap_select_existing_columns(
+                    active_snap,
+                    [
+                        "application_id",
+                        "proposal_id",
+                        "adaptation_target",
+                        "proposal_type",
+                        "proposal_direction",
+                        "proposal_strength",
+                        "proposal_confidence",
+                        "effective_delta",
+                        "applied_at_utc",
+                        "related_bucket",
+                        "related_flag",
+                        "related_style",
+                    ],
+                )
+                view = active_snap[snap_cols] if snap_cols else active_snap
+                _ei_render_table(view, height=300, empty_msg="No active-snapshot rows.")
+            except Exception as e:
+                st.caption(f"Active snapshot table unavailable: {_short_err(e)}")
+        if isinstance(notes_list, list) and notes_list:
+            with st.expander("Snapshot notes", expanded=False):
+                for n in notes_list:
+                    st.write(f"• {n}")
+
+    # ── 9) CURRENT APPLIED STATE OVERVIEW (heuristic audit) ──────────
+    st.markdown("### Current applied-state overview")
+    if no_applied:
+        st.caption("No registry rows to audit.")
+    else:
+        # Which targets currently have active rows?
+        if active_mask is not None and active_mask.any():
+            active_df = applied[active_mask].copy()
+            if "adaptation_target" in active_df.columns:
+                st.markdown("**Adaptation targets with active rows**")
+                try:
+                    by_target = (
+                        active_df.groupby("adaptation_target")
+                        .size()
+                        .rename("active_rows")
+                        .reset_index()
+                        .sort_values("active_rows", ascending=False)
+                        .reset_index(drop=True)
+                    )
+                    _ei_render_table(by_target)
+                except Exception as e:
+                    st.caption(f"Target summary unavailable: {_short_err(e)}")
+
+            # Duplicate active surfaces — same (target, bucket, flag, style)
+            key_cols = [
+                c
+                for c in (
+                    "adaptation_target",
+                    "related_bucket",
+                    "related_flag",
+                    "related_style",
+                )
+                if c in active_df.columns
+            ]
+            dup_df = None
+            if key_cols:
+                try:
+                    dup_counts = (
+                        active_df.assign(
+                            **{c: active_df[c].astype(str).fillna("") for c in key_cols}
+                        )
+                        .groupby(key_cols)
+                        .size()
+                        .rename("active_rows")
+                        .reset_index()
+                    )
+                    dup_df = dup_counts[dup_counts["active_rows"] > 1]
+                except Exception:
+                    dup_df = None
+            if dup_df is not None and not dup_df.empty:
+                st.warning(
+                    f"{len(dup_df):,} duplicate active surface(s) detected — "
+                    "multiple active rows share the same "
+                    "(adaptation_target, related_bucket, related_flag, related_style)."
+                )
+                _ei_render_table(dup_df)
+            else:
+                st.caption("No duplicate active surfaces detected.")
+
+            # Anomaly: active rows whose status is not APPLIED
+            if "status" in active_df.columns:
+                try:
+                    bad_status = active_df[active_df["status"].astype(str).str.upper() != "APPLIED"]
+                except Exception:
+                    bad_status = active_df.iloc[0:0]
+                if not bad_status.empty:
+                    st.warning(
+                        f"{len(bad_status):,} active row(s) carry a status other than APPLIED."
+                    )
+                    anom_cols = _ap_select_existing_columns(
+                        bad_status,
+                        [
+                            "application_id",
+                            "proposal_id",
+                            "adaptation_target",
+                            "status",
+                            "active_flag",
+                            "applied_at_utc",
+                        ],
+                    )
+                    view = bad_status[anom_cols] if anom_cols else bad_status
+                    _ei_render_table(view, height=220)
+        else:
+            st.caption("No active rows; nothing to audit in the overview.")
+
+    # ── 10) RAW DETAILED TABLES ──────────────────────────────────────
+    st.markdown("### Raw data")
+    with st.expander("Applied Adjustments Registry (raw)", expanded=False):
+        if no_applied:
+            st.caption("`applied_adjustments.csv` is empty or missing.")
+        else:
+            st.caption(f"{applied.shape[0]:,} rows × {applied.shape[1]:,} columns")
+            _ei_render_table(applied, height=420)
+
+    with st.expander("Apply Log (raw, most recent first)", expanded=False):
+        if no_log:
+            st.caption("`apply_log.csv` is empty or missing.")
+        else:
+            try:
+                log_view = apply_log.iloc[::-1].reset_index(drop=True)
+            except Exception:
+                log_view = apply_log
+            st.caption(f"{apply_log.shape[0]:,} rows × {apply_log.shape[1]:,} columns")
+            _ei_render_table(log_view, height=360)
+
+    with st.expander("Applied JSON Snapshot (raw)", expanded=False):
+        if no_json:
+            st.caption("`applied_adjustments.json` is empty or missing.")
+        else:
+            try:
+                meta = {
+                    k: applied_json.get(k)
+                    for k in (
+                        "generated_at_utc",
+                        "schema_version",
+                        "phase",
+                        "notes",
+                    )
+                    if k in applied_json
+                }
+                st.json(meta)
+                with st.expander("Full snapshot JSON", expanded=False):
+                    st.json(applied_json)
+            except Exception as e:
+                st.caption(f"Snapshot rendering unavailable: {_short_err(e)}")
+
+    with st.expander("Apply Summary (key sections)", expanded=False):
+        if no_summary:
+            st.caption("`apply_summary.json` is empty or missing.")
+        else:
+            try:
+                meta = {
+                    k: summary.get(k)
+                    for k in (
+                        "generated_at_utc",
+                        "schema_version",
+                        "phase",
+                        "advisory_only_source",
+                        "auto_apply_allowed",
+                        "approvals_source",
+                        "missing_inputs",
+                        "proposals_seen",
+                        "proposals_approved",
+                        "proposals_applied",
+                        "proposals_skipped",
+                        "proposals_rolled_back",
+                        "supersessions",
+                        "active_adjustments_count",
+                        "inactive_adjustments_count",
+                        "notes",
+                    )
+                    if k in summary
+                }
+                st.json(meta)
+                with st.expander("Top active adjustments (from summary)", expanded=False):
+                    top = summary.get("top_active_adjustments")
+                    if isinstance(top, list) and top:
+                        try:
+                            _ei_render_table(pd.DataFrame(top))
+                        except Exception:
+                            st.json(top)
+                    else:
+                        st.caption("No `top_active_adjustments` block in summary.")
+                with st.expander("Full summary JSON", expanded=False):
+                    st.json(summary)
+            except Exception as e:
+                st.caption(f"Summary rendering unavailable: {_short_err(e)}")
+
+
+# ─────────────────────────────────────────────────────────────
+# 🧪 ADAPTATION SIMULATION — Phase-2 observability page.
+# Reads data/results/adaptation_simulation.csv + _summary.json.
+# The simulation itself is produced by services/adaptation_simulation.py
+# which is read-only w.r.t. live trading logic.
+# ─────────────────────────────────────────────────────────────
+
+
+_AS_DECISION_ORDER: List[str] = [
+    "UNCHANGED_ACCEPT",
+    "NEWLY_REJECTED",
+    "NEWLY_ACCEPTED",
+    "UNCHANGED_REJECT",
+]
+
+
+def _as_load_csv(path: Path, label: str) -> Optional[pd.DataFrame]:
+    """Mirror of the _ad_/_ap_ loaders — tolerant of missing/empty/malformed."""
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+    except Exception as e:
+        st.warning(f"{label}: could not read `{path.name}` — {_short_err(e)}")
+        return pd.DataFrame()
+    return df
+
+
+def _as_load_json(path: Path, label: str) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        txt = path.read_text(encoding="utf-8")
+    except Exception as e:
+        st.warning(f"{label}: could not read `{path.name}` — {_short_err(e)}")
+        return {}
+    txt = (txt or "").strip()
+    if not txt:
+        return {}
+    try:
+        obj = json.loads(txt)
+    except Exception as e:
+        st.warning(f"{label}: `{path.name}` is not valid JSON — {_short_err(e)}")
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _as_select_existing_columns(df: pd.DataFrame, preferred: List[str]) -> List[str]:
+    if df is None or df.empty:
+        return []
+    return [c for c in preferred if c in df.columns]
+
+
+def _as_value_counts_table(
+    df: pd.DataFrame, col: str, order: Optional[List[str]] = None
+) -> Optional[pd.DataFrame]:
+    return _ad_value_counts_table(df, col, order=order)
+
+
+def _as_truthy_count(df: pd.DataFrame, col: str) -> Optional[int]:
+    return _ad_truthy_count(df, col)
+
+
+def _as_summary_table_sources(summary: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    """Render source_availability block from simulation summary JSON."""
+    return _ad_summary_table_sources(summary)
+
+
+def _as_acceptance_bar_chart(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Build the tiny baseline-vs-simulated table for st.bar_chart."""
+    if df is None or df.empty:
+        return None
+    try:
+        b_acc = int(
+            df.get("baseline_accepted", pd.Series([], dtype=object))
+            .apply(lambda v: str(v).strip().lower() in ("true", "1"))
+            .sum()
+        )
+        b_rej = len(df) - b_acc
+        s_acc = int(
+            df.get("simulated_accepted", pd.Series([], dtype=object))
+            .apply(lambda v: str(v).strip().lower() in ("true", "1"))
+            .sum()
+        )
+        s_rej = len(df) - s_acc
+        return pd.DataFrame(
+            {
+                "accepted": [b_acc, s_acc],
+                "rejected": [b_rej, s_rej],
+            },
+            index=["baseline", "simulated"],
+        )
+    except Exception:
+        return None
+
+
+def page_adaptation_simulation() -> None:
+    """🧪 Adaptation Simulation — what-if preview for active applied adjustments."""
+    st.title("🧪 Adaptation Simulation")
+    st.caption(
+        "Phase-2 what-if preview. Takes the ACTIVE rows from "
+        "`applied_adjustments.csv` and simulates — in memory only — what "
+        "would change in acceptance, thresholds, and opportunity flow. "
+        "**No broker, execution, lifecycle, or risk state is modified.**"
+    )
+
+    sim = _as_load_csv(ADAPTATION_SIMULATION_CSV_PATH, "Adaptation simulation CSV")
+    summary = _as_load_json(
+        ADAPTATION_SIMULATION_SUMMARY_JSON_PATH, "Adaptation simulation summary"
+    )
+
+    no_sim = sim is None or sim.empty
+    no_summary = summary is None or not isinstance(summary, dict) or not summary
+
+    if no_sim and no_summary:
+        st.info(
+            "No simulation outputs found yet. Run "
+            "`python -m services.adaptation_simulation` to populate "
+            "`data/results/adaptation_simulation.csv` and "
+            "`data/results/adaptation_simulation_summary.json`."
+        )
+
+    # ── 1) SUMMARY COMPARISON ─────────────────────────────────────────
+    st.markdown("### Summary — baseline vs simulated")
+
+    opps_seen = summary.get("opportunities_seen") if isinstance(summary, dict) else None
+    active_n = summary.get("active_adjustments_count") if isinstance(summary, dict) else None
+    active_used = (
+        summary.get("active_adjustments_used_count") if isinstance(summary, dict) else None
+    )
+
+    baseline_counts = (summary or {}).get("baseline_counts") or {}
+    simulated_counts = (summary or {}).get("simulated_counts") or {}
+    decision_counts = (summary or {}).get("decision_change_counts") or {}
+
+    def _int_or_na(v: Any) -> str:
+        try:
+            if v is None:
+                return "N/A"
+            return f"{int(v):,}"
+        except Exception:
+            return "N/A"
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Opportunities seen", _int_or_na(opps_seen))
+    c2.metric("Active adjustments", _int_or_na(active_n))
+    c3.metric("Active used", _int_or_na(active_used))
+    c4.metric("Newly rejected", _int_or_na(decision_counts.get("NEWLY_REJECTED")))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Baseline accepted", _int_or_na(baseline_counts.get("accepted")))
+    c6.metric("Simulated accepted", _int_or_na(simulated_counts.get("accepted")))
+    c7.metric("Baseline rejected", _int_or_na(baseline_counts.get("rejected")))
+    c8.metric("Newly accepted", _int_or_na(decision_counts.get("NEWLY_ACCEPTED")))
+
+    bits: List[str] = []
+    if isinstance(summary, dict):
+        gen_at = summary.get("generated_at_utc")
+        phase = summary.get("phase")
+        score_floor = summary.get("score_floor")
+        sim_only = summary.get("simulation_only")
+        adv_only = summary.get("advisory_only")
+        if gen_at:
+            bits.append(f"generated_at_utc=`{gen_at}`")
+        if phase:
+            bits.append(f"phase=`{phase}`")
+        if score_floor is not None:
+            bits.append(f"score_floor=`{score_floor}`")
+        if sim_only is True:
+            bits.append("simulation_only=`True`")
+        if adv_only is True:
+            bits.append("advisory_only=`True`")
+    if bits:
+        st.caption(" • ".join(bits))
+
+    if not no_sim:
+        try:
+            chart_df = _as_acceptance_bar_chart(sim)
+            if chart_df is not None:
+                col_a, col_b = st.columns([2, 3])
+                with col_a:
+                    st.markdown("**Acceptance comparison**")
+                    _ei_render_table(chart_df.reset_index().rename(columns={"index": "series"}))
+                with col_b:
+                    try:
+                        st.bar_chart(chart_df)
+                    except Exception as e:
+                        st.caption(f"Bar chart unavailable: {_short_err(e)}")
+        except Exception as e:
+            st.caption(f"Acceptance summary unavailable: {_short_err(e)}")
+
+        dc_counts = _as_value_counts_table(sim, "decision_change", order=_AS_DECISION_ORDER)
+        st.markdown("**Decision-change counts**")
+        _ei_render_table(dc_counts, empty_msg="No `decision_change` column.")
+
+    # ── 2) THRESHOLD IMPACT ──────────────────────────────────────────
+    st.markdown("### Threshold impact")
+    if no_summary:
+        st.caption("No summary JSON — threshold utilisation unavailable.")
+    else:
+        tu = summary.get("threshold_utilization") or {}
+        exposure = summary.get("exposure_delta_estimate") or {}
+
+        tc1, tc2, tc3 = st.columns(3)
+        tc1.metric(
+            "ADD-threshold matches",
+            _int_or_na(tu.get("add_score_threshold_matches")),
+        )
+        tc2.metric(
+            "Trim-threshold rows",
+            _int_or_na(tu.get("trim_profit_threshold_rows")),
+        )
+        tc3.metric(
+            "Cooldown-bias rows",
+            _int_or_na(tu.get("position_cooldown_bias_rows")),
+        )
+
+        if isinstance(exposure, dict) and exposure:
+            st.markdown("**Exposure delta (heuristic proxy — not a real risk figure)**")
+            try:
+                ex_df = pd.DataFrame(
+                    [
+                        (
+                            "newly_rejected_exposure_proxy",
+                            exposure.get("newly_rejected_exposure_proxy"),
+                        ),
+                        (
+                            "newly_accepted_exposure_proxy",
+                            exposure.get("newly_accepted_exposure_proxy"),
+                        ),
+                        ("net_exposure_change_proxy", exposure.get("net_exposure_change_proxy")),
+                    ],
+                    columns=["metric", "value"],
+                )
+                _ei_render_table(ex_df)
+                note = exposure.get("note")
+                if note:
+                    st.caption(str(note))
+            except Exception as e:
+                st.caption(f"Exposure summary unavailable: {_short_err(e)}")
+
+    # ── 3) SIGNAL ACCEPTANCE CHANGES ─────────────────────────────────
+    st.markdown("### Signal acceptance changes")
+    if no_sim:
+        st.caption("No per-row simulation rows available.")
+    else:
+        curated_cols = _as_select_existing_columns(
+            sim,
+            [
+                "row_id",
+                "symbol",
+                "opportunity_type",
+                "effective_stance",
+                "sizing_bucket",
+                "confidence",
+                "edge_score",
+                "baseline_score",
+                "baseline_threshold",
+                "simulated_score",
+                "simulated_threshold",
+                "simulated_penalty_total",
+                "simulated_boost_total",
+                "score_delta",
+                "decision_change",
+                "baseline_reject_reason",
+                "simulated_reject_reason",
+                "adjustments_applied",
+                "adjustment_details",
+                "spread_bucket",
+                "quote_is_stale",
+                "execution_risk_flag",
+            ],
+        )
+
+        def _filter_decision(df: pd.DataFrame, decision: str) -> pd.DataFrame:
+            if "decision_change" not in df.columns:
+                return df.iloc[0:0]
+            return df[df["decision_change"].astype(str).str.upper() == decision].copy()
+
+        newly_rejected = _filter_decision(sim, "NEWLY_REJECTED")
+        newly_accepted = _filter_decision(sim, "NEWLY_ACCEPTED")
+
+        col_nr, col_na = st.columns(2)
+        with col_nr:
+            st.markdown(f"**Newly rejected ({len(newly_rejected):,})**")
+            if newly_rejected.empty:
+                st.caption("No opportunities flip accept→reject.")
+            else:
+                view = newly_rejected[curated_cols] if curated_cols else newly_rejected
+                _ei_render_table(view.head(50), height=340)
+        with col_na:
+            st.markdown(f"**Newly accepted ({len(newly_accepted):,})**")
+            if newly_accepted.empty:
+                st.caption("No opportunities flip reject→accept.")
+            else:
+                view = newly_accepted[curated_cols] if curated_cols else newly_accepted
+                _ei_render_table(view.head(50), height=340)
+
+        if "baseline_reject_reason" in sim.columns:
+            try:
+                rr = (
+                    sim[sim["baseline_reject_reason"].astype(str).str.strip() != ""][
+                        "baseline_reject_reason"
+                    ]
+                    .astype(str)
+                    .value_counts()
+                    .reset_index()
+                )
+                rr.columns = ["baseline_reject_reason", "count"]
+                if not rr.empty:
+                    st.markdown("**Baseline reject reasons**")
+                    _ei_render_table(rr.head(15))
+            except Exception as e:
+                st.caption(f"Reject-reason summary unavailable: {_short_err(e)}")
+
+        if "simulated_reject_reason" in sim.columns:
+            try:
+                rr = (
+                    sim[sim["simulated_reject_reason"].astype(str).str.strip() != ""][
+                        "simulated_reject_reason"
+                    ]
+                    .astype(str)
+                    .value_counts()
+                    .reset_index()
+                )
+                rr.columns = ["simulated_reject_reason", "count"]
+                if not rr.empty:
+                    st.markdown("**Simulated reject reasons**")
+                    _ei_render_table(rr.head(15))
+            except Exception as e:
+                st.caption(f"Simulated-reject summary unavailable: {_short_err(e)}")
+
+    # ── 4) OPPORTUNITY CHANGES ───────────────────────────────────────
+    st.markdown("### Opportunity changes by type")
+    if no_sim:
+        st.caption("No simulation rows to break down.")
+    else:
+        try:
+            if {"opportunity_type", "decision_change"}.issubset(set(sim.columns)):
+                crosstab = (
+                    sim.groupby(["opportunity_type", "decision_change"])
+                    .size()
+                    .unstack(fill_value=0)
+                )
+                # Keep our canonical column order when present
+                existing_order = [c for c in _AS_DECISION_ORDER if c in crosstab.columns]
+                leftover = [c for c in crosstab.columns if c not in _AS_DECISION_ORDER]
+                crosstab = crosstab[existing_order + leftover]
+                crosstab = crosstab.reset_index()
+                _ei_render_table(crosstab)
+            else:
+                st.caption("`opportunity_type` or `decision_change` column missing.")
+        except Exception as e:
+            st.caption(f"Opportunity breakdown unavailable: {_short_err(e)}")
+
+    # ── 5) RISK IMPACT (COUNTS ONLY) ─────────────────────────────────
+    st.markdown("### Risk impact (counts only)")
+    st.caption(
+        "Counts of rows that matched risk-sensitive conditions during "
+        "simulation. No real risk state is modified."
+    )
+    if no_summary:
+        st.caption("No summary JSON — risk-impact counts unavailable.")
+    else:
+        rc = summary.get("risk_impact_counts") or {}
+        rc1, rc2, rc3 = st.columns(3)
+        rc1.metric(
+            "Wide / too-wide spread rows", _int_or_na(rc.get("wide_or_too_wide_spread_rows"))
+        )
+        rc2.metric("Stale-quote rows", _int_or_na(rc.get("stale_quote_rows")))
+        rc3.metric("HIGH exec-risk rows", _int_or_na(rc.get("high_execution_risk_rows")))
+        note = rc.get("note") if isinstance(rc, dict) else None
+        if note:
+            st.caption(str(note))
+
+    # ── 6) ACTIVE ADJUSTMENTS USED ───────────────────────────────────
+    st.markdown("### Active adjustments used")
+    adj_rows: List[Dict[str, Any]] = []
+    if isinstance(summary, dict):
+        raw = summary.get("active_adjustments") or []
+        if isinstance(raw, list):
+            adj_rows = [r for r in raw if isinstance(r, dict)]
+    if not adj_rows:
+        st.caption("No active adjustments were present in the last simulation.")
+    else:
+        try:
+            adj_df = pd.DataFrame(adj_rows)
+            preferred = _as_select_existing_columns(
+                adj_df,
+                [
+                    "adaptation_target",
+                    "effect",
+                    "effective_delta",
+                    "related_bucket",
+                    "related_flag",
+                    "related_style",
+                    "rows_matched",
+                    "application_id",
+                    "proposal_id",
+                    "description",
+                ],
+            )
+            view = adj_df[preferred] if preferred else adj_df
+            if "rows_matched" in view.columns:
+                try:
+                    view = view.sort_values("rows_matched", ascending=False)
+                except Exception:
+                    pass
+            _ei_render_table(view, height=280)
+        except Exception as e:
+            st.caption(f"Active-adjustment table unavailable: {_short_err(e)}")
+
+    # ── 7) SOURCE AVAILABILITY ───────────────────────────────────────
+    st.markdown("### Source availability")
+    if no_summary:
+        st.caption("No summary JSON available.")
+    else:
+        src_table = _as_summary_table_sources(summary)
+        if src_table is None or src_table.empty:
+            st.caption("Summary JSON has no `source_availability` block.")
+        else:
+            _ei_render_table(src_table)
+        missing = summary.get("missing_inputs") if isinstance(summary, dict) else None
+        if isinstance(missing, list) and missing:
+            st.warning(
+                f"Missing or unreadable inputs ({len(missing)}): "
+                + ", ".join(str(m) for m in missing)
+            )
+
+    # ── 8) EXPANDABLE RAW TABLES ─────────────────────────────────────
+    st.markdown("### Raw data")
+    with st.expander("Simulation per-row results (raw)", expanded=False):
+        if no_sim:
+            st.caption("`adaptation_simulation.csv` is empty or missing.")
+        else:
+            st.caption(f"{sim.shape[0]:,} rows × {sim.shape[1]:,} columns")
+            _ei_render_table(sim, height=420)
+
+    with st.expander("Simulation summary JSON (key sections)", expanded=False):
+        if no_summary:
+            st.caption("`adaptation_simulation_summary.json` is empty or missing.")
+        else:
+            try:
+                meta_keys = [
+                    "generated_at_utc",
+                    "schema_version",
+                    "phase",
+                    "simulation_only",
+                    "advisory_only",
+                    "auto_apply_allowed",
+                    "score_floor",
+                    "missing_inputs",
+                    "opportunities_seen",
+                    "active_adjustments_count",
+                    "active_adjustments_used_count",
+                    "baseline_counts",
+                    "simulated_counts",
+                    "decision_change_counts",
+                    "exposure_delta_estimate",
+                    "threshold_utilization",
+                    "risk_impact_counts",
+                    "notes",
+                ]
+                meta = {k: summary.get(k) for k in meta_keys if k in summary}
+                st.json(meta)
+                with st.expander("Full summary JSON", expanded=False):
+                    st.json(summary)
+            except Exception as e:
+                st.caption(f"Summary rendering unavailable: {_short_err(e)}")
+
+
+# ──────────────────────────────
+# PERFORMANCE INTELLIGENCE (read-only analytics)
+# ──────────────────────────────
+def _pi_format_money(v: Any) -> str:
+    try:
+        f = float(v)
+    except Exception:
+        return "N/A"
+    if not np.isfinite(f):
+        return "N/A"
+    sign = "-" if f < 0 else ""
+    return f"{sign}${abs(f):,.2f}"
+
+
+def _pi_color_pl(val: Any) -> str:
+    try:
+        f = float(val)
+    except Exception:
+        return ""
+    if not np.isfinite(f):
+        return ""
+    if f > 0:
+        return "color: #16a34a; font-weight: 600;"
+    if f < 0:
+        return "color: #dc2626; font-weight: 600;"
+    return ""
+
+
+_PI_RISK_FLAG_RANK: Dict[str, int] = {
+    "FORCE_EXIT": 0,
+    "TRIM_PRIORITY": 1,
+    "BLOCK_NEW_BUY": 2,
+    "OK": 3,
+}
+
+# Visual styling per risk flag (text colour + light background). FORCE_EXIT is
+# the loudest red, TRIM_PRIORITY amber, BLOCK_NEW_BUY blue, OK muted green.
+_PI_RISK_FLAG_STYLE: Dict[str, str] = {
+    "FORCE_EXIT": "background-color: #fee2e2; color: #b91c1c; font-weight: 700;",
+    "TRIM_PRIORITY": "background-color: #fef3c7; color: #b45309; font-weight: 700;",
+    "BLOCK_NEW_BUY": "background-color: #dbeafe; color: #1d4ed8; font-weight: 700;",
+    "OK": "background-color: #dcfce7; color: #166534; font-weight: 600;",
+}
+
+# HTML badge colours for the legend / metric annotations (matching cell styles).
+_PI_RISK_FLAG_BADGE_HTML: Dict[str, str] = {
+    "FORCE_EXIT": (
+        '<span style="background-color:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;'
+        'padding:2px 8px;border-radius:6px;font-weight:700;font-size:0.85rem;">'
+        "🛑 FORCE_EXIT</span>"
+    ),
+    "TRIM_PRIORITY": (
+        '<span style="background-color:#fef3c7;color:#b45309;border:1px solid #fcd34d;'
+        'padding:2px 8px;border-radius:6px;font-weight:700;font-size:0.85rem;">'
+        "✂️ TRIM_PRIORITY</span>"
+    ),
+    "BLOCK_NEW_BUY": (
+        '<span style="background-color:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;'
+        'padding:2px 8px;border-radius:6px;font-weight:700;font-size:0.85rem;">'
+        "🚫 BLOCK_NEW_BUY</span>"
+    ),
+    "OK": (
+        '<span style="background-color:#dcfce7;color:#166534;border:1px solid #86efac;'
+        'padding:2px 8px;border-radius:6px;font-weight:600;font-size:0.85rem;">'
+        "✅ OK</span>"
+    ),
+}
+
+
+def _pi_risk_flag_priority(flag: Any) -> int:
+    """Return numeric severity (lower = more urgent) for sort ordering."""
+    s = str(flag or "").strip().upper()
+    if not s:
+        return _PI_RISK_FLAG_RANK["OK"]
+    parts = [p.strip() for p in s.split("|") if p.strip()]
+    if not parts:
+        return _PI_RISK_FLAG_RANK["OK"]
+    return min(_PI_RISK_FLAG_RANK.get(p, 99) for p in parts)
+
+
+def _pi_risk_flag_cell_style(flag: Any) -> str:
+    """Cell CSS for the risk_flag column. Returns '' for unknown values."""
+    s = str(flag or "").strip().upper()
+    if not s:
+        return ""
+    parts = [p.strip() for p in s.split("|") if p.strip()]
+    if not parts:
+        return ""
+    # Use the highest-severity component for cell colour.
+    primary = min(parts, key=lambda p: _PI_RISK_FLAG_RANK.get(p, 99))
+    return _PI_RISK_FLAG_STYLE.get(primary, "")
+
+
+def _pi_drag_mask(df: pd.DataFrame) -> Optional[pd.Series]:
+    """Return a boolean mask of drag rows when an inferable column exists."""
+    if df is None or df.empty:
+        return None
+    if "drag_flag" in df.columns:
+        try:
+            return df["drag_flag"].astype(bool)
+        except Exception:
+            try:
+                s = df["drag_flag"].astype(str).str.strip().str.lower()
+                return s.isin({"true", "1", "yes", "y"})
+            except Exception:
+                return None
+    if "performance_bucket" in df.columns:
+        try:
+            return df["performance_bucket"].astype(str).str.upper() == "HIGH_DRAG"
+        except Exception:
+            return None
+    if "severity_bucket" in df.columns and "total_pl" in df.columns:
+        try:
+            sev = df["severity_bucket"].astype(str).str.upper() == "HIGH"
+            pl = pd.to_numeric(df["total_pl"], errors="coerce")
+            return sev & (pl < 0)
+        except Exception:
+            return None
+    return None
+
+
+def page_performance_intelligence() -> None:
+    st.markdown("### 📊 Performance Intelligence")
+    st.caption(
+        "Read-only analytics. Aggregates `performance_intelligence_*` artifacts produced by "
+        "`services/build_performance_intelligence.py`. Does not influence trading."
+    )
+
+    summary = load_json(PERFORMANCE_INTELLIGENCE_SUMMARY_JSON_PATH, show_error=False) or {}
+    system_df = csv_usable_rows(PERFORMANCE_INTELLIGENCE_CSV_PATH)
+    by_symbol_df = csv_usable_rows(PERFORMANCE_INTELLIGENCE_BY_SYMBOL_CSV_PATH)
+
+    if (
+        not summary
+        and (system_df is None or system_df.empty)
+        and (by_symbol_df is None or by_symbol_df.empty)
+    ):
+        st.info(
+            "No performance intelligence artifacts found yet. "
+            "Run `python -m services.build_performance_intelligence` to populate this page.",
+            icon="ℹ️",
+        )
+        with st.expander("Expected files", expanded=False):
+            st.code(
+                "\n".join(
+                    [
+                        str(PERFORMANCE_INTELLIGENCE_CSV_PATH),
+                        str(PERFORMANCE_INTELLIGENCE_BY_SYMBOL_CSV_PATH),
+                        str(PERFORMANCE_INTELLIGENCE_SUMMARY_JSON_PATH),
+                    ]
+                )
+            )
+        return
+
+    # ── 1) SYSTEM PERFORMANCE ────────────────────────────────────────
+    st.markdown("#### System Performance")
+
+    # Prefer summary JSON; fall back to one-row CSV when JSON is missing.
+    sys_view: Dict[str, Any] = {}
+    if summary:
+        sys_view = dict(summary)
+    elif system_df is not None and not system_df.empty:
+        try:
+            sys_view = {k: system_df.iloc[-1].get(k) for k in system_df.columns}
+        except Exception:
+            sys_view = {}
+
+    if not sys_view:
+        st.warning("System summary unavailable.", icon="⚠️")
+    else:
+        gen_at = sys_view.get("generated_at_utc")
+        if gen_at:
+            st.caption(f"Generated at: `{gen_at}` (UTC)")
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total symbols", f"{int(sys_view.get('total_symbols') or 0):,}")
+        m2.metric("Winners", f"{int(sys_view.get('winners') or 0):,}")
+        m3.metric("Losers", f"{int(sys_view.get('losers') or 0):,}")
+        m4.metric("High-drag symbols", f"{int(sys_view.get('high_drag_symbols') or 0):,}")
+
+        n1, n2, n3, n4 = st.columns(4)
+        best_sym = sys_view.get("best_symbol") or "—"
+        worst_sym = sys_view.get("worst_symbol") or "—"
+        n1.metric("Best symbol", str(best_sym))
+        n2.metric("Worst symbol", str(worst_sym))
+        n3.metric("Total combined P/L", _pi_format_money(sys_view.get("total_combined_pl")))
+        n4.metric("Open positions", f"{int(sys_view.get('open_positions') or 0):,}")
+
+        with st.expander("Realized vs unrealized split", expanded=False):
+            r1, r2 = st.columns(2)
+            r1.metric("Total realized P/L", _pi_format_money(sys_view.get("total_realized_pl")))
+            r2.metric("Total unrealized P/L", _pi_format_money(sys_view.get("total_unrealized_pl")))
+
+        if isinstance(summary, dict):
+            with st.expander("Full summary JSON", expanded=False):
+                st.json(summary)
+
+    # ── 2) SYMBOL PERFORMANCE ────────────────────────────────────────
+    st.markdown("#### Symbol Performance")
+
+    if by_symbol_df is None or by_symbol_df.empty:
+        st.info("`performance_intelligence_by_symbol.csv` is missing or empty.", icon="ℹ️")
+    else:
+        df = by_symbol_df.copy()
+
+        sym_col: Optional[str] = None
+        for cand in ("ticker", "symbol"):
+            if cand in df.columns:
+                sym_col = cand
+                break
+
+        # Coerce numeric columns where applicable.
+        numeric_candidates = [
+            "total_pl",
+            "realized_pl",
+            "unrealized_pl",
+            "win_rate",
+            "trade_count",
+            "trade_rows",
+            "open_qty",
+            "recent_order_count",
+            "buy_count",
+            "sell_count",
+            "filled_count",
+            "open_order_count",
+            "add_count",
+            "exit_count",
+            "trim_count",
+        ]
+        for c in numeric_candidates:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # Build display table — only include columns that exist.
+        preferred_cols = [
+            sym_col,
+            "total_pl",
+            "realized_pl",
+            "unrealized_pl",
+            "win_rate",
+            "trade_count",
+            "trade_rows",
+            "performance_bucket",
+            "severity_bucket",
+            "open_qty",
+            "drag_flag",
+        ]
+        cols_to_show = [c for c in preferred_cols if c and c in df.columns]
+        view = df[cols_to_show].copy() if cols_to_show else df.copy()
+
+        if "total_pl" in view.columns:
+            view = view.sort_values("total_pl", ascending=False, na_position="last").reset_index(
+                drop=True
+            )
+        elif sym_col is not None:
+            view = view.sort_values(sym_col, ascending=True, na_position="last").reset_index(
+                drop=True
+            )
+
+        # Highlight P/L columns green/red.
+        pl_cols = [c for c in ("total_pl", "realized_pl", "unrealized_pl") if c in view.columns]
+        try:
+            sty = view.style
+            if pl_cols:
+                sty = sty.applymap(_pi_color_pl, subset=pl_cols)
+                sty = sty.format({c: "{:,.2f}" for c in pl_cols})
+            st.dataframe(sty, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.caption(f"Styled table unavailable: {_short_err(e)}")
+            st.dataframe(view, use_container_width=True, hide_index=True)
+
+        # ── 3) VISUALS ────────────────────────────────────────────────
+        st.markdown("#### Top winners & losers")
+        if sym_col is None or "total_pl" not in df.columns:
+            st.caption("Need `total_pl` and a symbol column to render top/worst charts.")
+        else:
+            try:
+                ranked = df[[sym_col, "total_pl"]].dropna(subset=["total_pl"]).copy()
+                if ranked.empty:
+                    st.caption("No P/L rows to chart.")
+                else:
+                    top10 = ranked.sort_values("total_pl", ascending=False).head(10)
+                    bot10 = ranked.sort_values("total_pl", ascending=True).head(10)
+                    cL, cR = st.columns(2)
+                    with cL:
+                        st.caption("Top 10 winners (by total P/L)")
+                        st.bar_chart(top10.set_index(sym_col)[["total_pl"]])
+                    with cR:
+                        st.caption("Top 10 worst (by total P/L)")
+                        st.bar_chart(bot10.set_index(sym_col)[["total_pl"]])
+            except Exception as e:
+                st.caption(f"Top/worst chart unavailable: {_short_err(e)}")
+
+        st.markdown("#### Distribution of total P/L across symbols")
+        if "total_pl" not in df.columns:
+            st.caption("`total_pl` column not present — cannot render distribution.")
+        else:
+            try:
+                pl_series = pd.to_numeric(df["total_pl"], errors="coerce").dropna()
+                if pl_series.empty:
+                    st.caption("No numeric `total_pl` values to chart.")
+                else:
+                    plotted = False
+                    try:
+                        import plotly.express as px  # type: ignore
+
+                        fig = px.histogram(
+                            pl_series.rename("total_pl").to_frame(),
+                            x="total_pl",
+                            nbins=30,
+                            title="Symbol P/L distribution",
+                        )
+                        fig.update_layout(bargap=0.05)
+                        st.plotly_chart(fig, use_container_width=True)
+                        plotted = True
+                    except Exception:
+                        plotted = False
+
+                    if not plotted:
+                        # Streamlit fallback: bucketed bar chart.
+                        try:
+                            lo = float(pl_series.min())
+                            hi = float(pl_series.max())
+                            if not np.isfinite(lo) or not np.isfinite(hi) or lo == hi:
+                                st.caption(
+                                    "Distribution not chartable (all values equal or non-finite)."
+                                )
+                            else:
+                                bins = np.linspace(lo, hi, 21)
+                                cuts = pd.cut(pl_series, bins=bins, include_lowest=True)
+                                counts = cuts.value_counts().sort_index()
+                                labels = [
+                                    f"{interval.left:,.0f} → {interval.right:,.0f}"
+                                    for interval in counts.index
+                                ]
+                                hist_df = pd.DataFrame({"bucket": labels, "count": counts.values})
+                                st.bar_chart(hist_df.set_index("bucket"))
+                        except Exception as e:
+                            st.caption(f"Histogram unavailable: {_short_err(e)}")
+            except Exception as e:
+                st.caption(f"Distribution chart unavailable: {_short_err(e)}")
+
+        # ── 4) DRAG ANALYSIS ─────────────────────────────────────────
+        st.markdown("#### Drag Analysis")
+        drag_mask = _pi_drag_mask(df)
+        if drag_mask is None:
+            st.caption(
+                "No `drag_flag` / `performance_bucket` / `severity_bucket` column found — "
+                "drag analysis skipped."
+            )
+        else:
+            drag_df = df[drag_mask.fillna(False)]
+            if drag_df.empty:
+                st.success("No high-drag symbols flagged. ✅")
+            else:
+                st.warning(
+                    f"⚠️ High Drag Symbols ({len(drag_df):,}) — review for capital protection.",
+                    icon="⚠️",
+                )
+                drag_cols = [
+                    c
+                    for c in (
+                        sym_col,
+                        "total_pl",
+                        "realized_pl",
+                        "unrealized_pl",
+                        "performance_bucket",
+                        "severity_bucket",
+                        "loss_source",
+                        "current_lifecycle_stance",
+                        "effective_position_state",
+                        "open_qty",
+                        "drag_flag",
+                    )
+                    if c and c in drag_df.columns
+                ]
+                drag_view = drag_df[drag_cols] if drag_cols else drag_df
+                if "total_pl" in drag_view.columns:
+                    drag_view = drag_view.sort_values(
+                        "total_pl", ascending=True, na_position="last"
+                    )
+                drag_view = drag_view.reset_index(drop=True)
+                try:
+                    sty = drag_view.style
+                    pl_cols_d = [
+                        c
+                        for c in ("total_pl", "realized_pl", "unrealized_pl")
+                        if c in drag_view.columns
+                    ]
+                    if pl_cols_d:
+                        sty = sty.applymap(_pi_color_pl, subset=pl_cols_d)
+                        sty = sty.format({c: "{:,.2f}" for c in pl_cols_d})
+                    st.dataframe(sty, use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.caption(f"Drag table styling unavailable: {_short_err(e)}")
+                    st.dataframe(drag_view, use_container_width=True, hide_index=True)
+
+    # ── 5) RISK OVERLAY ──────────────────────────────────────────────
+    st.markdown("#### Risk Overlay")
+    st.caption("ℹ️ This is read-only intelligence. It does not place, cancel, trim, or exit trades.")
+
+    overlay_df = csv_usable_rows(PERFORMANCE_RISK_OVERLAY_CSV_PATH)
+    if overlay_df is None or overlay_df.empty:
+        st.info(
+            "`performance_risk_overlay.csv` not found or empty. "
+            "Run `python -m services.performance_risk_overlay` to generate it.",
+            icon="ℹ️",
+        )
+    else:
+        try:
+            ov = overlay_df.copy()
+
+            sym_col_o: Optional[str] = None
+            for cand in ("ticker", "symbol"):
+                if cand in ov.columns:
+                    sym_col_o = cand
+                    break
+
+            for c in ("total_pl", "unrealized_pl"):
+                if c in ov.columns:
+                    ov[c] = pd.to_numeric(ov[c], errors="coerce")
+
+            if "drag_flag" in ov.columns:
+                try:
+                    ov["drag_flag"] = ov["drag_flag"].apply(
+                        lambda v: (
+                            bool(v)
+                            if isinstance(v, (bool, int, float))
+                            else str(v).strip().lower() in {"true", "1", "yes", "y"}
+                        )
+                    )
+                except Exception:
+                    pass
+
+            flag_series = (
+                ov["risk_flag"].fillna("OK").astype(str).str.upper()
+                if "risk_flag" in ov.columns
+                else pd.Series(["OK"] * len(ov), index=ov.index)
+            )
+
+            def _has_flag(label: str) -> int:
+                return int(flag_series.str.contains(label, regex=False).sum())
+
+            n_total = int(len(ov))
+            n_force = _has_flag("FORCE_EXIT")
+            n_trim = _has_flag("TRIM_PRIORITY")
+            n_block = _has_flag("BLOCK_NEW_BUY")
+            n_ok = int((flag_series == "OK").sum())
+
+            r1, r2, r3, r4, r5 = st.columns(5)
+            r1.metric("Total symbols", f"{n_total:,}")
+            r2.metric("🛑 FORCE_EXIT", f"{n_force:,}")
+            r3.metric("✂️ TRIM_PRIORITY", f"{n_trim:,}")
+            r4.metric("🚫 BLOCK_NEW_BUY", f"{n_block:,}")
+            r5.metric("✅ OK", f"{n_ok:,}")
+
+            legend_html = "&nbsp;&nbsp;".join(
+                _PI_RISK_FLAG_BADGE_HTML[k]
+                for k in ("FORCE_EXIT", "TRIM_PRIORITY", "BLOCK_NEW_BUY", "OK")
+            )
+            st.markdown(
+                f"<div style='margin:0.35rem 0 0.5rem 0;'>{legend_html}</div>",
+                unsafe_allow_html=True,
+            )
+
+            preferred_cols_o = [
+                sym_col_o,
+                "total_pl",
+                "unrealized_pl",
+                "drag_flag",
+                "risk_flag",
+            ]
+            cols_show_o = [c for c in preferred_cols_o if c and c in ov.columns]
+            view_o = ov[cols_show_o].copy() if cols_show_o else ov.copy()
+
+            if "risk_flag" in view_o.columns:
+                view_o["__rank__"] = view_o["risk_flag"].apply(_pi_risk_flag_priority)
+            else:
+                view_o["__rank__"] = _PI_RISK_FLAG_RANK["OK"]
+
+            sort_keys = ["__rank__"]
+            sort_asc = [True]
+            if "total_pl" in view_o.columns:
+                sort_keys.append("total_pl")
+                sort_asc.append(True)
+            view_o = (
+                view_o.sort_values(sort_keys, ascending=sort_asc, na_position="last")
+                .drop(columns="__rank__")
+                .reset_index(drop=True)
+            )
+
+            try:
+                sty_o = view_o.style
+                pl_cols_o = [c for c in ("total_pl", "unrealized_pl") if c in view_o.columns]
+                if pl_cols_o:
+                    sty_o = sty_o.applymap(_pi_color_pl, subset=pl_cols_o)
+                    sty_o = sty_o.format({c: "{:,.2f}" for c in pl_cols_o})
+                if "risk_flag" in view_o.columns:
+                    sty_o = sty_o.applymap(_pi_risk_flag_cell_style, subset=["risk_flag"])
+                st.dataframe(sty_o, use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.caption(f"Risk overlay styling unavailable: {_short_err(e)}")
+                st.dataframe(view_o, use_container_width=True, hide_index=True)
+
+            st.caption(
+                "Sort order: FORCE_EXIT → TRIM_PRIORITY → BLOCK_NEW_BUY → OK "
+                "(then by `total_pl` ascending within each tier)."
+            )
+        except Exception as e:
+            st.warning(
+                f"Risk overlay rendering unavailable: {_short_err(e)}",
+                icon="⚠️",
+            )
+
+
+# ──────────────────────────────
 # ROUTER (single source of truth)
 # ──────────────────────────────
 PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
@@ -4266,6 +8951,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Portfolio", "Positions & Exposure"): page_positions_exposure,
     ("Portfolio", "Trade Log"): page_trade_log,
     ("Signals", "🧭 Signal Lifecycle"): page_signal_lifecycle,
+    ("Signals", "📜 Ticker Decision Timeline"): page_ticker_decision_timeline,
     ("Signals", "🚀 Trade Opportunities"): page_trade_opportunities,
     ("Signals", "🔍 Reconciliation"): page_reconciliation,
     ("Signals", "AI Signals"): page_ai_signals,
@@ -4282,6 +8968,12 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("System", "🧾 Data Contracts"): page_data_contracts,
     ("System", "🫀 Pipeline Health / Heartbeat"): page_pipeline_health,
     ("System", "⚙️ Execution Dashboard"): page_execution_dashboard,
+    ("System", "⚙️ Execution Intelligence"): page_execution_intelligence,
+    ("System", "🧠 Feedback Intelligence"): page_feedback_intelligence,
+    ("System", "🛠️ Adaptation Intelligence"): page_adaptation_intelligence,
+    ("System", "✅ Applied Adjustments"): page_applied_adjustments,
+    ("System", "🧪 Adaptation Simulation"): page_adaptation_simulation,
+    ("System", "📊 Performance Intelligence"): page_performance_intelligence,
     ("System", "Execution / Health"): page_execution_health,
     ("System", "🚦 Live Orders Panel"): page_live_orders_panel,
     ("System", "🟢 Live Run (Phase 1.5)"): page_live_run,
@@ -4299,6 +8991,7 @@ SECTIONS: Dict[str, List[str]] = {
     "Portfolio": ["Portfolio History", "Positions & Exposure", "Trade Log"],
     "Signals": [
         "🧭 Signal Lifecycle",
+        "📜 Ticker Decision Timeline",
         "🚀 Trade Opportunities",
         "🔍 Reconciliation",
         "AI Signals",
@@ -4314,6 +9007,12 @@ SECTIONS: Dict[str, List[str]] = {
         "🧾 Data Contracts",
         "🫀 Pipeline Health / Heartbeat",
         "⚙️ Execution Dashboard",
+        "⚙️ Execution Intelligence",
+        "🧠 Feedback Intelligence",
+        "🛠️ Adaptation Intelligence",
+        "✅ Applied Adjustments",
+        "🧪 Adaptation Simulation",
+        "📊 Performance Intelligence",
         "Execution / Health",
         "🚦 Live Orders Panel",
         "🟢 Live Run (Phase 1.5)",

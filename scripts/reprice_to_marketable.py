@@ -225,6 +225,19 @@ def main() -> None:
                 print(f"[SKIP] {r} {sym}")
             continue
 
+        # Broker may return None for halted / delisted / illiquid symbols.
+        # Defensive early-out: never invoke .get() on a non-dict (the next
+        # block, the verbose [SKIP] log, and the BUY/SELL bid-ask reads
+        # all assume q is a dict). We log in the format the spec dictates
+        # and continue with the remaining symbols.
+        if q is None or not isinstance(q, dict):
+            skipped += 1
+            r = "quote_unavailable"
+            skip_reasons[r] = skip_reasons.get(r, 0) + 1
+            if args.verbose:
+                print(f"[SKIP] {sym} quote_unavailable ts=None bid=None ask=None")
+            continue
+
         ok, reason = _quote_ok(q, max_age_min=float(args.max_age_min))
         if not ok:
             skipped += 1

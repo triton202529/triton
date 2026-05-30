@@ -42,6 +42,8 @@ def _load_config() -> Dict[str, Any]:
         "run_manage_open_orders": True,
         "manage_open_orders_execute_cancel": False,
         "manage_open_orders_stale_minutes": 30.0,
+        "run_smart_order_manager": False,
+        "smart_order_manager_execute": False,
         "run_reprice_order_ladder": True,
         "reprice_order_ladder_execute": False,
         "reprice_ladder_max_stage": 4,
@@ -235,6 +237,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--skip-reprice-ladder", action="store_true", help="Skip reprice_order_ladder stage."
     )
     ap.add_argument(
+        "--skip-smart-order-manager",
+        action="store_true",
+        help="Skip smart order manager (default manage_open_orders smart path).",
+    )
+    ap.add_argument(
         "--manage-execute",
         action="store_true",
         help="Pass --execute to manage_positions (default plan-only).",
@@ -281,6 +288,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     rpl_skip = bool(args.skip_reprice_ladder) or (
         not bool(cfg.get("run_reprice_order_ladder", True))
     )
+    srom_skip = bool(args.skip_smart_order_manager) or (
+        not bool(cfg.get("run_smart_order_manager", False))
+    )
     want_moo_cancel = bool(cfg.get("manage_open_orders_execute_cancel", False))
     moo_exec_cancel = bool(
         want_moo_cancel and arm_perms.get("manage_open_orders_execute_cancel", False)
@@ -291,7 +301,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     rpl_stage1_min = float(cfg.get("reprice_ladder_stage1_minutes", 15.0) or 15.0)
     moo_stale_min = float(cfg.get("manage_open_orders_stale_minutes", 30.0) or 30.0)
 
-    maint_needed = (not moo_skip) or (not rpl_skip)
+    maint_needed = (not moo_skip) or (not rpl_skip) or (not srom_skip)
     start_snap_skip = (
         not bool(cfg.get("refresh_snapshots_at_cycle_start", False))
     ) or args.no_snapshot_refresh
@@ -305,6 +315,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     stages_out: Dict[str, Any] = {}
     blocked_any = False
     had_warnings = False
+
+    want_srom_exec = bool(cfg.get("smart_order_manager_execute", False))
+    srom_exec = bool(want_srom_exec and arm_perms.get("manage_open_orders_execute_cancel", False))
+    if want_srom_exec and not arm_perms.get("manage_open_orders_execute_cancel", False):
+        notes.append(
+            "smart_order_manager --execute-smart blocked by ARM (need manage_open_orders_execute_cancel)"
+        )
 
     # PAPER ONLY — this module never invokes live
     mode = "paper"
@@ -336,6 +353,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "refresh_snapshots_before_open_order_maintenance": bool(
             cfg.get("refresh_snapshots_before_open_order_maintenance", True)
         ),
+        "run_smart_order_manager": not srom_skip,
+        "smart_order_manager_execute": srom_exec,
+        "want_smart_order_manager_execute": want_srom_exec,
         "run_scheduled_paper_cycle_config": str(CONFIG_PATH),
         "arm_mode": arm_mode_label,
         "arm_block_reasons": list(arm_block_reasons),
@@ -551,6 +571,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         mg_cmd.append("--verbose")
     mr = run_stage(mg_cmd, skip=mg_skip, treat_blocked=True)
     stages_out["manage_positions"] = _stage_dict(mr)
+    if (not mg_skip) and mr.exit_code == 0 and "[MANAGE_NOOP]" in (mr.message or ""):
+        notes.append("manage_positions: BATCH_EMPTY after filters (MANAGE_NOOP, not a failure)")
     if (not mg_skip) and mr.exit_code == 2:
         notes.append(
             "manage_positions: execution blocked — see [MANAGE_BLOCK] / [MANAGE_SUMMARY] / [ROTATION_RESULT] in stage output"
@@ -570,6 +592,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "services.manage_open_orders",
         "--mode",
         "paper",
+        "--legacy-pressure",
         "--stale-minutes",
         str(moo_stale_min),
     ]
@@ -579,6 +602,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         moo_cmd.append("--verbose")
     moo = run_stage(moo_cmd, skip=moo_skip, treat_blocked=True)
     stages_out["manage_open_orders"] = _stage_dict(moo)
+
+    # --- smart order manager (limit reprices / very-stale replace; broker-only) ---
+    srom_cmd = [
+        py,
+        "-m",
+        "services.manage_open_orders",
+        "--mode",
+        "paper",
+    ]
+    if srom_exec:
+        srom_cmd.append("--execute-smart")
+    if verbose:
+        srom_cmd.append("--verbose")
+    srom = run_stage(srom_cmd, skip=srom_skip, treat_blocked=True)
+    stages_out["smart_order_manager"] = _stage_dict(srom)
 
     # --- reprice_order_ladder (paper; optional execute) ---
     rpl_cmd = [
@@ -613,11 +651,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     exec_bad = (not ex_skip) and er.exit_code not in (0, 2)
     mg_bad = (not mg_skip) and mr.exit_code not in (0, 2)
     moo_bad = (not moo_skip) and moo.exit_code not in (0, 2)
+    srom_bad = (not srom_skip) and srom.exit_code not in (0, 2)
     rpl_bad = (not rpl_skip) and rpl.exit_code not in (0, 2)
     overall_ok = (
         not exec_bad
         and not mg_bad
         and not moo_bad
+        and not srom_bad
         and not rpl_bad
         and (snap_final_skip or sr.exit_code == 0)
         and (start_snap_skip or ss0.exit_code == 0)

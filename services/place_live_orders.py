@@ -77,6 +77,11 @@ from services.execution_drop_diagnostics import (
     read_json as read_drop_json,
     recompute_summary_counts,
 )
+from services.execution_intelligence import (
+    ExecutionIntelligenceConfig,
+    annotate_order as _ei_annotate_order,
+    ANNOTATE_ORDER_KEYS as _EI_KEYS,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LIFECYCLE_CSV = ROOT / "data" / "results" / "signal_lifecycle.csv"
@@ -84,6 +89,7 @@ EFFECTIVE_LIFECYCLE_PATH = ROOT / "data" / "results" / "signal_lifecycle_effecti
 TRADE_OPPORTUNITIES_PATH = ROOT / "data" / "results" / "trade_opportunities.csv"
 DEFAULT_ORDERS_CSV = DEFAULT_LIFECYCLE_CSV
 DEFAULT_MANAGE_ORDERS_CSV = ROOT / "data" / "live" / "manage_orders.csv"
+PERFORMANCE_RISK_OVERLAY_CSV = ROOT / "data" / "results" / "performance_risk_overlay.csv"
 
 # IMPORTANT: poll_order_status now writes/reads live_orders_log.csv
 DEFAULT_LOG_CSV = ROOT / "data" / "results" / "live_orders_log.csv"
@@ -320,6 +326,10 @@ class OrderRow:
     side: str
     qty: int
     limit_price: Optional[float]
+    # True iff this row originated from a performance-risk-overlay FORCE_EXIT
+    # decision in manage_positions. Carried through to PlannedOrder so that
+    # downstream batch caps (notional, future per-run counts) can exempt it.
+    force_exit_override: bool = False
 
 
 @dataclass
@@ -334,6 +344,83 @@ class PlannedOrder:
     client_order_id: str
     discipline_allowed: bool = True
     discipline_reason: str = ""
+    # Execution-intelligence quote snapshot (best-effort; may all be None).
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    quote_ts: Optional[str] = None
+    intended_price: Optional[float] = None
+    # See OrderRow.force_exit_override.
+    force_exit_override: bool = False
+
+
+def _load_block_new_buy_set(path: Path = PERFORMANCE_RISK_OVERLAY_CSV) -> "frozenset[str]":
+    """
+    Return the frozenset of normalized symbols carrying a ``BLOCK_NEW_BUY``
+    component in the performance-risk-overlay's ``risk_flag`` column.
+
+    The overlay CSV is fully optional. Missing / empty / malformed files
+    produce an empty set with no warnings (per spec: skip silently).
+
+    The ``risk_flag`` column may be a pipe-joined union — e.g.
+    ``FORCE_EXIT|BLOCK_NEW_BUY`` — so the test is component-wise, not
+    equality. Symbols are normalized through :func:`normalize_symbol` so
+    they match the same key shape used downstream in the BUY branch.
+    """
+    empty: "frozenset[str]" = frozenset()
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return empty
+    except OSError:
+        return empty
+    try:
+        df = pd.read_csv(path, low_memory=False)
+    except Exception:
+        return empty
+    if df is None or df.empty:
+        return empty
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    sym_col: Optional[str] = None
+    for cand in ("ticker", "symbol"):
+        if cand in df.columns:
+            sym_col = cand
+            break
+    if sym_col is None or "risk_flag" not in df.columns:
+        return empty
+    blocked: set[str] = set()
+    for _, r in df.iterrows():
+        raw = str(r.get("risk_flag") or "").strip().upper()
+        if not raw:
+            continue
+        parts = {p.strip() for p in raw.split("|") if p.strip()}
+        if "BLOCK_NEW_BUY" not in parts:
+            continue
+        sym = normalize_symbol(r.get(sym_col))
+        if sym:
+            blocked.add(sym)
+    return frozenset(blocked)
+
+
+def _row_force_exit_flag(row) -> bool:
+    """
+    Defensive truthy-check for the `force_exit_override` column on a CSV
+    row. The column is optional; older `manage_orders.csv` files may not
+    contain it. Pandas with keep_default_na=False yields strings for
+    boolean-ish values, so accept both real bools and stringy variants.
+    """
+    try:
+        if hasattr(row, "get"):
+            val = row.get("force_exit_override", False)
+        else:
+            val = False
+    except Exception:
+        return False
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return False
+    s = str(val).strip().lower()
+    return s in ("true", "1", "yes", "y", "t")
 
 
 # -----------------------------
@@ -825,6 +912,13 @@ def lifecycle_to_order_rows(
     out: List[OrderRow] = []
     lines: List[str] = []
     diag_out: List[Dict[str, Any]] = []
+    block_new_buy_set = _load_block_new_buy_set()
+    if block_new_buy_set:
+        print(
+            f"[BLOCK_NEW_BUY_OVERLAY_LOAD] count={len(block_new_buy_set)} "
+            f"symbols={sorted(block_new_buy_set)}",
+            flush=True,
+        )
 
     def _diag(
         sym: str,
@@ -876,7 +970,7 @@ def lifecycle_to_order_rows(
             continue
 
         if stance == "ROTATE_EXIT":
-            print(f"[MAP] ROTATE_EXIT → SELL for {sym}")
+            print(f"[MAP] ROTATE_EXIT -> SELL for {sym}")
 
         pos_broker = float(pos_map.get(sym, 0.0) or 0.0)
         csv_pos = _row_position_state(row)
@@ -885,6 +979,29 @@ def lifecycle_to_order_rows(
         lim = _row_limit_from_lifecycle(row)
 
         if stance == "BUY":
+            if sym in block_new_buy_set:
+                # Performance-risk-overlay says this asset is underperforming.
+                # Block NEW BUY entries only — ADD/TRIM/EXIT/ROTATE_EXIT branches
+                # are unaffected (they are separate elif branches below) so the
+                # system can still actively exit / trim / scale-in on existing
+                # positions in the same name.
+                print(
+                    f"[BLOCK_NEW_BUY] symbol={sym} reason=underperforming_asset",
+                    flush=True,
+                )
+                lines.append(
+                    _fmt_exec_log(sym, stance, "skip", 0, "block_new_buy_overlay", ex_flag)
+                )
+                _diag(
+                    sym,
+                    stance,
+                    0,
+                    "placement_input",
+                    "dropped",
+                    "BLOCK_NEW_BUY_OVERLAY",
+                    "Performance risk overlay: underperforming asset",
+                )
+                continue
             if _in_buy_cooldown(sym, signal_state):
                 lines.append(_fmt_exec_log(sym, stance, "skip", 0, "buy_cooldown_active", ex_flag))
                 _diag(
@@ -1054,11 +1171,18 @@ def lifecycle_to_order_rows(
                     "EXIT requires long position",
                 )
                 continue
+            force_exit = _row_force_exit_flag(row)
             q_user = safe_int(row.get("qty")) if "qty" in row.index else None
-            if q_user is not None and q_user > 0:
-                q = min(int(q_user), int(math.floor(pos_broker)))
+            full_pos_qty = int(math.floor(pos_broker))
+            if force_exit:
+                # FORCE_EXIT: ignore the row's qty cap (MAX_QTY) and always
+                # close the full broker position. Notional cap is exempted
+                # downstream when this flag rides on the PlannedOrder.
+                q = full_pos_qty
+            elif q_user is not None and q_user > 0:
+                q = min(int(q_user), full_pos_qty)
             else:
-                q = int(math.floor(pos_broker))
+                q = full_pos_qty
             if q < 1:
                 lines.append(
                     _fmt_exec_log(
@@ -1089,7 +1213,21 @@ def lifecycle_to_order_rows(
                     "Missing limit/close price",
                 )
                 continue
-            out.append(OrderRow(symbol=sym, side="sell", qty=q, limit_price=lim))
+            out.append(
+                OrderRow(
+                    symbol=sym,
+                    side="sell",
+                    qty=q,
+                    limit_price=lim,
+                    force_exit_override=force_exit,
+                )
+            )
+            if force_exit:
+                print(
+                    f"[FORCE_EXIT_EXECUTION_OVERRIDE] symbol={sym} qty={q} "
+                    f"bypassed_limits=MAX_QTY,BATCH_NOTIONAL_CAP",
+                    flush=True,
+                )
             lines.append(_fmt_exec_log(sym, stance, "sell", q, "close_full_position", ex_flag))
             _diag(
                 sym,
@@ -1223,6 +1361,69 @@ def get_ref_price(broker, symbol: str, side: str) -> Optional[float]:
     if s == "sell":
         return bid or last or ask
     return last or bid or ask
+
+
+def get_quote_snapshot(broker, symbol: str) -> Dict[str, Any]:
+    """
+    Best-effort snapshot of top-of-book + last trade for a single symbol.
+
+    Always returns a dict with keys {bid, ask, last, ts}. Any field may be None.
+    Never raises.
+    """
+    sym = normalize_symbol(symbol) or ""
+    out: Dict[str, Any] = {"bid": None, "ask": None, "last": None, "ts": None}
+    if not sym:
+        return out
+    try:
+        q = broker.get_quote(sym) or {}
+        b = safe_float(q.get("bid"))
+        a = safe_float(q.get("ask"))
+        if b is not None and b > 0:
+            out["bid"] = float(b)
+        if a is not None and a > 0:
+            out["ask"] = float(a)
+        out["ts"] = q.get("timestamp") or q.get("ts") or q.get("t") or None
+    except Exception:
+        pass
+    try:
+        t = broker.get_trade(sym) or {}
+        last = safe_float(t.get("last"))
+        if last is not None and last > 0:
+            out["last"] = float(last)
+    except Exception:
+        pass
+    return out
+
+
+# ── Execution-intelligence sidecar log ─────────────────────────────────────
+EXECUTION_INTELLIGENCE_CSV = ROOT / "data" / "results" / "execution_intelligence.csv"
+
+EI_FIELDS: List[str] = [
+    "timestamp",
+    "session",
+    "action",
+    "symbol",
+    "side",
+    "qty",
+    "order_id",
+    "client_order_id",
+    "status",
+] + list(_EI_KEYS)
+
+
+def append_execution_intelligence_row(row: Dict[str, Any]) -> None:
+    """Best-effort additive sidecar log; never raises."""
+    try:
+        path = EXECUTION_INTELLIGENCE_CSV
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_header = not path.exists()
+        with path.open("a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=EI_FIELDS, extrasaction="ignore")
+            if write_header:
+                w.writeheader()
+            w.writerow({k: ("" if row.get(k) is None else row.get(k)) for k in EI_FIELDS})
+    except Exception:
+        pass
 
 
 def clamp_limit(limit_price: float, ref: float, side: str, open_buffer_pct: float) -> float:
@@ -1671,6 +1872,12 @@ def main() -> None:
         limit_price = None if order_type == "market" else r.limit_price
 
         ref = get_ref_price(broker, r.symbol, r.side)
+        # Capture raw quote snapshot for execution-intelligence annotations.
+        # This is best-effort; failures fall back to neutral defaults later.
+        try:
+            _quote_snap = get_quote_snapshot(broker, r.symbol)
+        except Exception:
+            _quote_snap = {"bid": None, "ask": None, "last": None, "ts": None}
 
         if order_type == "limit":
             if limit_price is None or limit_price <= 0:
@@ -1776,6 +1983,11 @@ def main() -> None:
                 limit_price=limit_price,
                 ref_price=ref,
                 client_order_id=client_order_id,
+                bid=_quote_snap.get("bid"),
+                ask=_quote_snap.get("ask"),
+                quote_ts=_quote_snap.get("ts"),
+                intended_price=r.limit_price,
+                force_exit_override=bool(getattr(r, "force_exit_override", False)),
             )
         )
 
@@ -1813,7 +2025,7 @@ def main() -> None:
             f"Example(s): {', '.join(illegal_msgs[:8])}"
         )
         print(
-            "Fix options: (1) add --drop-illegal-sells, or (2) fix lifecycle/positions so SELL qty ≤ broker position, "
+            "Fix options: (1) add --drop-illegal-sells, or (2) fix lifecycle/positions so SELL qty <= broker position, "
             "or (3) --allow-shorts (not recommended)."
         )
         _finalize_place_diag_once(blocked=False)
@@ -1832,14 +2044,39 @@ def main() -> None:
                 print(
                     "[PLACE_MANAGE_ORDERS] BATCH_EMPTY source=manage_orders.csv "
                     f"lifecycle_rows={len(rows)} planned=0 in_flight_sat={in_flight_sat} "
-                    f"illegal_sells={illegal_sells} — see manage_positions plan CSV and [MANAGE_SUMMARY]"
+                    f"illegal_sells={illegal_sells} -- see manage_positions plan CSV and [MANAGE_SUMMARY]"
                 )
         except Exception:
             pass
         die("[BATCH_EMPTY] Nothing to place (all skipped or invalid).")
 
-    # Batch notional cap now applies to BOTH market + limit
-    if batch_notional_est > float(args.max_batch_notional):
+    # Batch notional cap now applies to BOTH market + limit.
+    # FORCE_EXIT exits originate from the performance-risk-overlay path in
+    # manage_positions and must never be blocked by per-batch heuristics —
+    # their notional is excluded from the cap comparison so a large forced
+    # close cannot starve out other (already-discipline-cleared) orders.
+    fx_notional_excluded = 0.0
+    fx_symbols: List[str] = []
+    for p in planned:
+        if not bool(getattr(p, "force_exit_override", False)):
+            continue
+        ref_for_calc = p.limit_price if p.limit_price is not None else p.ref_price
+        if ref_for_calc is None:
+            continue
+        fx_notional_excluded += float(p.qty) * float(ref_for_calc)
+        fx_symbols.append(p.symbol)
+    cap_compare_notional = batch_notional_est - fx_notional_excluded
+    if fx_notional_excluded > 0:
+        print(
+            f"[FORCE_EXIT_NOTIONAL_EXEMPT] count={len(fx_symbols)} "
+            f"symbols={sorted(set(fx_symbols))} "
+            f"exempted_notional={fx_notional_excluded:.2f} "
+            f"raw_batch_notional={batch_notional_est:.2f} "
+            f"compare_notional={cap_compare_notional:.2f} "
+            f"max_batch_notional={float(args.max_batch_notional):.2f}",
+            flush=True,
+        )
+    if cap_compare_notional > float(args.max_batch_notional):
         _PLACE_DIAG_ROWS.append(
             make_row(
                 run_mode=mode,
@@ -1849,7 +2086,8 @@ def main() -> None:
                 status="blocked",
                 reason_code="MAX_NOTIONAL",
                 reason_detail=(
-                    f"est_batch_notional={batch_notional_est:.2f} exceeds max "
+                    f"est_batch_notional={cap_compare_notional:.2f} (excl FORCE_EXIT "
+                    f"{fx_notional_excluded:.2f}) exceeds max "
                     f"{float(args.max_batch_notional):.2f}"
                 ),
                 source="place_live_orders",
@@ -1857,7 +2095,8 @@ def main() -> None:
             )
         )
         die(
-            f"[BATCH_NOTIONAL_BLOCK] est_batch_notional={batch_notional_est:.2f} "
+            f"[BATCH_NOTIONAL_BLOCK] est_batch_notional={cap_compare_notional:.2f} "
+            f"(excl FORCE_EXIT {fx_notional_excluded:.2f}) "
             f"exceeds max {float(args.max_batch_notional):.2f}. "
             f"(Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
         )
@@ -1871,7 +2110,7 @@ def main() -> None:
 
     if args.dry_run:
         print(
-            f"[DRY_RUN] no broker.submit_order — planned={len(planned)} fingerprint={fingerprint[:12]}... "
+            f"[DRY_RUN] no broker.submit_order -- planned={len(planned)} fingerprint={fingerprint[:12]}... "
             f"est_batch_notional={batch_notional_est:.2f} in_flight_sat={in_flight_sat} "
             f"cancelled_duplicates={cancelled_duplicates} illegal_sells={illegal_sells} "
             f"placement_session={placement_session} log_session={log_session}"
@@ -1886,6 +2125,43 @@ def main() -> None:
 
     placed = 0
     failed = 0
+    _ei_cfg = ExecutionIntelligenceConfig()
+
+    def _emit_execution_intelligence(
+        p: PlannedOrder, *, action: str, status: str, order_id: str, fill_price: Any = None
+    ) -> None:
+        """Write one sidecar row capturing quote/spread/style/slippage context."""
+        try:
+            ann = _ei_annotate_order(
+                action=action,
+                side=p.side,
+                bid=p.bid,
+                ask=p.ask,
+                quote_ts=p.quote_ts,
+                close=p.ref_price,
+                order_qty=p.qty,
+                order_notional=(float(p.qty) * float(p.limit_price)) if p.limit_price else None,
+                intended_price=p.intended_price,
+                submitted_limit_price=p.limit_price,
+                fill_price=fill_price,
+                cfg=_ei_cfg,
+            )
+            row: Dict[str, Any] = {
+                "timestamp": utc_now_iso(),
+                "session": log_session,
+                "action": action,
+                "symbol": p.symbol,
+                "side": p.side,
+                "qty": p.qty,
+                "order_id": order_id or "",
+                "client_order_id": p.client_order_id,
+                "status": status,
+            }
+            for k in _EI_KEYS:
+                row[k] = ann.get(k)
+            append_execution_intelligence_row(row)
+        except Exception:
+            pass
 
     for p in planned:
         try:
@@ -1926,6 +2202,7 @@ def main() -> None:
                     "sl_stop": "",
                 },
             )
+            _emit_execution_intelligence(p, action="submit", status=status, order_id=oid)
             _PLACE_DIAG_ROWS.append(
                 make_row(
                     run_mode=mode,
@@ -1997,6 +2274,7 @@ def main() -> None:
                     "sl_stop": "",
                 },
             )
+            _emit_execution_intelligence(p, action="submit", status="error", order_id="")
             print(f"[FAIL] {p.symbol} {p.side} qty={p.qty} err={e}")
 
     ok = placed > 0 and failed == 0

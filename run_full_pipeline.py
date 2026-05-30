@@ -43,6 +43,15 @@
 #      - Print stdout/stderr more aggressively on subprocess failure
 #      - Capture full Python traceback into heartbeat error field
 #      - Print traceback to console so stage failures are no longer opaque
+#
+# Patch (2026-04-25):
+#   ✅ Lifecycle freshness enforcement:
+#      - Promote "lifecycle" stage from optional to REQUIRED so
+#        signal_lifecycle.csv is always regenerated alongside signals.
+#      - apply_signal_lifecycle gains an ensure_lifecycle_fresh() public
+#        helper + --only-if-stale CLI flag for downstream callers
+#        (manage_positions / dashboards) that need a guaranteed-fresh
+#        lifecycle without forcing an unconditional rebuild.
 
 from __future__ import annotations
 
@@ -624,8 +633,12 @@ def main() -> int:
         ("backtest", "services.backtest_signals", True, []),
         # Optional (safe skips)
         ("rationale", "services.trade_rationale", False, []),
-        # ✅ NEW: lifecycle state generation (authoritative state layer)
-        ("lifecycle", "services.apply_signal_lifecycle", False, []),
+        # Lifecycle state generation (authoritative state layer).
+        # REQUIRED: signal_lifecycle.csv must always reflect the latest
+        # signals_with_rationale.csv. apply_signal_lifecycle is itself
+        # safe — it returns rc=2 (warn-equivalent) if no signals file
+        # exists, which the runner treats as a hard fail and surfaces.
+        ("lifecycle", "services.apply_signal_lifecycle", True, []),
         ("snapshot", "services.write_guard_snapshot", False, []),
         # Optional Phase 1.5+ risk artifacts
         ("regime", "services.regime_detector", False, ["--verbose"] if args.verbose else []),
@@ -651,6 +664,10 @@ def main() -> int:
         ("reconcile_lifecycle", "services.reconcile_lifecycle_vs_positions", False, []),
         ("build_effective_lifecycle", "services.build_effective_lifecycle", False, []),
         ("build_trade_opportunities", "services.build_trade_opportunities", False, []),
+        # Read-only diagnostics: confidence / edge_score dispersion snapshot.
+        # Pure observational — writes signal_distribution_summary.json and
+        # signal_distribution_sample.csv only.
+        ("signal_distribution", "services.signal_distribution", False, []),
         (
             "normalize_results_contracts",
             "services.normalize_results_contracts",

@@ -171,6 +171,16 @@ def main() -> None:
         action="store_true",
         help="Override safety: allow cancel/place when market is closed.",
     )
+    ap.add_argument(
+        "--smart-manage-open",
+        action="store_true",
+        help="Run services.manage_open_orders smart limit manager before placement.",
+    )
+    ap.add_argument(
+        "--execute-smart-open",
+        action="store_true",
+        help="With --smart-manage-open, apply reprices (default is dry-run).",
+    )
 
     args = ap.parse_args()
 
@@ -214,6 +224,28 @@ def main() -> None:
     else:
         print("[CLOCK] Market: UNKNOWN (clock unavailable)")
     print("")
+
+    if args.smart_manage_open:
+        if is_open is False and not args.ignore_market_closed:
+            print("=== Smart Order Manager ===")
+            print(
+                "[SKIP] Market CLOSED — smart-manage-open inactive (use --ignore-market-closed to override)."
+            )
+            print("")
+        else:
+            print("=== Smart Order Manager (open limits) ===")
+            try:
+                from services.manage_open_orders import run_smart_order_manager
+
+                run_smart_order_manager(
+                    mode=mode,
+                    dry_run=not bool(args.execute_smart_open),
+                    verbose=args.verbose,
+                    ignore_market_closed=args.ignore_market_closed,
+                )
+            except Exception as _e:
+                print(f"[WARN] smart order manager failed: {_e}")
+            print("")
 
     # 1) List open orders
     print("=== 1) List Open Orders (broker) ===")

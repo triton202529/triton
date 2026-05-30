@@ -32,6 +32,12 @@ from typing import Dict, Any, Optional
 import numpy as np
 import pandas as pd
 
+from services.edge_ranking import EnrichmentSpec, enrich_with_edge
+from services.portfolio_intelligence import (
+    PortfolioIntelligenceConfig,
+    apply_portfolio_intelligence,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = PROJECT_ROOT / "data"
 RESULTS_DIR = DATA_ROOT / "results"
@@ -228,10 +234,114 @@ def run(cfg: WeightingConfig) -> None:
         + cap_mode
     )
 
-    out = sig[["ticker", "raw_weight", "weight", "reason"]].copy()
+    # ─────────────────────────────────────────────────────────────
+    # Edge-based ranking and sizing (additive; preserves existing weights).
+    # All BUY rows that survived above are sizing-eligible (treated as ENTRY).
+    # The legacy `weight` column is kept untouched for backward compatibility.
+    # ─────────────────────────────────────────────────────────────
+    sizing_input = sig.copy()
+    sizing_input["opportunity_type"] = "ENTRY"
+    enriched = enrich_with_edge(
+        sizing_input,
+        EnrichmentSpec(opportunity_col="opportunity_type"),
+    )
+
+    sig["edge_score"] = enriched["edge_score"].values
+    sig["edge_rank"] = enriched["edge_rank"].values
+    sig["edge_percentile"] = enriched["edge_percentile"].values
+    sig["sizing_bucket"] = enriched["sizing_bucket"].values
+    sig["allocation_multiplier"] = enriched["allocation_multiplier"].values
+    sig["allocation_reason"] = enriched["allocation_reason"].values
+
+    sig["allocation_weight_raw"] = (
+        pd.to_numeric(sig["raw_weight"], errors="coerce").fillna(0.0)
+        * pd.to_numeric(sig["allocation_multiplier"], errors="coerce").fillna(0.0)
+    ).astype(float)
+    final_alloc = normalize_weights(sig["allocation_weight_raw"])
+    # If the edge tilt zeroed out everything (e.g. all FILTERED_LOW_EDGE), fall back
+    # to the legacy normalized weight so we never silently produce an empty book.
+    if float(final_alloc.sum()) <= 0.0:
+        sig["allocation_weight_final"] = sig["weight"].astype(float)
+        edge_fallback_used = True
+    else:
+        sig["allocation_weight_final"] = final_alloc.astype(float)
+        edge_fallback_used = False
+
+    # ─────────────────────────────────────────────────────────────
+    # Portfolio-aware tilt layer (concentration / sector / add / crowding).
+    # All BUY rows here are treated as ENTRY for sizing semantics. Hard risk
+    # caps elsewhere remain authoritative — this is only a soft tilt.
+    # ─────────────────────────────────────────────────────────────
+    pi_input = sig.copy()
+    pi_input["opportunity_type"] = "ENTRY"
+    pi_out, pi_diag = apply_portfolio_intelligence(
+        pi_input,
+        PortfolioIntelligenceConfig(),
+    )
+
+    # Pull the new portfolio columns back onto sig (additive, no rename/remove).
+    pi_cols = [
+        "sector_name",
+        "existing_position_weight",
+        "sector_weight_current",
+        "sector_weight_proposed",
+        "single_name_over_cap_flag",
+        "sector_over_cap_flag",
+        "add_overcrowded_flag",
+        "concentration_penalty",
+        "sector_penalty",
+        "add_dampener",
+        "crowding_penalty",
+        "crowded_group_rank",
+        "portfolio_adjustment_factor",
+        "portfolio_weight_pre_adjustment",
+        "portfolio_weight_post_adjustment",
+        "portfolio_adjustment_reason",
+        "portfolio_fallback_used",
+    ]
+    for c in pi_cols:
+        if c in pi_out.columns:
+            sig[c] = pi_out[c].values
+
+    out = sig[
+        [
+            "ticker",
+            "raw_weight",
+            "weight",
+            "reason",
+            "edge_score",
+            "edge_rank",
+            "edge_percentile",
+            "sizing_bucket",
+            "allocation_multiplier",
+            "allocation_weight_raw",
+            "allocation_weight_final",
+            "allocation_reason",
+            # Portfolio intelligence (v1) — additive only.
+            "sector_name",
+            "existing_position_weight",
+            "sector_weight_current",
+            "sector_weight_proposed",
+            "single_name_over_cap_flag",
+            "sector_over_cap_flag",
+            "add_overcrowded_flag",
+            "concentration_penalty",
+            "sector_penalty",
+            "add_dampener",
+            "crowding_penalty",
+            "crowded_group_rank",
+            "portfolio_adjustment_factor",
+            "portfolio_weight_pre_adjustment",
+            "portfolio_weight_post_adjustment",
+            "portfolio_adjustment_reason",
+            "portfolio_fallback_used",
+        ]
+    ].copy()
     out["generated_at"] = datetime.now(timezone.utc).isoformat()
     out["capital_mode"] = cap_mode
     out["capital_mult"] = float(cap_mult)
+    out["edge_fallback_used"] = bool(edge_fallback_used)
+    out["portfolio_intel_diagnostics"] = json.dumps(pi_diag, default=str)
 
     out.to_csv(OUT_CSV, index=False)
     out.to_json(OUT_JSON, orient="records", indent=2)

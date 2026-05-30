@@ -15,6 +15,7 @@ from services.broker_alpaca import AlpacaBroker  # uses your existing broker
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "execution_guard.json"
+EXECUTE_TRADES_CONFIG_PATH = PROJECT_ROOT / "config" / "execute_trades.json"
 RESULTS_DIR = PROJECT_ROOT / "data" / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -143,7 +144,29 @@ class ExecutionGuard:
         except Exception:
             # keep defaults
             pass
+        self._merge_execute_trades_position_cap(cfg)
         return cfg
+
+    @staticmethod
+    def _merge_execute_trades_position_cap(cfg: Dict[str, Any]) -> None:
+        """
+        Prefer max_positions from config/execute_trades.json (trading config).
+        Legacy: max_portfolio_positions if max_positions is absent.
+        """
+        try:
+            if not EXECUTE_TRADES_CONFIG_PATH.is_file():
+                return
+            u = json.loads(EXECUTE_TRADES_CONFIG_PATH.read_text(encoding="utf-8"))
+            if not isinstance(u, dict):
+                return
+            mp = u.get("max_positions")
+            if mp is None:
+                mp = u.get("max_portfolio_positions")
+            if mp is not None:
+                cfg["max_positions"] = max(1, int(mp))
+                cfg["_position_cap_source"] = "execute_trades"
+        except Exception:
+            pass
 
     def kill_switch_on(self) -> Tuple[bool, str]:
         """

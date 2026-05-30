@@ -29,7 +29,6 @@ REALLOCATION_CSV = RESULTS / "reallocation_plan.csv"
 OPPS_PATH = RESULTS / "trade_opportunities.csv"
 LIVE_LOG = RESULTS / "live_orders_log.csv"
 CONFIG_PATH = ROOT / "config" / "reallocation.json"
-EXEC_GUARD_CONFIG = ROOT / "config" / "execution_guard.json"
 POSITIONS_SNAPSHOT_PATH = RESULTS / "positions_snapshot.csv"
 
 
@@ -125,21 +124,24 @@ def load_reallocation_config() -> Dict[str, Any]:
     return cfg
 
 
-def _load_max_positions(rcfg: Dict[str, Any]) -> int:
-    o = rcfg.get("max_portfolio_positions")
-    if o is not None:
-        try:
-            return max(1, int(o))
-        except Exception:
-            pass
-    try:
-        if EXEC_GUARD_CONFIG.is_file():
-            u = json.loads(EXEC_GUARD_CONFIG.read_text(encoding="utf-8", errors="replace"))
-            if isinstance(u, dict) and u.get("max_positions") is not None:
-                return max(1, int(u.get("max_positions", 25)))
-    except Exception:
-        pass
-    return 25
+def _get_max_positions() -> int:
+    """Single source: config/execute_trades.json via ExecutionGuard (same as execute_trades / manage_positions)."""
+    from services.execution_guard import ExecutionGuard
+
+    merged: Dict[str, Any] = {}
+    ExecutionGuard._merge_execute_trades_position_cap(merged)
+    max_pos = merged.get("max_positions")
+    if max_pos is None:
+        raise RuntimeError("max_positions must be defined in execute_trades.json")
+    return max(1, int(max_pos))
+
+
+def _print_position_cap_sync(pos_count: int, max_pos: int) -> None:
+    print("[POSITION_CAP_SYNC]", flush=True)
+    print("module=capital_reallocation", flush=True)
+    print(f"current_positions={pos_count}", flush=True)
+    print(f"max_positions={max_pos}", flush=True)
+    print("source=config", flush=True)
 
 
 def load_portfolio_state(broker: Any, snapshot_path: Path) -> Tuple[Set[str], int, float]:
@@ -820,7 +822,8 @@ def run_reallocation_pipeline(
 
     ps_path = positions_snapshot_path or POSITIONS_SNAPSHOT_PATH
     pos_keys, pos_count, total_exp = load_portfolio_state(broker, ps_path)
-    max_pos = _load_max_positions(rcfg)
+    max_pos = _get_max_positions()
+    _print_position_cap_sync(pos_count, max_pos)
 
     opps = pd.DataFrame()
     if OPPS_PATH.is_file():

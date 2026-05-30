@@ -47,6 +47,9 @@ DEFAULTS: Dict[str, Any] = {
     "live_block_missing_recent_orders_snapshot": True,
     "live_block_stale_recent_orders_snapshot": True,
     "paper_warn_stale_snapshots": True,
+    # Paper: if live_orders.csv (append-only log) is stale but positions + recent CSVs are fresh,
+    # do not emit STALE_LIVE_ORDERS (snapshot_live_orders does not touch live_orders.csv).
+    "paper_suppress_stale_live_orders_when_pipeline_snapshots_fresh": True,
 }
 
 
@@ -343,9 +346,15 @@ class MasterExecutionGate:
         self, mode: str, reasons: List[str], warnings: List[str], details: Dict[str, Any]
     ) -> None:
         paths = self._paths()["guard"]
-        path = next((p for p in paths if p.is_file()), None)
+        existing = [p for p in paths if p.is_file()]
+        # Prefer newest mtime so we don't read a stale results/ copy when data/live is fresher.
+        path = max(existing, key=lambda p: p.stat().st_mtime) if existing else None
         max_age = float(self.cfg.get("max_guard_age_minutes") or 30)
-        sub: Dict[str, Any] = {"path": str(path) if path else None}
+        sub: Dict[str, Any] = {
+            "path": str(path) if path else None,
+            "candidates_checked": [str(p) for p in paths],
+            "resolved_by": "newest_mtime" if path else None,
+        }
 
         req_clear = mode == "live" and _safe_bool(
             self.cfg.get("require_guard_clear_for_live"), True
@@ -373,6 +382,14 @@ class MasterExecutionGate:
 
         if age is not None and age > max_age:
             sub["stale"] = True
+            sub["operator_note"] = (
+                "guard_snapshot.json is not updated by snapshot_live_orders; "
+                "refresh via guard / reconcile / pipeline that writes this file."
+            )
+            print(
+                f"[GATE_FRESHNESS] guard snapshot source={path} age_minutes={age:.1f} max={max_age} "
+                f"(not refreshed by snapshot_live_orders — see operator_note in gate details)"
+            )
             if mode == "live":
                 reasons.append("STALE_GUARD_SNAPSHOT")
             else:
@@ -525,6 +542,93 @@ class MasterExecutionGate:
 
         details["cpm"] = sub
 
+    def _csv_body_row_count(self, path: Path) -> int:
+        """Data rows only (excludes header). Returns -1 on error."""
+        try:
+            if not path.is_file():
+                return -1
+            with path.open("r", encoding="utf-8", errors="replace") as f:
+                n = sum(1 for _ in f)
+            return max(0, n - 1)
+        except OSError:
+            return -1
+
+    def _check_live_orders_snapshot(
+        self,
+        path: Path,
+        max_lo_age: float,
+        max_pos_age: float,
+        max_rec_age: float,
+        mode: str,
+        prior_snap: Dict[str, Any],
+        reasons: List[str],
+        warnings: List[str],
+    ) -> Dict[str, Any]:
+        """
+        live_orders.csv is an append-only event log (place_live_orders / poll), not rewritten by
+        snapshot_live_orders. In paper mode, avoid STALE_LIVE_ORDERS when positions + recent CSVs are fresh.
+        """
+        out: Dict[str, Any] = {"path": str(path)}
+        paper_warn = _safe_bool(self.cfg.get("paper_warn_stale_snapshots"), True)
+        suppress = _safe_bool(
+            self.cfg.get("paper_suppress_stale_live_orders_when_pipeline_snapshots_fresh"), True
+        )
+
+        if not path.is_file():
+            out["exists"] = False
+            if mode == "paper" and paper_warn:
+                warnings.append("MISSING_LIVE_ORDERS")
+            return out
+
+        out["exists"] = True
+        age = _file_age_minutes(path)
+        out["age_minutes"] = age
+        stale = age is not None and age > max_lo_age
+        if not stale:
+            return out
+
+        live_block_stale = mode == "live"
+        if live_block_stale:
+            reasons.append("STALE_LIVE_ORDERS")
+            print(
+                f"[GATE_FRESHNESS] live_orders freshness source={path} age_minutes={age:.1f} max={max_lo_age}"
+            )
+            return out
+
+        if mode == "paper" and paper_warn and suppress:
+            pos = prior_snap.get("positions") or {}
+            rec = prior_snap.get("recent_orders") or {}
+            pos_ok = (
+                pos.get("exists")
+                and pos.get("age_minutes") is not None
+                and float(pos["age_minutes"]) <= max_pos_age
+            )
+            rec_ok = (
+                rec.get("exists")
+                and rec.get("age_minutes") is not None
+                and float(rec["age_minutes"]) <= max_rec_age
+            )
+            if pos_ok and rec_ok:
+                out["stale_warn_suppressed"] = True
+                out["suppression_reason"] = "pipeline_csvs_fresh_live_orders_append_only"
+                oo_path = self.results / "open_orders_snapshot.csv"
+                oo_n = self._csv_body_row_count(oo_path)
+                if oo_n == 0:
+                    print(
+                        "[GATE_FRESHNESS] zero open orders; treating refreshed snapshots as authoritative "
+                        "(live_orders.csv event log is older than threshold but not updated by snapshot_live_orders)"
+                    )
+                else:
+                    print(
+                        f"[GATE_FRESHNESS] live_orders freshness source={path} (append-only event log); "
+                        "positions_snapshot.csv and recent_orders.csv are fresh — not emitting STALE_LIVE_ORDERS"
+                    )
+                return out
+
+        if mode == "paper" and paper_warn:
+            warnings.append("STALE_LIVE_ORDERS")
+        return out
+
     def _snapshot_check(
         self,
         label: str,
@@ -562,11 +666,14 @@ class MasterExecutionGate:
     ) -> None:
         snap: Dict[str, Any] = {}
         r = self.results
+        max_pos = float(self.cfg.get("max_positions_snapshot_age_minutes") or 30)
+        max_rec = float(self.cfg.get("max_recent_orders_age_minutes") or 30)
+        max_lo = float(self.cfg.get("max_live_orders_age_minutes") or 45)
 
         snap["positions"] = self._snapshot_check(
             "positions",
             r / "positions_snapshot.csv",
-            float(self.cfg.get("max_positions_snapshot_age_minutes") or 30),
+            max_pos,
             mode,
             _safe_bool(self.cfg.get("live_block_missing_positions_snapshot"), True),
             _safe_bool(self.cfg.get("live_block_stale_positions_snapshot"), True),
@@ -578,7 +685,7 @@ class MasterExecutionGate:
         snap["recent_orders"] = self._snapshot_check(
             "recent_orders",
             r / "recent_orders.csv",
-            float(self.cfg.get("max_recent_orders_age_minutes") or 30),
+            max_rec,
             mode,
             _safe_bool(self.cfg.get("live_block_missing_recent_orders_snapshot"), True),
             _safe_bool(self.cfg.get("live_block_stale_recent_orders_snapshot"), True),
@@ -587,17 +694,15 @@ class MasterExecutionGate:
             "MISSING_RECENT_ORDERS",
             "STALE_RECENT_ORDERS",
         )
-        snap["live_orders"] = self._snapshot_check(
-            "live_orders",
+        snap["live_orders"] = self._check_live_orders_snapshot(
             r / "live_orders.csv",
-            float(self.cfg.get("max_live_orders_age_minutes") or 45),
+            max_lo,
+            max_pos,
+            max_rec,
             mode,
-            False,
-            mode == "live",
+            snap,
             reasons,
             warnings,
-            "MISSING_LIVE_ORDERS",
-            "STALE_LIVE_ORDERS",
         )
         details["snapshots"] = snap
 
@@ -717,6 +822,71 @@ def append_gate_log_csv(decision: GateDecision) -> None:
             w.writerow(row)
     except Exception:
         pass
+
+
+def try_refresh_stale_guard_snapshot_if_clear(project_root: Optional[Path] = None) -> None:
+    """If the newest guard_snapshot.json is stale but logically clear, rewrite with a fresh timestamp only.
+
+    Does not change blocked/kill_switch semantics; does not bypass MasterExecutionGate on the next evaluate().
+    """
+    root = (project_root or PROJECT_ROOT).resolve()
+    gate = MasterExecutionGate(project_root=root)
+    paths = gate._paths()["guard"]
+    existing = [p for p in paths if p.is_file()]
+    if not existing:
+        print(
+            "[GUARD_HYGIENE] stale guard detected: no guard_snapshot.json under data/results or data/live "
+            "(run guard/reconcile/pipeline that writes this file)"
+        )
+        return
+
+    path = max(existing, key=lambda p: p.stat().st_mtime)
+    max_age = float(gate.cfg.get("max_guard_age_minutes") or 30)
+    age = _file_age_minutes(path)
+    doc = _load_json(path)
+
+    if age is None:
+        print(f"[GUARD_HYGIENE] refresh failed: cannot read age for path={path}")
+        return
+
+    if age <= max_age:
+        return
+
+    print(
+        f"[GUARD_HYGIENE] stale guard detected: path={path} age_minutes={age:.1f} max_minutes={max_age} "
+        f"(guard is not updated by snapshot_live_orders)"
+    )
+
+    if doc is None:
+        print("[GUARD_HYGIENE] refresh failed: guard_snapshot exists but is unreadable")
+        return
+
+    if gate._guard_bad(doc):
+        print(
+            "[GUARD_HYGIENE] refresh skipped: guard blocked/kill_switch active — "
+            "cannot safely refresh timestamp without operator action"
+        )
+        return
+
+    if not gate._guard_passes(doc):
+        print(
+            "[GUARD_HYGIENE] refresh skipped: guard not in clear/pass state — "
+            "cannot safely refresh timestamp"
+        )
+        return
+
+    print("[GUARD_HYGIENE] refresh triggered")
+    try:
+        ts = _utc_iso()
+        doc["timestamp"] = ts
+        doc["ts"] = ts
+        doc["updated_at"] = ts
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        tmp.replace(path)
+        print("[GUARD_HYGIENE] refresh complete")
+    except Exception as e:
+        print(f"[GUARD_HYGIENE] refresh failed: {e}")
 
 
 def _cli(argv: Optional[List[str]] = None) -> int:

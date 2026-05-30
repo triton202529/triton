@@ -442,6 +442,1030 @@
       "placed": 8,
       "session": "exec_trades_20260410_173310",
       "ts_utc": "2026-04-10T17:33:20Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "4860822c40e67a7977d92b0fa3246af4c60b0dd114becf192eb839d13a48203b",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260413_135918",
+      "ts_utc": "2026-04-13T13:59:20Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "652def261b104638ed28b6d01996faa65a9ed997f1e6597ed696586ddeef79fc",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260413_145410",
+      "ts_utc": "2026-04-13T14:54:48Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "77bbabe57309bef49f33feae151807ec4154aadfc7cd3efe3917abe93892c912",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260413_155756",
+      "ts_utc": "2026-04-13T15:58:27Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9c931a7b3dc5fa3147d64a630002731cac9cb3e83e095b0e85d9a1239dc2b9e7",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260413_163812",
+      "ts_utc": "2026-04-13T16:39:04Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a9af7596d5667c28edbe4f0927136b289166ec71a7b09ce0e8f7acd895ff5a48",
+      "ok": true,
+      "placed": 5,
+      "session": "exec_trades_20260414_015946",
+      "ts_utc": "2026-04-14T01:59:58Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "1a1029918e0cafca5cc95fdecfb507b33f900e05401893d293b88455cf526965",
+      "ok": true,
+      "placed": 4,
+      "session": "exec_trades_20260414_020751",
+      "ts_utc": "2026-04-14T02:08:14Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9b4faa813db851069b1c5676ccc79e22de4b9261311284d8f4e10027a1f38e13",
+      "ok": true,
+      "placed": 7,
+      "session": "exec_trades_20260414_024203",
+      "ts_utc": "2026-04-14T02:42:16Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "6ed2495f7df47a70f6b3189e321086dd5c7f5da5216d862941deb08e5bfb3973",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260414_144410",
+      "ts_utc": "2026-04-14T14:45:01Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "36a04058a9ae78dece3f67e4acd7d1d6439d7f05b5f2652dd9f1743b9463760d",
+      "ok": true,
+      "placed": 5,
+      "session": "exec_trades_20260414_150234",
+      "ts_utc": "2026-04-14T15:03:07Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "5abc1cf6d5415f068190f5395fcb3d1701c61099d85418afddcf1a6f0a977cc7",
+      "ok": true,
+      "placed": 6,
+      "session": "exec_trades_20260414_155252",
+      "ts_utc": "2026-04-14T15:53:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e09fb3b0828794189eb6fdb315dfc22114e953b1275763edaa8ca952447eb0d7",
+      "ok": true,
+      "placed": 4,
+      "session": "exec_trades_20260414_160856",
+      "ts_utc": "2026-04-14T16:09:29Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "58c227732751329934f8f0a9239f0ef1d7b18c9e7d90cb7af31415212ed0bddd",
+      "ok": true,
+      "placed": 4,
+      "session": "exec_trades_20260414_163005",
+      "ts_utc": "2026-04-14T16:30:20Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "8b71f0334b84aa6add45209f56d7f560b465d6ff933f2a125a3b5adaeda8860a",
+      "ok": true,
+      "placed": 4,
+      "session": "exec_trades_20260414_172817",
+      "ts_utc": "2026-04-14T17:28:27Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e6483bed423e9d1a33075171405ca58291e40f6ffd1b362dbed6c23333dbfb24",
+      "ok": true,
+      "placed": 4,
+      "session": "exec_trades_20260414_175319",
+      "ts_utc": "2026-04-14T17:53:35Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "ffdacf8b557887e85037a3c6b8c2ba0eb216572858a6f8fd112af74236696b6e",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260414_181126",
+      "ts_utc": "2026-04-14T18:11:55Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a3b07a8eea8409712394188bc2f4138536385c52ff2490b1ca77034b7d793e38",
+      "ok": true,
+      "placed": 6,
+      "session": "exec_trades_20260414_235951",
+      "ts_utc": "2026-04-15T00:00:00Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "14383428bed86312a6a724fda374c40c4c00a79db867f635216557b67d43eee4",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260416_015817",
+      "ts_utc": "2026-04-16T01:58:28Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "54cff736802493415c713cceacec8ad72e6b81e91c301ecab9ddbb38a46086aa",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260416_171726",
+      "ts_utc": "2026-04-16T17:17:52Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "b0565424ad34b94f0343a8c2d86f2c5765c08d3199c69608211886f9d20a2827",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260416_172657",
+      "ts_utc": "2026-04-16T17:27:17Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "7d0b35e234492824db9de8d1e1a118faf8e90caee845df555d7dc7a584bb9bd9",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260416_173903",
+      "ts_utc": "2026-04-16T17:39:15Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "4464b4d5962bf549c0e42c7d9773397bd6fa679325b60fa7d6b0b44a80a65aca",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260416_174906",
+      "ts_utc": "2026-04-16T17:49:20Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9dd38d970fdf7f4a714d4284adcfaf7e97776635d0caf219c73d318a3185ee56",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260416_175431",
+      "ts_utc": "2026-04-16T17:54:41Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f65292241471d6b4841e3fa14df922eaa74c6f5320abb5190dd98178ae90a56b",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260416_180325",
+      "ts_utc": "2026-04-16T18:04:12Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "d741af30e7f16949f61c647f72377407880b45caad089151eee954507280d0fd",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260416_181150",
+      "ts_utc": "2026-04-16T18:12:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "fb8a5de7428d5c585dd1f00fa4f59736fcfcf88e6daa061e521998af00781a3d",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260416_181637",
+      "ts_utc": "2026-04-16T18:17:01Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "daf97dbd8caf5e3fc9e42818461b9c3f4af0f3692d5fe86bdf4f2472882ea147",
+      "ok": true,
+      "placed": 5,
+      "session": "exec_trades_20260416_192241",
+      "ts_utc": "2026-04-16T19:23:19Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c6536151889c1b6b0055caf8d1c8cc3f41613980db9d83be20d9d52a146353bf",
+      "ok": true,
+      "placed": 5,
+      "session": "exec_trades_20260416_194403",
+      "ts_utc": "2026-04-16T19:44:39Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "5820dd97e08d37e1136e73e9eda879c972e52dbe85f166565ffc9b373247f529",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260417_140212",
+      "ts_utc": "2026-04-17T14:02:27Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "eaeb9a9189c85c95b720bddac43180a998867e0f5f3b79604d2e428af13ba924",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260417_170630",
+      "ts_utc": "2026-04-17T17:06:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "4a87d5c9fdf608fcdf1eda919e8b70e92d0bb2cf5eae570d0c60755f84da99e0",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260420_133353",
+      "ts_utc": "2026-04-20T13:34:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "2f3017433824cbe7c31cc91de494502fbd548c85452e750a073f99b05b3afb76",
+      "ok": true,
+      "placed": 6,
+      "session": "exec_trades_20260421_133045",
+      "ts_utc": "2026-04-21T13:30:59Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "2313f9d1e211100262798ed4b9601157c2ef8ced3af478da47a528e66fa739f3",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260422_145034",
+      "ts_utc": "2026-04-22T14:50:39Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c58a4b3fefe5eaf23988c5dd60e2be7ec37ab02e1f9eb07c0126802c7a8415a0",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260422_145639",
+      "ts_utc": "2026-04-22T14:56:52Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e2619b327724d0572f2e55db4c38746d1332dd43e837b9abe65b4ac0db9071d1",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260422_145826",
+      "ts_utc": "2026-04-22T14:58:40Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "0f2c113ba0ed8426b3aec0f45cd375a3e71cae2985ea039901687eff4bad3dfe",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260422_164851",
+      "ts_utc": "2026-04-22T16:48:57Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c646e49c3c2eed3a7b9494988bb90f742890dc3e8dd40239e38fd3255d6853a6",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260422_165029",
+      "ts_utc": "2026-04-22T16:50:38Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9e93f46bd017ffb69477977df3ff8bd2b0b23e265f91051f2b738896302bc09b",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260422_165554",
+      "ts_utc": "2026-04-22T16:56:10Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "4c184b99614a1076d25451eb91552de2061001fec1d10cc525ec0c47335c574f",
+      "ok": true,
+      "placed": 10,
+      "session": "manage_pos_20260423_133338",
+      "ts_utc": "2026-04-23T13:34:01Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "8c48991e97b7bc9d369ecad2724b2c18433aa4bfd7e6faa41790a32918819742",
+      "ok": true,
+      "placed": 9,
+      "session": "manage_pos_20260423_133612",
+      "ts_utc": "2026-04-23T13:36:33Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e06232faa6d5cdf994442de46829ed4d42cbb81eb3fbf42d16c59bcd37d36eda",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260423_134307",
+      "ts_utc": "2026-04-23T13:43:12Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f690e689d154adff6e151b1249a9f2438c287ab448e4c4ddad3e2e3a7280fcea",
+      "ok": true,
+      "placed": 3,
+      "session": "exec_trades_20260423_135413",
+      "ts_utc": "2026-04-23T13:54:46Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "3da78b80c87cebc7d3f0aa049dda41d7c5260ef375ad6619ccef0169bae7e740",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_140121",
+      "ts_utc": "2026-04-23T14:01:29Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e7e0ec933415fd55c8510de5a13d26f8803a68f4618de7e2b536e4899ddfe7e9",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_140131",
+      "ts_utc": "2026-04-23T14:01:34Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "8575476d1e9d4bc1bae8edcaff516206bcae10066f2e921edf4ad9152fdba0cc",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_140308",
+      "ts_utc": "2026-04-23T14:03:24Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "960933e2bda6f0bb2bdb18c3735b7787c03c235065035ea39aacd00abefe0339",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_140333",
+      "ts_utc": "2026-04-23T14:03:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "87211ea20816c415e64e9676e10833f626783902b6b3fa0176a8180bd86c3e77",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_140506",
+      "ts_utc": "2026-04-23T14:05:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "56fbd742bdd47759a86e51ba3cbb7eacb525f3b3b5d5e21b01400a5f2738dd41",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_140519",
+      "ts_utc": "2026-04-23T14:05:26Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "8f71abda52f93cb1936cc0222503bba23bfa9eedd1e3b45d7e02db0dd79f1b66",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_142021",
+      "ts_utc": "2026-04-23T14:20:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "06c0caf15848d28b1babd53f05e0d7e87c06064943c3840145e85ca20c864ee5",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_142627",
+      "ts_utc": "2026-04-23T14:26:35Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "fa25866085abd5c66ddc52ebad21b9a85fda5bf64ee85fac3ef56a51271a9b4c",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_142651",
+      "ts_utc": "2026-04-23T14:27:03Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "39532c012457b40585fcaab1cb13c6db7175e29d6f9708dd77a11cedf45faf80",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_142831",
+      "ts_utc": "2026-04-23T14:28:44Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9ac5e5ddf4bc3bcf7a63b8b036b181ead6f0573d3e5a9dd6c12788eeb676e441",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_143502",
+      "ts_utc": "2026-04-23T14:35:26Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "907bf5150b79e18673d6ef6c0b1c822773d21455de8097ea7fb7e03c7c53ae4a",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_143529",
+      "ts_utc": "2026-04-23T14:35:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "db29cbbfc920bcdb1c8533fb2c5b490faa21fb35903a56693762713efd838dbb",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260423_144320",
+      "ts_utc": "2026-04-23T14:43:31Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "58388f0d93bbceb1bafc70794797e10730c21c37f764120f9dd51d4aaa301450",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_144943",
+      "ts_utc": "2026-04-23T14:49:49Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "72325079db9bc68e5704011f1852958641840d0ca896141a800810a34c7ae3d2",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_145248",
+      "ts_utc": "2026-04-23T14:52:52Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "566b9962396ec13199224e00b798829ede8513b66d138645e9ac1519a45bdb60",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_150148",
+      "ts_utc": "2026-04-23T15:01:59Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c99d9b481ff177804768b33770b025f1d5874ed4afdc08c0d4ce9648ea2c8ee3",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_150327",
+      "ts_utc": "2026-04-23T15:03:31Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "3746cea54528a25fa458deaf4697e078172d8b90e3d96fecec7a6a5e6d969910",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_152503",
+      "ts_utc": "2026-04-23T15:25:10Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c0eaecabea6f96a636ab2b4cdee22cbac7c31f371174cbdbfc55d10fe1e2a729",
+      "ok": true,
+      "placed": 3,
+      "session": "manage_pos_20260423_152514",
+      "ts_utc": "2026-04-23T15:25:39Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "148b338520191c317ac9deeb5386c990ebb031fce7851008ca1ab8ec46155c7d",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_152848",
+      "ts_utc": "2026-04-23T15:28:51Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a51e9933c31209c602bbe819ed437093eb8780908cdccf3323945a15732ce5df",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_154642",
+      "ts_utc": "2026-04-23T15:46:54Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "11c4c15dc6f507187434ccf00c967a9ce5419c1f886996d7e94ad4fda501df2b",
+      "ok": true,
+      "placed": 6,
+      "session": "manage_pos_20260423_154701",
+      "ts_utc": "2026-04-23T15:47:23Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "44b775b6b93a919c47c32a303545888d868b8b16e3dd913c3fb99981111e678b",
+      "ok": true,
+      "placed": 2,
+      "session": "2026-04-23_OPEN_R160609Z",
+      "ts_utc": "2026-04-23T16:06:25Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "3dd2a7e4a80f90336a13bc2b6b82efb4ac3bf8d835bc2ec180ef91b7e817f630",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_164122",
+      "ts_utc": "2026-04-23T16:41:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "459acdcd80e7184b0ccb6e5cf7c637f42e5bd8a8b09bc74577b1701996410307",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260423_164139",
+      "ts_utc": "2026-04-23T16:41:49Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "06e7b96b0241d4998ffda55698992bbd93d8b25740f60a1297d649b2838ab2b9",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_164657",
+      "ts_utc": "2026-04-23T16:47:05Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "944a1f63a255b064fc505e72251222b93378d6f96a8b514c12d4dad46b4131b1",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260423_164708",
+      "ts_utc": "2026-04-23T16:47:32Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "714aaeda74dcc182637f2ef6b3a82184b19c245b1902892279b123da57d9803c",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_165706",
+      "ts_utc": "2026-04-23T16:57:14Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f5b85e8aee1332aa02e05dfb4b6768916e1a62995bd00d39821029dc1280267f",
+      "ok": true,
+      "placed": 1,
+      "session": "2026-04-23_OPEN_R170739Z",
+      "ts_utc": "2026-04-23T17:07:48Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "62555b77b6dc5e7c34d7a9ecc5771055fca8a86583435b0112dc289bd98abaf8",
+      "ok": true,
+      "placed": 7,
+      "session": "manage_pos_20260423_175554",
+      "ts_utc": "2026-04-23T17:56:22Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "510c04b0ca56bbdecb330222cd723d32cedf7ac617484668359f6e66b9e50aec",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_175804",
+      "ts_utc": "2026-04-23T17:58:07Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9be0cea022200938c6e02a793bfe63666a6ed73025142c678a7797c6750a8614",
+      "ok": true,
+      "placed": 1,
+      "session": "2026-04-23_OPEN_R181859Z",
+      "ts_utc": "2026-04-23T18:19:12Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "d445b6d73633964b75162f8236dce05a29979c9fd113895eb4a28f2a96340154",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_182149",
+      "ts_utc": "2026-04-23T18:22:16Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "5ec24b9d19999b4fc71da115311ae2bdd7ebbd77ad1a6720c375a018c55c755b",
+      "ok": true,
+      "placed": 2,
+      "session": "manage_pos_20260423_182223",
+      "ts_utc": "2026-04-23T18:22:32Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "466fe0fe44f46a8a4dc94bfeb4d4559debc22e72ef151e382647c7583ac98f3d",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_183816",
+      "ts_utc": "2026-04-23T18:38:24Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "27c72d8014b3b428874355852ea367847d3cd3beee9d7bcb3151fa4ec5c167bc",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_184000",
+      "ts_utc": "2026-04-23T18:40:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e2131875e4eda45bb2d3d1f5061e233d523bb6747689b247d08aa47da5623e4d",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_184016",
+      "ts_utc": "2026-04-23T18:40:18Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "192dfeb6545f22bfb99bd7f860f593a58bb72b34d1f2d3b3b103fe550de92716",
+      "ok": true,
+      "placed": 1,
+      "session": "2026-04-23_OPEN_R185118Z",
+      "ts_utc": "2026-04-23T18:51:23Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "16d3e86f5634db53393ae72375e6c5c931886fea04af54e6ff1b756fd61a4034",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_185449",
+      "ts_utc": "2026-04-23T18:54:55Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "138239d90f61c709b21195a6f2a02d4f5f5726411e500b269cd5f56e556d6a5d",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260423_185634",
+      "ts_utc": "2026-04-23T18:56:42Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "048a12bca74b5e7238ff267a57af6e02ab72ad468a09c32315a31f247ca97690",
+      "ok": true,
+      "placed": 2,
+      "session": "manage_pos_20260423_185950",
+      "ts_utc": "2026-04-23T18:59:54Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "3706c5ae76ab8094a22c55ff0fd0e5594357b5ac02f12b59e0b2d90655cdac84",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_190127",
+      "ts_utc": "2026-04-23T19:01:40Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "d33a018f68d7840996245a955d6bcfed546a9f73c4ffa5494156ed12d33b9e73",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_190318",
+      "ts_utc": "2026-04-23T19:03:23Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "800deae1573efb012c63a83d8b5a028a3eb68718b3a7e916fbccce56636b3c28",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_190456",
+      "ts_utc": "2026-04-23T19:05:03Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "47a19eafb314878afff314c656a490115ad7d7b24187f64cba3b0a776ceb7931",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_191554",
+      "ts_utc": "2026-04-23T19:15:57Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "0e75aecf891769fbecf880aab05ce269d77277c7580831ee5728036f22389dd5",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_191734",
+      "ts_utc": "2026-04-23T19:17:37Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "b36c8237fa9cae130a6713c06969e2307dc32ed595cc10466eb837bd2d8c616b",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_192241",
+      "ts_utc": "2026-04-23T19:22:45Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "23e0f03b0ffff9822fcdb1b802e794e1a4e15b15067e15088303481f400a54db",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_192550",
+      "ts_utc": "2026-04-23T19:25:53Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "8836ffc7aa38d947b6cdcc8b3f1a5e6d056437dc9f58e2be16026c9f12292e8f",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260423_195043",
+      "ts_utc": "2026-04-23T19:50:53Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "d6522c6698d510dce6fe665123375778600c35ba1c7c00bc15e5d31bb57804a5",
+      "ok": true,
+      "placed": 2,
+      "session": "manage_pos_20260423_195055",
+      "ts_utc": "2026-04-23T19:51:02Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "43cae402263095b0ba7023c2ddbdc524910e747bc80464f2a480b908ef02c69b",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260423_195233",
+      "ts_utc": "2026-04-23T19:52:41Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "30e77f6f2eb65d7a784bf6dad1899e8d8b4cf4a480c8780a7c51228c0b6b1acd",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260423_195244",
+      "ts_utc": "2026-04-23T19:52:48Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "99cfc0a80ac87d1f1678d92fff3012be71f4bc6acd7d10d4c4db855bc1b123cf",
+      "ok": true,
+      "placed": 3,
+      "session": "manage_pos_20260423_195728",
+      "ts_utc": "2026-04-23T19:57:33Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "20e941f3dcd28b05a1232c3b540de35388822feba6957ea45664dbe0a04fe827",
+      "ok": true,
+      "placed": 10,
+      "session": "2026-04-23_OPEN_R210946Z",
+      "ts_utc": "2026-04-23T21:09:54Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9b6385e7a9439dadc3b1f877fad65cb86616910f806b1db6b6843091fc325058",
+      "ok": true,
+      "placed": 2,
+      "session": "2026-04-24_OPEN_R190229Z",
+      "ts_utc": "2026-04-24T19:02:37Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "938f0eb77ae4dd7d024d38cceb8a1d26cdfe4a6efe54437da68caf3349159bf1",
+      "ok": true,
+      "placed": 10,
+      "session": "manage_pos_20260424_190459",
+      "ts_utc": "2026-04-24T19:05:20Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "72e361022d760712071aeac6b060ca5d3408d9be9ebd17ab22012eaa66a21529",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260424_190657",
+      "ts_utc": "2026-04-24T19:07:08Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "56d91abfcf6379d13601654f7ee805738ff4b682e2feae7e5abf9ac77054ef43",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260424_205659",
+      "ts_utc": "2026-04-24T20:57:04Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "41bcf521821a1f239bbe3569abcabbb96894185cbbb3e21bb9109e41414519cb",
+      "ok": true,
+      "placed": 8,
+      "session": "2026-04-24_OPEN_R191323Z",
+      "ts_utc": "2026-04-25T19:13:32Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "7ec0ba59f7dde2554dd2fb105e6df825cd6fa1959ddabb267795f5e26a9b60ca",
+      "ok": true,
+      "placed": 8,
+      "session": "2026-04-24_OPEN_R193002Z",
+      "ts_utc": "2026-04-25T19:30:10Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a95cc486c6c7768c088450e712228ffe0ef55573d7dd1f32642e4f018e0b1bde",
+      "ok": true,
+      "placed": 8,
+      "session": "manage_pos_20260427_133042",
+      "ts_utc": "2026-04-27T13:30:57Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a6d318a999d043f61fb83766afd64e6973318a4cfad7e0bbfa67345aacb0b7b5",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260427_133229",
+      "ts_utc": "2026-04-27T13:32:32Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "10e00d20cd5de055f8d29dbafdc67e0d4505631d792ae43e63aaa2667f4ef693",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260427_140018",
+      "ts_utc": "2026-04-27T14:00:34Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "813a6d21ec61086bbb049314379599733a696462f9095d82cbbff7be3c8f3c7f",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260427_140037",
+      "ts_utc": "2026-04-27T14:00:42Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "e3b32ab90a1e38fdf51cdd6cba652e24139f208adccaa83377aab81aafada70f",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260427_140155",
+      "ts_utc": "2026-04-27T14:02:08Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "af22dfb3d8da5057d5aafb308d2aa2100528735cfda427b660046362b2278df6",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260427_140628",
+      "ts_utc": "2026-04-27T14:06:53Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "64c7ed228b752d76e6ccc6a2f01d89f4958eb58908ec3ece512d3e3474074edf",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260427_140656",
+      "ts_utc": "2026-04-27T14:07:00Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "a2c33f77e2147f6de2cd63a871365cb0ec6dda4f3a6849103d64a26438475994",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260427_141632",
+      "ts_utc": "2026-04-27T14:16:36Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "9404fa6adee7babafb5e8857ecc11f352253adde7ba9fd218730a174e1aec746",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260427_141750",
+      "ts_utc": "2026-04-27T14:17:57Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c9173f156fc4b669445937260527273b7e61beff3e3daf6ec21416a1e43e3ee8",
+      "ok": true,
+      "placed": 2,
+      "session": "manage_pos_20260427_142307",
+      "ts_utc": "2026-04-27T14:23:17Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "da7119e71473e1df38a88e396b14a092d19ad5b405815d8018b7cf96cefd51da",
+      "ok": true,
+      "placed": 3,
+      "session": "manage_pos_20260427_143119",
+      "ts_utc": "2026-04-27T14:31:31Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "b219f9a05e0186e90f65adf054597582c32653fe3e788dc9235994db5fd4980f",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260427_143248",
+      "ts_utc": "2026-04-27T14:32:52Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "069203622e86ee2acce027bbe5ffd368c35b9a24abb5b8e9fc1331d982d95e03",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260427_143519",
+      "ts_utc": "2026-04-27T14:35:38Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "6465309f70b4e05b8d76320f30ad9240f69fa3d57156b37704d28ef4c3209fb6",
+      "ok": true,
+      "placed": 2,
+      "session": "manage_pos_20260427_143540",
+      "ts_utc": "2026-04-27T14:37:58Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "48b94f416c827ee1f53bbf365690fe760ddf99b426d06a2aeb8c4cb17f04b249",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260427_143926",
+      "ts_utc": "2026-04-27T14:39:29Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "8d3c63b73f8cb304ac7e9da2540ee17ca917d24e77038d94dec5159cd0716fea",
+      "ok": true,
+      "placed": 2,
+      "session": "exec_trades_20260427_150910",
+      "ts_utc": "2026-04-27T15:09:19Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "4cc94839bade94f6e9064baf0892231ca2529c6265883b54b0640dee70668e8e",
+      "ok": true,
+      "placed": 1,
+      "session": "exec_trades_20260427_152110",
+      "ts_utc": "2026-04-27T15:21:16Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "4796b34abd5b0681bac52355fc42e134b300ebc84fa10a466538c579cab6fd16",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260427_152118",
+      "ts_utc": "2026-04-27T15:21:23Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "ade374276ffc1883800d71bd3d9856d5e6805e00af0752c66febf0fdf30bb2ad",
+      "ok": true,
+      "placed": 6,
+      "session": "manage_pos_20260427_155841",
+      "ts_utc": "2026-04-27T15:58:51Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f727d3d52894f2c167037abe19e9579ba0f2d0a31541280c22de17388e01fc9e",
+      "ok": true,
+      "placed": 3,
+      "session": "manage_pos_20260428_021122",
+      "ts_utc": "2026-04-28T02:11:27Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "acb248b36ea4dfdfeec991a4cca6db1712290bab8aa1d4efb7f1487bd030ee7a",
+      "ok": true,
+      "placed": 4,
+      "session": "manage_pos_20260428_172333",
+      "ts_utc": "2026-04-28T17:23:41Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "bf7b3e629e6e8a2452fed894f0f847759d93d515ac5231102cb5cadcf0d59bda",
+      "ok": true,
+      "placed": 2,
+      "session": "manage_pos_20260428_201608",
+      "ts_utc": "2026-04-28T20:16:13Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "f5ef7abf1c8ea16c0bf228a50b1cb9bca48a814f1cbfddafc7c7a884de8b1d62",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260429_000158",
+      "ts_utc": "2026-04-29T00:02:01Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "b2453f44f084d726ef3389c0fe06aa41322ca2392c497d95919c728e9f5a7c0a",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260429_011304",
+      "ts_utc": "2026-04-29T01:13:09Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "c8986f0d72c9f7f6c7d87b099a691deb9963c38b669d407b274f1ca651bd15b7",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260429_023651",
+      "ts_utc": "2026-04-29T02:36:54Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "abcc47df5d4a2c161b92c7e8337201d97b82400ad33649e56f1067a121a25610",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260429_231328",
+      "ts_utc": "2026-04-29T23:13:30Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "53dec10cd7c0abdb14e24603c05df554f00df00749f67e6d88f8814f059f0617",
+      "ok": true,
+      "placed": 1,
+      "session": "manage_pos_20260501_133114",
+      "ts_utc": "2026-05-01T13:31:25Z"
     }
   ],
   "submitted": {

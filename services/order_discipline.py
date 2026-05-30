@@ -15,6 +15,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
+from services.execution_quality import (
+    effective_recent_fill_cooldown_minutes,
+    load_positions_qty_map,
+    log_cooldown_bypassed,
+    log_cooldown_relaxed,
+    median_confidence_buys,
+    recent_submit_cooldown_should_bypass,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "config" / "order_discipline.json"
 RESULTS = ROOT / "data" / "results"
@@ -284,6 +293,50 @@ def get_symbol_order_state(
     }
 
 
+def _batch_buy_confidence_median_dict_rows(rows: List[Dict[str, Any]]) -> Optional[float]:
+    vals: List[float] = []
+    for r in rows:
+        if normalize_side(r.get("side")) != "buy":
+            continue
+        try:
+            vals.append(float(r.get("confidence", 0) or 0.0))
+        except Exception:
+            vals.append(0.0)
+    return median_confidence_buys(vals)
+
+
+def _batch_buy_confidence_median_planned(planned: List[Any]) -> Optional[float]:
+    vals: List[float] = []
+    for p in planned:
+        if normalize_side(getattr(p, "side", None)) != "buy":
+            continue
+        try:
+            vals.append(float(getattr(p, "confidence", 0) or 0.0))
+        except Exception:
+            vals.append(0.0)
+    return median_confidence_buys(vals)
+
+
+def _row_confidence_from_dict(r: Dict[str, Any]) -> Optional[float]:
+    c = r.get("confidence")
+    if c is None:
+        return None
+    try:
+        return float(c)
+    except Exception:
+        return None
+
+
+def _row_confidence_from_planned(p: Any) -> Optional[float]:
+    c = getattr(p, "confidence", None)
+    if c is None:
+        return None
+    try:
+        return float(c)
+    except Exception:
+        return None
+
+
 def should_block_order(
     symbol: str,
     side: str,
@@ -296,6 +349,9 @@ def should_block_order(
     session_seen: Optional[Set[Tuple[str, str]]] = None,
     open_side_keys: Optional[Set[Tuple[str, str]]] = None,
     now: Optional[datetime] = None,
+    row_confidence: Optional[float] = None,
+    batch_buy_confidence_median: Optional[float] = None,
+    positions_qty_map: Optional[Dict[str, float]] = None,
 ) -> Tuple[bool, str]:
     """
     Returns (blocked, reason). If blocked True, do not submit.
@@ -330,18 +386,53 @@ def should_block_order(
         if key in open_side_keys:
             return True, "OPEN_SAME_SIDE_EXISTS"
 
-    if (
-        idx["last_submit"].get(key)
-        and (now - idx["last_submit"][key]).total_seconds() / 60.0 <= sub_m
-    ):
-        return True, "RECENT_SUBMIT_COOLDOWN"
-    if idx["last_fill"].get(key) and (now - idx["last_fill"][key]).total_seconds() / 60.0 <= fill_m:
-        return True, "RECENT_FILL_COOLDOWN"
-    if (
-        idx["last_cancel"].get(key)
-        and (now - idx["last_cancel"][key]).total_seconds() / 60.0 <= can_m
-    ):
-        return True, "RECENT_CANCEL_COOLDOWN"
+    last_submit_ts = idx["last_submit"].get(key)
+    if last_submit_ts is not None and (now - last_submit_ts).total_seconds() / 60.0 <= sub_m:
+        bypass, detail = recent_submit_cooldown_should_bypass(
+            symbol=sym,
+            side=sd,
+            last_submit_ts=last_submit_ts,
+            events=events,
+            positions_qty_map=positions_qty_map,
+        )
+        if bypass:
+            log_cooldown_bypassed(sym, detail)
+        else:
+            return True, "RECENT_SUBMIT_COOLDOWN"
+    last_fill_t = idx["last_fill"].get(key)
+    if last_fill_t is not None:
+        minutes_since = (now - last_fill_t).total_seconds() / 60.0
+        if minutes_since <= fill_m:
+            eff_m = effective_recent_fill_cooldown_minutes(fill_m)
+            if minutes_since > eff_m:
+                pass
+            else:
+                if (
+                    sd == "buy"
+                    and row_confidence is not None
+                    and batch_buy_confidence_median is not None
+                    and row_confidence > batch_buy_confidence_median
+                ):
+                    log_cooldown_relaxed(
+                        sym,
+                        "RECENT_FILL_COOLDOWN",
+                        "buy_confidence_above_batch_median",
+                    )
+                else:
+                    return True, "RECENT_FILL_COOLDOWN"
+    last_cancel_ts = idx["last_cancel"].get(key)
+    if last_cancel_ts is not None and (now - last_cancel_ts).total_seconds() / 60.0 <= can_m:
+        bypass, detail = recent_submit_cooldown_should_bypass(
+            symbol=sym,
+            side=sd,
+            last_submit_ts=last_submit_ts,
+            events=events,
+            positions_qty_map=positions_qty_map,
+        )
+        if bypass:
+            log_cooldown_bypassed(sym, detail)
+        else:
+            return True, "RECENT_CANCEL_COOLDOWN"
 
     fill_m_seq = float(cfg.get("block_if_recent_filled_same_side_minutes", 20) or 20)
     if sd == "sell" and not cfg.get("allow_exit_after_buy_fill", False):
@@ -442,6 +533,7 @@ def annotate_plan_with_discipline(
         else load_open_same_side_keys(DEFAULT_OPEN_SNAPSHOT)
     )
     session_seen: Set[Tuple[str, str]] = set()
+    positions_qty_map = load_positions_qty_map()
 
     block_counts: Counter = Counter()
     symbols_blocked: List[str] = []
@@ -449,6 +541,7 @@ def annotate_plan_with_discipline(
 
     out: List[Dict[str, Any]] = []
     raw_list: List[Dict[str, Any]] = [dict(x) for x in rows] if isinstance(rows, list) else []
+    m_buy = _batch_buy_confidence_median_dict_rows(raw_list)
 
     for r in raw_list:
         sym = normalize_symbol(r.get("symbol") or r.get("ticker"))
@@ -468,6 +561,9 @@ def annotate_plan_with_discipline(
             event_index=idx,
             session_seen=session_seen,
             open_side_keys=opens,
+            row_confidence=_row_confidence_from_dict(r),
+            batch_buy_confidence_median=m_buy,
+            positions_qty_map=positions_qty_map,
         )
         if blocked:
             block_counts[reason] += 1
@@ -587,10 +683,12 @@ def apply_discipline_to_planned_generic(
         else load_open_same_side_keys(DEFAULT_OPEN_SNAPSHOT)
     )
     session_seen: Set[Tuple[str, str]] = set()
+    positions_qty_map = load_positions_qty_map()
     kept: List[Any] = []
     block_counts: Counter = Counter()
     symbols_blocked: List[str] = []
     seen_block: Set[str] = set()
+    m_buy = _batch_buy_confidence_median_planned(planned)
 
     for p in planned:
         sym = normalize_symbol(getattr(p, "symbol", None))
@@ -613,6 +711,9 @@ def apply_discipline_to_planned_generic(
             event_index=idx,
             session_seen=session_seen,
             open_side_keys=opens,
+            row_confidence=_row_confidence_from_planned(p),
+            batch_buy_confidence_median=m_buy,
+            positions_qty_map=positions_qty_map,
         )
         if blocked:
             block_counts[reason] += 1
