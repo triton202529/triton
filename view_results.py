@@ -232,6 +232,39 @@ PERFORMANCE_INTELLIGENCE_BY_SYMBOL_CSV_PATH = RESULTS_DIR / "performance_intelli
 PERFORMANCE_INTELLIGENCE_SUMMARY_JSON_PATH = RESULTS_DIR / "performance_intelligence_summary.json"
 PERFORMANCE_RISK_OVERLAY_CSV_PATH = RESULTS_DIR / "performance_risk_overlay.csv"
 
+# Governance Command Center (Phase 2 — read-only observability)
+GCC_READINESS_SUMMARY_PATH = RESULTS_DIR / "arm_runtime_governance_readiness_gate_summary.json"
+GCC_ADMISSION_SUMMARY_PATH = RESULTS_DIR / "arm_runtime_governance_admission_board_summary.json"
+GCC_ELIGIBILITY_SUMMARY_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_constitutional_eligibility_board_summary.json"
+)
+GCC_RECOMMENDATION_SUMMARY_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_enablement_recommendation_engine_summary.json"
+)
+GCC_REVIEW_SUMMARY_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_enablement_review_board_summary.json"
+)
+GCC_VERDICT_SUMMARY_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_institutional_verdict_engine_summary.json"
+)
+GCC_DOSSIER_SUMMARY_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_human_escalation_dossier_summary.json"
+)
+GCC_DOSSIER_JSON_PATH = RESULTS_DIR / "arm_runtime_governance_human_escalation_dossier.json"
+GCC_READINESS_MEM_PATH = RESULTS_DIR / "arm_runtime_governance_readiness_gate_memory.csv"
+GCC_ADMISSION_MEM_PATH = RESULTS_DIR / "arm_runtime_governance_admission_board_memory.csv"
+GCC_ELIGIBILITY_MEM_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_constitutional_eligibility_board_memory.csv"
+)
+GCC_RECOMMENDATION_MEM_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_enablement_recommendation_engine_memory.csv"
+)
+GCC_REVIEW_MEM_PATH = RESULTS_DIR / "arm_runtime_governance_enablement_review_board_memory.csv"
+GCC_VERDICT_MEM_PATH = (
+    RESULTS_DIR / "arm_runtime_governance_institutional_verdict_engine_memory.csv"
+)
+GCC_DOSSIER_MEM_PATH = RESULTS_DIR / "arm_runtime_governance_human_escalation_dossier_memory.csv"
+
 # Nice-to-have (do not force FAIL)
 MODEL_COMPARISON_PATH = RESULTS_DIR / "model_comparison.csv"
 FEATURE_IMPORTANCE_PATH = RESULTS_DIR / "feature_importance.csv"
@@ -8944,6 +8977,12020 @@ def page_performance_intelligence() -> None:
 
 
 # ──────────────────────────────
+# GOVERNANCE COMMAND CENTER (Phase 2 — read-only)
+# ──────────────────────────────
+
+_GCC_MATURITY_TOKENS: Tuple[str, ...] = (
+    "INSTITUTIONAL",
+    "READY",
+    "LIMITED",
+    "OBSERVE",
+    "DORMANT",
+)
+
+_GCC_LADDER_STAGES: List[Tuple[str, str, str, str]] = [
+    ("Readiness", "readiness_state", "runtime_readiness_classification", "readiness_confidence"),
+    ("Admission", "admission_state", "runtime_admission_classification", "admission_confidence"),
+    (
+        "Constitutional Eligibility",
+        "constitutional_eligibility_state",
+        "runtime_constitutional_eligibility_classification",
+        "constitutional_eligibility_confidence",
+    ),
+    (
+        "Recommendation",
+        "recommendation_state",
+        "runtime_enablement_recommendation_classification",
+        "recommendation_confidence",
+    ),
+    (
+        "Review",
+        "review_state",
+        "runtime_enablement_review_classification",
+        "review_confidence",
+    ),
+    (
+        "Verdict",
+        "verdict_state",
+        "runtime_verdict_classification",
+        "verdict_confidence",
+    ),
+    (
+        "Human Escalation",
+        "dossier_state",
+        "human_escalation_classification",
+        "escalation_confidence",
+    ),
+]
+
+_GCC_TIMELINE_SERIES: List[Tuple[str, Path, str]] = [
+    ("Readiness", GCC_READINESS_MEM_PATH, "readiness_confidence"),
+    ("Admission", GCC_ADMISSION_MEM_PATH, "admission_confidence"),
+    ("Eligibility", GCC_ELIGIBILITY_MEM_PATH, "constitutional_eligibility_confidence"),
+    ("Recommendation", GCC_RECOMMENDATION_MEM_PATH, "recommendation_confidence"),
+    ("Review", GCC_REVIEW_MEM_PATH, "review_confidence"),
+    ("Verdict", GCC_VERDICT_MEM_PATH, "verdict_confidence"),
+    ("Escalation", GCC_DOSSIER_MEM_PATH, "escalation_confidence"),
+]
+
+_GCC_HIST_SERIES: List[Tuple[str, Path, str, str]] = [
+    ("Readiness", GCC_READINESS_MEM_PATH, "readiness_state", "readiness_confidence"),
+    ("Admission", GCC_ADMISSION_MEM_PATH, "admission_state", "admission_confidence"),
+    (
+        "Eligibility",
+        GCC_ELIGIBILITY_MEM_PATH,
+        "constitutional_eligibility_state",
+        "constitutional_eligibility_confidence",
+    ),
+    (
+        "Recommendation",
+        GCC_RECOMMENDATION_MEM_PATH,
+        "recommendation_state",
+        "recommendation_confidence",
+    ),
+    ("Review", GCC_REVIEW_MEM_PATH, "review_state", "review_confidence"),
+    ("Verdict", GCC_VERDICT_MEM_PATH, "verdict_state", "verdict_confidence"),
+    ("Human Escalation", GCC_DOSSIER_MEM_PATH, "dossier_state", "escalation_confidence"),
+]
+
+
+def _gcc_fmt_conf(value: Any, default: str = "0.00") -> str:
+    try:
+        if value is None:
+            return default
+        return f"{float(value):.2f}"
+    except Exception:
+        return default
+
+
+def _gcc_maturity_badge(state: Any) -> str:
+    s = str(state or "").upper()
+    for token in _GCC_MATURITY_TOKENS:
+        if token in s:
+            return "Institutional" if token == "INSTITUTIONAL" else token.capitalize()
+    return "Unknown"
+
+
+def _gcc_card_tone(classification: Any, state: Any) -> str:
+    cls = str(classification or "").upper()
+    st_name = str(state or "").upper()
+    favorable = any(
+        k in cls
+        for k in (
+            "FAVORABLE",
+            "FULL",
+            "ADMITTED",
+            "ELIGIBLE",
+            "RECOMMENDED",
+            "UNDER_REVIEW",
+            "RUNTIME_READY",
+        )
+    )
+    if favorable and "NOT_" not in cls and "DO_NOT" not in cls:
+        return "success"
+    if "OBSERVE" in cls or "OBSERVE" in st_name:
+        return "info"
+    if "LIMITED" in cls or "LIMITED" in st_name:
+        return "warning"
+    return "warning" if "DORMANT" in st_name or "NOT_" in cls or "DO_NOT" in cls else "info"
+
+
+def _gcc_badge_tone(classification: Any, state: Any) -> str:
+    return _gcc_card_tone(classification, state)
+
+
+def _gcc_badge_style(tone: str) -> str:
+    if tone == "success":
+        return "border-color:rgba(34,197,94,.55);color:rgba(134,239,172,.95);"
+    if tone == "warning":
+        return "border-color:rgba(234,179,8,.55);color:rgba(253,224,71,.95);"
+    return "border-color:rgba(96,165,250,.45);color:rgba(147,197,253,.95);"
+
+
+_GCC_UX_CSS = """
+<style>
+.gcc-status-card{border:1px solid rgba(148,163,184,.28);border-radius:10px;padding:.65rem .75rem .55rem;margin-bottom:.2rem;background:rgba(15,23,42,.38);}
+.gcc-status-card .gcc-label{font-size:.76rem;opacity:.82;font-weight:600;margin:0 0 .4rem;letter-spacing:.03em;text-transform:uppercase;}
+.gcc-status-card .gcc-class{font-size:1.08rem;font-weight:700;line-height:1.22;word-break:break-word;margin:0 0 .28rem;}
+.gcc-status-card .gcc-conf{font-size:.8rem;opacity:.78;margin:0 0 .32rem;}
+.gcc-status-card .gcc-badge{display:inline-block;font-size:.68rem;font-weight:700;letter-spacing:.08em;padding:.14rem .42rem;border-radius:4px;border:1px solid rgba(148,163,184,.4);margin:0 0 .28rem;}
+.gcc-status-card .gcc-state{font-size:.66rem;opacity:.48;font-family:ui-monospace,monospace;word-break:break-all;margin:0;line-height:1.2;}
+.gcc-ladder-wrap{border:1px solid rgba(148,163,184,.22);border-radius:10px;padding:.45rem .65rem;background:rgba(15,23,42,.28);}
+.gcc-ladder{font-size:.84rem;line-height:1.2;margin:0;}
+.gcc-ladder-row{display:flex;align-items:center;justify-content:space-between;gap:.65rem;padding:.14rem 0;}
+.gcc-ladder-left{flex:1;min-width:0;display:flex;align-items:baseline;gap:.55rem;}
+.gcc-ladder-stage{font-weight:600;white-space:nowrap;min-width:8.5rem;}
+.gcc-ladder-detail{opacity:.72;font-size:.76rem;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.gcc-ladder-badge{font-size:.68rem;font-weight:700;letter-spacing:.06em;padding:.08rem .38rem;border-radius:4px;border:1px solid rgba(148,163,184,.35);white-space:nowrap;}
+.gcc-ladder-arrow{text-align:center;opacity:.42;font-size:.72rem;line-height:1;margin:0;padding:0;}
+.gcc-block-group{margin:.35rem 0 .15rem;font-size:.88rem;font-weight:600;opacity:.92;}
+.gcc-block-item{margin:.08rem 0 .08rem .15rem;font-size:.86rem;opacity:.88;}
+.gcc-hist-wrap{border:1px solid rgba(148,163,184,.22);border-radius:10px;padding:.55rem .75rem;background:rgba(15,23,42,.30);margin:.35rem 0;}
+.gcc-hist-title{font-size:.78rem;font-weight:600;opacity:.82;text-transform:uppercase;letter-spacing:.04em;margin:0 0 .25rem;}
+.gcc-hist-value{font-size:.95rem;font-weight:600;line-height:1.3;margin:0 0 .18rem;}
+.gcc-hist-detail{font-size:.82rem;opacity:.72;line-height:1.35;margin:0;}
+.gcc-hist-metric{font-size:.84rem;opacity:.88;margin:.08rem 0;}
+</style>
+"""
+
+
+def _gcc_render_card(
+    title: str,
+    classification: Any,
+    confidence: Any,
+    state: Any,
+) -> None:
+    badge = _gcc_maturity_badge(state).upper()
+    tone = _gcc_badge_tone(classification, state)
+    badge_style = _gcc_badge_style(tone)
+    cls_text = str(classification or "—")
+    st.markdown(
+        f"""
+        <div class="gcc-status-card">
+          <div class="gcc-label">{title}</div>
+          <div class="gcc-class">{cls_text}</div>
+          <div class="gcc-conf">confidence {_gcc_fmt_conf(confidence)}</div>
+          <div class="gcc-badge" style="{badge_style}">{badge}</div>
+          <div class="gcc-state">state: {state or "—"}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _gcc_get(d: Optional[Dict[str, Any]], key: str, default: Any = None) -> Any:
+    if not isinstance(d, dict):
+        return default
+    return d.get(key, default)
+
+
+def _gcc_collect_blocked_reason_groups(
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+) -> List[Tuple[str, List[str]]]:
+    groups: Dict[str, List[str]] = {
+        "Governance maturity": [],
+        "Institutional authorization": [],
+        "Constitutional concerns": [],
+        "Final institutional position": [],
+    }
+    seen: set = set()
+
+    def _add(group: str, text: Any) -> None:
+        t = str(text or "").strip()
+        if not t or t in seen or group not in groups:
+            return
+        seen.add(t)
+        groups[group].append(t)
+
+    ladder_checks = [
+        (
+            _gcc_get(readiness, "runtime_readiness_classification"),
+            "NOT_RUNTIME_READY",
+            "Governance maturity",
+            "Runtime governance is not institutionally ready.",
+        ),
+        (
+            _gcc_get(admission, "runtime_admission_classification"),
+            "NOT_RUNTIME_ADMITTED",
+            "Institutional authorization",
+            "Runtime governance has not been admitted.",
+        ),
+        (
+            _gcc_get(eligibility, "runtime_constitutional_eligibility_classification"),
+            "NOT_CONSTITUTIONALLY_ELIGIBLE",
+            "Institutional authorization",
+            "Runtime governance is not constitutionally eligible.",
+        ),
+        (
+            _gcc_get(recommendation, "runtime_enablement_recommendation_classification"),
+            "NOT_RECOMMENDED",
+            "Institutional authorization",
+            "Runtime enablement recommendation not earned.",
+        ),
+        (
+            _gcc_get(review, "runtime_enablement_review_classification"),
+            "NOT_UNDER_REVIEW",
+            "Institutional authorization",
+            "Formal runtime enablement review is not active.",
+        ),
+        (
+            _gcc_get(verdict, "runtime_verdict_classification"),
+            "DO_NOT_ENABLE_RUNTIME",
+            "Final institutional position",
+            "Triton's institutional verdict does not support runtime governance enablement.",
+        ),
+        (
+            _gcc_get(dossier_summary, "human_escalation_classification"),
+            "NO_ESCALATION",
+            "Final institutional position",
+            "Human escalation is unnecessary.",
+        ),
+    ]
+    for cls, blocked_token, group, msg in ladder_checks:
+        if str(cls or "").upper() == blocked_token:
+            _add(group, msg)
+
+    if _gcc_get(dossier_summary, "constitutional_review_required") is True:
+        _add("Constitutional concerns", "Constitutional review remains required.")
+    if _gcc_get(verdict, "constitutional_review_required") is True:
+        _add("Constitutional concerns", "Constitutional pressure remains elevated.")
+
+    dossier = _gcc_get(dossier_record, "human_escalation_dossier") or {}
+    exec_sum = str(_gcc_get(dossier, "executive_summary") or "")
+    if exec_sum:
+        low = exec_sum.lower()
+        if any(k in low for k in ("maturity", "insufficient", "immature", "shadow")):
+            if "governance maturity remains insufficient" in low:
+                _add("Governance maturity", "Governance maturity remains insufficient.")
+            elif "shadow governance reliability remains immature" in low:
+                _add("Governance maturity", "Shadow governance reliability remains immature.")
+            else:
+                _add("Governance maturity", exec_sum)
+
+    for item in _gcc_get(dossier_record, "dossier_reasons") or []:
+        text = str(item or "")
+        low = text.lower()
+        if any(k in low for k in ("constitutional", "court", "violation")):
+            _add("Constitutional concerns", text)
+        elif any(k in low for k in ("maturity", "ready", "shadow", "immature")):
+            _add("Governance maturity", text)
+        else:
+            _add("Final institutional position", text)
+
+    rationale = _gcc_get(dossier, "human_escalation_rationale")
+    if rationale:
+        _add("Final institutional position", rationale)
+
+    for item in _gcc_get(dossier, "case_against_runtime") or []:
+        text = str(item or "")
+        low = text.lower()
+        if any(k in low for k in ("constitutional", "court", "overrul")):
+            _add("Constitutional concerns", text)
+        elif any(k in low for k in ("shadow", "readiness", "maturity", "immature", "confidence")):
+            _add("Governance maturity", text)
+        elif any(k in low for k in ("verdict", "enablement", "mutate", "communication")):
+            _add("Final institutional position", text)
+        else:
+            _add("Governance maturity", text)
+
+    ordered: List[Tuple[str, List[str]]] = []
+    for name in (
+        "Governance maturity",
+        "Institutional authorization",
+        "Constitutional concerns",
+        "Final institutional position",
+    ):
+        items = groups[name]
+        if items:
+            ordered.append((name, items))
+
+    if not ordered:
+        ordered.append(
+            (
+                "Final institutional position",
+                [
+                    "Runtime governance posture is under institutional review. "
+                    "Detailed block rationale is not yet available — treat runtime as locked."
+                ],
+            )
+        )
+    return ordered
+
+
+def _gcc_render_ladder(
+    stages: List[Tuple[str, Any, Any, Any]],
+) -> None:
+    rows_html: List[str] = []
+    for idx, (label, classification, confidence, state) in enumerate(stages):
+        badge = _gcc_maturity_badge(state).upper()
+        tone = _gcc_badge_tone(classification, state)
+        badge_style = _gcc_badge_style(tone)
+        cls_text = str(classification or "—")
+        arrow = '<div class="gcc-ladder-arrow">↓</div>' if idx < len(stages) - 1 else ""
+        rows_html.append(
+            f'<div class="gcc-ladder-row">'
+            f'<div class="gcc-ladder-left">'
+            f'<span class="gcc-ladder-stage">{label}</span>'
+            f'<span class="gcc-ladder-detail">{cls_text} · {_gcc_fmt_conf(confidence)}</span>'
+            f"</div>"
+            f'<span class="gcc-ladder-badge" style="{badge_style}">{badge}</span>'
+            f"</div>"
+            f"{arrow}"
+        )
+    ladder_html = (
+        f'<div class="gcc-ladder-wrap"><div class="gcc-ladder">{"".join(rows_html)}</div></div>'
+    )
+    st.markdown(ladder_html, unsafe_allow_html=True)
+
+
+def _gcc_build_confidence_timeline() -> Tuple[Optional[Any], Optional[float]]:
+    rows: List[Dict[str, Any]] = []
+    for label, path, conf_col in _GCC_TIMELINE_SERIES:
+        df = _ad_load_csv(path, f"{label} memory")
+        if df is None or df.empty or "timestamp" not in df.columns or conf_col not in df.columns:
+            continue
+        try:
+            sub = df[["timestamp", conf_col]].copy()
+            sub["timestamp"] = pd.to_datetime(sub["timestamp"], errors="coerce", utc=True)
+            sub[conf_col] = pd.to_numeric(sub[conf_col], errors="coerce")
+            sub = sub.dropna(subset=["timestamp"])
+            if sub.empty:
+                continue
+            sub["stage"] = label
+            sub = sub.rename(columns={conf_col: "confidence"})
+            rows.extend(sub[["timestamp", "stage", "confidence"]].to_dict("records"))
+        except Exception:
+            continue
+    if not rows:
+        return None, None
+    plot_df = pd.DataFrame(rows)
+    max_conf: Optional[float] = None
+    try:
+        max_conf = float(pd.to_numeric(plot_df["confidence"], errors="coerce").max())
+    except Exception:
+        max_conf = None
+    try:
+        import plotly.express as px  # type: ignore
+
+        fig = px.line(
+            plot_df,
+            x="timestamp",
+            y="confidence",
+            color="stage",
+            title="Governance Confidence Timeline",
+            markers=True,
+        )
+        fig.update_layout(
+            yaxis_title="Confidence",
+            xaxis_title="Timestamp (UTC)",
+            legend_title="Stage",
+            height=420,
+            margin=dict(l=40, r=20, t=50, b=40),
+        )
+        fig.update_yaxes(range=[0, 1])
+        return fig, max_conf
+    except Exception:
+        return None, max_conf
+
+
+def _gcc_maturity_rank(state: Any) -> int:
+    s = str(state or "").upper()
+    order = {"DORMANT": 0, "OBSERVE": 1, "LIMITED": 2, "READY": 3, "INSTITUTIONAL": 4}
+    best = -1
+    for token, rank in order.items():
+        if token in s:
+            best = max(best, rank)
+    return best
+
+
+def _gcc_fmt_conf_delta(value: Any) -> str:
+    try:
+        v = float(value)
+    except Exception:
+        return "0.00"
+    sign = "+" if v >= 0 else "−"
+    return f"{sign}{abs(v):.2f}"
+
+
+def _gcc_load_hist_memory(
+    stage: str, path: Path, state_col: str, conf_col: str
+) -> Optional[pd.DataFrame]:
+    df = _ad_load_csv(path, f"{stage} memory")
+    if df is None or df.empty:
+        return None
+    if "timestamp" not in df.columns or state_col not in df.columns or conf_col not in df.columns:
+        return None
+    try:
+        out = df[["timestamp", state_col, conf_col]].copy()
+        out["timestamp"] = pd.to_datetime(out["timestamp"], errors="coerce", utc=True)
+        out[state_col] = out[state_col].astype(str)
+        out[conf_col] = pd.to_numeric(out[conf_col], errors="coerce").fillna(0.0)
+        out = out.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        return out if not out.empty else None
+    except Exception:
+        return None
+
+
+def _gcc_transition_interpretation(
+    stage: str,
+    prev_state: Any,
+    curr_state: Any,
+    conf_delta: float,
+) -> str:
+    prev_rank = _gcc_maturity_rank(prev_state)
+    curr_rank = _gcc_maturity_rank(curr_state)
+    if str(prev_state) != str(curr_state):
+        if curr_rank > prev_rank:
+            return f"{stage} strengthened"
+        if curr_rank < prev_rank:
+            return f"{stage} weakened"
+        return f"{stage} posture shifted"
+    if conf_delta > 0.001:
+        return f"{stage} confidence increased"
+    if conf_delta < -0.001:
+        return f"{stage} confidence decreased"
+    return f"{stage} remained stable"
+
+
+def _gcc_analyze_governance_history(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+) -> Dict[str, Any]:
+    transitions: List[Dict[str, Any]] = []
+    changes: List[str] = []
+    conf_deltas: List[float] = []
+    state_changes = 0
+    loaded_stages = 0
+
+    for stage, path, state_col, conf_col in _GCC_HIST_SERIES:
+        mem = _gcc_load_hist_memory(stage, path, state_col, conf_col)
+        if mem is None:
+            continue
+        loaded_stages += 1
+        if len(mem) == 1:
+            row = mem.iloc[0]
+            changes.append(
+                f"{stage} posture remained stable ({_gcc_maturity_badge(row[state_col])})."
+            )
+            conf_deltas.append(0.0)
+            continue
+
+        first = mem.iloc[0]
+        last = mem.iloc[-1]
+        span_delta = float(last[conf_col]) - float(first[conf_col])
+        conf_deltas.append(span_delta)
+
+        if str(first[state_col]) != str(last[state_col]):
+            changes.append(
+                f"Governance advanced from {_gcc_maturity_badge(first[state_col])} → "
+                f"{_gcc_maturity_badge(last[state_col])} at {stage.lower()}."
+            )
+        elif abs(span_delta) >= 0.001:
+            if span_delta > 0:
+                changes.append(
+                    f"{stage} confidence increased by {_gcc_fmt_conf_delta(span_delta)}."
+                )
+            else:
+                changes.append(f"{stage} confidence weakened by {_gcc_fmt_conf_delta(span_delta)}.")
+        else:
+            changes.append(f"{stage} posture remained stable.")
+
+        for i in range(1, len(mem)):
+            prev = mem.iloc[i - 1]
+            curr = mem.iloc[i]
+            delta = float(curr[conf_col]) - float(prev[conf_col])
+            prev_state = prev[state_col]
+            curr_state = curr[state_col]
+            if str(prev_state) == str(curr_state) and abs(delta) < 0.001:
+                continue
+            if str(prev_state) != str(curr_state):
+                state_changes += 1
+            ts = curr["timestamp"]
+            ts_str = ts.strftime("%Y-%m-%d %H:%M") if hasattr(ts, "strftime") else str(ts)
+            transitions.append(
+                {
+                    "Timestamp": ts_str,
+                    "Stage": stage,
+                    "Previous": _gcc_maturity_badge(prev_state),
+                    "Current": _gcc_maturity_badge(curr_state),
+                    "Confidence Δ": _gcc_fmt_conf_delta(delta),
+                    "Interpretation": _gcc_transition_interpretation(
+                        stage, prev_state, curr_state, delta
+                    ),
+                }
+            )
+
+    max_conf = 0.0
+    for stage, path, state_col, conf_col in _GCC_HIST_SERIES:
+        mem = _gcc_load_hist_memory(stage, path, state_col, conf_col)
+        if mem is not None:
+            try:
+                max_conf = max(max_conf, float(mem[conf_col].max()))
+            except Exception:
+                pass
+
+    if max_conf <= 0.01 and state_changes == 0:
+        confidence_direction = "dormant"
+    else:
+        pos = sum(1 for d in conf_deltas if d > 0.001)
+        neg = sum(1 for d in conf_deltas if d < -0.001)
+        zero = len(conf_deltas) - pos - neg
+        if pos > 0 and neg > 0:
+            confidence_direction = "mixed"
+        elif pos > 0 and neg == 0:
+            confidence_direction = "improving"
+        elif neg > 0 and pos == 0:
+            confidence_direction = "deteriorating"
+        elif zero == len(conf_deltas) or not conf_deltas:
+            confidence_direction = "stable"
+        else:
+            confidence_direction = "stable"
+
+    total_movement = sum(abs(d) for d in conf_deltas)
+    if state_changes >= 2 or total_movement >= 0.15:
+        momentum = "HIGH"
+    elif state_changes >= 1 or total_movement >= 0.05:
+        momentum = "MODERATE"
+    elif total_movement >= 0.01 or len(transitions) >= 1:
+        momentum = "LOW"
+    else:
+        momentum = "NONE"
+
+    if state_changes == 0:
+        posture_stability = "Stable institutional posture"
+    elif state_changes <= 2:
+        posture_stability = "Limited governance posture shifts detected"
+    else:
+        posture_stability = "Frequent governance posture shifts detected"
+
+    if confidence_direction == "dormant":
+        posture_trend = "Governance posture remains dormant."
+        posture_detail = "No institutional progression has yet occurred."
+    elif confidence_direction == "improving":
+        posture_trend = "Governance posture is improving."
+        improving = [c for c in changes if "increased" in c.lower() or "advanced" in c.lower()]
+        posture_detail = (
+            improving[0] if improving else "Institutional confidence increased over time."
+        )
+    elif confidence_direction == "deteriorating":
+        posture_trend = "Governance posture degraded."
+        weakening = [c for c in changes if "weakened" in c.lower()]
+        posture_detail = (
+            weakening[0]
+            if weakening
+            else "Institutional confidence weakened across governance stages."
+        )
+    elif confidence_direction == "mixed":
+        posture_trend = "Governance posture is mixed."
+        posture_detail = "Some stages improved while others weakened or remained stable."
+    else:
+        posture_trend = "Governance posture is stable."
+        posture_detail = "No material confidence movement detected across recorded history."
+
+    dossier = _gcc_get(dossier_record, "human_escalation_dossier") or {}
+    explanation: List[str] = []
+    seen_expl: set = set()
+
+    def _expl_add(text: str) -> None:
+        t = text.strip()
+        if t and t not in seen_expl:
+            seen_expl.add(t)
+            explanation.append(t)
+
+    if confidence_direction == "dormant":
+        _expl_add(
+            "Governance remains dormant because institutional readiness, constitutional eligibility, "
+            "and recommendation thresholds have not materially advanced."
+        )
+    elif confidence_direction == "improving":
+        _expl_add("Governance confidence is trending upward across recorded institutional history.")
+    elif confidence_direction == "deteriorating":
+        _expl_add("Governance confidence has weakened across recorded institutional history.")
+
+    esc_cls = str(_gcc_get(dossier_summary, "human_escalation_classification") or "").upper()
+    if esc_cls == "NO_ESCALATION":
+        _expl_add(
+            "Human escalation remains inactive because governance confidence does not justify "
+            "operator intervention."
+        )
+    elif esc_cls in ("OBSERVE_ONLY_ESCALATION", "LIMITED_ESCALATION", "FULL_OPERATOR_ESCALATION"):
+        _expl_add(f"Human escalation posture is active ({esc_cls.replace('_', ' ').title()}).")
+
+    exec_sum = str(_gcc_get(dossier, "executive_summary") or "").strip()
+    if exec_sum:
+        _expl_add(exec_sum)
+
+    for item in (_gcc_get(dossier, "case_against_runtime") or [])[:2]:
+        _expl_add(str(item))
+
+    if not explanation:
+        _expl_add(
+            "Governance posture reflects current institutional summaries; historical depth remains limited."
+        )
+    explanation = explanation[:5]
+
+    if not changes:
+        changes = ["No material governance changes detected."]
+
+    transitions.sort(key=lambda r: r.get("Timestamp", ""))
+
+    return {
+        "posture_trend": posture_trend,
+        "posture_detail": posture_detail,
+        "confidence_direction": confidence_direction,
+        "institutional_momentum": momentum,
+        "posture_stability": posture_stability,
+        "transitions": transitions,
+        "changes": changes,
+        "operator_explanation": explanation,
+        "has_history": loaded_stages > 0,
+        "has_transitions": len(transitions) > 0,
+    }
+
+
+def _gcc_render_hist_card(title: str, value: str, detail: str = "") -> None:
+    detail_html = f'<div class="gcc-hist-detail">{detail}</div>' if detail else ""
+    st.markdown(
+        f'<div class="gcc-hist-wrap"><div class="gcc-hist-title">{title}</div>'
+        f'<div class="gcc-hist-value">{value}</div>{detail_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _gcc_render_historical_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Optional[Dict[str, Any]] = None,
+) -> None:
+    if hist is None:
+        hist = _gcc_analyze_governance_history(
+            readiness=readiness,
+            admission=admission,
+            eligibility=eligibility,
+            recommendation=recommendation,
+            review=review,
+            verdict=verdict,
+            dossier_summary=dossier_summary,
+            dossier_record=dossier_record,
+        )
+
+    st.markdown("### Governance Historical Intelligence")
+    st.caption("Institutional audit trail — how governance posture evolved over recorded history.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        _gcc_render_hist_card(
+            "Governance Posture Trend", hist["posture_trend"], hist["posture_detail"]
+        )
+    with c2:
+        _gcc_render_hist_card(
+            "Confidence Direction",
+            hist["confidence_direction"].capitalize(),
+            f"Confidence direction: {hist['confidence_direction'].capitalize()}",
+        )
+    with c3:
+        _gcc_render_hist_card(
+            "Institutional Momentum",
+            hist["institutional_momentum"],
+            f"Institutional momentum: {hist['institutional_momentum']}",
+        )
+    with c4:
+        _gcc_render_hist_card("Posture Stability", hist["posture_stability"])
+
+    st.markdown("#### Governance Transition History")
+    if hist["has_transitions"]:
+        trans_df = pd.DataFrame(hist["transitions"])
+        _ei_render_table(trans_df, height=min(280, 40 + 35 * len(trans_df)))
+    else:
+        st.info(
+            "No governance posture transitions detected yet. "
+            "History will populate as governance maturity evolves."
+        )
+
+    st.markdown("#### Governance Change Detection")
+    for change in hist["changes"][:10]:
+        st.markdown(f'<div class="gcc-hist-metric">• {change}</div>', unsafe_allow_html=True)
+
+    st.markdown("#### Why Governance Looks This Way")
+    for item in hist["operator_explanation"]:
+        st.markdown(f'<div class="gcc-block-item">• {item}</div>', unsafe_allow_html=True)
+
+
+_GCC_REGIME_PRIORITY: Tuple[str, ...] = (
+    "CONSTITUTIONAL_STRESS",
+    "GOVERNANCE_REGRESSION",
+    "INSTITUTIONAL_INSTABILITY",
+    "RUNTIME_CANDIDATE",
+    "PRE_RUNTIME_READINESS",
+    "GOVERNANCE_ACCELERATION",
+    "EARLY_INSTITUTIONAL_FORMATION",
+    "DORMANT_GOVERNANCE",
+)
+
+_GCC_REGIME_DISPLAY: Dict[str, str] = {
+    "DORMANT_GOVERNANCE": "Dormant Governance",
+    "EARLY_INSTITUTIONAL_FORMATION": "Early Institutional Formation",
+    "GOVERNANCE_ACCELERATION": "Governance Acceleration",
+    "CONSTITUTIONAL_STRESS": "Constitutional Stress",
+    "INSTITUTIONAL_INSTABILITY": "Institutional Instability",
+    "PRE_RUNTIME_READINESS": "Pre-Runtime Readiness",
+    "RUNTIME_CANDIDATE": "Runtime Candidate",
+    "GOVERNANCE_REGRESSION": "Governance Regression",
+}
+
+_GCC_REGIME_OPERATOR_MEANING: Dict[str, str] = {
+    "DORMANT_GOVERNANCE": (
+        "Triton's runtime governance stack is present but inactive. The system is observing itself, "
+        "but no institutional pathway toward runtime governance has been earned."
+    ),
+    "EARLY_INSTITUTIONAL_FORMATION": (
+        "Governance signals are beginning to accumulate, but institutional thresholds for readiness, "
+        "admission, and review have not yet been met."
+    ),
+    "GOVERNANCE_ACCELERATION": (
+        "Governance confidence is improving across recorded history. Institutional momentum is building, "
+        "but runtime mutation remains locked pending further maturity."
+    ),
+    "CONSTITUTIONAL_STRESS": (
+        "Constitutional constraints dominate Triton's governance posture. Runtime governance should "
+        "remain blocked until constitutional pressure falls."
+    ),
+    "INSTITUTIONAL_INSTABILITY": (
+        "Governance signals are mixed or shifting frequently. Operators should treat posture changes "
+        "as provisional until stability returns."
+    ),
+    "PRE_RUNTIME_READINESS": (
+        "Several upstream governance stages show limited or advancing maturity. Runtime discussion may "
+        "be approaching, but live runtime policy remains locked."
+    ),
+    "RUNTIME_CANDIDATE": (
+        "Triton has accumulated enough institutional support to be discussed as a future runtime "
+        "candidate, but runtime mutation remains locked."
+    ),
+    "GOVERNANCE_REGRESSION": (
+        "Governance confidence or stage maturity is moving backward. Operators should investigate "
+        "whether constitutional or institutional deterioration is underway."
+    ),
+}
+
+_GCC_REGIME_OPERATOR_POSTURE: Dict[str, str] = {
+    "DORMANT_GOVERNANCE": "OBSERVE_ONLY",
+    "EARLY_INSTITUTIONAL_FORMATION": "CONTINUE_EVIDENCE_COLLECTION",
+    "GOVERNANCE_ACCELERATION": "REVIEW_WITH_CAUTION",
+    "CONSTITUTIONAL_STRESS": "MAINTAIN_CONSTITUTIONAL_LOCK",
+    "INSTITUTIONAL_INSTABILITY": "REVIEW_WITH_CAUTION",
+    "PRE_RUNTIME_READINESS": "PREPARE_OPERATOR_REVIEW",
+    "RUNTIME_CANDIDATE": "PREPARE_OPERATOR_REVIEW",
+    "GOVERNANCE_REGRESSION": "INVESTIGATE_REGRESSION",
+}
+
+
+def _gcc_cls_maturity_rank(classification: Any) -> int:
+    c = str(classification or "").upper()
+    if not c or c == "—":
+        return -1
+    if "NOT_" in c or "DO_NOT" in c:
+        return 0
+    if "FAVORABLE" in c or "FULL_OPERATOR" in c:
+        return 4
+    if "LIMITED" in c:
+        return 2
+    if "OBSERVE" in c:
+        return 1
+    if any(k in c for k in ("READY", "ADMITTED", "ELIGIBLE", "RECOMMENDED", "UNDER_REVIEW")):
+        return 3
+    return 0
+
+
+def _gcc_collect_governance_snapshot(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+) -> Dict[str, Any]:
+    dossier = _gcc_get(dossier_record, "human_escalation_dossier") or {}
+    confidences = [
+        _gcc_get(readiness, "readiness_confidence", 0.0),
+        _gcc_get(admission, "admission_confidence", 0.0),
+        _gcc_get(eligibility, "constitutional_eligibility_confidence", 0.0),
+        _gcc_get(recommendation, "recommendation_confidence", 0.0),
+        _gcc_get(review, "review_confidence", 0.0),
+        _gcc_get(verdict, "verdict_confidence", 0.0),
+        _gcc_get(dossier_summary, "escalation_confidence", 0.0),
+    ]
+    try:
+        max_conf = max(float(c or 0.0) for c in confidences)
+    except Exception:
+        max_conf = 0.0
+
+    states = [
+        _gcc_get(readiness, "readiness_state"),
+        _gcc_get(admission, "admission_state"),
+        _gcc_get(eligibility, "constitutional_eligibility_state"),
+        _gcc_get(recommendation, "recommendation_state"),
+        _gcc_get(review, "review_state"),
+        _gcc_get(verdict, "verdict_state"),
+        _gcc_get(dossier_summary, "dossier_state"),
+    ]
+    state_text = [str(s or "").upper() for s in states if s]
+    all_dormant = bool(state_text) and all("DORMANT" in s for s in state_text)
+
+    const_review = any(
+        _gcc_get(obj, "constitutional_review_required") is True
+        for obj in (
+            readiness,
+            admission,
+            eligibility,
+            recommendation,
+            review,
+            verdict,
+            dossier_summary,
+        )
+    )
+    constitutional_safe = _gcc_get(dossier, "constitutional_safe")
+    future_candidate = _gcc_get(
+        dossier, "future_runtime_candidate", _gcc_get(dossier_summary, "future_runtime_candidate")
+    )
+
+    classifications = {
+        "readiness": _gcc_get(readiness, "runtime_readiness_classification"),
+        "admission": _gcc_get(admission, "runtime_admission_classification"),
+        "eligibility": _gcc_get(eligibility, "runtime_constitutional_eligibility_classification"),
+        "recommendation": _gcc_get(
+            recommendation, "runtime_enablement_recommendation_classification"
+        ),
+        "review": _gcc_get(review, "runtime_enablement_review_classification"),
+        "verdict": _gcc_get(verdict, "runtime_verdict_classification"),
+        "escalation": _gcc_get(dossier_summary, "human_escalation_classification"),
+    }
+
+    upstream_ranks = [
+        _gcc_cls_maturity_rank(classifications["readiness"]),
+        _gcc_cls_maturity_rank(classifications["admission"]),
+        _gcc_cls_maturity_rank(classifications["eligibility"]),
+    ]
+    max_upstream_rank = max(upstream_ranks) if upstream_ranks else 0
+
+    return {
+        "confidences": confidences,
+        "max_conf": max_conf,
+        "all_dormant": all_dormant,
+        "constitutional_safe": constitutional_safe,
+        "constitutional_review_required": const_review,
+        "future_runtime_candidate": future_candidate is True,
+        "classifications": classifications,
+        "max_upstream_rank": max_upstream_rank,
+        "dossier": dossier,
+    }
+
+
+def _gcc_regime_drivers(regime: str, snap: Dict[str, Any], hist: Dict[str, Any]) -> List[str]:
+    cls = snap["classifications"]
+    drivers: List[str] = []
+
+    if regime == "DORMANT_GOVERNANCE":
+        drivers.extend(
+            [
+                "All runtime governance stages remain dormant",
+                "Runtime admission has not been earned",
+                "Constitutional eligibility is not active",
+                "Human escalation is inactive",
+            ]
+        )
+    elif regime == "EARLY_INSTITUTIONAL_FORMATION":
+        drivers.append(f"Governance confidence above zero (max {_gcc_fmt_conf(snap['max_conf'])})")
+        drivers.append(f"Readiness posture: {cls.get('readiness') or '—'}")
+        drivers.append("Runtime review has not yet been earned")
+        drivers.append("Institutional signals are accumulating")
+    elif regime == "GOVERNANCE_ACCELERATION":
+        drivers.append(f"Confidence trend is {hist.get('confidence_direction', '—')}")
+        drivers.append(f"Institutional momentum is {hist.get('institutional_momentum', '—')}")
+        if hist.get("has_transitions"):
+            drivers.append("Stage progression detected in governance history")
+        else:
+            drivers.append("Confidence movement detected across governance memory")
+    elif regime == "CONSTITUTIONAL_STRESS":
+        if snap["constitutional_safe"] is False:
+            drivers.append("Constitutional safety is false")
+        if snap["constitutional_review_required"]:
+            drivers.append("Constitutional review remains required")
+        drivers.append(f"Eligibility posture: {cls.get('eligibility') or '—'}")
+        drivers.append("Court/council constraints dominate governance posture")
+    elif regime == "INSTITUTIONAL_INSTABILITY":
+        drivers.append(f"Confidence direction is {hist.get('confidence_direction', '—')}")
+        drivers.append(hist.get("posture_stability", "Governance posture shifts detected"))
+        drivers.append("Conflicting or unstable stage outcomes present")
+    elif regime == "PRE_RUNTIME_READINESS":
+        drivers.append(f"Readiness posture: {cls.get('readiness') or '—'}")
+        drivers.append(f"Admission posture: {cls.get('admission') or '—'}")
+        drivers.append(f"Eligibility posture: {cls.get('eligibility') or '—'}")
+        drivers.append("Runtime mutation remains locked")
+    elif regime == "RUNTIME_CANDIDATE":
+        if snap["future_runtime_candidate"]:
+            drivers.append("Future runtime candidate flag is true")
+        drivers.append(f"Verdict posture: {cls.get('verdict') or '—'}")
+        drivers.append(f"Human escalation posture: {cls.get('escalation') or '—'}")
+        drivers.append("Runtime mutation remains locked")
+    elif regime == "GOVERNANCE_REGRESSION":
+        drivers.append(f"Confidence direction is {hist.get('confidence_direction', '—')}")
+        weakened = [c for c in hist.get("changes", []) if "weakened" in c.lower()]
+        if weakened:
+            drivers.append(weakened[0])
+        else:
+            drivers.append("Governance confidence is deteriorating across recorded history")
+        if snap["constitutional_safe"] is False:
+            drivers.append("Constitutional safety remains weak")
+
+    return drivers[:6]
+
+
+def _gcc_regime_confidence(regime: str, snap: Dict[str, Any], hist: Dict[str, Any]) -> float:
+    if regime == "DORMANT_GOVERNANCE" and snap["max_conf"] <= 0.01 and snap["all_dormant"]:
+        return 0.95
+    if regime == "CONSTITUTIONAL_STRESS":
+        score = 0.70
+        if snap["constitutional_safe"] is False:
+            score += 0.12
+        if snap["constitutional_review_required"]:
+            score += 0.10
+        return min(score, 0.98)
+    if regime == "GOVERNANCE_REGRESSION":
+        return 0.82 if hist.get("confidence_direction") == "deteriorating" else 0.68
+    if regime == "INSTITUTIONAL_INSTABILITY":
+        return 0.72 if hist.get("confidence_direction") == "mixed" else 0.60
+    if regime == "RUNTIME_CANDIDATE":
+        score = 0.65
+        if snap["future_runtime_candidate"]:
+            score += 0.15
+        if str(snap["classifications"].get("verdict") or "").upper() == "FAVORABLE_RUNTIME_VERDICT":
+            score += 0.12
+        return min(score, 0.92)
+    if regime == "PRE_RUNTIME_READINESS":
+        return min(0.55 + 0.08 * snap["max_upstream_rank"], 0.88)
+    if regime == "GOVERNANCE_ACCELERATION":
+        mom = hist.get("institutional_momentum", "NONE")
+        base = {"LOW": 0.62, "MODERATE": 0.74, "HIGH": 0.84}.get(mom, 0.58)
+        return base
+    if regime == "EARLY_INSTITUTIONAL_FORMATION":
+        return min(0.50 + snap["max_conf"], 0.80)
+    return 0.55
+
+
+def _gcc_detect_governance_regime(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    cls = snap["classifications"]
+    verdict_cls = str(cls.get("verdict") or "").upper()
+    esc_cls = str(cls.get("escalation") or "").upper()
+
+    def _match_constitutional_stress() -> bool:
+        if snap["constitutional_safe"] is False:
+            return True
+        if snap["constitutional_review_required"]:
+            return True
+        if (
+            str(cls.get("eligibility") or "").upper() == "NOT_CONSTITUTIONALLY_ELIGIBLE"
+            and snap["constitutional_review_required"]
+        ):
+            return True
+        return False
+
+    def _match_regression() -> bool:
+        if hist.get("confidence_direction") == "deteriorating":
+            return True
+        for tr in hist.get("transitions", []):
+            if "weakened" in str(tr.get("Interpretation", "")).lower():
+                return True
+        for ch in hist.get("changes", []):
+            if "weakened" in str(ch).lower():
+                return True
+        return False
+
+    def _match_instability() -> bool:
+        if hist.get("confidence_direction") == "mixed":
+            return True
+        if "Frequent" in str(hist.get("posture_stability", "")):
+            return True
+        return False
+
+    def _match_runtime_candidate() -> bool:
+        if snap["future_runtime_candidate"]:
+            return True
+        if verdict_cls == "FAVORABLE_RUNTIME_VERDICT":
+            return True
+        if esc_cls == "FULL_OPERATOR_ESCALATION":
+            return True
+        return False
+
+    def _match_pre_runtime_readiness() -> bool:
+        if snap["max_upstream_rank"] >= 2:
+            return True
+        if any(
+            "LIMITED" in str(v or "").upper() and "NOT_" not in str(v or "").upper()
+            for v in (cls.get("readiness"), cls.get("admission"), cls.get("eligibility"))
+        ):
+            return True
+        return False
+
+    def _match_acceleration() -> bool:
+        return hist.get("confidence_direction") == "improving" and hist.get(
+            "institutional_momentum"
+        ) in ("LOW", "MODERATE", "HIGH")
+
+    def _match_early_formation() -> bool:
+        return (
+            snap["max_conf"] > 0.01
+            and str(cls.get("readiness") or "").upper() == "NOT_RUNTIME_READY"
+        )
+
+    def _match_dormant() -> bool:
+        return snap["max_conf"] <= 0.01 and snap["all_dormant"]
+
+    matchers = {
+        "CONSTITUTIONAL_STRESS": _match_constitutional_stress,
+        "GOVERNANCE_REGRESSION": _match_regression,
+        "INSTITUTIONAL_INSTABILITY": _match_instability,
+        "RUNTIME_CANDIDATE": _match_runtime_candidate,
+        "PRE_RUNTIME_READINESS": _match_pre_runtime_readiness,
+        "GOVERNANCE_ACCELERATION": _match_acceleration,
+        "EARLY_INSTITUTIONAL_FORMATION": _match_early_formation,
+        "DORMANT_GOVERNANCE": _match_dormant,
+    }
+
+    regime = "DORMANT_GOVERNANCE"
+    for candidate in _GCC_REGIME_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            regime = candidate
+            break
+
+    confidence = _gcc_regime_confidence(regime, snap, hist)
+    drivers = _gcc_regime_drivers(regime, snap, hist)
+    if not drivers:
+        drivers = ["Governance regime derived from current institutional summaries."]
+
+    return {
+        "regime": regime,
+        "regime_display": _GCC_REGIME_DISPLAY.get(regime, regime.replace("_", " ").title()),
+        "regime_confidence": confidence,
+        "drivers": drivers,
+        "operator_meaning": _GCC_REGIME_OPERATOR_MEANING.get(regime, ""),
+        "operator_posture": _GCC_REGIME_OPERATOR_POSTURE.get(regime, "NO_ACTION_REQUIRED"),
+    }
+
+
+def _gcc_render_regime_detection(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if regime is None:
+        regime = _gcc_detect_governance_regime(
+            readiness=readiness,
+            admission=admission,
+            eligibility=eligibility,
+            recommendation=recommendation,
+            review=review,
+            verdict=verdict,
+            dossier_summary=dossier_summary,
+            dossier_record=dossier_record,
+            hist=hist,
+        )
+
+    st.markdown("### Governance Regime Detection")
+    st.caption("Institutional classification of Triton's current governance environment.")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Governance Regime", regime["regime_display"])
+    c2.metric("Regime Confidence", _gcc_fmt_conf(regime["regime_confidence"]))
+    c3.metric("Operator Posture", regime["operator_posture"])
+
+    st.markdown("**Regime Drivers**")
+    for driver in regime["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    meaning = regime["operator_meaning"]
+    if regime["regime"] in (
+        "CONSTITUTIONAL_STRESS",
+        "GOVERNANCE_REGRESSION",
+        "INSTITUTIONAL_INSTABILITY",
+    ):
+        st.warning(meaning)
+    elif regime["regime"] in (
+        "RUNTIME_CANDIDATE",
+        "PRE_RUNTIME_READINESS",
+        "GOVERNANCE_ACCELERATION",
+    ):
+        st.success(meaning)
+    else:
+        st.info(meaning)
+
+    with st.expander("Regime classification detail", expanded=False):
+        st.markdown(f"- **Internal label:** `{regime['regime']}`")
+        st.markdown(f"- **Confidence direction:** `{hist.get('confidence_direction', '—')}`")
+        st.markdown(f"- **Institutional momentum:** `{hist.get('institutional_momentum', '—')}`")
+        st.markdown(f"- **Posture stability:** {hist.get('posture_stability', '—')}")
+
+    return regime
+
+
+_GCC_TRAJECTORY_PRIORITY: Tuple[str, ...] = (
+    "CONSTITUTIONALLY_CONSTRAINED",
+    "GOVERNANCE_REGRESSION_RISK",
+    "RUNTIME_DISCUSSION_CANDIDATE",
+    "PRE_RUNTIME_TRAJECTORY",
+    "GOVERNANCE_ACCELERATING",
+    "GOVERNANCE_IMPROVING",
+    "GOVERNANCE_STABLE",
+    "GOVERNANCE_DORMANT",
+)
+
+_GCC_TRAJECTORY_DISPLAY: Dict[str, str] = {
+    "GOVERNANCE_DORMANT": "Governance Dormant",
+    "GOVERNANCE_STABLE": "Governance Stable",
+    "GOVERNANCE_IMPROVING": "Governance Improving",
+    "GOVERNANCE_ACCELERATING": "Governance Accelerating",
+    "GOVERNANCE_REGRESSION_RISK": "Governance Regression Risk",
+    "CONSTITUTIONALLY_CONSTRAINED": "Constitutionally Constrained",
+    "PRE_RUNTIME_TRAJECTORY": "Pre-Runtime Trajectory",
+    "RUNTIME_DISCUSSION_CANDIDATE": "Runtime Discussion Candidate",
+}
+
+_GCC_FORECAST_OPERATOR_ACTION: Dict[str, str] = {
+    "GOVERNANCE_DORMANT": "CONTINUE_OBSERVATION",
+    "GOVERNANCE_STABLE": "CONTINUE_OBSERVATION",
+    "GOVERNANCE_IMPROVING": "CONTINUE_EVIDENCE_COLLECTION",
+    "GOVERNANCE_ACCELERATING": "MONITOR_ACCELERATION",
+    "GOVERNANCE_REGRESSION_RISK": "REVIEW_GOVERNANCE_SHIFTS",
+    "CONSTITUTIONALLY_CONSTRAINED": "MAINTAIN_CONSTITUTIONAL_LOCK",
+    "PRE_RUNTIME_TRAJECTORY": "PREPARE_RUNTIME_DISCUSSION",
+    "RUNTIME_DISCUSSION_CANDIDATE": "PREPARE_RUNTIME_DISCUSSION",
+}
+
+
+def _gcc_forecast_regression_risk(hist: Dict[str, Any], regime: Dict[str, Any]) -> str:
+    direction = hist.get("confidence_direction", "stable")
+    regime_key = regime.get("regime", "")
+    stability = str(hist.get("posture_stability", ""))
+    if (
+        regime_key in ("GOVERNANCE_REGRESSION", "INSTITUTIONAL_INSTABILITY")
+        and direction == "deteriorating"
+    ):
+        return "HIGH"
+    if direction == "deteriorating" or "Frequent" in stability:
+        return "MODERATE"
+    if direction == "mixed" or regime_key == "INSTITUTIONAL_INSTABILITY":
+        return "LOW"
+    return "NONE"
+
+
+def _gcc_forecast_runtime_probability(
+    trajectory: str, regime: Dict[str, Any], snap: Dict[str, Any]
+) -> str:
+    if trajectory == "RUNTIME_DISCUSSION_CANDIDATE":
+        return "HIGH"
+    if trajectory == "PRE_RUNTIME_TRAJECTORY":
+        return "ELEVATED"
+    if trajectory in ("GOVERNANCE_ACCELERATING", "GOVERNANCE_IMPROVING"):
+        return "MODERATE"
+    if regime.get("regime") == "EARLY_INSTITUTIONAL_FORMATION":
+        return "LOW"
+    return "VERY_LOW"
+
+
+def _gcc_forecast_constitutional_outlook(
+    snap: Dict[str, Any],
+    hist: Dict[str, Any],
+    trajectory: str,
+) -> str:
+    if snap["constitutional_safe"] is True and not snap["constitutional_review_required"]:
+        return "Constitutional outlook favorable"
+    if trajectory == "CONSTITUTIONALLY_CONSTRAINED":
+        if hist.get("confidence_direction") == "improving":
+            return "Constitutional constraints improving"
+        return "Constitutional pressure likely persistent"
+    if snap["constitutional_safe"] is False and hist.get("confidence_direction") == "deteriorating":
+        return "Constitutional risk elevated"
+    if snap["constitutional_review_required"] and hist.get("confidence_direction") == "stable":
+        return "Constitutional pressure stable"
+    if snap["constitutional_safe"] is False:
+        return "Constitutional pressure likely persistent"
+    return "Constitutional pressure stable"
+
+
+def _gcc_forecast_confidence(
+    trajectory: str, regime: Dict[str, Any], hist: Dict[str, Any]
+) -> float:
+    base = float(regime.get("regime_confidence", 0.55))
+    direction = hist.get("confidence_direction", "stable")
+    if trajectory in ("GOVERNANCE_DORMANT", "GOVERNANCE_STABLE") and direction in (
+        "dormant",
+        "stable",
+    ):
+        return min(max(base, 0.85), 0.95)
+    if direction == "mixed" or "Frequent" in str(hist.get("posture_stability", "")):
+        return min(base, 0.65)
+    if not hist.get("has_history"):
+        return min(base, 0.55)
+    if not hist.get("has_transitions") and direction == "dormant":
+        return min(max(base, 0.88), 0.95)
+    return min(max(base, 0.50), 0.90)
+
+
+def _gcc_forecast_narrative(
+    trajectory: str,
+    snap: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    constitutional_outlook: str,
+    runtime_probability: str,
+) -> List[str]:
+    bullets: List[str] = []
+    cls = snap["classifications"]
+
+    if trajectory == "GOVERNANCE_DORMANT":
+        bullets.append(
+            "Triton governance is expected to remain dormant in the near term. Institutional readiness, "
+            "constitutional eligibility, and runtime recommendation thresholds remain materially inactive."
+        )
+    elif trajectory == "GOVERNANCE_STABLE":
+        bullets.append(
+            "Governance posture appears stable. Confidence and stage maturity show no material directional shift."
+        )
+    elif trajectory == "GOVERNANCE_IMPROVING":
+        bullets.append(
+            "Governance posture is gradually improving. Confidence trends suggest slow institutional progression."
+        )
+    elif trajectory == "GOVERNANCE_ACCELERATING":
+        bullets.append(
+            "Governance momentum is accelerating across recorded history with upward confidence movement."
+        )
+    elif trajectory == "GOVERNANCE_REGRESSION_RISK":
+        bullets.append(
+            "Governance regression risk is elevated due to weakening confidence or unstable posture shifts."
+        )
+    elif trajectory == "CONSTITUTIONALLY_CONSTRAINED":
+        bullets.append(
+            "Constitutional constraints are expected to dominate near-term governance trajectory."
+        )
+    elif trajectory == "PRE_RUNTIME_TRAJECTORY":
+        bullets.append(
+            "Upstream governance stages show limited or advancing maturity; runtime discussion may approach."
+        )
+    elif trajectory == "RUNTIME_DISCUSSION_CANDIDATE":
+        bullets.append(
+            "Institutional support is sufficient to sustain runtime governance discussion, though enablement remains locked."
+        )
+
+    if snap["constitutional_safe"] is False or snap["constitutional_review_required"]:
+        bullets.append(constitutional_outlook + ".")
+
+    if runtime_probability in ("VERY_LOW", "LOW"):
+        bullets.append(
+            "Runtime discussion probability remains low; institutional readiness unlikely near term."
+        )
+    elif runtime_probability == "MODERATE":
+        bullets.append(
+            "Runtime discussion probability is rising modestly as governance signals accumulate."
+        )
+    elif runtime_probability in ("ELEVATED", "HIGH"):
+        bullets.append(
+            f"Runtime discussion probability is {runtime_probability.lower().replace('_', ' ')} — not runtime enablement."
+        )
+
+    if str(cls.get("escalation") or "").upper() == "NO_ESCALATION":
+        bullets.append("Human escalation remains inactive under current institutional confidence.")
+
+    return bullets[:5]
+
+
+def _gcc_detect_governance_forecast(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    cls = snap["classifications"]
+    regime_key = regime.get("regime", "")
+    direction = hist.get("confidence_direction", "stable")
+    momentum = hist.get("institutional_momentum", "NONE")
+    verdict_cls = str(cls.get("verdict") or "").upper()
+    esc_cls = str(cls.get("escalation") or "").upper()
+
+    improving_count = sum(
+        1
+        for tr in hist.get("transitions", [])
+        if "increased" in str(tr.get("Interpretation", "")).lower()
+        or "strengthened" in str(tr.get("Interpretation", "")).lower()
+    )
+
+    def _match_constitutionally_constrained() -> bool:
+        return (
+            snap["constitutional_safe"] is False
+            or snap["constitutional_review_required"]
+            or regime_key == "CONSTITUTIONAL_STRESS"
+        )
+
+    def _match_regression_risk() -> bool:
+        return (
+            direction == "deteriorating"
+            or regime_key in ("GOVERNANCE_REGRESSION", "INSTITUTIONAL_INSTABILITY")
+            or any("weakened" in str(c).lower() for c in hist.get("changes", []))
+        )
+
+    def _match_runtime_discussion() -> bool:
+        return (
+            regime_key == "RUNTIME_CANDIDATE"
+            or snap["future_runtime_candidate"]
+            or verdict_cls == "FAVORABLE_RUNTIME_VERDICT"
+            or esc_cls == "FULL_OPERATOR_ESCALATION"
+        )
+
+    def _match_pre_runtime() -> bool:
+        return regime_key == "PRE_RUNTIME_READINESS" or snap["max_upstream_rank"] >= 2
+
+    def _match_accelerating() -> bool:
+        return direction == "improving" and (momentum == "HIGH" or improving_count >= 2)
+
+    def _match_improving() -> bool:
+        return direction == "improving" and momentum in ("LOW", "MODERATE")
+
+    def _match_stable() -> bool:
+        return direction in ("stable", "dormant") and "Frequent" not in str(
+            hist.get("posture_stability", "")
+        )
+
+    def _match_dormant() -> bool:
+        return snap["max_conf"] <= 0.01 and snap["all_dormant"] and esc_cls == "NO_ESCALATION"
+
+    matchers = {
+        "CONSTITUTIONALLY_CONSTRAINED": _match_constitutionally_constrained,
+        "GOVERNANCE_REGRESSION_RISK": _match_regression_risk,
+        "RUNTIME_DISCUSSION_CANDIDATE": _match_runtime_discussion,
+        "PRE_RUNTIME_TRAJECTORY": _match_pre_runtime,
+        "GOVERNANCE_ACCELERATING": _match_accelerating,
+        "GOVERNANCE_IMPROVING": _match_improving,
+        "GOVERNANCE_STABLE": _match_stable,
+        "GOVERNANCE_DORMANT": _match_dormant,
+    }
+
+    trajectory = "GOVERNANCE_DORMANT"
+    for candidate in _GCC_TRAJECTORY_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            trajectory = candidate
+            break
+
+    regression_risk = _gcc_forecast_regression_risk(hist, regime)
+    runtime_probability = _gcc_forecast_runtime_probability(trajectory, regime, snap)
+    constitutional_outlook = _gcc_forecast_constitutional_outlook(snap, hist, trajectory)
+    forecast_confidence = _gcc_forecast_confidence(trajectory, regime, hist)
+    narrative = _gcc_forecast_narrative(
+        trajectory, snap, hist, regime, constitutional_outlook, runtime_probability
+    )
+    operator_action = _GCC_FORECAST_OPERATOR_ACTION.get(trajectory, "CONTINUE_OBSERVATION")
+
+    return {
+        "trajectory": trajectory,
+        "trajectory_display": _GCC_TRAJECTORY_DISPLAY.get(
+            trajectory, trajectory.replace("_", " ").title()
+        ),
+        "forecast_confidence": forecast_confidence,
+        "runtime_discussion_probability": runtime_probability,
+        "constitutional_outlook": constitutional_outlook,
+        "regression_risk": regression_risk,
+        "narrative": narrative,
+        "operator_action": operator_action,
+    }
+
+
+def _gcc_render_forecast_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+) -> Dict[str, Any]:
+    forecast = _gcc_detect_governance_forecast(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+    )
+
+    st.markdown("### Governance Forecasting & Trajectory Intelligence")
+    st.caption(
+        "Read-only institutional forecast derived from governance history, regime, and posture."
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Governance Trajectory", forecast["trajectory_display"])
+    c2.metric("Forecast Confidence", _gcc_fmt_conf(forecast["forecast_confidence"]))
+    c3.metric("Runtime Discussion Probability", forecast["runtime_discussion_probability"])
+    c4.metric("Regression Risk", forecast["regression_risk"])
+
+    st.warning(
+        "**This is NOT runtime enablement.** Runtime mutation remains locked. "
+        "Forecast probability reflects institutional discussion posture only."
+    )
+
+    outlook = forecast["constitutional_outlook"]
+    if "persistent" in outlook.lower() or "elevated" in outlook.lower():
+        st.warning(f"**Constitutional Outlook:** {outlook}")
+    elif "favorable" in outlook.lower() or "improving" in outlook.lower():
+        st.success(f"**Constitutional Outlook:** {outlook}")
+    else:
+        st.info(f"**Constitutional Outlook:** {outlook}")
+
+    st.markdown("**Institutional Forecast Narrative**")
+    for item in forecast["narrative"]:
+        st.markdown(f'<div class="gcc-block-item">• {item}</div>', unsafe_allow_html=True)
+
+    st.metric("Recommended Operator Action", forecast["operator_action"])
+
+    with st.expander("Forecast derivation detail", expanded=False):
+        st.markdown(f"- **Internal trajectory:** `{forecast['trajectory']}`")
+        st.markdown(f"- **Regime:** `{regime.get('regime', '—')}`")
+        st.markdown(f"- **Confidence direction:** `{hist.get('confidence_direction', '—')}`")
+        st.markdown(f"- **Institutional momentum:** `{hist.get('institutional_momentum', '—')}`")
+
+    return forecast
+
+
+_GCC_TENSION_OPERATOR_RESPONSE: Dict[str, str] = {
+    "NO_TENSION": "CONTINUE_OBSERVATION",
+    "LOW_TENSION": "CONTINUE_OBSERVATION",
+    "MODERATE_TENSION": "REVIEW_GOVERNANCE_SIGNALS",
+    "HIGH_TENSION": "MAINTAIN_CONSTITUTIONAL_LOCK",
+    "CRITICAL_TENSION": "BLOCK_RUNTIME_DISCUSSION",
+}
+
+_GCC_TENSION_INTERPRETATION: Dict[str, str] = {
+    "NO_TENSION": (
+        "Governance signals are internally consistent. Dormant posture, low confidence, blocked runtime, "
+        "and inactive escalation all agree."
+    ),
+    "LOW_TENSION": (
+        "Minor governance signal disagreement detected. Early momentum or confidence movement has not "
+        "yet changed institutional lock posture."
+    ),
+    "MODERATE_TENSION": (
+        "Governance shows early improvement, but constitutional constraints still dominate. "
+        "Operators should avoid treating momentum as readiness."
+    ),
+    "HIGH_TENSION": (
+        "Strong governance contradictions are present. Favorable or improving signals conflict with "
+        "restrictive constitutional or verdict state; review carefully."
+    ),
+    "CRITICAL_TENSION": (
+        "Governance contains a safety-critical contradiction. Runtime mutation lock or constitutional "
+        "safety must be reviewed before any further autonomy discussion."
+    ),
+}
+
+
+def _gcc_is_optimistic_classification(classification: Any) -> bool:
+    c = str(classification or "").upper()
+    if not c or "NOT_" in c or "DO_NOT" in c:
+        return False
+    return any(k in c for k in ("LIMITED", "RECOMMENDED", "UNDER_REVIEW", "FAVORABLE", "FULL"))
+
+
+def _gcc_detect_governance_tensions(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    dossier = snap["dossier"]
+    cls = snap["classifications"]
+    contradictions: List[Dict[str, str]] = []
+
+    def _add(severity: str, message: str, rule: str) -> None:
+        contradictions.append({"severity": severity, "message": message, "rule": rule})
+
+    trajectory = forecast.get("trajectory", "")
+    regime_key = regime.get("regime", "")
+    improving_trajectories = {
+        "GOVERNANCE_IMPROVING",
+        "GOVERNANCE_ACCELERATING",
+        "PRE_RUNTIME_TRAJECTORY",
+        "RUNTIME_DISCUSSION_CANDIDATE",
+    }
+
+    mutation_summaries = (
+        ("readiness", readiness),
+        ("admission", admission),
+        ("eligibility", eligibility),
+        ("recommendation", recommendation),
+        ("review", review),
+        ("verdict", verdict),
+        ("dossier_summary", dossier_summary),
+    )
+    for _label, obj in mutation_summaries:
+        if not isinstance(obj, dict) or not obj:
+            continue
+        val = _gcc_get(obj, "runtime_mutation_allowed")
+        if val is True:
+            _add(
+                "critical",
+                "Runtime mutation lock is not clearly preserved.",
+                "runtime_mutation_true",
+            )
+            break
+        if "engine" in obj and "runtime_mutation_allowed" not in obj:
+            _add(
+                "critical",
+                "Runtime mutation lock is not clearly preserved.",
+                "runtime_mutation_ambiguous",
+            )
+            break
+
+    dossier_mutation = _gcc_get(dossier, "runtime_mutation_allowed")
+    if dossier_mutation is True and not any(
+        c["rule"] == "runtime_mutation_true" for c in contradictions
+    ):
+        _add(
+            "critical",
+            "Runtime mutation lock is not clearly preserved.",
+            "runtime_mutation_true",
+        )
+
+    if snap["future_runtime_candidate"] and snap["constitutional_safe"] is False:
+        _add(
+            "critical",
+            "Future runtime candidacy conflicts with constitutional safety.",
+            "runtime_candidate_vs_constitutional_unsafe",
+        )
+
+    if trajectory in improving_trajectories and (
+        regime_key == "CONSTITUTIONAL_STRESS" or snap["constitutional_safe"] is False
+    ):
+        _add(
+            "warning",
+            "Governance trajectory is improving, but constitutional constraints remain dominant.",
+            "improving_trajectory_vs_constitutional_stress",
+        )
+
+    rec_opt = _gcc_is_optimistic_classification(cls.get("recommendation"))
+    review_opt = _gcc_is_optimistic_classification(cls.get("review"))
+    verdict_cls = str(cls.get("verdict") or "").upper()
+    if (rec_opt or review_opt) and verdict_cls == "DO_NOT_ENABLE_RUNTIME":
+        _add(
+            "warning",
+            "Recommendation/review posture is more optimistic than institutional verdict.",
+            "recommendation_optimism_vs_verdict",
+        )
+
+    readiness_cls = str(cls.get("readiness") or "").upper()
+    readiness_conf = float(_gcc_get(readiness, "readiness_confidence", 0.0) or 0.0)
+    regime_conf = float(regime.get("regime_confidence", 0.0) or 0.0)
+    forecast_conf = float(forecast.get("forecast_confidence", 0.0) or 0.0)
+    if (
+        max(regime_conf, forecast_conf) >= 0.75
+        and readiness_cls == "NOT_RUNTIME_READY"
+        and readiness_conf <= 0.05
+    ):
+        _add(
+            "warning",
+            "Governance classification confidence is high while runtime readiness remains dormant.",
+            "high_confidence_vs_dormant_readiness",
+        )
+
+    momentum = hist.get("institutional_momentum", "NONE")
+    esc_cls = str(cls.get("escalation") or "").upper()
+    if momentum in ("LOW", "MODERATE", "HIGH") and esc_cls == "NO_ESCALATION":
+        _add(
+            "informational",
+            "Governance momentum exists, but human escalation remains inactive.",
+            "momentum_vs_no_escalation",
+        )
+
+    regression_risk = forecast.get("regression_risk", "NONE")
+    if regression_risk in ("MODERATE", "HIGH") and regime_key in (
+        "GOVERNANCE_ACCELERATION",
+        "PRE_RUNTIME_READINESS",
+        "RUNTIME_CANDIDATE",
+    ):
+        _add(
+            "warning",
+            "Positive governance regime conflicts with elevated regression risk.",
+            "regression_risk_vs_positive_regime",
+        )
+
+    if (
+        momentum in ("LOW", "MODERATE", "HIGH")
+        and forecast.get("runtime_discussion_probability") == "VERY_LOW"
+    ):
+        _add(
+            "informational",
+            "Governance momentum is rising while runtime discussion probability remains very low.",
+            "momentum_vs_low_runtime_probability",
+        )
+
+    key_risks = _gcc_get(dossier, "key_risks") or []
+    if esc_cls == "NO_ESCALATION" and key_risks:
+        _add(
+            "informational",
+            "Human escalation is inactive while key governance risk signals remain elevated.",
+            "inactive_escalation_vs_key_risks",
+        )
+
+    if hist.get("confidence_direction") == "improving" and regime_key == "CONSTITUTIONAL_STRESS":
+        if not any(
+            c["rule"] == "improving_trajectory_vs_constitutional_stress" for c in contradictions
+        ):
+            _add(
+                "warning",
+                "Confidence is improving while constitutional stress remains elevated.",
+                "improving_confidence_vs_constitutional_stress",
+            )
+
+    critical_n = sum(1 for c in contradictions if c["severity"] == "critical")
+    warning_n = sum(1 for c in contradictions if c["severity"] == "warning")
+    info_n = sum(1 for c in contradictions if c["severity"] == "informational")
+    total = len(contradictions)
+
+    if critical_n > 0:
+        tension_level = "CRITICAL_TENSION"
+    elif warning_n >= 2 or (
+        warning_n >= 1 and snap["future_runtime_candidate"] and snap["constitutional_safe"] is False
+    ):
+        tension_level = "HIGH_TENSION"
+    elif total >= 2 or warning_n >= 1:
+        tension_level = "MODERATE_TENSION"
+    elif total == 1:
+        tension_level = "LOW_TENSION"
+    else:
+        tension_level = "NO_TENSION"
+
+    if tension_level == "NO_TENSION" and snap["max_conf"] <= 0.01 and snap["all_dormant"]:
+        tension_confidence = 0.90
+    elif total > 0:
+        tension_confidence = min(0.55 + 0.10 * total + 0.12 * critical_n + 0.06 * warning_n, 0.98)
+    else:
+        tension_confidence = 0.75
+
+    if not any(
+        isinstance(d, dict) and d
+        for d in (
+            readiness,
+            admission,
+            eligibility,
+            recommendation,
+            review,
+            verdict,
+            dossier_summary,
+        )
+    ):
+        tension_confidence = min(tension_confidence, 0.50)
+
+    operator_response = _GCC_TENSION_OPERATOR_RESPONSE.get(tension_level, "CONTINUE_OBSERVATION")
+    if critical_n > 0 or any(c["rule"].startswith("runtime_mutation") for c in contradictions):
+        operator_response = "BLOCK_RUNTIME_DISCUSSION"
+
+    return {
+        "tension_level": tension_level,
+        "tension_display": tension_level.replace("_", " ").title(),
+        "tension_confidence": tension_confidence,
+        "contradiction_count": total,
+        "critical_count": critical_n,
+        "warning_count": warning_n,
+        "informational_count": info_n,
+        "contradictions": contradictions,
+        "operator_interpretation": _GCC_TENSION_INTERPRETATION.get(tension_level, ""),
+        "operator_response": operator_response,
+    }
+
+
+def _gcc_render_tension_detection(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+) -> Dict[str, Any]:
+    tension = _gcc_detect_governance_tensions(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+    )
+
+    st.markdown("### Governance Contradiction & Tension Detection")
+    st.caption("Institutional friction analysis — where governance signals disagree.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Tension Level", tension["tension_display"])
+    c2.metric("Tension Confidence", _gcc_fmt_conf(tension["tension_confidence"]))
+    c3.metric("Contradiction Count", str(tension["contradiction_count"]))
+    c4.metric("Recommended Response", tension["operator_response"])
+
+    count_bits = (
+        f"Critical: {tension['critical_count']} · "
+        f"Warning: {tension['warning_count']} · "
+        f"Informational: {tension['informational_count']}"
+    )
+    st.caption(count_bits)
+
+    level = tension["tension_level"]
+    if level in ("HIGH_TENSION", "CRITICAL_TENSION"):
+        st.error(tension["operator_interpretation"])
+    elif level == "MODERATE_TENSION":
+        st.warning(tension["operator_interpretation"])
+    elif level == "LOW_TENSION":
+        st.info(tension["operator_interpretation"])
+    else:
+        st.success(tension["operator_interpretation"])
+
+    if tension["critical_count"] > 0:
+        st.error(
+            "**Safety-critical contradiction detected.** Review runtime mutation lock and "
+            "constitutional safety before any runtime discussion."
+        )
+
+    st.markdown("**Key Contradictions**")
+    if tension["contradictions"]:
+        for item in tension["contradictions"]:
+            sev = item["severity"]
+            msg = item["message"]
+            if sev == "critical":
+                st.error(f"• {msg}")
+            elif sev == "warning":
+                st.warning(f"• {msg}")
+            else:
+                st.info(f"• {msg}")
+    else:
+        st.success("No governance contradictions detected. Institutional signals are aligned.")
+
+    with st.expander("Tension analysis detail", expanded=False):
+        st.markdown(f"- **Internal level:** `{tension['tension_level']}`")
+        st.markdown(f"- **Regime:** `{regime.get('regime', '—')}`")
+        st.markdown(f"- **Trajectory:** `{forecast.get('trajectory', '—')}`")
+        st.markdown(f"- **Regression risk:** `{forecast.get('regression_risk', '—')}`")
+
+    return tension
+
+
+_GCC_CONSENSUS_PRIORITY: Tuple[str, ...] = (
+    "CONFLICTED_GOVERNANCE",
+    "FRAGMENTED_GOVERNANCE",
+    "PRE_RUNTIME_CONVERGENCE",
+    "CONSTITUTIONAL_CONSENSUS",
+    "STRONG_CONSENSUS",
+    "MODERATE_CONSENSUS",
+)
+
+_GCC_CONSENSUS_DISPLAY: Dict[str, str] = {
+    "STRONG_CONSENSUS": "Strong Consensus",
+    "MODERATE_CONSENSUS": "Moderate Consensus",
+    "CONSTITUTIONAL_CONSENSUS": "Constitutional Consensus",
+    "PRE_RUNTIME_CONVERGENCE": "Pre-Runtime Convergence",
+    "FRAGMENTED_GOVERNANCE": "Fragmented Governance",
+    "CONFLICTED_GOVERNANCE": "Conflicted Governance",
+}
+
+_GCC_CONSENSUS_OPERATOR_STANCE: Dict[str, str] = {
+    "STRONG_CONSENSUS": "CONTINUE_OBSERVATION",
+    "MODERATE_CONSENSUS": "CONTINUE_OBSERVATION",
+    "CONSTITUTIONAL_CONSENSUS": "TRUST_CONSTITUTIONAL_POSTURE",
+    "PRE_RUNTIME_CONVERGENCE": "MONITOR_CONVERGENCE",
+    "FRAGMENTED_GOVERNANCE": "REVIEW_FRAGMENTATION",
+    "CONFLICTED_GOVERNANCE": "BLOCK_RUNTIME_ASSUMPTIONS",
+}
+
+_GCC_CONSENSUS_INTERPRETATION: Dict[str, str] = {
+    "STRONG_CONSENSUS": (
+        "Governance signals broadly agree across status, regime, trajectory, and escalation posture. "
+        "Institutional consensus is strong and posture appears internally consistent."
+    ),
+    "MODERATE_CONSENSUS": (
+        "Governance is mostly aligned with minor tensions present. Institutional signals support "
+        "the same broad conclusion with limited fragmentation."
+    ),
+    "CONSTITUTIONAL_CONSENSUS": (
+        "Governance signals strongly agree that runtime governance should remain institutionally constrained. "
+        "Constitutional safeguards, verdict posture, escalation inactivity, and trajectory intelligence are aligned."
+    ),
+    "PRE_RUNTIME_CONVERGENCE": (
+        "Governance signals are gradually converging toward a more mature institutional posture, "
+        "although runtime mutation remains locked."
+    ),
+    "FRAGMENTED_GOVERNANCE": (
+        "Governance signals are partially fragmented. Multiple governance layers disagree on institutional "
+        "direction, reducing decision cohesion."
+    ),
+    "CONFLICTED_GOVERNANCE": (
+        "Governance contains major contradictions across recommendation, verdict, constitutional safety, "
+        "or runtime lock posture. Institutional consensus is weak."
+    ),
+}
+
+
+def _gcc_consensus_drivers(
+    state: str,
+    snap: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+) -> List[str]:
+    cls = snap["classifications"]
+    drivers: List[str] = []
+
+    if state == "CONSTITUTIONAL_CONSENSUS":
+        drivers.extend(
+            [
+                f"Runtime readiness posture: {cls.get('readiness') or '—'}",
+                f"Constitutional eligibility: {cls.get('eligibility') or '—'}",
+                f"Institutional verdict: {cls.get('verdict') or '—'}",
+                f"Runtime discussion probability: {forecast.get('runtime_discussion_probability', '—')}",
+                f"Human escalation: {cls.get('escalation') or '—'}",
+            ]
+        )
+    elif state == "PRE_RUNTIME_CONVERGENCE":
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+        drivers.append(f"Institutional momentum: {hist.get('institutional_momentum', '—')}")
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append(f"Readiness posture: {cls.get('readiness') or '—'}")
+        if str(cls.get("escalation") or "").upper() != "NO_ESCALATION":
+            drivers.append(f"Escalation posture: {cls.get('escalation')}")
+    elif state == "FRAGMENTED_GOVERNANCE":
+        drivers.append(f"Tension level: {tension.get('tension_display', '—')}")
+        drivers.append(f"Contradictions detected: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+        if tension.get("contradictions"):
+            drivers.append(tension["contradictions"][0]["message"])
+    elif state == "CONFLICTED_GOVERNANCE":
+        drivers.append(f"Critical contradictions: {tension.get('critical_count', 0)}")
+        drivers.append(f"Warning contradictions: {tension.get('warning_count', 0)}")
+        for item in (tension.get("contradictions") or [])[:3]:
+            drivers.append(item["message"])
+    elif state == "STRONG_CONSENSUS":
+        drivers.append(f"Posture stability: {hist.get('posture_stability', '—')}")
+        drivers.append(f"Tension level: {tension.get('tension_display', '—')}")
+        drivers.append("Governance stages show aligned restrictive posture")
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+    else:
+        drivers.append(f"Tension level: {tension.get('tension_display', '—')}")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+
+    return drivers[:6]
+
+
+def _gcc_alignment_strength(consensus_state: str, tension: Dict[str, Any]) -> str:
+    level = tension.get("tension_level", "NO_TENSION")
+    count = int(tension.get("contradiction_count", 0) or 0)
+    if consensus_state == "CONFLICTED_GOVERNANCE" or level == "CRITICAL_TENSION":
+        return "VERY_LOW"
+    if consensus_state == "FRAGMENTED_GOVERNANCE" or level == "HIGH_TENSION":
+        return "LOW"
+    if consensus_state == "MODERATE_CONSENSUS" or level == "MODERATE_TENSION":
+        return "MODERATE"
+    if consensus_state in ("STRONG_CONSENSUS", "CONSTITUTIONAL_CONSENSUS") and count == 0:
+        return "VERY_HIGH"
+    if consensus_state in (
+        "STRONG_CONSENSUS",
+        "CONSTITUTIONAL_CONSENSUS",
+        "PRE_RUNTIME_CONVERGENCE",
+    ):
+        return "HIGH"
+    return "MODERATE"
+
+
+def _gcc_consensus_confidence(
+    consensus_state: str,
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> float:
+    regime_conf = float(regime.get("regime_confidence", 0.55) or 0.55)
+    forecast_conf = float(forecast.get("forecast_confidence", 0.55) or 0.55)
+    tension_conf = float(tension.get("tension_confidence", 0.55) or 0.55)
+    count = int(tension.get("contradiction_count", 0) or 0)
+    base = 0.25 * regime_conf + 0.20 * forecast_conf + 0.20 * tension_conf
+
+    if consensus_state in ("STRONG_CONSENSUS", "CONSTITUTIONAL_CONSENSUS"):
+        base += 0.30
+        if count == 0:
+            base += 0.12
+    elif consensus_state == "MODERATE_CONSENSUS":
+        base += 0.15
+    elif consensus_state == "PRE_RUNTIME_CONVERGENCE":
+        base += 0.10
+    elif consensus_state == "FRAGMENTED_GOVERNANCE":
+        base += 0.05
+    else:
+        base = min(base, 0.50)
+
+    if hist.get("confidence_direction") == "mixed":
+        base -= 0.08
+    if tension.get("critical_count", 0) > 0:
+        base = min(base, 0.40)
+
+    return min(max(base, 0.35), 0.98)
+
+
+def _gcc_detect_governance_consensus(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    cls = snap["classifications"]
+    tension_level = tension.get("tension_level", "NO_TENSION")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    critical_count = int(tension.get("critical_count", 0) or 0)
+    trajectory = forecast.get("trajectory", "")
+    regime_key = regime.get("regime", "")
+    verdict_cls = str(cls.get("verdict") or "").upper()
+    esc_cls = str(cls.get("escalation") or "").upper()
+
+    def _match_conflicted() -> bool:
+        return (
+            critical_count > 0
+            or tension_level in ("CRITICAL_TENSION", "HIGH_TENSION")
+            or (tension_level == "MODERATE_TENSION" and contradiction_count >= 3)
+        )
+
+    def _match_fragmented() -> bool:
+        return (
+            tension_level in ("MODERATE_TENSION", "HIGH_TENSION") and contradiction_count >= 2
+        ) or hist.get("confidence_direction") == "mixed"
+
+    def _match_pre_runtime_convergence() -> bool:
+        return (
+            trajectory
+            in ("GOVERNANCE_IMPROVING", "GOVERNANCE_ACCELERATING", "PRE_RUNTIME_TRAJECTORY")
+            and hist.get("institutional_momentum") in ("LOW", "MODERATE", "HIGH")
+            and hist.get("confidence_direction") in ("improving", "stable")
+        )
+
+    def _match_constitutional_consensus() -> bool:
+        return (
+            (regime_key == "CONSTITUTIONAL_STRESS" or snap["constitutional_safe"] is False)
+            and verdict_cls == "DO_NOT_ENABLE_RUNTIME"
+            and esc_cls == "NO_ESCALATION"
+            and forecast.get("runtime_discussion_probability") in ("VERY_LOW", "LOW")
+            and tension_level in ("NO_TENSION", "LOW_TENSION", "MODERATE_TENSION")
+            and critical_count == 0
+        )
+
+    def _match_strong_consensus() -> bool:
+        return (
+            tension_level in ("NO_TENSION", "LOW_TENSION")
+            and contradiction_count == 0
+            and "Stable" in str(hist.get("posture_stability", ""))
+        )
+
+    matchers = {
+        "CONFLICTED_GOVERNANCE": _match_conflicted,
+        "FRAGMENTED_GOVERNANCE": _match_fragmented,
+        "PRE_RUNTIME_CONVERGENCE": _match_pre_runtime_convergence,
+        "CONSTITUTIONAL_CONSENSUS": _match_constitutional_consensus,
+        "STRONG_CONSENSUS": _match_strong_consensus,
+        "MODERATE_CONSENSUS": lambda: True,
+    }
+
+    consensus_state = "MODERATE_CONSENSUS"
+    for candidate in _GCC_CONSENSUS_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            consensus_state = candidate
+            break
+
+    alignment = _gcc_alignment_strength(consensus_state, tension)
+    confidence = _gcc_consensus_confidence(consensus_state, regime, forecast, tension, hist)
+    drivers = _gcc_consensus_drivers(consensus_state, snap, hist, regime, forecast, tension)
+
+    return {
+        "consensus_state": consensus_state,
+        "consensus_display": _GCC_CONSENSUS_DISPLAY.get(
+            consensus_state, consensus_state.replace("_", " ").title()
+        ),
+        "consensus_confidence": confidence,
+        "alignment_strength": alignment,
+        "drivers": drivers,
+        "interpretation": _GCC_CONSENSUS_INTERPRETATION.get(consensus_state, ""),
+        "operator_stance": _GCC_CONSENSUS_OPERATOR_STANCE.get(
+            consensus_state, "CONTINUE_OBSERVATION"
+        ),
+    }
+
+
+def _gcc_render_consensus_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+) -> Dict[str, Any]:
+    consensus = _gcc_detect_governance_consensus(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+    )
+
+    st.markdown("### Governance Convergence / Consensus Intelligence")
+    st.caption("Institutional agreement analysis — how aligned and cohesive governance posture is.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Governance Consensus", consensus["consensus_display"])
+    c2.metric("Consensus Confidence", _gcc_fmt_conf(consensus["consensus_confidence"]))
+    c3.metric("Alignment Strength", consensus["alignment_strength"])
+    c4.metric("Operator Stance", consensus["operator_stance"])
+
+    state = consensus["consensus_state"]
+    if state == "CONFLICTED_GOVERNANCE":
+        st.error(consensus["interpretation"])
+    elif state == "FRAGMENTED_GOVERNANCE":
+        st.warning(consensus["interpretation"])
+    elif state in ("STRONG_CONSENSUS", "CONSTITUTIONAL_CONSENSUS"):
+        st.success(consensus["interpretation"])
+    elif state == "PRE_RUNTIME_CONVERGENCE":
+        st.info(consensus["interpretation"])
+    else:
+        st.info(consensus["interpretation"])
+
+    st.markdown("**Consensus Drivers**")
+    for driver in consensus["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    with st.expander("Consensus analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{consensus['consensus_state']}`")
+        st.markdown(f"- **Tension level:** `{tension.get('tension_level', '—')}`")
+        st.markdown(f"- **Contradiction count:** `{tension.get('contradiction_count', 0)}`")
+        st.markdown(f"- **Posture stability:** {hist.get('posture_stability', '—')}")
+
+    return consensus
+
+
+_GCC_INTEGRITY_PRIORITY: Tuple[str, ...] = (
+    "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+    "GOVERNANCE_OVERCONFIDENT",
+    "GOVERNANCE_CONFIDENCE_WEAK",
+    "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT",
+    "GOVERNANCE_CONFIDENCE_TRUSTWORTHY",
+    "GOVERNANCE_CONFIDENCE_PARTIALLY_RELIABLE",
+)
+
+_GCC_INTEGRITY_DISPLAY: Dict[str, str] = {
+    "GOVERNANCE_CONFIDENCE_TRUSTWORTHY": "Governance Confidence Trustworthy",
+    "GOVERNANCE_CONFIDENCE_PARTIALLY_RELIABLE": "Governance Confidence Partially Reliable",
+    "GOVERNANCE_CONFIDENCE_WEAK": "Governance Confidence Weak",
+    "GOVERNANCE_OVERCONFIDENT": "Governance Overconfident",
+    "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS": "Confidence Undercut by Contradictions",
+    "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT": "Dormant but Consistent",
+}
+
+_GCC_INTEGRITY_INTERPRETATION: Dict[str, str] = {
+    "GOVERNANCE_CONFIDENCE_TRUSTWORTHY": (
+        "Governance confidence is supported by institutional consensus, low tension, and stable posture. "
+        "Operators may use confidence signals with standard caution."
+    ),
+    "GOVERNANCE_CONFIDENCE_PARTIALLY_RELIABLE": (
+        "Governance confidence is mostly usable but some tension or fragmentation exists. "
+        "Operators should treat confidence cautiously and corroborate with stage posture."
+    ),
+    "GOVERNANCE_CONFIDENCE_WEAK": (
+        "Governance confidence has a weak evidential basis due to sparse history or limited maturity signals. "
+        "Operators should require more evidence before relying on confidence."
+    ),
+    "GOVERNANCE_OVERCONFIDENT": (
+        "Governance confidence appears stronger than institutional maturity supports. Runtime readiness, "
+        "eligibility, and verdict posture remain restrictive."
+    ),
+    "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS": (
+        "Governance confidence is weakened by contradictions across the institutional stack. "
+        "Operators should discount confidence until fragmentation decreases."
+    ),
+    "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT": (
+        "Governance confidence is limited, but the restrictive institutional posture is internally coherent. "
+        "Operators should not treat dormant confidence as readiness."
+    ),
+}
+
+_GCC_INTEGRITY_TRUST_POSTURE: Dict[str, str] = {
+    "GOVERNANCE_CONFIDENCE_TRUSTWORTHY": "TRUST_WITH_CAUTION",
+    "GOVERNANCE_CONFIDENCE_PARTIALLY_RELIABLE": "TRUST_WITH_CAUTION",
+    "GOVERNANCE_CONFIDENCE_WEAK": "REQUIRE_MORE_EVIDENCE",
+    "GOVERNANCE_OVERCONFIDENT": "DISCOUNT_CONFIDENCE",
+    "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS": "REVIEW_CONFIDENCE_INTEGRITY",
+    "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT": "TRUST_RESTRICTIVE_POSTURE",
+}
+
+
+def _gcc_integrity_drivers(
+    state: str,
+    snap: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> List[str]:
+    cls = snap["classifications"]
+    drivers: List[str] = []
+
+    if state == "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT":
+        drivers.extend(
+            [
+                f"Governance confidence remains dormant (max {_gcc_fmt_conf(snap['max_conf'])})",
+                f"Runtime readiness: {cls.get('readiness') or '—'}",
+                f"Institutional verdict: {cls.get('verdict') or '—'}",
+                "Runtime mutation lock remains preserved",
+            ]
+        )
+    elif state == "GOVERNANCE_OVERCONFIDENT":
+        drivers.append(f"Regime confidence: {_gcc_fmt_conf(regime.get('regime_confidence'))}")
+        drivers.append(f"Forecast confidence: {_gcc_fmt_conf(forecast.get('forecast_confidence'))}")
+        drivers.append(f"Runtime readiness: {cls.get('readiness') or '—'}")
+        drivers.append("Institutional maturity has not materially advanced")
+    elif state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+        drivers.append(f"Tension level: {tension.get('tension_display', '—')}")
+        drivers.append(f"Contradictions detected: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Consensus state: {consensus.get('consensus_display', '—')}")
+        drivers.append("Confidence should be discounted")
+    elif state == "GOVERNANCE_CONFIDENCE_WEAK":
+        drivers.append(
+            f"Historical depth: {'limited' if not hist.get('has_transitions') else 'partial'}"
+        )
+        drivers.append(f"Posture stability: {hist.get('posture_stability', '—')}")
+        drivers.append(
+            f"Consensus confidence: {_gcc_fmt_conf(consensus.get('consensus_confidence'))}"
+        )
+    elif state == "GOVERNANCE_CONFIDENCE_TRUSTWORTHY":
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append(f"Alignment strength: {consensus.get('alignment_strength', '—')}")
+        drivers.append(f"Tension level: {tension.get('tension_display', '—')}")
+        drivers.append("Confidence supported by institutional agreement")
+    else:
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append(f"Tension level: {tension.get('tension_display', '—')}")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Alignment strength: {consensus.get('alignment_strength', '—')}")
+
+    return drivers[:6]
+
+
+def _gcc_overconfidence_risk(
+    snap: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    readiness: Dict[str, Any],
+) -> str:
+    regime_conf = float(regime.get("regime_confidence", 0.0) or 0.0)
+    forecast_conf = float(forecast.get("forecast_confidence", 0.0) or 0.0)
+    high_conf = max(regime_conf, forecast_conf) >= 0.75
+    readiness_cls = str(_gcc_get(readiness, "runtime_readiness_classification") or "").upper()
+    readiness_conf = float(_gcc_get(readiness, "readiness_confidence", 0.0) or 0.0)
+    count = int(tension.get("contradiction_count", 0) or 0)
+    critical = int(tension.get("critical_count", 0) or 0)
+
+    mutation_ok = all(
+        _gcc_get(obj, "runtime_mutation_allowed") is False
+        for obj in (readiness,)
+        if isinstance(obj, dict) and obj
+    )
+
+    if high_conf and snap["future_runtime_candidate"] and snap["constitutional_safe"] is False:
+        return "CRITICAL"
+    if high_conf and (critical > 0 or not mutation_ok):
+        return "CRITICAL"
+    if high_conf and count >= 1:
+        return "HIGH"
+    if high_conf and readiness_cls == "NOT_RUNTIME_READY" and readiness_conf <= 0.05:
+        return "MODERATE"
+    if max(regime_conf, forecast_conf) >= 0.60 and tension.get("tension_level") in (
+        "NO_TENSION",
+        "LOW_TENSION",
+    ):
+        return "LOW"
+    return "NONE"
+
+
+def _gcc_confidence_discount(
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    overconfidence_risk: str,
+    integrity_state: str,
+) -> float:
+    discount = 0.0
+    count = int(tension.get("contradiction_count", 0) or 0)
+    level = tension.get("tension_level", "NO_TENSION")
+
+    if count > 0:
+        discount += 0.08 * min(count, 4)
+    if level == "MODERATE_TENSION":
+        discount += 0.15
+    elif level == "HIGH_TENSION":
+        discount += 0.25
+    elif level == "CRITICAL_TENSION":
+        discount += 0.35
+    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        discount += 0.20
+    if integrity_state == "GOVERNANCE_OVERCONFIDENT":
+        discount += 0.25
+    if overconfidence_risk == "CRITICAL":
+        discount += 0.20
+    elif overconfidence_risk == "HIGH":
+        discount += 0.12
+
+    return min(discount, 0.65)
+
+
+def _gcc_trustworthiness_score(
+    consensus: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    hist: Dict[str, Any],
+    discount: float,
+) -> float:
+    consensus_conf = float(consensus.get("consensus_confidence", 0.55) or 0.55)
+    regime_conf = float(regime.get("regime_confidence", 0.55) or 0.55)
+    forecast_conf = float(forecast.get("forecast_confidence", 0.55) or 0.55)
+    alignment = consensus.get("alignment_strength", "MODERATE")
+    align_bonus = {
+        "VERY_HIGH": 0.22,
+        "HIGH": 0.16,
+        "MODERATE": 0.08,
+        "LOW": 0.0,
+        "VERY_LOW": -0.08,
+    }.get(alignment, 0.0)
+
+    base = 0.30 * consensus_conf + 0.20 * regime_conf + 0.20 * forecast_conf + align_bonus
+    if tension.get("tension_level") == "NO_TENSION":
+        base += 0.12
+    elif tension.get("tension_level") in ("HIGH_TENSION", "CRITICAL_TENSION"):
+        base -= 0.15
+
+    count = int(tension.get("contradiction_count", 0) or 0)
+    base -= 0.06 * min(count, 5)
+
+    if not hist.get("has_history"):
+        base -= 0.10
+    if hist.get("confidence_direction") == "mixed":
+        base -= 0.08
+
+    trust = min(max(base, 0.20), 0.98)
+    return min(max(trust * (1.0 - discount), 0.15), 0.98)
+
+
+def _gcc_detect_confidence_integrity(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    cls = snap["classifications"]
+    regime_conf = float(regime.get("regime_confidence", 0.0) or 0.0)
+    forecast_conf = float(forecast.get("forecast_confidence", 0.0) or 0.0)
+    high_conf = (
+        max(regime_conf, forecast_conf, float(consensus.get("consensus_confidence", 0.0) or 0.0))
+        >= 0.75
+    )
+    readiness_cls = str(cls.get("readiness") or "").upper()
+    readiness_conf = float(_gcc_get(readiness, "readiness_confidence", 0.0) or 0.0)
+    consensus_state = consensus.get("consensus_state", "")
+    tension_level = tension.get("tension_level", "NO_TENSION")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+
+    def _match_undercut() -> bool:
+        return consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE") or (
+            contradiction_count >= 2 and tension_level != "NO_TENSION"
+        )
+
+    def _match_overconfident() -> bool:
+        return high_conf and readiness_cls == "NOT_RUNTIME_READY" and readiness_conf <= 0.05
+
+    def _match_weak() -> bool:
+        return (
+            not hist.get("has_history")
+            or (snap["max_conf"] <= 0.01 and not hist.get("has_transitions"))
+            or float(consensus.get("consensus_confidence", 0.0) or 0.0) < 0.55
+        )
+
+    def _match_dormant_consistent() -> bool:
+        return (
+            snap["max_conf"] <= 0.01
+            and snap["all_dormant"]
+            and tension_level in ("NO_TENSION", "LOW_TENSION", "MODERATE_TENSION")
+            and int(tension.get("critical_count", 0) or 0) == 0
+            and str(cls.get("verdict") or "").upper() == "DO_NOT_ENABLE_RUNTIME"
+        )
+
+    def _match_trustworthy() -> bool:
+        return (
+            consensus_state in ("STRONG_CONSENSUS", "CONSTITUTIONAL_CONSENSUS")
+            and contradiction_count == 0
+            and tension_level in ("NO_TENSION", "LOW_TENSION")
+            and consensus.get("alignment_strength") in ("HIGH", "VERY_HIGH")
+        )
+
+    matchers = {
+        "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS": _match_undercut,
+        "GOVERNANCE_OVERCONFIDENT": _match_overconfident,
+        "GOVERNANCE_CONFIDENCE_WEAK": _match_weak,
+        "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT": _match_dormant_consistent,
+        "GOVERNANCE_CONFIDENCE_TRUSTWORTHY": _match_trustworthy,
+        "GOVERNANCE_CONFIDENCE_PARTIALLY_RELIABLE": lambda: True,
+    }
+
+    integrity_state = "GOVERNANCE_CONFIDENCE_PARTIALLY_RELIABLE"
+    for candidate in _GCC_INTEGRITY_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            integrity_state = candidate
+            break
+
+    overconfidence_risk = _gcc_overconfidence_risk(snap, regime, forecast, tension, readiness)
+    discount = _gcc_confidence_discount(tension, consensus, overconfidence_risk, integrity_state)
+    trustworthiness = _gcc_trustworthiness_score(
+        consensus, regime, forecast, tension, hist, discount
+    )
+    raw_confidence_context = (regime_conf + forecast_conf) / 2.0
+    drivers = _gcc_integrity_drivers(
+        integrity_state, snap, regime, forecast, tension, consensus, hist
+    )
+
+    trust_posture = _GCC_INTEGRITY_TRUST_POSTURE.get(integrity_state, "TRUST_WITH_CAUTION")
+    if overconfidence_risk == "CRITICAL":
+        trust_posture = "BLOCK_CONFIDENCE_BASED_ESCALATION"
+
+    return {
+        "integrity_state": integrity_state,
+        "integrity_display": _GCC_INTEGRITY_DISPLAY.get(
+            integrity_state, integrity_state.replace("_", " ").title()
+        ),
+        "trustworthiness_score": trustworthiness,
+        "raw_confidence_context": raw_confidence_context,
+        "overconfidence_risk": overconfidence_risk,
+        "confidence_discount": discount,
+        "discounted_trust_score": trustworthiness,
+        "drivers": drivers,
+        "interpretation": _GCC_INTEGRITY_INTERPRETATION.get(integrity_state, ""),
+        "trust_posture": trust_posture,
+    }
+
+
+def _gcc_render_confidence_integrity(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+) -> Dict[str, Any]:
+    integrity = _gcc_detect_confidence_integrity(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+    )
+
+    st.markdown("### Governance Confidence Integrity & Trustworthiness")
+    st.caption("Confidence calibration — whether institutional confidence can be trusted.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Confidence Integrity", integrity["integrity_display"])
+    c2.metric("Trustworthiness Score", _gcc_fmt_conf(integrity["trustworthiness_score"]))
+    c3.metric("Overconfidence Risk", integrity["overconfidence_risk"])
+    c4.metric("Confidence Discount", _gcc_fmt_conf(integrity["confidence_discount"]))
+
+    st.caption(
+        f"Raw confidence context (regime/forecast avg): {_gcc_fmt_conf(integrity['raw_confidence_context'])} · "
+        f"Discounted trust score: {_gcc_fmt_conf(integrity['discounted_trust_score'])}"
+    )
+
+    state = integrity["integrity_state"]
+    if state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+        st.error(integrity["interpretation"])
+    elif state in ("GOVERNANCE_OVERCONFIDENT", "GOVERNANCE_CONFIDENCE_WEAK"):
+        st.warning(integrity["interpretation"])
+    elif state == "GOVERNANCE_CONFIDENCE_TRUSTWORTHY":
+        st.success(integrity["interpretation"])
+    elif state == "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT":
+        st.info(integrity["interpretation"])
+    else:
+        st.info(integrity["interpretation"])
+
+    if integrity["overconfidence_risk"] == "CRITICAL":
+        st.error(
+            "**Critical overconfidence risk.** Block confidence-based escalation until constitutional "
+            "safety and runtime mutation lock are verified."
+        )
+
+    st.markdown("**Integrity Drivers**")
+    for driver in integrity["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    st.metric("Recommended Trust Posture", integrity["trust_posture"])
+
+    with st.expander("Confidence integrity detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{integrity['integrity_state']}`")
+        st.markdown(
+            f"- **Consensus confidence:** `{_gcc_fmt_conf(consensus.get('consensus_confidence'))}`"
+        )
+        st.markdown(f"- **Regime confidence:** `{_gcc_fmt_conf(regime.get('regime_confidence'))}`")
+        st.markdown(
+            f"- **Forecast confidence:** `{_gcc_fmt_conf(forecast.get('forecast_confidence'))}`"
+        )
+
+    return integrity
+
+
+_GCC_READINESS_PRIORITY: Tuple[str, ...] = (
+    "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE",
+    "GOVERNANCE_REVIEW_ELIGIBLE",
+    "LIMITED_REVIEW_WORTHINESS",
+    "OBSERVATION_ONLY",
+    "NOT_INSTITUTIONALLY_DISCUSSABLE",
+)
+
+_GCC_READINESS_DISPLAY: Dict[str, str] = {
+    "NOT_INSTITUTIONALLY_DISCUSSABLE": "Not Institutionally Discussable",
+    "OBSERVATION_ONLY": "Observation Only",
+    "LIMITED_REVIEW_WORTHINESS": "Limited Review Worthiness",
+    "GOVERNANCE_REVIEW_ELIGIBLE": "Governance Review Eligible",
+    "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE": "Operator Committee Review Eligible",
+}
+
+_GCC_READINESS_ESCALATION: Dict[str, str] = {
+    "NOT_INSTITUTIONALLY_DISCUSSABLE": "NONE",
+    "OBSERVATION_ONLY": "VERY_LOW",
+    "LIMITED_REVIEW_WORTHINESS": "LOW",
+    "GOVERNANCE_REVIEW_ELIGIBLE": "MODERATE",
+    "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE": "HIGH",
+}
+
+_GCC_READINESS_DISCUSSABILITY: Dict[str, str] = {
+    "NOT_INSTITUTIONALLY_DISCUSSABLE": "NOT_DISCUSSABLE",
+    "OBSERVATION_ONLY": "INTERNAL_OBSERVATION_ONLY",
+    "LIMITED_REVIEW_WORTHINESS": "LIMITED_INTERNAL_REVIEW",
+    "GOVERNANCE_REVIEW_ELIGIBLE": "GOVERNANCE_DISCUSSION_APPROPRIATE",
+    "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE": "COMMITTEE_DISCUSSION_APPROPRIATE",
+}
+
+_GCC_READINESS_ACTION: Dict[str, str] = {
+    "NOT_INSTITUTIONALLY_DISCUSSABLE": "MAINTAIN_CONSTITUTIONAL_LOCK",
+    "OBSERVATION_ONLY": "CONTINUE_OBSERVATION",
+    "LIMITED_REVIEW_WORTHINESS": "COLLECT_MORE_EVIDENCE",
+    "GOVERNANCE_REVIEW_ELIGIBLE": "INITIATE_GOVERNANCE_REVIEW",
+    "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE": "PREPARE_OPERATOR_COMMITTEE_REVIEW",
+}
+
+_GCC_READINESS_INTERPRETATION: Dict[str, str] = {
+    "NOT_INSTITUTIONALLY_DISCUSSABLE": (
+        "Governance maturity remains insufficient for institutional discussion. Constitutional constraints, "
+        "fragmented posture, and weakened confidence integrity limit escalation appropriateness."
+    ),
+    "OBSERVATION_ONLY": (
+        "Governance posture is internally observable but not yet mature enough for formal review. "
+        "Operator observation and evidence collection remain appropriate."
+    ),
+    "LIMITED_REVIEW_WORTHINESS": (
+        "Governance shows early signs of institutional maturation, but escalation remains premature. "
+        "Observation and evidence collection remain appropriate."
+    ),
+    "GOVERNANCE_REVIEW_ELIGIBLE": (
+        "Governance maturity has improved enough to justify limited institutional review, although "
+        "runtime mutation remains explicitly locked."
+    ),
+    "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE": (
+        "Governance convergence and confidence integrity support operator committee discussion. "
+        "This remains review eligibility only — not runtime enablement or autonomy approval."
+    ),
+}
+
+
+def _gcc_governance_maturity_score(
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    tension: Dict[str, Any],
+    hist: Dict[str, Any],
+    snap: Dict[str, Any],
+) -> float:
+    regime_conf = float(regime.get("regime_confidence", 0.0) or 0.0)
+    forecast_conf = float(forecast.get("forecast_confidence", 0.0) or 0.0)
+    consensus_conf = float(consensus.get("consensus_confidence", 0.0) or 0.0)
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+
+    score = 0.15 * regime_conf + 0.15 * forecast_conf + 0.15 * consensus_conf + 0.30 * trust
+    if "Stable" in str(hist.get("posture_stability", "")):
+        score += 0.08
+    if hist.get("confidence_direction") == "improving":
+        score += 0.06
+
+    count = int(tension.get("contradiction_count", 0) or 0)
+    score -= 0.06 * min(count, 5)
+
+    if snap["constitutional_safe"] is False or snap["constitutional_review_required"]:
+        score -= 0.10
+    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        score -= 0.12
+    if integrity.get("integrity_state") == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+        score -= 0.15
+
+    if snap["max_conf"] <= 0.01 and hist.get("confidence_direction") == "dormant":
+        score = min(score, 0.28)
+
+    return min(max(score, 0.0), 1.0)
+
+
+def _gcc_next_governance_gate(
+    readiness_state: str,
+    integrity: Dict[str, Any],
+    consensus: Dict[str, Any],
+    tension: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+) -> str:
+    if readiness_state == "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE":
+        return "Prepare Committee Review"
+    if readiness_state == "GOVERNANCE_REVIEW_ELIGIBLE":
+        return "Prepare Governance Review"
+    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        return "Reduce Contradictions"
+    if integrity.get("integrity_state") in (
+        "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+        "GOVERNANCE_OVERCONFIDENT",
+    ):
+        return "Improve Confidence Integrity"
+    if (
+        regime.get("regime") == "CONSTITUTIONAL_STRESS"
+        or forecast.get("trajectory") == "CONSTITUTIONALLY_CONSTRAINED"
+    ):
+        return "Improve Governance Stability"
+    if consensus.get("alignment_strength") in ("LOW", "VERY_LOW"):
+        return "Strengthen Institutional Consensus"
+    if readiness_state == "LIMITED_REVIEW_WORTHINESS":
+        return "Collect More Evidence"
+    if readiness_state == "OBSERVATION_ONLY":
+        return "Continue Observation"
+    return "Maintain Constitutional Lock"
+
+
+def _gcc_readiness_drivers(
+    state: str,
+    snap: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> List[str]:
+    cls = snap["classifications"]
+    drivers: List[str] = []
+
+    if state == "NOT_INSTITUTIONALLY_DISCUSSABLE":
+        if regime.get("regime") == "CONSTITUTIONAL_STRESS":
+            drivers.append("Constitutional stress dominates governance")
+        drivers.append(
+            f"Runtime discussion probability: {forecast.get('runtime_discussion_probability', '—')}"
+        )
+        if integrity.get("integrity_state") == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+            drivers.append("Governance confidence undercut by contradictions")
+        drivers.append(f"Escalation posture: {cls.get('escalation') or '—'}")
+        drivers.append(f"Consensus state: {consensus.get('consensus_display', '—')}")
+    elif state == "LIMITED_REVIEW_WORTHINESS":
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append("Institutional maturity remains limited")
+    elif state == "GOVERNANCE_REVIEW_ELIGIBLE":
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+        drivers.append("Runtime mutation remains locked")
+    elif state == "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE":
+        drivers.append("Governance convergence strengthening")
+        drivers.append(f"Contradictions low: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+    elif state == "OBSERVATION_ONLY":
+        drivers.append(f"Governance maturity score remains limited")
+        drivers.append(f"Posture stability: {hist.get('posture_stability', '—')}")
+        drivers.append(f"Human escalation: {cls.get('escalation') or '—'}")
+        drivers.append("Institutional discussion not yet warranted")
+    else:
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(f"Tension: {tension.get('tension_display', '—')}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_decision_readiness(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    tension_level = tension.get("tension_level", "NO_TENSION")
+    trajectory = forecast.get("trajectory", "")
+    consensus_state = consensus.get("consensus_state", "")
+    integrity_state = integrity.get("integrity_state", "")
+    maturity = _gcc_governance_maturity_score(
+        regime, forecast, consensus, integrity, tension, hist, snap
+    )
+
+    def _match_committee() -> bool:
+        return (
+            trajectory in ("PRE_RUNTIME_TRAJECTORY", "RUNTIME_DISCUSSION_CANDIDATE")
+            and consensus_state in ("PRE_RUNTIME_CONVERGENCE", "STRONG_CONSENSUS")
+            and trust >= 0.70
+            and contradiction_count <= 1
+            and tension_level in ("NO_TENSION", "LOW_TENSION")
+            and integrity_state
+            not in (
+                "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+                "GOVERNANCE_OVERCONFIDENT",
+            )
+            and maturity >= 0.65
+        )
+
+    def _match_review_eligible() -> bool:
+        return (
+            trajectory
+            in (
+                "GOVERNANCE_IMPROVING",
+                "GOVERNANCE_ACCELERATING",
+                "PRE_RUNTIME_TRAJECTORY",
+            )
+            and consensus_state not in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            and trust >= 0.45
+            and contradiction_count <= 2
+            and integrity_state not in ("GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",)
+            and maturity >= 0.40
+        )
+
+    def _match_limited() -> bool:
+        if consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+            return False
+        if integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+            return False
+        return (
+            hist.get("confidence_direction") in ("improving", "stable")
+            or trajectory in ("GOVERNANCE_IMPROVING",)
+            or float(snap["max_conf"]) > 0.01
+        ) and maturity >= 0.18
+
+    def _match_observation() -> bool:
+        if consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+            return False
+        if integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+            return False
+        return (
+            integrity_state == "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT"
+            or consensus_state == "CONSTITUTIONAL_CONSENSUS"
+            or (
+                snap["max_conf"] <= 0.01
+                and tension_level in ("NO_TENSION", "LOW_TENSION", "MODERATE_TENSION")
+                and int(tension.get("critical_count", 0) or 0) == 0
+            )
+        )
+
+    def _match_not_discussable() -> bool:
+        return (
+            consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            or integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS"
+            or integrity.get("overconfidence_risk") == "CRITICAL"
+            or tension_level in ("HIGH_TENSION", "CRITICAL_TENSION")
+            or maturity < 0.18
+        )
+
+    matchers = {
+        "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE": _match_committee,
+        "GOVERNANCE_REVIEW_ELIGIBLE": _match_review_eligible,
+        "LIMITED_REVIEW_WORTHINESS": _match_limited,
+        "OBSERVATION_ONLY": _match_observation,
+        "NOT_INSTITUTIONALLY_DISCUSSABLE": _match_not_discussable,
+    }
+
+    readiness_state = "NOT_INSTITUTIONALLY_DISCUSSABLE"
+    for candidate in _GCC_READINESS_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            readiness_state = candidate
+            break
+
+    drivers = _gcc_readiness_drivers(
+        readiness_state, snap, regime, forecast, tension, consensus, integrity, hist
+    )
+    next_gate = _gcc_next_governance_gate(
+        readiness_state, integrity, consensus, tension, regime, forecast
+    )
+
+    return {
+        "readiness_state": readiness_state,
+        "readiness_display": _GCC_READINESS_DISPLAY.get(
+            readiness_state, readiness_state.replace("_", " ").title()
+        ),
+        "escalation_readiness": _GCC_READINESS_ESCALATION.get(readiness_state, "NONE"),
+        "discussability": _GCC_READINESS_DISCUSSABILITY.get(readiness_state, "NOT_DISCUSSABLE"),
+        "governance_maturity_score": maturity,
+        "drivers": drivers,
+        "interpretation": _GCC_READINESS_INTERPRETATION.get(readiness_state, ""),
+        "institutional_action": _GCC_READINESS_ACTION.get(readiness_state, "CONTINUE_OBSERVATION"),
+        "next_governance_gate": next_gate,
+    }
+
+
+def _gcc_render_decision_readiness(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+) -> Dict[str, Any]:
+    decision = _gcc_detect_decision_readiness(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+    )
+
+    st.markdown("### Governance Decision Readiness & Institutional Escalation Intelligence")
+    st.caption(
+        "Institutional gate assessment — discussability and review eligibility only. "
+        "**Not runtime enablement. Not autonomy approval.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Decision Readiness", decision["readiness_display"])
+    c2.metric("Escalation Readiness", decision["escalation_readiness"])
+    c3.metric("Discussability", decision["discussability"])
+    c4.metric("Governance Maturity Score", _gcc_fmt_conf(decision["governance_maturity_score"]))
+
+    state = decision["readiness_state"]
+    if state == "NOT_INSTITUTIONALLY_DISCUSSABLE":
+        st.error(decision["interpretation"])
+    elif state in ("OBSERVATION_ONLY", "LIMITED_REVIEW_WORTHINESS"):
+        st.info(decision["interpretation"])
+    elif state == "GOVERNANCE_REVIEW_ELIGIBLE":
+        st.warning(decision["interpretation"])
+    else:
+        st.success(decision["interpretation"])
+
+    st.warning(
+        "**Runtime mutation remains locked.** Decision readiness reflects institutional discussion "
+        "eligibility only — not runtime enablement or policy mutation."
+    )
+
+    st.markdown("**Escalation Drivers**")
+    for driver in decision["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Institutional Action", decision["institutional_action"])
+    a2.metric("Next Governance Gate", decision["next_governance_gate"])
+
+    with st.expander("Decision readiness detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{decision['readiness_state']}`")
+        st.markdown(f"- **Integrity state:** `{integrity.get('integrity_state', '—')}`")
+        st.markdown(f"- **Consensus state:** `{consensus.get('consensus_state', '—')}`")
+        st.markdown(
+            f"- **Trustworthiness:** `{_gcc_fmt_conf(integrity.get('discounted_trust_score'))}`"
+        )
+
+    return decision
+
+
+_GCC_FAILURE_PRIORITY: Tuple[str, ...] = (
+    "FALSE_CONFIDENCE_ESCALATION_RISK",
+    "ESCALATION_WITHOUT_MATURITY_RISK",
+    "CONSTITUTIONAL_DRIFT_RISK",
+    "GOVERNANCE_FRAGMENTATION_RISK",
+    "PREMATURE_REVIEW_RISK",
+    "CONSENSUS_ILLUSION_RISK",
+    "DECISION_PARALYSIS_RISK",
+    "INSTITUTIONAL_OVERFITTING_RISK",
+    "GOVERNANCE_STABLE",
+)
+
+_GCC_FAILURE_DISPLAY: Dict[str, str] = {
+    "GOVERNANCE_STABLE": "Governance Stable",
+    "GOVERNANCE_FRAGMENTATION_RISK": "Governance Fragmentation Risk",
+    "FALSE_CONFIDENCE_ESCALATION_RISK": "False Confidence Escalation Risk",
+    "CONSTITUTIONAL_DRIFT_RISK": "Constitutional Drift Risk",
+    "PREMATURE_REVIEW_RISK": "Premature Review Risk",
+    "CONSENSUS_ILLUSION_RISK": "Consensus Illusion Risk",
+    "ESCALATION_WITHOUT_MATURITY_RISK": "Escalation Without Maturity Risk",
+    "INSTITUTIONAL_OVERFITTING_RISK": "Institutional Overfitting Risk",
+    "DECISION_PARALYSIS_RISK": "Decision Paralysis Risk",
+}
+
+_GCC_FAILURE_INTERPRETATION: Dict[str, str] = {
+    "GOVERNANCE_STABLE": (
+        "Governance failure-mode exposure is limited. Institutional signals are coherent, confidence integrity "
+        "is acceptable, and escalation pressure remains appropriately constrained."
+    ),
+    "GOVERNANCE_FRAGMENTATION_RISK": (
+        "Governance remains vulnerable to fragmentation. Contradictions and weak cohesion reduce institutional "
+        "reliability and increase decision-process fragility."
+    ),
+    "FALSE_CONFIDENCE_ESCALATION_RISK": (
+        "Governance confidence appears stronger than maturity supports. Escalation or review would risk "
+        "violating Capital Preservation Doctrine safeguards."
+    ),
+    "CONSTITUTIONAL_DRIFT_RISK": (
+        "Constitutional stress and review pressure create drift risk. Runtime governance should remain "
+        "blocked until constitutional posture stabilizes."
+    ),
+    "PREMATURE_REVIEW_RISK": (
+        "Governance maturity remains insufficient for institutional review despite emerging discussion signals."
+    ),
+    "CONSENSUS_ILLUSION_RISK": (
+        "Apparent governance alignment may mask underlying contradictions or weakened confidence integrity."
+    ),
+    "ESCALATION_WITHOUT_MATURITY_RISK": (
+        "Escalation or review signals are emerging without sufficient governance maturity to support them safely."
+    ),
+    "INSTITUTIONAL_OVERFITTING_RISK": (
+        "Governance may be reacting too strongly to weak or sparse signals. Confidence exceeds evidential support."
+    ),
+    "DECISION_PARALYSIS_RISK": (
+        "Extreme contradictions and weak direction increase decision paralysis risk across the institutional stack."
+    ),
+}
+
+_GCC_FAILURE_SAFEGUARD: Dict[str, str] = {
+    "GOVERNANCE_STABLE": "CONTINUE_OBSERVATION",
+    "GOVERNANCE_FRAGMENTATION_RISK": "REDUCE_FRAGMENTATION",
+    "FALSE_CONFIDENCE_ESCALATION_RISK": "BLOCK_ESCALATION",
+    "CONSTITUTIONAL_DRIFT_RISK": "MAINTAIN_CONSTITUTIONAL_LOCK",
+    "PREMATURE_REVIEW_RISK": "REQUIRE_MORE_EVIDENCE",
+    "CONSENSUS_ILLUSION_RISK": "IMPROVE_CONFIDENCE_INTEGRITY",
+    "ESCALATION_WITHOUT_MATURITY_RISK": "BLOCK_ESCALATION",
+    "INSTITUTIONAL_OVERFITTING_RISK": "REQUIRE_MORE_EVIDENCE",
+    "DECISION_PARALYSIS_RISK": "IMPROVE_GOVERNANCE_STABILITY",
+}
+
+
+def _gcc_fragility_score(
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    regime: Dict[str, Any],
+    snap: Dict[str, Any],
+) -> float:
+    score = 0.0
+    count = int(tension.get("contradiction_count", 0) or 0)
+    score += 0.08 * min(count, 6)
+
+    level = tension.get("tension_level", "NO_TENSION")
+    if level == "MODERATE_TENSION":
+        score += 0.12
+    elif level == "HIGH_TENSION":
+        score += 0.22
+    elif level == "CRITICAL_TENSION":
+        score += 0.32
+
+    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        score += 0.18
+    if integrity.get("integrity_state") in (
+        "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+        "GOVERNANCE_OVERCONFIDENT",
+    ):
+        score += 0.16
+    if integrity.get("overconfidence_risk") in ("HIGH", "CRITICAL"):
+        score += 0.14
+    if snap["constitutional_safe"] is False or snap["constitutional_review_required"]:
+        score += 0.10
+    if float(decision.get("governance_maturity_score", 0.0) or 0.0) < 0.20:
+        score += 0.10
+    if regime.get("regime") == "CONSTITUTIONAL_STRESS":
+        score += 0.08
+
+    return min(max(score, 0.0), 1.0)
+
+
+def _gcc_risk_severity(
+    risk_state: str,
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    fragility: float,
+) -> str:
+    if (
+        risk_state in ("FALSE_CONFIDENCE_ESCALATION_RISK", "ESCALATION_WITHOUT_MATURITY_RISK")
+        and integrity.get("overconfidence_risk") == "CRITICAL"
+    ):
+        return "CRITICAL"
+    if (
+        risk_state in ("FALSE_CONFIDENCE_ESCALATION_RISK", "DECISION_PARALYSIS_RISK")
+        and fragility >= 0.55
+    ):
+        return "CRITICAL"
+    if (
+        risk_state
+        in (
+            "FALSE_CONFIDENCE_ESCALATION_RISK",
+            "ESCALATION_WITHOUT_MATURITY_RISK",
+            "GOVERNANCE_FRAGMENTATION_RISK",
+            "DECISION_PARALYSIS_RISK",
+        )
+        and fragility >= 0.40
+    ):
+        return "HIGH"
+    if risk_state in (
+        "CONSTITUTIONAL_DRIFT_RISK",
+        "GOVERNANCE_FRAGMENTATION_RISK",
+        "PREMATURE_REVIEW_RISK",
+    ):
+        return "MODERATE"
+    if risk_state == "GOVERNANCE_STABLE":
+        return "NONE"
+    if fragility >= 0.25:
+        return "LOW"
+    return "NONE"
+
+
+def _gcc_failure_containment(
+    risk_state: str,
+    decision: Dict[str, Any],
+    integrity: Dict[str, Any],
+    consensus: Dict[str, Any],
+) -> str:
+    if risk_state == "FALSE_CONFIDENCE_ESCALATION_RISK":
+        return "Prevent escalation; discount confidence before any review"
+    if risk_state == "ESCALATION_WITHOUT_MATURITY_RISK":
+        return "Delay institutional discussion until maturity improves"
+    if risk_state == "CONSTITUTIONAL_DRIFT_RISK":
+        return "Maintain constitutional lock; reduce review pressure"
+    if risk_state == "GOVERNANCE_FRAGMENTATION_RISK":
+        return "Reduce contradictions before review"
+    if risk_state == "PREMATURE_REVIEW_RISK":
+        return "Maintain observation only; collect more evidence"
+    if risk_state == "CONSENSUS_ILLUSION_RISK":
+        return "Strengthen confidence integrity before trusting alignment"
+    if risk_state == "DECISION_PARALYSIS_RISK":
+        return "Improve governance stability before advancing gates"
+    if risk_state == "INSTITUTIONAL_OVERFITTING_RISK":
+        return "Require more evidence; avoid overreacting to weak signals"
+    if decision.get("readiness_state") == "NOT_INSTITUTIONALLY_DISCUSSABLE":
+        return "Maintain observation only"
+    return "Continue observation with standard institutional caution"
+
+
+def _gcc_dominant_failure_modes(
+    risk_state: str,
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    consensus: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> List[str]:
+    modes: List[str] = []
+    primary = _GCC_FAILURE_DISPLAY.get(risk_state, risk_state)
+    modes.append(primary)
+
+    if integrity.get("integrity_state") == "GOVERNANCE_OVERCONFIDENT":
+        modes.append("Confidence stronger than institutional maturity")
+    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        modes.append("Governance cohesion deteriorating")
+    if int(tension.get("contradiction_count", 0) or 0) >= 2:
+        modes.append("Contradictions elevated across governance layers")
+    if (
+        decision.get("escalation_readiness") not in ("NONE", "VERY_LOW")
+        and float(decision.get("governance_maturity_score", 0.0) or 0.0) < 0.25
+    ):
+        modes.append("Escalation unsupported by readiness")
+    if integrity.get("overconfidence_risk") in ("HIGH", "CRITICAL"):
+        modes.append("False certainty risk elevated")
+
+    seen: set = set()
+    out: List[str] = []
+    for m in modes:
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out[:6]
+
+
+def _gcc_failure_drivers(
+    snap: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    consensus: Dict[str, Any],
+    decision: Dict[str, Any],
+    regime: Dict[str, Any],
+) -> List[str]:
+    drivers: List[str] = []
+    if float(integrity.get("confidence_discount", 0.0) or 0.0) > 0.10:
+        drivers.append(
+            f"Trustworthiness discounted ({_gcc_fmt_conf(integrity.get('confidence_discount'))})"
+        )
+    if float(decision.get("governance_maturity_score", 0.0) or 0.0) < 0.25:
+        drivers.append("Governance maturity insufficient")
+    if snap["constitutional_safe"] is False or snap["constitutional_review_required"]:
+        drivers.append("Constitutional stress elevated")
+    cls = snap["classifications"]
+    if str(cls.get("readiness") or "").upper().startswith("NOT"):
+        drivers.append(f"Runtime readiness: {cls.get('readiness') or '—'}")
+    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        drivers.append("Consensus fragmented")
+    if decision.get("escalation_readiness") in ("NONE", "VERY_LOW"):
+        drivers.append("Escalation inappropriate at current maturity")
+    if regime.get("regime") == "CONSTITUTIONAL_STRESS":
+        drivers.append("Constitutional stress regime active")
+    return drivers[:6]
+
+
+def _gcc_detect_governance_failure_modes(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+    raw_conf = float(integrity.get("raw_confidence_context", 0.0) or 0.0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    consensus_state = consensus.get("consensus_state", "")
+    integrity_state = integrity.get("integrity_state", "")
+    overconf = integrity.get("overconfidence_risk", "NONE")
+    readiness_cls = str(snap["classifications"].get("readiness") or "").upper()
+    discussability = decision.get("discussability", "NOT_DISCUSSABLE")
+    escalation = decision.get("escalation_readiness", "NONE")
+
+    def _match_false_confidence() -> bool:
+        return (
+            integrity_state == "GOVERNANCE_OVERCONFIDENT"
+            or overconf in ("HIGH", "CRITICAL")
+            or (raw_conf >= 0.75 and trust < 0.35 and readiness_cls == "NOT_RUNTIME_READY")
+        )
+
+    def _match_escalation_without_maturity() -> bool:
+        return (
+            discussability not in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY")
+            and maturity < 0.25
+            and escalation in ("LOW", "MODERATE", "HIGH")
+        )
+
+    def _match_constitutional_drift() -> bool:
+        return (
+            snap["constitutional_safe"] is False
+            or snap["constitutional_review_required"]
+            or regime.get("regime") == "CONSTITUTIONAL_STRESS"
+        ) and hist.get("confidence_direction") in ("deteriorating", "mixed", "dormant")
+
+    def _match_fragmentation() -> bool:
+        return (
+            consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            or contradiction_count >= 2
+        )
+
+    def _match_premature_review() -> bool:
+        return (
+            decision.get("readiness_state")
+            in ("LIMITED_REVIEW_WORTHINESS", "GOVERNANCE_REVIEW_ELIGIBLE")
+            and maturity < 0.35
+        )
+
+    def _match_consensus_illusion() -> bool:
+        return consensus_state in (
+            "CONSTITUTIONAL_CONSENSUS",
+            "MODERATE_CONSENSUS",
+            "STRONG_CONSENSUS",
+        ) and (
+            integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS"
+            or contradiction_count >= 1
+        )
+
+    def _match_decision_paralysis() -> bool:
+        return consensus_state == "CONFLICTED_GOVERNANCE" or (
+            contradiction_count >= 3
+            and tension.get("tension_level") in ("HIGH_TENSION", "CRITICAL_TENSION")
+        )
+
+    def _match_overfitting() -> bool:
+        return (
+            raw_conf >= 0.70
+            and not hist.get("has_transitions")
+            and maturity < 0.30
+            and hist.get("confidence_direction") in ("improving", "stable")
+        )
+
+    def _match_stable() -> bool:
+        return (
+            contradiction_count == 0
+            and tension.get("tension_level") in ("NO_TENSION", "LOW_TENSION")
+            and integrity_state
+            in (
+                "GOVERNANCE_CONFIDENCE_TRUSTWORTHY",
+                "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT",
+                "GOVERNANCE_CONFIDENCE_PARTIALLY_RELIABLE",
+            )
+            and overconf in ("NONE", "LOW")
+        )
+
+    matchers = {
+        "FALSE_CONFIDENCE_ESCALATION_RISK": _match_false_confidence,
+        "ESCALATION_WITHOUT_MATURITY_RISK": _match_escalation_without_maturity,
+        "CONSTITUTIONAL_DRIFT_RISK": _match_constitutional_drift,
+        "GOVERNANCE_FRAGMENTATION_RISK": _match_fragmentation,
+        "PREMATURE_REVIEW_RISK": _match_premature_review,
+        "CONSENSUS_ILLUSION_RISK": _match_consensus_illusion,
+        "DECISION_PARALYSIS_RISK": _match_decision_paralysis,
+        "INSTITUTIONAL_OVERFITTING_RISK": _match_overfitting,
+        "GOVERNANCE_STABLE": _match_stable,
+    }
+
+    risk_state = "GOVERNANCE_STABLE"
+    for candidate in _GCC_FAILURE_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            risk_state = candidate
+            break
+
+    fragility = _gcc_fragility_score(tension, consensus, integrity, decision, regime, snap)
+    severity = _gcc_risk_severity(risk_state, tension, integrity, fragility)
+    failure_modes = _gcc_dominant_failure_modes(risk_state, tension, integrity, consensus, decision)
+    drivers = _gcc_failure_drivers(snap, tension, integrity, consensus, decision, regime)
+    safeguard = _GCC_FAILURE_SAFEGUARD.get(risk_state, "CONTINUE_OBSERVATION")
+    containment = _gcc_failure_containment(risk_state, decision, integrity, consensus)
+
+    return {
+        "risk_state": risk_state,
+        "risk_display": _GCC_FAILURE_DISPLAY.get(risk_state, risk_state.replace("_", " ").title()),
+        "risk_severity": severity,
+        "fragility_score": fragility,
+        "failure_modes": failure_modes,
+        "drivers": drivers,
+        "interpretation": _GCC_FAILURE_INTERPRETATION.get(risk_state, ""),
+        "safeguard": safeguard,
+        "containment_strategy": containment,
+    }
+
+
+def _gcc_render_failure_mode_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    failure = _gcc_detect_governance_failure_modes(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+    )
+
+    st.markdown("### Governance Failure Modes & Institutional Risk Intelligence")
+    st.caption(
+        "Meta-governance risk analysis — how governance itself could fail. "
+        "**Not runtime enablement. Not autonomy approval.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Governance Risk State", failure["risk_display"])
+    c2.metric("Institutional Risk Severity", failure["risk_severity"])
+    c3.metric("Governance Fragility Score", _gcc_fmt_conf(failure["fragility_score"]))
+    c4.metric("Governance Safeguard", failure["safeguard"])
+
+    state = failure["risk_state"]
+    sev = failure["risk_severity"]
+    if sev == "CRITICAL" or state in (
+        "FALSE_CONFIDENCE_ESCALATION_RISK",
+        "DECISION_PARALYSIS_RISK",
+    ):
+        st.error(failure["interpretation"])
+    elif sev in ("HIGH", "MODERATE") or state in (
+        "GOVERNANCE_FRAGMENTATION_RISK",
+        "CONSTITUTIONAL_DRIFT_RISK",
+        "ESCALATION_WITHOUT_MATURITY_RISK",
+    ):
+        st.warning(failure["interpretation"])
+    elif state == "GOVERNANCE_STABLE":
+        st.success(failure["interpretation"])
+    else:
+        st.info(failure["interpretation"])
+
+    st.markdown("**Dominant Failure Modes**")
+    for mode in failure["failure_modes"]:
+        if sev in ("CRITICAL", "HIGH"):
+            st.warning(f"• {mode}")
+        else:
+            st.markdown(f'<div class="gcc-hist-metric">• {mode}</div>', unsafe_allow_html=True)
+
+    st.markdown("**Failure Drivers**")
+    for driver in failure["drivers"]:
+        st.markdown(f'<div class="gcc-block-item">• {driver}</div>', unsafe_allow_html=True)
+
+    st.metric("Failure Containment Strategy", failure["containment_strategy"])
+
+    with st.expander("Failure mode analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{failure['risk_state']}`")
+        st.markdown(f"- **Decision readiness:** `{decision.get('readiness_state', '—')}`")
+        st.markdown(f"- **Integrity state:** `{integrity.get('integrity_state', '—')}`")
+        st.markdown(f"- **Overconfidence risk:** `{integrity.get('overconfidence_risk', '—')}`")
+
+    return failure
+
+
+_GCC_AUDITABILITY_PRIORITY: Tuple[str, ...] = (
+    "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+    "EVIDENCE_FRAGMENTED",
+    "LOW_AUDITABILITY",
+    "SPARSE_EVIDENCE",
+    "MODERATE_AUDITABILITY",
+    "HIGH_AUDITABILITY",
+)
+
+_GCC_AUDITABILITY_DISPLAY: Dict[str, str] = {
+    "HIGH_AUDITABILITY": "High Auditability",
+    "MODERATE_AUDITABILITY": "Moderate Auditability",
+    "LOW_AUDITABILITY": "Low Auditability",
+    "SPARSE_EVIDENCE": "Sparse Evidence",
+    "EVIDENCE_FRAGMENTED": "Evidence Fragmented",
+    "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE": "Confidence Unsupported by Evidence",
+}
+
+_GCC_AUDITABILITY_INTERPRETATION: Dict[str, str] = {
+    "HIGH_AUDITABILITY": (
+        "Governance conclusions are institutionally traceable and sufficiently evidenced. "
+        "Consensus, trajectory, and confidence integrity broadly align."
+    ),
+    "MODERATE_AUDITABILITY": (
+        "Governance reasoning is mostly explainable, though some evidence weakness remains. "
+        "Confidence is partially supported by institutional signals."
+    ),
+    "LOW_AUDITABILITY": (
+        "Governance is difficult to justify with current evidence. Confidence integrity and "
+        "institutional traceability remain weak."
+    ),
+    "SPARSE_EVIDENCE": (
+        "Governance conclusions remain weakly evidenced. Institutional posture is traceable but "
+        "supported by limited maturity and sparse historical progression."
+    ),
+    "EVIDENCE_FRAGMENTED": (
+        "Governance reasoning remains partially fragmented. Contradictions reduce institutional "
+        "traceability and weaken auditability."
+    ),
+    "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE": (
+        "Governance confidence exceeds what current maturity and evidence depth support. "
+        "Operators should treat confidence as insufficiently evidenced."
+    ),
+}
+
+_GCC_AUDITABILITY_ACTION: Dict[str, str] = {
+    "HIGH_AUDITABILITY": "MAINTAIN_OBSERVATION",
+    "MODERATE_AUDITABILITY": "CONTINUE_INSTITUTIONAL_MONITORING",
+    "LOW_AUDITABILITY": "AUDIT_GOVERNANCE_SIGNAL_QUALITY",
+    "SPARSE_EVIDENCE": "COLLECT_MORE_EVIDENCE",
+    "EVIDENCE_FRAGMENTED": "REDUCE_CONTRADICTIONS",
+    "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE": "IMPROVE_CONFIDENCE_SUPPORT",
+}
+
+
+def _gcc_evidence_integrity_score(
+    hist: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    tension: Dict[str, Any],
+) -> float:
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+    consensus_conf = float(consensus.get("consensus_confidence", 0.0) or 0.0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    transition_n = len(hist.get("transitions") or [])
+
+    score = 0.25 * trust + 0.20 * consensus_conf + 0.15 * maturity
+    if hist.get("has_history"):
+        score += 0.08
+    if hist.get("has_transitions"):
+        score += 0.10
+    score += 0.02 * min(transition_n, 5)
+
+    count = int(tension.get("contradiction_count", 0) or 0)
+    score -= 0.06 * min(count, 5)
+    score -= 0.12 * float(integrity.get("confidence_discount", 0.0) or 0.0)
+
+    if integrity.get("integrity_state") == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+        score -= 0.12
+    if integrity.get("overconfidence_risk") in ("HIGH", "CRITICAL"):
+        score -= 0.15
+
+    return min(max(score, 0.0), 1.0)
+
+
+def _gcc_evidence_depth(
+    hist: Dict[str, Any],
+    snap: Dict[str, Any],
+    evidence_score: float,
+) -> str:
+    transition_n = len(hist.get("transitions") or [])
+    if snap["max_conf"] <= 0.01 and not hist.get("has_transitions"):
+        return "VERY_LOW"
+    if evidence_score < 0.20:
+        return "LOW"
+    if transition_n >= 2 or evidence_score >= 0.55:
+        return "HIGH"
+    if transition_n >= 1 or evidence_score >= 0.35:
+        return "MODERATE"
+    return "VERY_LOW" if evidence_score < 0.25 else "LOW"
+
+
+def _gcc_explainability_quality(
+    audit_state: str,
+    hist: Dict[str, Any],
+    evidence_score: float,
+) -> str:
+    if audit_state == "HIGH_AUDITABILITY" and hist.get("has_transitions"):
+        return "HIGHLY_TRACEABLE"
+    if audit_state == "HIGH_AUDITABILITY":
+        return "STRONG"
+    if audit_state == "MODERATE_AUDITABILITY":
+        return "ADEQUATE"
+    if audit_state in ("SPARSE_EVIDENCE", "LOW_AUDITABILITY"):
+        return "LIMITED"
+    return "POOR"
+
+
+def _gcc_traceability_status(
+    audit_state: str,
+    hist: Dict[str, Any],
+    evidence_score: float,
+) -> str:
+    if audit_state == "HIGH_AUDITABILITY" and hist.get("has_transitions"):
+        return "HIGHLY_TRACEABLE"
+    if audit_state in ("HIGH_AUDITABILITY", "MODERATE_AUDITABILITY") and evidence_score >= 0.40:
+        return "TRACEABLE"
+    if audit_state in ("SPARSE_EVIDENCE", "MODERATE_AUDITABILITY", "LOW_AUDITABILITY"):
+        return "PARTIALLY_TRACEABLE"
+    return "NOT_TRACEABLE"
+
+
+def _gcc_audit_drivers(
+    audit_state: str,
+    hist: Dict[str, Any],
+    snap: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> List[str]:
+    cls = snap["classifications"]
+    drivers: List[str] = []
+
+    if audit_state == "SPARSE_EVIDENCE":
+        drivers.append("Governance history limited")
+        drivers.append(f"Runtime readiness: {cls.get('readiness') or '—'}")
+        drivers.append("Confidence supported by limited maturity evidence")
+        drivers.append(f"Institutional transitions detected: {len(hist.get('transitions') or [])}")
+    elif audit_state == "EVIDENCE_FRAGMENTED":
+        drivers.append("Contradictions weaken institutional traceability")
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append("Governance cohesion reduced")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+    elif audit_state == "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE":
+        drivers.append("Confidence stronger than maturity")
+        drivers.append(
+            f"Maturity score: {_gcc_fmt_conf(decision.get('governance_maturity_score'))}"
+        )
+        drivers.append(
+            f"Trustworthiness discounted ({_gcc_fmt_conf(integrity.get('confidence_discount'))})"
+        )
+        drivers.append(f"Overconfidence risk: {integrity.get('overconfidence_risk', '—')}")
+    elif audit_state == "HIGH_AUDITABILITY":
+        drivers.append(f"Posture stability: {hist.get('posture_stability', '—')}")
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append("Governance reasoning broadly coherent")
+    else:
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Tension: {tension.get('tension_display', '—')}")
+        drivers.append(f"Evidence transitions: {len(hist.get('transitions') or [])}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_auditability(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+    raw_conf = float(integrity.get("raw_confidence_context", 0.0) or 0.0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    consensus_state = consensus.get("consensus_state", "")
+    integrity_state = integrity.get("integrity_state", "")
+    overconf = integrity.get("overconfidence_risk", "NONE")
+
+    evidence_score = _gcc_evidence_integrity_score(hist, consensus, integrity, decision, tension)
+
+    def _match_unsupported() -> bool:
+        return (
+            integrity_state == "GOVERNANCE_OVERCONFIDENT"
+            or overconf in ("HIGH", "CRITICAL")
+            or (raw_conf >= 0.75 and trust < 0.35 and maturity < 0.25)
+        )
+
+    def _match_fragmented() -> bool:
+        return (
+            consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            or contradiction_count >= 2
+        )
+
+    def _match_low() -> bool:
+        return (
+            trust < 0.35
+            or evidence_score < 0.25
+            or integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS"
+        )
+
+    def _match_sparse() -> bool:
+        return (
+            not hist.get("has_transitions")
+            and snap["max_conf"] <= 0.01
+            and hist.get("confidence_direction") == "dormant"
+        )
+
+    def _match_moderate() -> bool:
+        return evidence_score >= 0.25 and contradiction_count <= 2 and trust >= 0.20
+
+    def _match_high() -> bool:
+        return (
+            contradiction_count == 0
+            and tension.get("tension_level") in ("NO_TENSION", "LOW_TENSION")
+            and trust >= 0.55
+            and evidence_score >= 0.50
+            and consensus_state not in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            and failure.get("risk_state") == "GOVERNANCE_STABLE"
+        )
+
+    matchers = {
+        "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE": _match_unsupported,
+        "EVIDENCE_FRAGMENTED": _match_fragmented,
+        "LOW_AUDITABILITY": _match_low,
+        "SPARSE_EVIDENCE": _match_sparse,
+        "MODERATE_AUDITABILITY": _match_moderate,
+        "HIGH_AUDITABILITY": _match_high,
+    }
+
+    audit_state = "MODERATE_AUDITABILITY"
+    for candidate in _GCC_AUDITABILITY_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            audit_state = candidate
+            break
+
+    evidence_depth = _gcc_evidence_depth(hist, snap, evidence_score)
+    explainability = _gcc_explainability_quality(audit_state, hist, evidence_score)
+    traceability = _gcc_traceability_status(audit_state, hist, evidence_score)
+    drivers = _gcc_audit_drivers(audit_state, hist, snap, tension, consensus, integrity, decision)
+
+    return {
+        "audit_state": audit_state,
+        "audit_display": _GCC_AUDITABILITY_DISPLAY.get(
+            audit_state, audit_state.replace("_", " ").title()
+        ),
+        "evidence_integrity_score": evidence_score,
+        "evidence_depth": evidence_depth,
+        "explainability_quality": explainability,
+        "drivers": drivers,
+        "interpretation": _GCC_AUDITABILITY_INTERPRETATION.get(audit_state, ""),
+        "evidence_action": _GCC_AUDITABILITY_ACTION.get(
+            audit_state, "CONTINUE_INSTITUTIONAL_MONITORING"
+        ),
+        "traceability_status": traceability,
+    }
+
+
+def _gcc_render_auditability_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+) -> Dict[str, Any]:
+    audit = _gcc_detect_governance_auditability(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+    )
+
+    st.markdown("### Governance Institutional Auditability & Evidence Integrity")
+    st.caption(
+        "Evidence and traceability analysis — whether governance conclusions are sufficiently supported. "
+        "**Read-only audit view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Auditability State", audit["audit_display"])
+    c2.metric("Evidence Integrity Score", _gcc_fmt_conf(audit["evidence_integrity_score"]))
+    c3.metric("Evidence Depth", audit["evidence_depth"])
+    c4.metric("Explainability Quality", audit["explainability_quality"])
+
+    state = audit["audit_state"]
+    if state in ("CONFIDENCE_UNSUPPORTED_BY_EVIDENCE", "EVIDENCE_FRAGMENTED", "LOW_AUDITABILITY"):
+        st.warning(audit["interpretation"])
+    elif state == "HIGH_AUDITABILITY":
+        st.success(audit["interpretation"])
+    elif state == "SPARSE_EVIDENCE":
+        st.info(audit["interpretation"])
+    else:
+        st.info(audit["interpretation"])
+
+    st.markdown("**Audit Drivers**")
+    for driver in audit["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Evidence Action", audit["evidence_action"])
+    a2.metric("Governance Traceability Status", audit["traceability_status"])
+
+    with st.expander("Auditability analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{audit['audit_state']}`")
+        st.markdown(f"- **Transition count:** `{len(hist.get('transitions') or [])}`")
+        st.markdown(
+            f"- **Trustworthiness:** `{_gcc_fmt_conf(integrity.get('discounted_trust_score'))}`"
+        )
+        st.markdown(f"- **Failure risk state:** `{failure.get('risk_state', '—')}`")
+
+    return audit
+
+
+_GCC_COHERENCE_PRIORITY: Tuple[str, ...] = (
+    "ESCALATION_LOGIC_MISMATCH",
+    "INTERNALLY_INCONSISTENT_GOVERNANCE",
+    "FRAGMENTED_REASONING_CHAIN",
+    "LOW_COHERENCE_GOVERNANCE",
+    "LOGICALLY_CONSTRAINED_BUT_COHERENT",
+    "MODERATELY_COHERENT_GOVERNANCE",
+    "HIGHLY_COHERENT_GOVERNANCE",
+)
+
+_GCC_COHERENCE_DISPLAY: Dict[str, str] = {
+    "HIGHLY_COHERENT_GOVERNANCE": "Highly Coherent Governance",
+    "MODERATELY_COHERENT_GOVERNANCE": "Moderately Coherent Governance",
+    "LOGICALLY_CONSTRAINED_BUT_COHERENT": "Logically Constrained but Coherent",
+    "LOW_COHERENCE_GOVERNANCE": "Low Coherence Governance",
+    "INTERNALLY_INCONSISTENT_GOVERNANCE": "Internally Inconsistent Governance",
+    "FRAGMENTED_REASONING_CHAIN": "Fragmented Reasoning Chain",
+    "ESCALATION_LOGIC_MISMATCH": "Escalation Logic Mismatch",
+}
+
+_GCC_COHERENCE_INTERPRETATION: Dict[str, str] = {
+    "HIGHLY_COHERENT_GOVERNANCE": (
+        "Governance sections broadly agree. Confidence, trajectory, maturity, risk, and "
+        "discussability align into a coherent institutional narrative."
+    ),
+    "MODERATELY_COHERENT_GOVERNANCE": (
+        "Governance mostly makes institutional sense. Minor inconsistencies exist, but the "
+        "committee-level story remains usable."
+    ),
+    "LOGICALLY_CONSTRAINED_BUT_COHERENT": (
+        "Governance remains institutionally constrained but internally coherent. Constitutional "
+        "safeguards, maturity limits, escalation posture, and auditability broadly agree."
+    ),
+    "LOW_COHERENCE_GOVERNANCE": (
+        "Institutional reasoning is weak. Governance sections partially disagree and the "
+        "narrative remains unstable."
+    ),
+    "INTERNALLY_INCONSISTENT_GOVERNANCE": (
+        "Governance sections materially conflict. The reasoning chain is difficult to justify "
+        "at committee level."
+    ),
+    "FRAGMENTED_REASONING_CHAIN": (
+        "Governance reasoning remains fragmented. Institutional sections disagree on maturity, "
+        "trustworthiness, and escalation appropriateness."
+    ),
+    "ESCALATION_LOGIC_MISMATCH": (
+        "Governance escalation logic is unsupported by institutional maturity and evidence "
+        "integrity. Committee-level reasoning remains insufficient."
+    ),
+}
+
+_GCC_COHERENCE_ACTION: Dict[str, str] = {
+    "HIGHLY_COHERENT_GOVERNANCE": "CONTINUE_OBSERVATION",
+    "MODERATELY_COHERENT_GOVERNANCE": "CONTINUE_OBSERVATION",
+    "LOGICALLY_CONSTRAINED_BUT_COHERENT": "MAINTAIN_CONSTITUTIONAL_LOGIC",
+    "LOW_COHERENCE_GOVERNANCE": "IMPROVE_GOVERNANCE_COHERENCE",
+    "INTERNALLY_INCONSISTENT_GOVERNANCE": "IMPROVE_CROSS_SECTION_ALIGNMENT",
+    "FRAGMENTED_REASONING_CHAIN": "REDUCE_REASONING_FRAGMENTATION",
+    "ESCALATION_LOGIC_MISMATCH": "BLOCK_ESCALATION_ASSUMPTIONS",
+}
+
+_GCC_REGIME_TRAJECTORY_ALIGNED: Tuple[Tuple[str, str], ...] = (
+    ("CONSTITUTIONAL_STRESS", "CONSTITUTIONALLY_CONSTRAINED"),
+    ("GOVERNANCE_REGRESSION", "GOVERNANCE_STALLED"),
+    ("INSTITUTIONAL_INSTABILITY", "GOVERNANCE_STALLED"),
+    ("EARLY_INSTITUTIONAL_FORMATION", "GOVERNANCE_FORMING"),
+    ("RUNTIME_CANDIDATE", "PRE_RUNTIME_TRAJECTORY"),
+    ("PRE_RUNTIME_READINESS", "PRE_RUNTIME_TRAJECTORY"),
+    ("GOVERNANCE_ACCELERATION", "GOVERNANCE_ACCELERATING"),
+)
+
+
+def _gcc_regime_trajectory_aligned(regime: Dict[str, Any], forecast: Dict[str, Any]) -> bool:
+    regime_key = regime.get("regime", "")
+    trajectory = forecast.get("trajectory", "")
+    if (regime_key, trajectory) in _GCC_REGIME_TRAJECTORY_ALIGNED:
+        return True
+    if regime_key in ("CONSTITUTIONAL_STRESS", "GOVERNANCE_REGRESSION") and trajectory in (
+        "CONSTITUTIONALLY_CONSTRAINED",
+        "GOVERNANCE_STALLED",
+        "GOVERNANCE_DETERIORATING",
+    ):
+        return True
+    return False
+
+
+def _gcc_institutional_logic_score(
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+) -> float:
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+    consensus_conf = float(consensus.get("consensus_confidence", 0.0) or 0.0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    evidence = float(audit.get("evidence_integrity_score", 0.0) or 0.0)
+    count = int(tension.get("contradiction_count", 0) or 0)
+
+    score = 0.18 * trust + 0.18 * consensus_conf + 0.14 * maturity + 0.12 * evidence
+    if _gcc_regime_trajectory_aligned(regime, forecast):
+        score += 0.12
+    if failure.get("risk_state") == "GOVERNANCE_STABLE":
+        score += 0.08
+    discussable = decision.get("discussability", "NOT_DISCUSSABLE")
+    escalation = decision.get("escalation_readiness", "NONE")
+    if discussable in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY") and escalation in (
+        "NONE",
+        "VERY_LOW",
+    ):
+        score += 0.06
+
+    score -= 0.08 * min(count, 5)
+    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        score -= 0.18
+    if integrity.get("integrity_state") == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+        score -= 0.14
+    if audit.get("audit_state") in (
+        "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+        "EVIDENCE_FRAGMENTED",
+    ):
+        score -= 0.16
+    if failure.get("risk_state") in (
+        "FALSE_CONFIDENCE_ESCALATION_RISK",
+        "ESCALATION_WITHOUT_MATURITY_RISK",
+    ):
+        score -= 0.20
+
+    return min(max(score, 0.0), 1.0)
+
+
+def _gcc_cross_section_agreement(
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+) -> str:
+    checks = 0
+    aligned = 0
+
+    checks += 1
+    if _gcc_regime_trajectory_aligned(regime, forecast):
+        aligned += 1
+
+    checks += 1
+    consensus_state = consensus.get("consensus_state", "")
+    count = int(tension.get("contradiction_count", 0) or 0)
+    if consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+        if count >= 2:
+            aligned += 1
+    elif count <= 1:
+        aligned += 1
+
+    checks += 1
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    discussable = decision.get("discussability", "NOT_DISCUSSABLE")
+    if maturity < 0.25 and discussable in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY"):
+        aligned += 1
+    elif maturity >= 0.40 and discussable not in ("NOT_DISCUSSABLE",):
+        aligned += 1
+
+    checks += 1
+    integrity_state = integrity.get("integrity_state", "")
+    audit_state = audit.get("audit_state", "")
+    if (
+        integrity_state == "GOVERNANCE_OVERCONFIDENT"
+        and audit_state == "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE"
+    ):
+        aligned += 1
+    elif (
+        integrity_state != "GOVERNANCE_OVERCONFIDENT"
+        and audit_state != "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE"
+    ):
+        aligned += 1
+
+    checks += 1
+    failure_risk = failure.get("risk_state", "")
+    if failure_risk in ("FALSE_CONFIDENCE_ESCALATION_RISK", "ESCALATION_WITHOUT_MATURITY_RISK"):
+        if decision.get("escalation_readiness") not in ("NONE", "VERY_LOW"):
+            aligned += 1
+    elif failure_risk == "GOVERNANCE_FRAGMENTATION_RISK":
+        if consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+            aligned += 1
+    elif failure_risk == "GOVERNANCE_STABLE":
+        aligned += 1
+
+    checks += 1
+    if regime.get("regime") == "CONSTITUTIONAL_STRESS" and forecast.get("trajectory") in (
+        "CONSTITUTIONALLY_CONSTRAINED",
+        "GOVERNANCE_STALLED",
+    ):
+        if decision.get("readiness_state") in (
+            "NOT_INSTITUTIONALLY_DISCUSSABLE",
+            "OBSERVATION_ONLY",
+        ):
+            aligned += 1
+
+    ratio = aligned / max(checks, 1)
+    if ratio >= 0.85:
+        return "VERY_HIGH"
+    if ratio >= 0.70:
+        return "HIGH"
+    if ratio >= 0.50:
+        return "MODERATE"
+    if ratio >= 0.30:
+        return "LOW"
+    return "VERY_LOW"
+
+
+def _gcc_narrative_integrity(coherence_state: str, logic_score: float) -> str:
+    if coherence_state == "HIGHLY_COHERENT_GOVERNANCE":
+        return "HIGHLY_COHERENT"
+    if coherence_state == "LOGICALLY_CONSTRAINED_BUT_COHERENT":
+        return "STRONG"
+    if coherence_state == "MODERATELY_COHERENT_GOVERNANCE":
+        return "PARTIAL"
+    if coherence_state == "LOW_COHERENCE_GOVERNANCE":
+        return "WEAK"
+    if coherence_state in (
+        "INTERNALLY_INCONSISTENT_GOVERNANCE",
+        "FRAGMENTED_REASONING_CHAIN",
+        "ESCALATION_LOGIC_MISMATCH",
+    ):
+        return "BROKEN" if logic_score < 0.20 else "WEAK"
+    return "PARTIAL"
+
+
+def _gcc_reasoning_chain_status(
+    coherence_state: str,
+    narrative: str,
+    cross_section: str,
+) -> str:
+    if coherence_state == "HIGHLY_COHERENT_GOVERNANCE":
+        return "HIGHLY_COHERENT"
+    if coherence_state in ("INTERNALLY_INCONSISTENT_GOVERNANCE", "FRAGMENTED_REASONING_CHAIN"):
+        return "BROKEN" if narrative == "BROKEN" else "FRAGMENTED"
+    if coherence_state == "ESCALATION_LOGIC_MISMATCH":
+        return "FRAGMENTED"
+    if coherence_state == "LOGICALLY_CONSTRAINED_BUT_COHERENT":
+        return "COHERENT"
+    if coherence_state == "MODERATELY_COHERENT_GOVERNANCE":
+        return "PARTIALLY_COHERENT"
+    if cross_section in ("VERY_LOW", "LOW"):
+        return "FRAGMENTED"
+    return "PARTIALLY_COHERENT"
+
+
+def _gcc_coherence_drivers(
+    coherence_state: str,
+    snap: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    audit: Dict[str, Any],
+) -> List[str]:
+    cls = snap["classifications"]
+    drivers: List[str] = []
+
+    if coherence_state == "LOGICALLY_CONSTRAINED_BUT_COHERENT":
+        drivers.append("Constitutional lock consistently supported")
+        drivers.append(f"Runtime readiness: {cls.get('readiness') or '—'}")
+        drivers.append("Escalation blocked coherently")
+        drivers.append(
+            f"Governance maturity insufficient ({_gcc_fmt_conf(decision.get('governance_maturity_score'))})"
+        )
+    elif coherence_state == "FRAGMENTED_REASONING_CHAIN":
+        drivers.append("Contradictions weaken institutional story")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+    elif coherence_state == "ESCALATION_LOGIC_MISMATCH":
+        drivers.append("Escalation posture exceeds maturity")
+        drivers.append(f"Escalation readiness: {decision.get('escalation_readiness', '—')}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append(f"Discussability: {decision.get('discussability', '—')}")
+    elif coherence_state == "INTERNALLY_INCONSISTENT_GOVERNANCE":
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(f"Trajectory: {forecast.get('trajectory_display', '—')}")
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Decision readiness: {decision.get('readiness_display', '—')}")
+    elif coherence_state == "HIGHLY_COHERENT_GOVERNANCE":
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append(f"Tension: {tension.get('tension_display', '—')}")
+        drivers.append("Cross-section governance signals align")
+    else:
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(f"Failure alignment: {consensus.get('consensus_state', '—')}")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+        drivers.append(
+            f"Evidence integrity: {_gcc_fmt_conf(audit.get('evidence_integrity_score'))}"
+        )
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_coherence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    logic_score = _gcc_institutional_logic_score(
+        regime, forecast, tension, consensus, integrity, decision, failure, audit
+    )
+    cross_section = _gcc_cross_section_agreement(
+        regime, forecast, tension, consensus, integrity, decision, failure, audit
+    )
+
+    regime_key = regime.get("regime", "")
+    trajectory = forecast.get("trajectory", "")
+    consensus_state = consensus.get("consensus_state", "")
+    integrity_state = integrity.get("integrity_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    escalation = decision.get("escalation_readiness", "NONE")
+    discussability = decision.get("discussability", "NOT_DISCUSSABLE")
+    readiness_state = decision.get("readiness_state", "")
+    failure_risk = failure.get("risk_state", "")
+    audit_state = audit.get("audit_state", "")
+
+    def _match_escalation_mismatch() -> bool:
+        return (
+            failure_risk == "ESCALATION_WITHOUT_MATURITY_RISK"
+            or (
+                escalation not in ("NONE", "VERY_LOW")
+                and (
+                    discussability in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY")
+                    or maturity < 0.25
+                    or audit_state == "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE"
+                )
+            )
+            or (
+                readiness_state in ("GOVERNANCE_REVIEW_ELIGIBLE", "LIMITED_REVIEW_WORTHINESS")
+                and maturity < 0.25
+                and audit_state == "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE"
+            )
+        )
+
+    def _match_internally_inconsistent() -> bool:
+        return (
+            (
+                regime_key in ("CONSTITUTIONAL_STRESS", "GOVERNANCE_REGRESSION")
+                and trajectory in ("GOVERNANCE_ACCELERATING", "PRE_RUNTIME_TRAJECTORY")
+                and readiness_state != "NOT_INSTITUTIONALLY_DISCUSSABLE"
+            )
+            or (
+                consensus_state in ("CONSTITUTIONAL_CONSENSUS", "STRONG_CONSENSUS")
+                and integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS"
+            )
+            or (
+                readiness_state
+                in ("GOVERNANCE_REVIEW_ELIGIBLE", "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE")
+                and failure_risk
+                in ("FALSE_CONFIDENCE_ESCALATION_RISK", "GOVERNANCE_FRAGMENTATION_RISK")
+            )
+        )
+
+    def _match_fragmented_chain() -> bool:
+        return (
+            consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            and contradiction_count >= 2
+            and audit_state
+            in (
+                "EVIDENCE_FRAGMENTED",
+                "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+                "LOW_AUDITABILITY",
+            )
+        )
+
+    def _match_low_coherence() -> bool:
+        return logic_score < 0.35 or cross_section in ("VERY_LOW", "LOW")
+
+    def _match_constrained_coherent() -> bool:
+        return (
+            (
+                regime_key
+                in ("CONSTITUTIONAL_STRESS", "GOVERNANCE_REGRESSION", "INSTITUTIONAL_INSTABILITY")
+                or snap["constitutional_safe"] is False
+                or snap["constitutional_review_required"]
+            )
+            and _gcc_regime_trajectory_aligned(regime, forecast)
+            and readiness_state in ("NOT_INSTITUTIONALLY_DISCUSSABLE", "OBSERVATION_ONLY")
+            and discussability in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY")
+            and escalation in ("NONE", "VERY_LOW")
+            and integrity_state
+            in (
+                "GOVERNANCE_CONFIDENCE_DORMANT_BUT_CONSISTENT",
+                "GOVERNANCE_CONFIDENCE_STABLE",
+            )
+        )
+
+    def _match_moderate() -> bool:
+        return logic_score >= 0.30 and cross_section in ("MODERATE", "HIGH")
+
+    def _match_highly_coherent() -> bool:
+        return (
+            logic_score >= 0.60
+            and cross_section in ("HIGH", "VERY_HIGH")
+            and contradiction_count == 0
+            and consensus_state not in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            and failure_risk == "GOVERNANCE_STABLE"
+            and audit_state == "HIGH_AUDITABILITY"
+        )
+
+    matchers = {
+        "ESCALATION_LOGIC_MISMATCH": _match_escalation_mismatch,
+        "INTERNALLY_INCONSISTENT_GOVERNANCE": _match_internally_inconsistent,
+        "FRAGMENTED_REASONING_CHAIN": _match_fragmented_chain,
+        "LOW_COHERENCE_GOVERNANCE": _match_low_coherence,
+        "LOGICALLY_CONSTRAINED_BUT_COHERENT": _match_constrained_coherent,
+        "MODERATELY_COHERENT_GOVERNANCE": _match_moderate,
+        "HIGHLY_COHERENT_GOVERNANCE": _match_highly_coherent,
+    }
+
+    coherence_state = "MODERATELY_COHERENT_GOVERNANCE"
+    for candidate in _GCC_COHERENCE_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            coherence_state = candidate
+            break
+
+    narrative = _gcc_narrative_integrity(coherence_state, logic_score)
+    reasoning_chain = _gcc_reasoning_chain_status(coherence_state, narrative, cross_section)
+    drivers = _gcc_coherence_drivers(
+        coherence_state, snap, regime, forecast, tension, consensus, integrity, decision, audit
+    )
+
+    return {
+        "coherence_state": coherence_state,
+        "coherence_display": _GCC_COHERENCE_DISPLAY.get(
+            coherence_state, coherence_state.replace("_", " ").title()
+        ),
+        "logic_score": logic_score,
+        "narrative_integrity": narrative,
+        "cross_section_agreement": cross_section,
+        "drivers": drivers,
+        "interpretation": _GCC_COHERENCE_INTERPRETATION.get(coherence_state, ""),
+        "logic_action": _GCC_COHERENCE_ACTION.get(coherence_state, "CONTINUE_OBSERVATION"),
+        "reasoning_chain_status": reasoning_chain,
+    }
+
+
+def _gcc_render_coherence_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+) -> Dict[str, Any]:
+    coherence = _gcc_detect_governance_coherence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+    )
+
+    st.markdown("### Governance Institutional Coherence & Internal Logic Integrity")
+    st.caption(
+        "Institutional sense-making — whether governance logically holds together across sections. "
+        "**Read-only logic validation. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Governance Coherence", coherence["coherence_display"])
+    c2.metric("Institutional Logic Score", _gcc_fmt_conf(coherence["logic_score"]))
+    c3.metric("Narrative Integrity", coherence["narrative_integrity"])
+    c4.metric("Cross-Section Agreement", coherence["cross_section_agreement"])
+
+    state = coherence["coherence_state"]
+    if state in (
+        "ESCALATION_LOGIC_MISMATCH",
+        "INTERNALLY_INCONSISTENT_GOVERNANCE",
+        "FRAGMENTED_REASONING_CHAIN",
+    ):
+        st.error(coherence["interpretation"])
+    elif state == "LOW_COHERENCE_GOVERNANCE":
+        st.warning(coherence["interpretation"])
+    elif state in ("HIGHLY_COHERENT_GOVERNANCE", "LOGICALLY_CONSTRAINED_BUT_COHERENT"):
+        st.success(coherence["interpretation"])
+    else:
+        st.info(coherence["interpretation"])
+
+    st.markdown("**Coherence Drivers**")
+    for driver in coherence["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Logic Action", coherence["logic_action"])
+    a2.metric("Reasoning Chain Status", coherence["reasoning_chain_status"])
+
+    with st.expander("Coherence analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{coherence['coherence_state']}`")
+        st.markdown(f"- **Regime:** `{regime.get('regime', '—')}`")
+        st.markdown(f"- **Trajectory:** `{forecast.get('trajectory', '—')}`")
+        st.markdown(f"- **Auditability state:** `{audit.get('audit_state', '—')}`")
+
+    return coherence
+
+
+_GCC_STABILITY_PRIORITY: Tuple[str, ...] = (
+    "GOVERNANCE_DETERIORATING",
+    "REASONING_INSTABILITY_DETECTED",
+    "GOVERNANCE_VOLATILITY_ELEVATED",
+    "CONSTITUTIONAL_DRIFT_RISK",
+    "CONFIDENCE_OSCILLATION_RISK",
+    "INSTITUTIONAL_DRIFT_DETECTED",
+    "GOVERNANCE_STABILITY_IMPROVING",
+    "STABLE_GOVERNANCE_POSTURE",
+)
+
+_GCC_STABILITY_DISPLAY: Dict[str, str] = {
+    "STABLE_GOVERNANCE_POSTURE": "Stable Governance Posture",
+    "INSTITUTIONAL_DRIFT_DETECTED": "Institutional Drift Detected",
+    "CONSTITUTIONAL_DRIFT_RISK": "Constitutional Drift Risk",
+    "GOVERNANCE_VOLATILITY_ELEVATED": "Governance Volatility Elevated",
+    "REASONING_INSTABILITY_DETECTED": "Reasoning Instability Detected",
+    "CONFIDENCE_OSCILLATION_RISK": "Confidence Oscillation Risk",
+    "GOVERNANCE_STABILITY_IMPROVING": "Governance Stability Improving",
+    "GOVERNANCE_DETERIORATING": "Governance Deteriorating",
+}
+
+_GCC_STABILITY_INTERPRETATION: Dict[str, str] = {
+    "STABLE_GOVERNANCE_POSTURE": (
+        "Governance posture is stable but restrictive. Runtime governance remains blocked "
+        "consistently, and no durable institutional shift has occurred."
+    ),
+    "INSTITUTIONAL_DRIFT_DETECTED": (
+        "Governance regime, trajectory, or readiness posture is shifting over time. "
+        "Institutional movement is present but not yet clearly stabilized."
+    ),
+    "CONSTITUTIONAL_DRIFT_RISK": (
+        "Constitutional constraints remain the dominant source of governance instability. "
+        "Operators should maintain the constitutional lock until pressure subsides."
+    ),
+    "GOVERNANCE_VOLATILITY_ELEVATED": (
+        "Governance posture changes frequently. Confidence direction and transition history "
+        "indicate elevated institutional volatility."
+    ),
+    "REASONING_INSTABILITY_DETECTED": (
+        "Governance reasoning remains unstable. Fragmented coherence, weak auditability, "
+        "and discounted confidence reduce institutional durability."
+    ),
+    "CONFIDENCE_OSCILLATION_RISK": (
+        "Confidence direction is unstable across recorded history. Trustworthiness is difficult "
+        "to interpret while oscillation persists."
+    ),
+    "GOVERNANCE_STABILITY_IMPROVING": (
+        "Governance posture is becoming more stable. Contradictions and coherence signals "
+        "suggest institutional durability is improving."
+    ),
+    "GOVERNANCE_DETERIORATING": (
+        "Governance is deteriorating. Confidence is weakening, contradictions are elevated, "
+        "and coherence or auditability is degrading."
+    ),
+}
+
+_GCC_STABILITY_ACTION: Dict[str, str] = {
+    "STABLE_GOVERNANCE_POSTURE": "CONTINUE_OBSERVATION",
+    "INSTITUTIONAL_DRIFT_DETECTED": "INVESTIGATE_DRIFT",
+    "CONSTITUTIONAL_DRIFT_RISK": "MAINTAIN_CONSTITUTIONAL_LOCK",
+    "GOVERNANCE_VOLATILITY_ELEVATED": "REDUCE_GOVERNANCE_VOLATILITY",
+    "REASONING_INSTABILITY_DETECTED": "REDUCE_REASONING_INSTABILITY",
+    "CONFIDENCE_OSCILLATION_RISK": "STRENGTHEN_STABILITY_EVIDENCE",
+    "GOVERNANCE_STABILITY_IMPROVING": "CONTINUE_OBSERVATION",
+    "GOVERNANCE_DETERIORATING": "BLOCK_ESCALATION_UNTIL_STABLE",
+}
+
+_GCC_STABILITY_CONTAINMENT: Dict[str, str] = {
+    "STABLE_GOVERNANCE_POSTURE": "Continue monitoring transition history",
+    "INSTITUTIONAL_DRIFT_DETECTED": "Delay institutional discussion until posture stabilizes",
+    "CONSTITUTIONAL_DRIFT_RISK": "Preserve constitutional lock",
+    "GOVERNANCE_VOLATILITY_ELEVATED": "Stabilize confidence integrity",
+    "REASONING_INSTABILITY_DETECTED": "Reduce reasoning fragmentation",
+    "CONFIDENCE_OSCILLATION_RISK": "Strengthen stability evidence before escalation review",
+    "GOVERNANCE_STABILITY_IMPROVING": "Maintain observation only",
+    "GOVERNANCE_DETERIORATING": "Delay institutional discussion until posture stabilizes",
+}
+
+
+def _gcc_stability_score(
+    hist: Dict[str, Any],
+    tension: Dict[str, Any],
+    coherence: Dict[str, Any],
+    audit: Dict[str, Any],
+    failure: Dict[str, Any],
+) -> float:
+    direction = hist.get("confidence_direction", "stable")
+    stability_text = str(hist.get("posture_stability", ""))
+    transition_n = len(hist.get("transitions") or [])
+    count = int(tension.get("contradiction_count", 0) or 0)
+
+    score = 0.30
+    if "Stable" in stability_text:
+        score += 0.22
+    elif "Limited" in stability_text:
+        score += 0.10
+    if direction in ("stable", "dormant"):
+        score += 0.18
+    elif direction == "improving":
+        score += 0.12
+    elif direction == "mixed":
+        score -= 0.10
+    elif direction == "deteriorating":
+        score -= 0.18
+
+    score += 0.04 * max(0, 3 - min(transition_n, 3))
+    score -= 0.06 * min(count, 4)
+    score += 0.10 * float(coherence.get("logic_score", 0.0) or 0.0)
+    score += 0.08 * float(audit.get("evidence_integrity_score", 0.0) or 0.0)
+
+    if coherence.get("reasoning_chain_status") in ("BROKEN", "FRAGMENTED"):
+        score -= 0.20
+    if failure.get("risk_severity") == "CRITICAL":
+        score -= 0.15
+    elif failure.get("risk_severity") == "HIGH":
+        score -= 0.08
+
+    return min(max(score, 0.0), 1.0)
+
+
+def _gcc_drift_severity(
+    hist: Dict[str, Any],
+    snap: Dict[str, Any],
+    tension: Dict[str, Any],
+    failure: Dict[str, Any],
+    stability_score: float,
+) -> str:
+    transition_n = len(hist.get("transitions") or [])
+    direction = hist.get("confidence_direction", "stable")
+    count = int(tension.get("contradiction_count", 0) or 0)
+    fragility = float(failure.get("fragility_score", 0.0) or 0.0)
+    risk_sev = failure.get("risk_severity", "LOW")
+
+    if (direction == "deteriorating" and count >= 2 and risk_sev in ("CRITICAL", "HIGH")) or (
+        fragility >= 0.85 and transition_n >= 2
+    ):
+        return "CRITICAL"
+    if (
+        snap["constitutional_safe"] is False
+        and snap["constitutional_review_required"]
+        and direction in ("deteriorating", "mixed")
+    ):
+        return "HIGH"
+    if transition_n >= 3 or direction == "mixed" or count >= 2:
+        return "MODERATE" if stability_score >= 0.35 else "HIGH"
+    if transition_n >= 1 or "Limited" in str(hist.get("posture_stability", "")):
+        return "LOW"
+    if stability_score >= 0.55 and transition_n == 0:
+        return "NONE"
+    return "LOW"
+
+
+def _gcc_volatility_level(
+    hist: Dict[str, Any],
+    tension: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> str:
+    transition_n = len(hist.get("transitions") or [])
+    direction = hist.get("confidence_direction", "stable")
+    stability_text = str(hist.get("posture_stability", ""))
+    count = int(tension.get("contradiction_count", 0) or 0)
+
+    if transition_n >= 4 or (direction == "mixed" and "Frequent" in stability_text):
+        return "EXTREME"
+    if transition_n >= 2 or direction == "mixed" or count >= 3:
+        return "HIGH"
+    if (
+        transition_n >= 1
+        or count >= 2
+        or coherence.get("coherence_state") == "FRAGMENTED_REASONING_CHAIN"
+    ):
+        return "MODERATE"
+    if "Limited" in stability_text or direction == "deteriorating":
+        return "LOW"
+    return "NONE"
+
+
+def _gcc_stability_drivers(
+    stability_state: str,
+    snap: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    coherence: Dict[str, Any],
+    audit: Dict[str, Any],
+    failure: Dict[str, Any],
+) -> List[str]:
+    cls = snap["classifications"]
+    drivers: List[str] = []
+
+    if stability_state == "STABLE_GOVERNANCE_POSTURE":
+        drivers.append("Runtime governance remains consistently constrained")
+        drivers.append(f"Human escalation: {cls.get('escalation') or '—'}")
+        drivers.append("Institutional posture has not materially shifted")
+        drivers.append("Runtime mutation lock remains preserved")
+    elif stability_state == "REASONING_INSTABILITY_DETECTED":
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Reasoning chain: {coherence.get('reasoning_chain_status', '—')}")
+    elif stability_state == "CONSTITUTIONAL_DRIFT_RISK":
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(
+            f"Constitutional safe: {'Yes' if snap['constitutional_safe'] is True else 'No'}"
+        )
+        drivers.append(
+            f"Constitutional review required: {'Yes' if snap['constitutional_review_required'] else 'No'}"
+        )
+        drivers.append(f"Failure risk: {failure.get('risk_display', '—')}")
+    elif stability_state == "GOVERNANCE_DETERIORATING":
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Fragility score: {_gcc_fmt_conf(failure.get('fragility_score'))}")
+    elif stability_state == "GOVERNANCE_VOLATILITY_ELEVATED":
+        drivers.append(hist.get("posture_stability", "Posture shifts detected"))
+        drivers.append(f"Transition count: {len(hist.get('transitions') or [])}")
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append(f"Tension: {tension.get('tension_display', '—')}")
+    elif stability_state == "CONFIDENCE_OSCILLATION_RISK":
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append(f"Transition count: {len(hist.get('transitions') or [])}")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(hist.get("posture_stability", "Posture shifts detected"))
+    else:
+        drivers.append(hist.get("posture_stability", "Posture stability assessed"))
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(f"Momentum: {hist.get('institutional_momentum', '—')}")
+        drivers.append(f"Transition count: {len(hist.get('transitions') or [])}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_stability(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    stability_score = _gcc_stability_score(hist, tension, coherence, audit, failure)
+    drift_severity = _gcc_drift_severity(hist, snap, tension, failure, stability_score)
+    volatility = _gcc_volatility_level(hist, tension, coherence)
+
+    direction = hist.get("confidence_direction", "stable")
+    stability_text = str(hist.get("posture_stability", ""))
+    transition_n = len(hist.get("transitions") or [])
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    failure_risk = failure.get("risk_state", "")
+    coherence_state = coherence.get("coherence_state", "")
+    reasoning = coherence.get("reasoning_chain_status", "")
+    audit_state = audit.get("audit_state", "")
+
+    def _match_deteriorating() -> bool:
+        return (
+            direction == "deteriorating"
+            or (
+                direction == "mixed"
+                and contradiction_count >= 2
+                and coherence_state in ("FRAGMENTED_REASONING_CHAIN", "LOW_COHERENCE_GOVERNANCE")
+            )
+            or (
+                integrity.get("integrity_state")
+                == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS"
+                and direction != "improving"
+                and float(coherence.get("logic_score", 0.0) or 0.0) < 0.25
+            )
+        )
+
+    def _match_reasoning_instability() -> bool:
+        return (
+            reasoning in ("BROKEN", "FRAGMENTED")
+            or coherence_state
+            in (
+                "FRAGMENTED_REASONING_CHAIN",
+                "INTERNALLY_INCONSISTENT_GOVERNANCE",
+            )
+            or (
+                audit_state
+                in ("CONFIDENCE_UNSUPPORTED_BY_EVIDENCE", "EVIDENCE_FRAGMENTED", "LOW_AUDITABILITY")
+                and coherence_state != "LOGICALLY_CONSTRAINED_BUT_COHERENT"
+            )
+        )
+
+    def _match_volatility_elevated() -> bool:
+        return (
+            "Frequent" in stability_text
+            or transition_n >= 3
+            or (direction == "mixed" and transition_n >= 1)
+        )
+
+    def _match_constitutional_drift() -> bool:
+        return failure_risk == "CONSTITUTIONAL_DRIFT_RISK" or (
+            snap["constitutional_safe"] is False
+            and (
+                regime.get("regime") == "CONSTITUTIONAL_STRESS"
+                or snap["constitutional_review_required"]
+            )
+        )
+
+    def _match_confidence_oscillation() -> bool:
+        return direction == "mixed" and (
+            transition_n >= 1 or "Limited" in stability_text or "Frequent" in stability_text
+        )
+
+    def _match_institutional_drift() -> bool:
+        return (
+            transition_n >= 1
+            and direction not in ("stable", "dormant")
+            and not _match_volatility_elevated()
+        ) or (
+            hist.get("posture_trend")
+            not in ("Stable Restrictive Posture", "Stable Governance Posture")
+            and transition_n >= 1
+            and direction in ("improving", "mixed")
+        )
+
+    def _match_improving() -> bool:
+        return (
+            direction == "improving"
+            and contradiction_count <= 1
+            and reasoning not in ("BROKEN", "FRAGMENTED")
+            and float(coherence.get("logic_score", 0.0) or 0.0) >= 0.30
+        )
+
+    def _match_stable() -> bool:
+        return (
+            direction in ("stable", "dormant")
+            and "Frequent" not in stability_text
+            and transition_n <= 1
+            and (
+                coherence_state
+                in (
+                    "LOGICALLY_CONSTRAINED_BUT_COHERENT",
+                    "MODERATELY_COHERENT_GOVERNANCE",
+                    "HIGHLY_COHERENT_GOVERNANCE",
+                )
+                or (
+                    snap["max_conf"] <= 0.01
+                    and decision.get("discussability")
+                    in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY")
+                )
+            )
+        )
+
+    matchers = {
+        "GOVERNANCE_DETERIORATING": _match_deteriorating,
+        "REASONING_INSTABILITY_DETECTED": _match_reasoning_instability,
+        "GOVERNANCE_VOLATILITY_ELEVATED": _match_volatility_elevated,
+        "CONSTITUTIONAL_DRIFT_RISK": _match_constitutional_drift,
+        "CONFIDENCE_OSCILLATION_RISK": _match_confidence_oscillation,
+        "INSTITUTIONAL_DRIFT_DETECTED": _match_institutional_drift,
+        "GOVERNANCE_STABILITY_IMPROVING": _match_improving,
+        "STABLE_GOVERNANCE_POSTURE": _match_stable,
+    }
+
+    stability_state = "INSTITUTIONAL_DRIFT_DETECTED"
+    for candidate in _GCC_STABILITY_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            stability_state = candidate
+            break
+
+    drivers = _gcc_stability_drivers(
+        stability_state, snap, hist, regime, tension, integrity, coherence, audit, failure
+    )
+
+    return {
+        "stability_state": stability_state,
+        "stability_display": _GCC_STABILITY_DISPLAY.get(
+            stability_state, stability_state.replace("_", " ").title()
+        ),
+        "drift_severity": drift_severity,
+        "stability_score": stability_score,
+        "volatility_level": volatility,
+        "drivers": drivers,
+        "interpretation": _GCC_STABILITY_INTERPRETATION.get(stability_state, ""),
+        "stability_action": _GCC_STABILITY_ACTION.get(stability_state, "CONTINUE_OBSERVATION"),
+        "containment_strategy": _GCC_STABILITY_CONTAINMENT.get(
+            stability_state, "Maintain observation only"
+        ),
+    }
+
+
+def _gcc_render_stability_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> Dict[str, Any]:
+    stability = _gcc_detect_governance_stability(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+    )
+
+    st.markdown("### Governance Institutional Stability & Drift Intelligence")
+    st.caption(
+        "Institutional durability analysis — whether governance posture is stable, drifting, or volatile. "
+        "**Read-only stability view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Stability State", stability["stability_display"])
+    c2.metric("Drift Severity", stability["drift_severity"])
+    c3.metric("Stability Score", _gcc_fmt_conf(stability["stability_score"]))
+    c4.metric("Volatility Level", stability["volatility_level"])
+
+    state = stability["stability_state"]
+    drift = stability["drift_severity"]
+    if state == "GOVERNANCE_DETERIORATING" or drift == "CRITICAL":
+        st.error(stability["interpretation"])
+    elif state in (
+        "REASONING_INSTABILITY_DETECTED",
+        "GOVERNANCE_VOLATILITY_ELEVATED",
+        "CONSTITUTIONAL_DRIFT_RISK",
+    ) or drift in ("HIGH", "MODERATE"):
+        st.warning(stability["interpretation"])
+    elif state in ("STABLE_GOVERNANCE_POSTURE", "GOVERNANCE_STABILITY_IMPROVING"):
+        st.success(stability["interpretation"])
+    else:
+        st.info(stability["interpretation"])
+
+    st.markdown("**Stability / Drift Drivers**")
+    for driver in stability["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Stability Action", stability["stability_action"])
+    a2.metric("Drift Containment Strategy", stability["containment_strategy"])
+
+    with st.expander("Stability analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{stability['stability_state']}`")
+        st.markdown(f"- **Confidence direction:** `{hist.get('confidence_direction', '—')}`")
+        st.markdown(f"- **Posture stability:** {hist.get('posture_stability', '—')}")
+        st.markdown(f"- **Transition count:** `{len(hist.get('transitions') or [])}`")
+
+    return stability
+
+
+_GCC_RESILIENCE_PRIORITY: Tuple[str, ...] = (
+    "GOVERNANCE_RECOVERY_BLOCKED",
+    "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+    "LOW_GOVERNANCE_RESILIENCE",
+    "RECOVERABLE_FRAGMENTATION",
+    "REVERSIBLE_GOVERNANCE_DETERIORATION",
+    "GOVERNANCE_SELF_STABILIZATION_EMERGING",
+    "MODERATE_GOVERNANCE_RESILIENCE",
+    "HIGH_GOVERNANCE_RESILIENCE",
+)
+
+_GCC_RESILIENCE_DISPLAY: Dict[str, str] = {
+    "HIGH_GOVERNANCE_RESILIENCE": "High Governance Resilience",
+    "MODERATE_GOVERNANCE_RESILIENCE": "Moderate Governance Resilience",
+    "LOW_GOVERNANCE_RESILIENCE": "Low Governance Resilience",
+    "GOVERNANCE_RECOVERY_BLOCKED": "Governance Recovery Blocked",
+    "RECOVERABLE_FRAGMENTATION": "Recoverable Fragmentation",
+    "CONSTITUTIONAL_RECOVERY_UNLIKELY": "Constitutional Recovery Unlikely",
+    "GOVERNANCE_SELF_STABILIZATION_EMERGING": "Governance Self-Stabilization Emerging",
+    "REVERSIBLE_GOVERNANCE_DETERIORATION": "Reversible Governance Deterioration",
+}
+
+_GCC_RESILIENCE_INTERPRETATION: Dict[str, str] = {
+    "HIGH_GOVERNANCE_RESILIENCE": (
+        "Governance resilience is strong. Institutional posture is stable, contradictions are "
+        "low, and recovery capability appears durable."
+    ),
+    "MODERATE_GOVERNANCE_RESILIENCE": (
+        "Governance is partially recoverable. Instability is manageable and institutional "
+        "improvement remains plausible with continued observation."
+    ),
+    "LOW_GOVERNANCE_RESILIENCE": (
+        "Governance resilience remains weak. Fragmented coherence, poor trustworthiness, and "
+        "institutional instability limit recovery confidence."
+    ),
+    "GOVERNANCE_RECOVERY_BLOCKED": (
+        "Governance recovery remains blocked by constitutional pressure, weak evidence integrity, "
+        "and fragmented institutional reasoning."
+    ),
+    "RECOVERABLE_FRAGMENTATION": (
+        "Governance fragmentation is present but appears recoverable. Contradictions remain "
+        "manageable and coherence repair is plausible."
+    ),
+    "CONSTITUTIONAL_RECOVERY_UNLIKELY": (
+        "Constitutional constraints dominate recovery outlook. Governance remains constrained "
+        "until constitutional pressure subsides."
+    ),
+    "GOVERNANCE_SELF_STABILIZATION_EMERGING": (
+        "Governance self-stabilization signals are emerging. Coherence and stability indicators "
+        "suggest institutional recovery may be underway."
+    ),
+    "REVERSIBLE_GOVERNANCE_DETERIORATION": (
+        "Governance deterioration appears reversible. Institutional signals suggest stabilization "
+        "may become possible if contradictions decline."
+    ),
+}
+
+_GCC_RESILIENCE_ACTION: Dict[str, str] = {
+    "HIGH_GOVERNANCE_RESILIENCE": "CONTINUE_OBSERVATION",
+    "MODERATE_GOVERNANCE_RESILIENCE": "MONITOR_RECOVERY_SIGNALS",
+    "LOW_GOVERNANCE_RESILIENCE": "IMPROVE_GOVERNANCE_COHERENCE",
+    "GOVERNANCE_RECOVERY_BLOCKED": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "RECOVERABLE_FRAGMENTATION": "REDUCE_FRAGMENTATION",
+    "CONSTITUTIONAL_RECOVERY_UNLIKELY": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "GOVERNANCE_SELF_STABILIZATION_EMERGING": "CONTINUE_OBSERVATION",
+    "REVERSIBLE_GOVERNANCE_DETERIORATION": "MONITOR_RECOVERY_SIGNALS",
+}
+
+_GCC_RESILIENCE_PATHWAY: Dict[str, str] = {
+    "HIGH_GOVERNANCE_RESILIENCE": "Stabilize institutional posture",
+    "MODERATE_GOVERNANCE_RESILIENCE": "Monitor recovery signals",
+    "LOW_GOVERNANCE_RESILIENCE": "Improve governance coherence",
+    "GOVERNANCE_RECOVERY_BLOCKED": "Delay escalation until stability improves",
+    "RECOVERABLE_FRAGMENTATION": "Reduce contradictions",
+    "CONSTITUTIONAL_RECOVERY_UNLIKELY": "Delay escalation until stability improves",
+    "GOVERNANCE_SELF_STABILIZATION_EMERGING": "Stabilize institutional posture",
+    "REVERSIBLE_GOVERNANCE_DETERIORATION": "Strengthen confidence integrity",
+}
+
+
+def _gcc_recovery_probability(
+    resilience_state: str,
+    stability: Dict[str, Any],
+    coherence: Dict[str, Any],
+    audit: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> str:
+    if resilience_state in ("GOVERNANCE_RECOVERY_BLOCKED", "CONSTITUTIONAL_RECOVERY_UNLIKELY"):
+        return "VERY_LOW"
+    if resilience_state == "LOW_GOVERNANCE_RESILIENCE":
+        return "LOW"
+    if resilience_state in ("RECOVERABLE_FRAGMENTATION", "REVERSIBLE_GOVERNANCE_DETERIORATION"):
+        return "MODERATE"
+    if resilience_state in (
+        "GOVERNANCE_SELF_STABILIZATION_EMERGING",
+        "MODERATE_GOVERNANCE_RESILIENCE",
+    ):
+        return "HIGH"
+    if resilience_state == "HIGH_GOVERNANCE_RESILIENCE":
+        return "VERY_HIGH"
+
+    score = (
+        float(stability.get("stability_score", 0.0) or 0.0) * 0.35
+        + float(coherence.get("logic_score", 0.0) or 0.0) * 0.25
+        + float(audit.get("evidence_integrity_score", 0.0) or 0.0) * 0.20
+        + float(decision.get("governance_maturity_score", 0.0) or 0.0) * 0.20
+    )
+    if score < 0.20:
+        return "VERY_LOW"
+    if score < 0.35:
+        return "LOW"
+    if score < 0.55:
+        return "MODERATE"
+    if score < 0.75:
+        return "HIGH"
+    return "VERY_HIGH"
+
+
+def _gcc_recovery_severity(
+    resilience_state: str,
+    failure: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> str:
+    if resilience_state == "GOVERNANCE_RECOVERY_BLOCKED":
+        return "CRITICAL"
+    if resilience_state in ("CONSTITUTIONAL_RECOVERY_UNLIKELY", "LOW_GOVERNANCE_RESILIENCE"):
+        return "SEVERE"
+    if resilience_state == "REVERSIBLE_GOVERNANCE_DETERIORATION":
+        return "MATERIAL"
+    if resilience_state == "RECOVERABLE_FRAGMENTATION":
+        return "MODERATE"
+    if (
+        failure.get("risk_severity") == "CRITICAL"
+        and coherence.get("reasoning_chain_status") == "BROKEN"
+    ):
+        return "CRITICAL"
+    if resilience_state in (
+        "MODERATE_GOVERNANCE_RESILIENCE",
+        "GOVERNANCE_SELF_STABILIZATION_EMERGING",
+    ):
+        return "MINOR"
+    return "MODERATE"
+
+
+def _gcc_self_stabilization_potential(
+    hist: Dict[str, Any],
+    stability: Dict[str, Any],
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    resilience_state: str,
+) -> str:
+    if resilience_state in ("GOVERNANCE_RECOVERY_BLOCKED", "CONSTITUTIONAL_RECOVERY_UNLIKELY"):
+        return "NONE"
+    direction = hist.get("confidence_direction", "stable")
+    count = int(tension.get("contradiction_count", 0) or 0)
+
+    if resilience_state == "GOVERNANCE_SELF_STABILIZATION_EMERGING":
+        return "HIGH"
+    if resilience_state == "HIGH_GOVERNANCE_RESILIENCE":
+        return "HIGH"
+    if direction == "improving" and count <= 1:
+        return "MODERATE"
+    if resilience_state in ("RECOVERABLE_FRAGMENTATION", "REVERSIBLE_GOVERNANCE_DETERIORATION"):
+        return "MODERATE"
+    if float(stability.get("stability_score", 0.0) or 0.0) >= 0.50 and count <= 1:
+        return "MODERATE"
+    if resilience_state == "LOW_GOVERNANCE_RESILIENCE":
+        return "LOW"
+    return "LOW"
+
+
+def _gcc_recovery_drivers(
+    resilience_state: str,
+    snap: Dict[str, Any],
+    regime: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    coherence: Dict[str, Any],
+    audit: Dict[str, Any],
+    stability: Dict[str, Any],
+    decision: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> List[str]:
+    drivers: List[str] = []
+
+    if resilience_state == "GOVERNANCE_RECOVERY_BLOCKED":
+        drivers.append(f"Constitutional stress: {regime.get('regime_display', '—')}")
+        drivers.append(f"Confidence integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(
+            f"Institutional maturity insufficient ({_gcc_fmt_conf(decision.get('governance_maturity_score'))})"
+        )
+    elif resilience_state == "RECOVERABLE_FRAGMENTATION":
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)} (manageable)")
+        drivers.append(f"Stability score: {_gcc_fmt_conf(stability.get('stability_score'))}")
+        drivers.append("Coherence repair plausible")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+    elif resilience_state == "GOVERNANCE_SELF_STABILIZATION_EMERGING":
+        drivers.append(f"Consensus: {coherence.get('cross_section_agreement', '—')}")
+        drivers.append(f"Drift severity: {stability.get('drift_severity', '—')}")
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append(f"Stability: {stability.get('stability_display', '—')}")
+    elif resilience_state == "CONSTITUTIONAL_RECOVERY_UNLIKELY":
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(
+            f"Constitutional safe: {'Yes' if snap['constitutional_safe'] is True else 'No'}"
+        )
+        drivers.append(f"Stability state: {stability.get('stability_display', '—')}")
+        drivers.append("Constitutional posture dominates recovery outlook")
+    elif resilience_state == "REVERSIBLE_GOVERNANCE_DETERIORATION":
+        drivers.append(f"Stability state: {stability.get('stability_display', '—')}")
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append("Recovery signals partially visible")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+    else:
+        drivers.append(f"Stability: {stability.get('stability_display', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Fragility: {_gcc_fmt_conf(stability.get('stability_score'))}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_resilience(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+
+    stability_state = stability.get("stability_state", "")
+    coherence_state = coherence.get("coherence_state", "")
+    reasoning = coherence.get("reasoning_chain_status", "")
+    audit_state = audit.get("audit_state", "")
+    failure_risk = failure.get("risk_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    direction = hist.get("confidence_direction", "stable")
+    stability_score = float(stability.get("stability_score", 0.0) or 0.0)
+    logic_score = float(coherence.get("logic_score", 0.0) or 0.0)
+    evidence_score = float(audit.get("evidence_integrity_score", 0.0) or 0.0)
+    drift_sev = stability.get("drift_severity", "LOW")
+
+    def _match_recovery_blocked() -> bool:
+        return (
+            stability_state in ("GOVERNANCE_DETERIORATING", "REASONING_INSTABILITY_DETECTED")
+            and (
+                reasoning in ("BROKEN", "FRAGMENTED")
+                or audit_state
+                in (
+                    "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+                    "EVIDENCE_FRAGMENTED",
+                    "LOW_AUDITABILITY",
+                )
+            )
+            and (
+                failure.get("risk_severity") in ("CRITICAL", "HIGH")
+                or drift_sev in ("CRITICAL", "HIGH")
+            )
+        )
+
+    def _match_constitutional_unlikely() -> bool:
+        return (
+            stability_state == "CONSTITUTIONAL_DRIFT_RISK"
+            or failure_risk == "CONSTITUTIONAL_DRIFT_RISK"
+            or (
+                snap["constitutional_safe"] is False
+                and regime.get("regime") == "CONSTITUTIONAL_STRESS"
+                and logic_score < 0.35
+            )
+        )
+
+    def _match_low_resilience() -> bool:
+        return (
+            logic_score < 0.25
+            or stability_score < 0.30
+            or evidence_score < 0.15
+            or (
+                coherence_state in ("FRAGMENTED_REASONING_CHAIN", "LOW_COHERENCE_GOVERNANCE")
+                and float(failure.get("fragility_score", 0.0) or 0.0) >= 0.70
+            )
+        )
+
+    def _match_recoverable_fragmentation() -> bool:
+        return (
+            consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            and contradiction_count <= 2
+            and reasoning != "BROKEN"
+            and not _match_recovery_blocked()
+        )
+
+    def _match_reversible_deterioration() -> bool:
+        return (
+            stability_state == "GOVERNANCE_DETERIORATING"
+            and direction in ("improving", "stable", "mixed")
+            and contradiction_count <= 2
+            and logic_score >= 0.15
+        )
+
+    def _match_self_stabilization() -> bool:
+        return stability_state == "GOVERNANCE_STABILITY_IMPROVING" or (
+            direction == "improving"
+            and contradiction_count <= 1
+            and reasoning not in ("BROKEN", "FRAGMENTED")
+        )
+
+    def _match_moderate_resilience() -> bool:
+        return (
+            stability_score >= 0.30
+            and logic_score >= 0.25
+            and evidence_score >= 0.15
+            and drift_sev in ("NONE", "LOW", "MODERATE")
+        )
+
+    def _match_high_resilience() -> bool:
+        return (
+            stability_state == "STABLE_GOVERNANCE_POSTURE"
+            and stability_score >= 0.55
+            and contradiction_count == 0
+            and coherence_state
+            in (
+                "HIGHLY_COHERENT_GOVERNANCE",
+                "MODERATELY_COHERENT_GOVERNANCE",
+                "LOGICALLY_CONSTRAINED_BUT_COHERENT",
+            )
+            and failure_risk == "GOVERNANCE_STABLE"
+        )
+
+    matchers = {
+        "GOVERNANCE_RECOVERY_BLOCKED": _match_recovery_blocked,
+        "CONSTITUTIONAL_RECOVERY_UNLIKELY": _match_constitutional_unlikely,
+        "LOW_GOVERNANCE_RESILIENCE": _match_low_resilience,
+        "RECOVERABLE_FRAGMENTATION": _match_recoverable_fragmentation,
+        "REVERSIBLE_GOVERNANCE_DETERIORATION": _match_reversible_deterioration,
+        "GOVERNANCE_SELF_STABILIZATION_EMERGING": _match_self_stabilization,
+        "MODERATE_GOVERNANCE_RESILIENCE": _match_moderate_resilience,
+        "HIGH_GOVERNANCE_RESILIENCE": _match_high_resilience,
+    }
+
+    resilience_state = "MODERATE_GOVERNANCE_RESILIENCE"
+    for candidate in _GCC_RESILIENCE_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            resilience_state = candidate
+            break
+
+    recovery_prob = _gcc_recovery_probability(
+        resilience_state, stability, coherence, audit, decision
+    )
+    recovery_severity = _gcc_recovery_severity(resilience_state, failure, coherence)
+    self_stab = _gcc_self_stabilization_potential(
+        hist, stability, coherence, tension, resilience_state
+    )
+    drivers = _gcc_recovery_drivers(
+        resilience_state,
+        snap,
+        regime,
+        tension,
+        integrity,
+        coherence,
+        audit,
+        stability,
+        decision,
+        hist,
+    )
+
+    return {
+        "resilience_state": resilience_state,
+        "resilience_display": _GCC_RESILIENCE_DISPLAY.get(
+            resilience_state, resilience_state.replace("_", " ").title()
+        ),
+        "recovery_probability": recovery_prob,
+        "recovery_severity": recovery_severity,
+        "self_stabilization_potential": self_stab,
+        "drivers": drivers,
+        "interpretation": _GCC_RESILIENCE_INTERPRETATION.get(resilience_state, ""),
+        "recovery_action": _GCC_RESILIENCE_ACTION.get(resilience_state, "CONTINUE_OBSERVATION"),
+        "recovery_pathway": _GCC_RESILIENCE_PATHWAY.get(
+            resilience_state, "Monitor recovery signals"
+        ),
+    }
+
+
+def _gcc_render_resilience_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+) -> Dict[str, Any]:
+    resilience = _gcc_detect_governance_resilience(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+    )
+
+    st.markdown("### Governance Institutional Resilience & Recovery Intelligence")
+    st.caption(
+        "Recoverability analysis — whether governance can self-stabilize and what recovery path exists. "
+        "**Read-only resilience view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Governance Resilience", resilience["resilience_display"])
+    c2.metric("Recovery Probability", resilience["recovery_probability"])
+    c3.metric("Recovery Severity", resilience["recovery_severity"])
+    c4.metric("Self-Stabilization Potential", resilience["self_stabilization_potential"])
+
+    state = resilience["resilience_state"]
+    severity = resilience["recovery_severity"]
+    if state == "GOVERNANCE_RECOVERY_BLOCKED" or severity == "CRITICAL":
+        st.error(resilience["interpretation"])
+    elif state in (
+        "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+        "LOW_GOVERNANCE_RESILIENCE",
+    ) or severity in ("SEVERE", "MATERIAL"):
+        st.warning(resilience["interpretation"])
+    elif state in ("HIGH_GOVERNANCE_RESILIENCE", "GOVERNANCE_SELF_STABILIZATION_EMERGING"):
+        st.success(resilience["interpretation"])
+    else:
+        st.info(resilience["interpretation"])
+
+    st.markdown("**Recovery Drivers**")
+    for driver in resilience["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Recovery Action", resilience["recovery_action"])
+    a2.metric("Recovery Pathway", resilience["recovery_pathway"])
+
+    with st.expander("Resilience analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{resilience['resilience_state']}`")
+        st.markdown(f"- **Stability state:** `{stability.get('stability_state', '—')}`")
+        st.markdown(f"- **Coherence state:** `{coherence.get('coherence_state', '—')}`")
+        st.markdown(f"- **Drift severity:** `{stability.get('drift_severity', '—')}`")
+
+    return resilience
+
+
+_GCC_IMPROVEMENT_PRIORITY: Tuple[str, ...] = (
+    "IMPROVEMENT_TRAJECTORY_BLOCKED",
+    "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP",
+    "GOVERNANCE_LEARNING_STALLED",
+    "INSTITUTIONAL_IMPROVEMENT_POSSIBLE",
+    "GOVERNANCE_ADAPTATION_EMERGING",
+    "CONTRADICTIONS_DECLINING",
+    "GOVERNANCE_MATURITY_IMPROVING",
+    "GOVERNANCE_EVOLUTION_STRENGTHENING",
+)
+
+_GCC_IMPROVEMENT_DISPLAY: Dict[str, str] = {
+    "GOVERNANCE_LEARNING_STALLED": "Governance Learning Stalled",
+    "INSTITUTIONAL_IMPROVEMENT_POSSIBLE": "Institutional Improvement Possible",
+    "GOVERNANCE_ADAPTATION_EMERGING": "Governance Adaptation Emerging",
+    "GOVERNANCE_MATURITY_IMPROVING": "Governance Maturity Improving",
+    "IMPROVEMENT_TRAJECTORY_BLOCKED": "Improvement Trajectory Blocked",
+    "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP": "Governance Trapped in Low-Quality Loop",
+    "CONTRADICTIONS_DECLINING": "Contradictions Declining",
+    "GOVERNANCE_EVOLUTION_STRENGTHENING": "Governance Evolution Strengthening",
+}
+
+_GCC_IMPROVEMENT_INTERPRETATION: Dict[str, str] = {
+    "GOVERNANCE_LEARNING_STALLED": (
+        "Governance institutional learning remains limited. Persistent contradictions, weak "
+        "coherence, and poor confidence integrity reduce evidence of meaningful improvement."
+    ),
+    "INSTITUTIONAL_IMPROVEMENT_POSSIBLE": (
+        "Governance remains weak but improvement is plausible. Stabilization signals exist and "
+        "contradictions appear manageable with continued institutional observation."
+    ),
+    "GOVERNANCE_ADAPTATION_EMERGING": (
+        "Governance adaptation signals are emerging. Coherence and trustworthiness indicators "
+        "suggest constructive institutional adjustment may be underway."
+    ),
+    "GOVERNANCE_MATURITY_IMPROVING": (
+        "Governance maturity appears to be progressing. Stability and readiness trajectory "
+        "signals suggest institutional strengthening over time."
+    ),
+    "IMPROVEMENT_TRAJECTORY_BLOCKED": (
+        "Governance improvement remains constrained by constitutional pressure and institutional "
+        "instability. Recovery remains insufficient to support material learning."
+    ),
+    "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP": (
+        "Governance appears trapped in a low-quality loop. Repeated contradictions and stagnant "
+        "maturity limit evidence of constructive institutional progression."
+    ),
+    "CONTRADICTIONS_DECLINING": (
+        "Governance is becoming cleaner institutionally. Fragmentation is reducing and coherence "
+        "indicators suggest improving institutional quality."
+    ),
+    "GOVERNANCE_EVOLUTION_STRENGTHENING": (
+        "Governance shows signs of institutional evolution. Stability, coherence, trustworthiness, "
+        "and maturity are improving together."
+    ),
+}
+
+_GCC_IMPROVEMENT_ACTION: Dict[str, str] = {
+    "GOVERNANCE_LEARNING_STALLED": "IMPROVE_GOVERNANCE_COHERENCE",
+    "INSTITUTIONAL_IMPROVEMENT_POSSIBLE": "MONITOR_IMPROVEMENT_SIGNALS",
+    "GOVERNANCE_ADAPTATION_EMERGING": "CONTINUE_OBSERVATION",
+    "GOVERNANCE_MATURITY_IMPROVING": "STRENGTHEN_GOVERNANCE_MATURITY",
+    "IMPROVEMENT_TRAJECTORY_BLOCKED": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP": "REDUCE_CONTRADICTIONS",
+    "CONTRADICTIONS_DECLINING": "CONTINUE_OBSERVATION",
+    "GOVERNANCE_EVOLUTION_STRENGTHENING": "CONTINUE_OBSERVATION",
+}
+
+_GCC_IMPROVEMENT_PATHWAY: Dict[str, str] = {
+    "GOVERNANCE_LEARNING_STALLED": "Improve coherence",
+    "INSTITUTIONAL_IMPROVEMENT_POSSIBLE": "Stabilize governance posture",
+    "GOVERNANCE_ADAPTATION_EMERGING": "Monitor improvement signals",
+    "GOVERNANCE_MATURITY_IMPROVING": "Improve institutional maturity",
+    "IMPROVEMENT_TRAJECTORY_BLOCKED": "Delay escalation until governance improves",
+    "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP": "Reduce contradictions",
+    "CONTRADICTIONS_DECLINING": "Strengthen evidence integrity",
+    "GOVERNANCE_EVOLUTION_STRENGTHENING": "Stabilize governance posture",
+}
+
+
+def _gcc_improvement_probability(
+    improvement_state: str,
+    resilience: Dict[str, Any],
+    stability: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> str:
+    recovery_prob = resilience.get("recovery_probability", "LOW")
+    prob_map = {
+        "VERY_LOW": "VERY_LOW",
+        "LOW": "LOW",
+        "MODERATE": "MODERATE",
+        "HIGH": "HIGH",
+        "VERY_HIGH": "VERY_HIGH",
+    }
+    if improvement_state in (
+        "IMPROVEMENT_TRAJECTORY_BLOCKED",
+        "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP",
+    ):
+        return "VERY_LOW"
+    if improvement_state == "GOVERNANCE_LEARNING_STALLED":
+        return "LOW"
+    if improvement_state == "INSTITUTIONAL_IMPROVEMENT_POSSIBLE":
+        return "MODERATE"
+    if improvement_state in ("GOVERNANCE_ADAPTATION_EMERGING", "CONTRADICTIONS_DECLINING"):
+        return "HIGH"
+    if improvement_state in ("GOVERNANCE_MATURITY_IMPROVING", "GOVERNANCE_EVOLUTION_STRENGTHENING"):
+        return "VERY_HIGH"
+    base = prob_map.get(recovery_prob, "LOW")
+    if (
+        float(stability.get("stability_score", 0.0) or 0.0) >= 0.50
+        and float(coherence.get("logic_score", 0.0) or 0.0) >= 0.40
+    ):
+        return "HIGH" if base in ("LOW", "MODERATE") else base
+    return base
+
+
+def _gcc_adaptation_quality(
+    improvement_state: str,
+    hist: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> str:
+    direction = hist.get("confidence_direction", "stable")
+    if improvement_state in (
+        "IMPROVEMENT_TRAJECTORY_BLOCKED",
+        "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP",
+    ):
+        return "NONE"
+    if improvement_state == "GOVERNANCE_LEARNING_STALLED":
+        return "POOR"
+    if improvement_state == "INSTITUTIONAL_IMPROVEMENT_POSSIBLE":
+        return "LIMITED"
+    if improvement_state in ("GOVERNANCE_ADAPTATION_EMERGING", "CONTRADICTIONS_DECLINING"):
+        return "MODERATE"
+    if improvement_state in ("GOVERNANCE_MATURITY_IMPROVING", "GOVERNANCE_EVOLUTION_STRENGTHENING"):
+        return "STRONG"
+    if direction == "improving":
+        return "MODERATE"
+    return "LIMITED"
+
+
+def _gcc_improvement_velocity(
+    improvement_state: str,
+    hist: Dict[str, Any],
+    stability: Dict[str, Any],
+) -> str:
+    direction = hist.get("confidence_direction", "stable")
+    if improvement_state in (
+        "IMPROVEMENT_TRAJECTORY_BLOCKED",
+        "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP",
+        "GOVERNANCE_LEARNING_STALLED",
+    ):
+        return "NONE"
+    if improvement_state == "GOVERNANCE_EVOLUTION_STRENGTHENING":
+        return "FAST"
+    if improvement_state in ("GOVERNANCE_MATURITY_IMPROVING", "CONTRADICTIONS_DECLINING"):
+        return "MODERATE"
+    if improvement_state == "GOVERNANCE_ADAPTATION_EMERGING" or direction == "improving":
+        return "SLOW"
+    if stability.get("stability_state") == "GOVERNANCE_STABILITY_IMPROVING":
+        return "SLOW"
+    return "NONE"
+
+
+def _gcc_improvement_drivers(
+    improvement_state: str,
+    hist: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    coherence: Dict[str, Any],
+    resilience: Dict[str, Any],
+    stability: Dict[str, Any],
+    decision: Dict[str, Any],
+    regime: Dict[str, Any],
+) -> List[str]:
+    drivers: List[str] = []
+
+    if improvement_state == "GOVERNANCE_LEARNING_STALLED":
+        drivers.append(
+            f"Contradictions remain persistent ({tension.get('contradiction_count', 0)})"
+        )
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Confidence integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(
+            f"Institutional maturity stagnant ({_gcc_fmt_conf(decision.get('governance_maturity_score'))})"
+        )
+    elif improvement_state == "IMPROVEMENT_TRAJECTORY_BLOCKED":
+        drivers.append(f"Constitutional pressure: {regime.get('regime_display', '—')}")
+        drivers.append(f"Resilience: {resilience.get('resilience_display', '—')}")
+        drivers.append(f"Recovery probability: {resilience.get('recovery_probability', '—')}")
+        drivers.append(f"Drift containment: {stability.get('containment_strategy', '—')}")
+    elif improvement_state == "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP":
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Stability: {stability.get('stability_display', '—')}")
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append("No meaningful progression detected")
+    elif improvement_state == "GOVERNANCE_MATURITY_IMPROVING":
+        drivers.append(f"Stability: {stability.get('stability_display', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Consensus alignment: {coherence.get('cross_section_agreement', '—')}")
+        drivers.append(
+            f"Maturity score: {_gcc_fmt_conf(decision.get('governance_maturity_score'))}"
+        )
+    elif improvement_state in ("GOVERNANCE_ADAPTATION_EMERGING", "CONTRADICTIONS_DECLINING"):
+        drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Self-stabilization: {resilience.get('self_stabilization_potential', '—')}")
+    else:
+        drivers.append(f"Resilience: {resilience.get('resilience_display', '—')}")
+        drivers.append(f"Recovery probability: {resilience.get('recovery_probability', '—')}")
+        drivers.append(f"Stability score: {_gcc_fmt_conf(stability.get('stability_score'))}")
+        drivers.append(f"Institutional momentum: {hist.get('institutional_momentum', '—')}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_improvement(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+) -> Dict[str, Any]:
+    direction = hist.get("confidence_direction", "stable")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    logic_score = float(coherence.get("logic_score", 0.0) or 0.0)
+    resilience_state = resilience.get("resilience_state", "")
+    stability_state = stability.get("stability_state", "")
+    coherence_state = coherence.get("coherence_state", "")
+
+    def _match_blocked() -> bool:
+        return (
+            resilience_state in ("GOVERNANCE_RECOVERY_BLOCKED", "CONSTITUTIONAL_RECOVERY_UNLIKELY")
+            or stability_state in ("CONSTITUTIONAL_DRIFT_RISK", "GOVERNANCE_DETERIORATING")
+            or resilience.get("recovery_probability") == "VERY_LOW"
+        )
+
+    def _match_low_quality_loop() -> bool:
+        return (
+            contradiction_count >= 2
+            and direction in ("dormant", "mixed", "deteriorating")
+            and maturity < 0.20
+            and coherence_state in ("FRAGMENTED_REASONING_CHAIN", "LOW_COHERENCE_GOVERNANCE")
+            and not hist.get("has_transitions")
+        )
+
+    def _match_learning_stalled() -> bool:
+        return (
+            contradiction_count >= 2
+            and logic_score < 0.30
+            and maturity < 0.25
+            and integrity.get("integrity_state")
+            in (
+                "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+                "GOVERNANCE_OVERCONFIDENT",
+            )
+        )
+
+    def _match_improvement_possible() -> bool:
+        return resilience_state in (
+            "RECOVERABLE_FRAGMENTATION",
+            "REVERSIBLE_GOVERNANCE_DETERIORATION",
+            "MODERATE_GOVERNANCE_RESILIENCE",
+        )
+
+    def _match_adaptation_emerging() -> bool:
+        return resilience_state == "GOVERNANCE_SELF_STABILIZATION_EMERGING" or (
+            direction == "improving"
+            and contradiction_count <= 1
+            and coherence.get("reasoning_chain_status") not in ("BROKEN",)
+        )
+
+    def _match_contradictions_declining() -> bool:
+        return (
+            contradiction_count <= 1
+            and direction in ("improving", "stable")
+            and coherence_state
+            not in ("FRAGMENTED_REASONING_CHAIN", "INTERNALLY_INCONSISTENT_GOVERNANCE")
+            and stability_state in ("GOVERNANCE_STABILITY_IMPROVING", "STABLE_GOVERNANCE_POSTURE")
+        )
+
+    def _match_maturity_improving() -> bool:
+        return (
+            direction == "improving"
+            and maturity >= 0.18
+            and stability_state in ("GOVERNANCE_STABILITY_IMPROVING", "STABLE_GOVERNANCE_POSTURE")
+            and logic_score >= 0.30
+        )
+
+    def _match_evolution_strengthening() -> bool:
+        return (
+            resilience_state == "HIGH_GOVERNANCE_RESILIENCE"
+            and stability_state == "STABLE_GOVERNANCE_POSTURE"
+            and direction in ("improving", "stable")
+            and contradiction_count == 0
+            and logic_score >= 0.55
+            and float(stability.get("stability_score", 0.0) or 0.0) >= 0.55
+        )
+
+    matchers = {
+        "IMPROVEMENT_TRAJECTORY_BLOCKED": _match_blocked,
+        "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP": _match_low_quality_loop,
+        "GOVERNANCE_LEARNING_STALLED": _match_learning_stalled,
+        "INSTITUTIONAL_IMPROVEMENT_POSSIBLE": _match_improvement_possible,
+        "GOVERNANCE_ADAPTATION_EMERGING": _match_adaptation_emerging,
+        "CONTRADICTIONS_DECLINING": _match_contradictions_declining,
+        "GOVERNANCE_MATURITY_IMPROVING": _match_maturity_improving,
+        "GOVERNANCE_EVOLUTION_STRENGTHENING": _match_evolution_strengthening,
+    }
+
+    improvement_state = "GOVERNANCE_LEARNING_STALLED"
+    for candidate in _GCC_IMPROVEMENT_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            improvement_state = candidate
+            break
+
+    improvement_prob = _gcc_improvement_probability(
+        improvement_state, resilience, stability, coherence
+    )
+    adaptation = _gcc_adaptation_quality(improvement_state, hist, coherence)
+    velocity = _gcc_improvement_velocity(improvement_state, hist, stability)
+    drivers = _gcc_improvement_drivers(
+        improvement_state,
+        hist,
+        tension,
+        integrity,
+        coherence,
+        resilience,
+        stability,
+        decision,
+        regime,
+    )
+
+    return {
+        "improvement_state": improvement_state,
+        "improvement_display": _GCC_IMPROVEMENT_DISPLAY.get(
+            improvement_state, improvement_state.replace("_", " ").title()
+        ),
+        "improvement_probability": improvement_prob,
+        "adaptation_quality": adaptation,
+        "improvement_velocity": velocity,
+        "drivers": drivers,
+        "interpretation": _GCC_IMPROVEMENT_INTERPRETATION.get(improvement_state, ""),
+        "improvement_action": _GCC_IMPROVEMENT_ACTION.get(
+            improvement_state, "CONTINUE_OBSERVATION"
+        ),
+        "improvement_pathway": _GCC_IMPROVEMENT_PATHWAY.get(
+            improvement_state, "Monitor improvement signals"
+        ),
+    }
+
+
+def _gcc_render_improvement_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+) -> Dict[str, Any]:
+    improvement = _gcc_detect_governance_improvement(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+    )
+
+    st.markdown("### Governance Institutional Learning & Improvement Intelligence")
+    st.caption(
+        "Institutional learning analysis — whether governance is improving and adapting constructively. "
+        "**Read-only improvement view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Learning / Improvement State", improvement["improvement_display"])
+    c2.metric("Improvement Probability", improvement["improvement_probability"])
+    c3.metric("Adaptation Quality", improvement["adaptation_quality"])
+    c4.metric("Improvement Velocity", improvement["improvement_velocity"])
+
+    state = improvement["improvement_state"]
+    if state in ("IMPROVEMENT_TRAJECTORY_BLOCKED", "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP"):
+        st.error(improvement["interpretation"])
+    elif state == "GOVERNANCE_LEARNING_STALLED":
+        st.warning(improvement["interpretation"])
+    elif state in ("GOVERNANCE_EVOLUTION_STRENGTHENING", "GOVERNANCE_MATURITY_IMPROVING"):
+        st.success(improvement["interpretation"])
+    else:
+        st.info(improvement["interpretation"])
+
+    st.markdown("**Improvement Drivers**")
+    for driver in improvement["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Improvement Action", improvement["improvement_action"])
+    a2.metric("Institutional Improvement Pathway", improvement["improvement_pathway"])
+
+    with st.expander("Improvement analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{improvement['improvement_state']}`")
+        st.markdown(f"- **Resilience state:** `{resilience.get('resilience_state', '—')}`")
+        st.markdown(f"- **Confidence direction:** `{hist.get('confidence_direction', '—')}`")
+        st.markdown(
+            f"- **Maturity score:** `{_gcc_fmt_conf(decision.get('governance_maturity_score'))}`"
+        )
+
+    return improvement
+
+
+_GCC_FAILURE_SCENARIO_PRIORITY: Tuple[str, ...] = (
+    "SYSTEMIC_GOVERNANCE_FAILURE_RISK",
+    "CONSTITUTIONAL_BREAKDOWN_RISK",
+    "GOVERNANCE_DECISION_PARALYSIS",
+    "TRUSTWORTHINESS_COLLAPSE_RISK",
+    "AUDITABILITY_FAILURE_RISK",
+    "FRAGMENTATION_RISK_ELEVATED",
+    "RECOVERABLE_GOVERNANCE_STRESS",
+    "GOVERNANCE_FAILURE_CONTAINED",
+)
+
+_GCC_FAILURE_SCENARIO_DISPLAY: Dict[str, str] = {
+    "SYSTEMIC_GOVERNANCE_FAILURE_RISK": "Systemic Governance Failure Risk",
+    "CONSTITUTIONAL_BREAKDOWN_RISK": "Constitutional Breakdown Risk",
+    "GOVERNANCE_DECISION_PARALYSIS": "Governance Decision Paralysis",
+    "TRUSTWORTHINESS_COLLAPSE_RISK": "Trustworthiness Collapse Risk",
+    "AUDITABILITY_FAILURE_RISK": "Auditability Failure Risk",
+    "FRAGMENTATION_RISK_ELEVATED": "Fragmentation Risk Elevated",
+    "RECOVERABLE_GOVERNANCE_STRESS": "Recoverable Governance Stress",
+    "GOVERNANCE_FAILURE_CONTAINED": "Governance Failure Contained",
+}
+
+_GCC_FAILURE_SCENARIO_INTERPRETATION: Dict[str, str] = {
+    "SYSTEMIC_GOVERNANCE_FAILURE_RISK": (
+        "Governance failure risk appears systemic. Constitutional pressure, fragmented coherence, "
+        "and deteriorating institutional trustworthiness materially constrain governance reliability."
+    ),
+    "CONSTITUTIONAL_BREAKDOWN_RISK": (
+        "Constitutional breakdown risk is elevated. Governance posture remains unstable under "
+        "persistent constitutional pressure and constrained institutional recovery."
+    ),
+    "GOVERNANCE_DECISION_PARALYSIS": (
+        "Governance decision paralysis risk is present. Persistent contradictions and weak consensus "
+        "block institutional reasoning and committee-level decision progress."
+    ),
+    "TRUSTWORTHINESS_COLLAPSE_RISK": (
+        "Trustworthiness collapse risk is elevated. Confidence integrity is poor and governance "
+        "evidence no longer sufficiently supports institutional conclusions."
+    ),
+    "AUDITABILITY_FAILURE_RISK": (
+        "Auditability failure risk is present. Governance explanations remain weak and institutional "
+        "transparency is deteriorating."
+    ),
+    "FRAGMENTATION_RISK_ELEVATED": (
+        "Fragmentation risk is elevated. Contradictions are manageable but growing, and coherence "
+        "indicators continue to weaken."
+    ),
+    "RECOVERABLE_GOVERNANCE_STRESS": (
+        "Governance remains under institutional stress, but failure appears containable. "
+        "Stabilization pathways remain plausible if coherence improves and contradictions decline."
+    ),
+    "GOVERNANCE_FAILURE_CONTAINED": (
+        "Governance failure risk currently appears contained. Institutional safeguards, auditability, "
+        "and governance coherence remain sufficiently stable."
+    ),
+}
+
+_GCC_FAILURE_SCENARIO_ACTION: Dict[str, str] = {
+    "SYSTEMIC_GOVERNANCE_FAILURE_RISK": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "CONSTITUTIONAL_BREAKDOWN_RISK": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "GOVERNANCE_DECISION_PARALYSIS": "STABILIZE_REASONING_CHAIN",
+    "TRUSTWORTHINESS_COLLAPSE_RISK": "IMPROVE_CONFIDENCE_INTEGRITY",
+    "AUDITABILITY_FAILURE_RISK": "IMPROVE_AUDITABILITY",
+    "FRAGMENTATION_RISK_ELEVATED": "REDUCE_FRAGMENTATION",
+    "RECOVERABLE_GOVERNANCE_STRESS": "MONITOR_FAILURE_SIGNALS",
+    "GOVERNANCE_FAILURE_CONTAINED": "CONTINUE_OBSERVATION",
+}
+
+
+def _gcc_failure_probability(
+    scenario_state: str,
+    resilience: Dict[str, Any],
+    improvement: Dict[str, Any],
+    stability: Dict[str, Any],
+) -> str:
+    if scenario_state in ("SYSTEMIC_GOVERNANCE_FAILURE_RISK", "CONSTITUTIONAL_BREAKDOWN_RISK"):
+        return "VERY_HIGH"
+    if scenario_state in ("GOVERNANCE_DECISION_PARALYSIS", "TRUSTWORTHINESS_COLLAPSE_RISK"):
+        return "HIGH"
+    if scenario_state in ("AUDITABILITY_FAILURE_RISK", "FRAGMENTATION_RISK_ELEVATED"):
+        return "MODERATE"
+    if scenario_state == "RECOVERABLE_GOVERNANCE_STRESS":
+        return "LOW"
+    if scenario_state == "GOVERNANCE_FAILURE_CONTAINED":
+        return "VERY_LOW"
+    if resilience.get("recovery_probability") == "VERY_LOW":
+        return "HIGH"
+    if improvement.get("improvement_probability") == "VERY_LOW":
+        return "HIGH"
+    if float(stability.get("stability_score", 0.0) or 0.0) < 0.30:
+        return "MODERATE"
+    return "LOW"
+
+
+def _gcc_failure_severity(
+    scenario_state: str,
+    failure: Dict[str, Any],
+) -> str:
+    if scenario_state == "SYSTEMIC_GOVERNANCE_FAILURE_RISK":
+        return "CRITICAL"
+    if scenario_state in ("CONSTITUTIONAL_BREAKDOWN_RISK", "GOVERNANCE_DECISION_PARALYSIS"):
+        return "SEVERE"
+    if scenario_state in ("TRUSTWORTHINESS_COLLAPSE_RISK", "AUDITABILITY_FAILURE_RISK"):
+        return "MATERIAL"
+    if scenario_state == "FRAGMENTATION_RISK_ELEVATED":
+        return "MODERATE"
+    if scenario_state == "RECOVERABLE_GOVERNANCE_STRESS":
+        return "MINOR"
+    if failure.get("risk_severity") == "CRITICAL":
+        return "CRITICAL"
+    return "MINOR"
+
+
+def _gcc_containment_strength(
+    scenario_state: str,
+    audit: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> str:
+    if scenario_state in (
+        "SYSTEMIC_GOVERNANCE_FAILURE_RISK",
+        "CONSTITUTIONAL_BREAKDOWN_RISK",
+        "TRUSTWORTHINESS_COLLAPSE_RISK",
+    ):
+        return "NONE" if scenario_state == "SYSTEMIC_GOVERNANCE_FAILURE_RISK" else "WEAK"
+    if scenario_state in ("GOVERNANCE_DECISION_PARALYSIS", "AUDITABILITY_FAILURE_RISK"):
+        return "WEAK"
+    if scenario_state == "FRAGMENTATION_RISK_ELEVATED":
+        return "LIMITED"
+    if scenario_state == "RECOVERABLE_GOVERNANCE_STRESS":
+        return "MODERATE"
+    if scenario_state == "GOVERNANCE_FAILURE_CONTAINED":
+        return "STRONG"
+
+    score = (
+        float(stability.get("stability_score", 0.0) or 0.0) * 0.30
+        + float(audit.get("evidence_integrity_score", 0.0) or 0.0) * 0.25
+        + float(decision.get("governance_maturity_score", 0.0) or 0.0) * 0.20
+    )
+    recovery = resilience.get("recovery_probability", "LOW")
+    if recovery in ("HIGH", "VERY_HIGH"):
+        score += 0.15
+    elif recovery == "VERY_LOW":
+        score -= 0.15
+
+    if score >= 0.65:
+        return "STRONG"
+    if score >= 0.45:
+        return "MODERATE"
+    if score >= 0.25:
+        return "LIMITED"
+    return "WEAK"
+
+
+def _gcc_failure_pathway_warnings(
+    scenario_state: str,
+    hist: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    regime: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> Tuple[str, List[str]]:
+    warnings: List[str] = []
+
+    if int(tension.get("contradiction_count", 0) or 0) >= 1:
+        warnings.append("Persistent contradictions")
+    if coherence.get("reasoning_chain_status") in ("BROKEN", "FRAGMENTED"):
+        warnings.append("Declining governance coherence")
+    if float(integrity.get("discounted_trust_score", 0.0) or 0.0) < 0.35:
+        warnings.append("Trustworthiness deterioration")
+    if audit.get("audit_state") in (
+        "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+        "EVIDENCE_FRAGMENTED",
+        "LOW_AUDITABILITY",
+    ):
+        warnings.append("Weakening auditability")
+    if regime.get("regime") == "CONSTITUTIONAL_STRESS":
+        warnings.append("Escalating constitutional pressure")
+    if decision.get("discussability") in ("NOT_DISCUSSABLE",):
+        warnings.append("Delayed institutional escalation")
+
+    pathway_map = {
+        "SYSTEMIC_GOVERNANCE_FAILURE_RISK": "Systemic institutional breakdown pathway",
+        "CONSTITUTIONAL_BREAKDOWN_RISK": "Constitutional constraint escalation pathway",
+        "GOVERNANCE_DECISION_PARALYSIS": "Institutional decision paralysis pathway",
+        "TRUSTWORTHINESS_COLLAPSE_RISK": "Confidence integrity collapse pathway",
+        "AUDITABILITY_FAILURE_RISK": "Governance transparency failure pathway",
+        "FRAGMENTATION_RISK_ELEVATED": "Progressive fragmentation pathway",
+        "RECOVERABLE_GOVERNANCE_STRESS": "Containable stress with stabilization potential",
+        "GOVERNANCE_FAILURE_CONTAINED": "Low-risk contained governance posture",
+    }
+    pathway = pathway_map.get(scenario_state, "Monitor failure signals")
+
+    if not warnings:
+        if scenario_state == "GOVERNANCE_FAILURE_CONTAINED":
+            warnings = ["No elevated early-warning signals detected"]
+        else:
+            warnings = [f"Confidence direction: {hist.get('confidence_direction', '—')}"]
+
+    return pathway, warnings[:6]
+
+
+def _gcc_failure_scenario_drivers(
+    scenario_state: str,
+    regime: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    resilience: Dict[str, Any],
+    failure: Dict[str, Any],
+) -> List[str]:
+    drivers: List[str] = []
+
+    if scenario_state == "SYSTEMIC_GOVERNANCE_FAILURE_RISK":
+        drivers.append(f"Constitutional pressure: {regime.get('regime_display', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append(f"Recovery probability: {resilience.get('recovery_probability', '—')}")
+    elif scenario_state == "GOVERNANCE_DECISION_PARALYSIS":
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Consensus: {coherence.get('cross_section_agreement', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Improvement state: blocked or stalled")
+    elif scenario_state == "GOVERNANCE_FAILURE_CONTAINED":
+        drivers.append(f"Failure risk: {failure.get('risk_display', '—')}")
+        drivers.append(f"Stability containment active")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append(f"Recovery probability: {resilience.get('recovery_probability', '—')}")
+    elif scenario_state == "TRUSTWORTHINESS_COLLAPSE_RISK":
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Overconfidence risk: {integrity.get('overconfidence_risk', '—')}")
+        drivers.append(f"Trust discount: {_gcc_fmt_conf(integrity.get('confidence_discount'))}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+    elif scenario_state == "CONSTITUTIONAL_BREAKDOWN_RISK":
+        drivers.append(f"Regime: {regime.get('regime_display', '—')}")
+        drivers.append(f"Resilience: {resilience.get('resilience_display', '—')}")
+        drivers.append(f"Failure risk: {failure.get('risk_display', '—')}")
+        drivers.append(f"Recovery blocked: {resilience.get('resilience_state', '—')}")
+    else:
+        drivers.append(f"Tension: {tension.get('tension_display', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Fragility: {_gcc_fmt_conf(failure.get('fragility_score'))}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_failure_scenario(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    improvement: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    failure_risk = failure.get("risk_state", "")
+    coherence_state = coherence.get("coherence_state", "")
+    reasoning = coherence.get("reasoning_chain_status", "")
+    audit_state = audit.get("audit_state", "")
+    resilience_state = resilience.get("resilience_state", "")
+    fragility = float(failure.get("fragility_score", 0.0) or 0.0)
+    consensus_state = consensus.get("consensus_state", "")
+
+    def _match_systemic() -> bool:
+        return (
+            failure.get("risk_severity") == "CRITICAL"
+            and reasoning == "BROKEN"
+            and trust < 0.25
+            and audit_state
+            in (
+                "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+                "EVIDENCE_FRAGMENTED",
+                "LOW_AUDITABILITY",
+            )
+            and (resilience_state == "GOVERNANCE_RECOVERY_BLOCKED" or fragility >= 0.85)
+        )
+
+    def _match_constitutional_breakdown() -> bool:
+        return (
+            regime.get("regime") == "CONSTITUTIONAL_STRESS"
+            and snap["constitutional_safe"] is False
+            and (
+                stability.get("stability_state")
+                in (
+                    "CONSTITUTIONAL_DRIFT_RISK",
+                    "GOVERNANCE_DETERIORATING",
+                )
+                or resilience_state
+                in (
+                    "GOVERNANCE_RECOVERY_BLOCKED",
+                    "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+                )
+            )
+        )
+
+    def _match_decision_paralysis() -> bool:
+        return failure_risk == "DECISION_PARALYSIS_RISK" or (
+            consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            and contradiction_count >= 2
+            and decision.get("readiness_state") == "NOT_INSTITUTIONALLY_DISCUSSABLE"
+        )
+
+    def _match_trust_collapse() -> bool:
+        return (
+            integrity.get("integrity_state")
+            in (
+                "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+                "GOVERNANCE_OVERCONFIDENT",
+            )
+            and trust < 0.30
+            and integrity.get("overconfidence_risk") in ("HIGH", "CRITICAL")
+        )
+
+    def _match_auditability_failure() -> bool:
+        return (
+            audit_state
+            in (
+                "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+                "EVIDENCE_FRAGMENTED",
+                "LOW_AUDITABILITY",
+            )
+            and audit.get("traceability_status") in ("NOT_TRACEABLE", "PARTIALLY_TRACEABLE")
+            and audit.get("explainability_quality") in ("POOR", "LIMITED")
+        )
+
+    def _match_fragmentation_elevated() -> bool:
+        return (
+            consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            or coherence_state == "FRAGMENTED_REASONING_CHAIN"
+            or contradiction_count >= 1
+        ) and not _match_systemic()
+
+    def _match_recoverable_stress() -> bool:
+        return resilience_state in (
+            "RECOVERABLE_FRAGMENTATION",
+            "REVERSIBLE_GOVERNANCE_DETERIORATION",
+            "MODERATE_GOVERNANCE_RESILIENCE",
+        ) or (
+            stability.get("stability_state") == "GOVERNANCE_DETERIORATING"
+            and resilience.get("recovery_probability") in ("MODERATE", "HIGH")
+        )
+
+    def _match_contained() -> bool:
+        return (
+            failure_risk == "GOVERNANCE_STABLE"
+            and contradiction_count == 0
+            and coherence_state
+            in (
+                "HIGHLY_COHERENT_GOVERNANCE",
+                "MODERATELY_COHERENT_GOVERNANCE",
+                "LOGICALLY_CONSTRAINED_BUT_COHERENT",
+            )
+            and audit_state == "HIGH_AUDITABILITY"
+        )
+
+    matchers = {
+        "SYSTEMIC_GOVERNANCE_FAILURE_RISK": _match_systemic,
+        "CONSTITUTIONAL_BREAKDOWN_RISK": _match_constitutional_breakdown,
+        "GOVERNANCE_DECISION_PARALYSIS": _match_decision_paralysis,
+        "TRUSTWORTHINESS_COLLAPSE_RISK": _match_trust_collapse,
+        "AUDITABILITY_FAILURE_RISK": _match_auditability_failure,
+        "FRAGMENTATION_RISK_ELEVATED": _match_fragmentation_elevated,
+        "RECOVERABLE_GOVERNANCE_STRESS": _match_recoverable_stress,
+        "GOVERNANCE_FAILURE_CONTAINED": _match_contained,
+    }
+
+    scenario_state = "FRAGMENTATION_RISK_ELEVATED"
+    for candidate in _GCC_FAILURE_SCENARIO_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            scenario_state = candidate
+            break
+
+    failure_prob = _gcc_failure_probability(scenario_state, resilience, improvement, stability)
+    failure_severity = _gcc_failure_severity(scenario_state, failure)
+    containment = _gcc_containment_strength(scenario_state, audit, stability, resilience, decision)
+    drivers = _gcc_failure_scenario_drivers(
+        scenario_state, regime, tension, integrity, audit, coherence, resilience, failure
+    )
+    pathway, warnings = _gcc_failure_pathway_warnings(
+        scenario_state, hist, tension, integrity, audit, coherence, regime, decision
+    )
+
+    return {
+        "scenario_state": scenario_state,
+        "scenario_display": _GCC_FAILURE_SCENARIO_DISPLAY.get(
+            scenario_state, scenario_state.replace("_", " ").title()
+        ),
+        "failure_probability": failure_prob,
+        "failure_severity": failure_severity,
+        "containment_strength": containment,
+        "drivers": drivers,
+        "interpretation": _GCC_FAILURE_SCENARIO_INTERPRETATION.get(scenario_state, ""),
+        "containment_action": _GCC_FAILURE_SCENARIO_ACTION.get(
+            scenario_state, "MONITOR_FAILURE_SIGNALS"
+        ),
+        "failure_pathway": pathway,
+        "early_warnings": warnings,
+    }
+
+
+def _gcc_render_failure_scenario_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    improvement: Dict[str, Any],
+) -> Dict[str, Any]:
+    scenario = _gcc_detect_governance_failure_scenario(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+        improvement=improvement,
+    )
+
+    st.markdown("### Governance Institutional Failure Scenario Intelligence")
+    st.caption(
+        "Institutional stress testing — how governance could fail and what containment remains. "
+        "**Read-only failure scenario view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Failure Scenario State", scenario["scenario_display"])
+    c2.metric("Failure Probability", scenario["failure_probability"])
+    c3.metric("Failure Severity", scenario["failure_severity"])
+    c4.metric("Containment Strength", scenario["containment_strength"])
+
+    state = scenario["scenario_state"]
+    severity = scenario["failure_severity"]
+    if state == "SYSTEMIC_GOVERNANCE_FAILURE_RISK" or severity == "CRITICAL":
+        st.error(scenario["interpretation"])
+    elif state in (
+        "CONSTITUTIONAL_BREAKDOWN_RISK",
+        "GOVERNANCE_DECISION_PARALYSIS",
+        "TRUSTWORTHINESS_COLLAPSE_RISK",
+    ) or severity in ("SEVERE", "MATERIAL"):
+        st.warning(scenario["interpretation"])
+    elif state == "GOVERNANCE_FAILURE_CONTAINED":
+        st.success(scenario["interpretation"])
+    else:
+        st.info(scenario["interpretation"])
+
+    st.markdown("**Failure Drivers**")
+    for driver in scenario["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Containment Action", scenario["containment_action"])
+    a2.metric("Failure Pathway", scenario["failure_pathway"])
+
+    st.markdown("**Early Warning Signals**")
+    for warning in scenario["early_warnings"]:
+        if state in ("SYSTEMIC_GOVERNANCE_FAILURE_RISK", "CONSTITUTIONAL_BREAKDOWN_RISK"):
+            st.warning(f"• {warning}")
+        else:
+            st.markdown(f'<div class="gcc-block-item">• {warning}</div>', unsafe_allow_html=True)
+
+    with st.expander("Failure scenario analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{scenario['scenario_state']}`")
+        st.markdown(f"- **Resilience state:** `{resilience.get('resilience_state', '—')}`")
+        st.markdown(f"- **Improvement state:** `{improvement.get('improvement_state', '—')}`")
+        st.markdown(f"- **Failure risk state:** `{failure.get('risk_state', '—')}`")
+
+    return scenario
+
+
+_GCC_INTERVENTION_PRIORITY: Tuple[str, ...] = (
+    "CONSTITUTIONAL_LOCK_REQUIRED",
+    "ESCALATION_REQUIRED",
+    "CONTAINMENT_RECOMMENDED",
+    "INSTITUTIONAL_CAUTION_REQUIRED",
+    "MONITORING_ELEVATED",
+    "OBSERVATION_ONLY",
+)
+
+_GCC_INTERVENTION_DISPLAY: Dict[str, str] = {
+    "CONSTITUTIONAL_LOCK_REQUIRED": "Constitutional Lock Required",
+    "ESCALATION_REQUIRED": "Escalation Required",
+    "CONTAINMENT_RECOMMENDED": "Containment Recommended",
+    "INSTITUTIONAL_CAUTION_REQUIRED": "Institutional Caution Required",
+    "MONITORING_ELEVATED": "Monitoring Elevated",
+    "OBSERVATION_ONLY": "Observation Only",
+}
+
+_GCC_INTERVENTION_INTERPRETATION: Dict[str, str] = {
+    "CONSTITUTIONAL_LOCK_REQUIRED": (
+        "Governance containment posture remains defensive. Constitutional pressure, degraded "
+        "trustworthiness, and systemic governance fragility justify preservation of institutional "
+        "safeguards and delayed escalation."
+    ),
+    "ESCALATION_REQUIRED": (
+        "Institutional deterioration is material. Governance failure risk is severe enough to "
+        "justify operator escalation and heightened human review."
+    ),
+    "CONTAINMENT_RECOMMENDED": (
+        "Governance deterioration appears manageable but material. Institutional containment and "
+        "heightened observation appear warranted while stabilization signals are monitored."
+    ),
+    "INSTITUTIONAL_CAUTION_REQUIRED": (
+        "Governance is weakening but deterioration remains manageable. Institutional caution and "
+        "increased observability are appropriate until stability improves."
+    ),
+    "MONITORING_ELEVATED": (
+        "Governance stress is visible but intervention is not yet required. Monitoring intensity "
+        "should increase while containment signals are tracked."
+    ),
+    "OBSERVATION_ONLY": (
+        "Governance remains institutionally stable. Current safeguards appear sufficient and no "
+        "escalation posture is presently justified."
+    ),
+}
+
+_GCC_INTERVENTION_ACTION: Dict[str, str] = {
+    "CONSTITUTIONAL_LOCK_REQUIRED": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "ESCALATION_REQUIRED": "ESCALATE_HUMAN_REVIEW",
+    "CONTAINMENT_RECOMMENDED": "CONTAIN_AND_MONITOR",
+    "INSTITUTIONAL_CAUTION_REQUIRED": "INCREASE_OBSERVABILITY",
+    "MONITORING_ELEVATED": "MONITOR_CONTAINMENT_SIGNALS",
+    "OBSERVATION_ONLY": "CONTINUE_OBSERVATION",
+}
+
+_GCC_INTERVENTION_PROTOCOL: Dict[str, List[str]] = {
+    "CONSTITUTIONAL_LOCK_REQUIRED": [
+        "Preserve constitutional safeguards",
+        "Delay escalation until stability improves",
+        "Monitor trustworthiness deterioration",
+        "Reassess once institutional posture stabilizes",
+    ],
+    "ESCALATION_REQUIRED": [
+        "Escalate to human review",
+        "Monitor governance coherence",
+        "Observe trustworthiness deterioration",
+        "Reassess containment posture daily",
+    ],
+    "CONTAINMENT_RECOMMENDED": [
+        "Contain and monitor governance stress",
+        "Monitor contradiction intensity",
+        "Observe trustworthiness deterioration",
+        "Delay escalation until stability improves",
+    ],
+    "INSTITUTIONAL_CAUTION_REQUIRED": [
+        "Increase observability",
+        "Monitor governance coherence",
+        "Monitor contradiction intensity",
+        "Reassess once institutional posture stabilizes",
+    ],
+    "MONITORING_ELEVATED": [
+        "Monitor containment signals",
+        "Monitor governance coherence",
+        "Observe constitutional pressure",
+    ],
+    "OBSERVATION_ONLY": [
+        "Continue observation only",
+        "Monitor routine governance signals",
+    ],
+}
+
+
+def _gcc_institutional_urgency(posture: str, scenario: Dict[str, Any]) -> str:
+    if posture == "CONSTITUTIONAL_LOCK_REQUIRED":
+        return "CRITICAL"
+    if posture == "ESCALATION_REQUIRED":
+        return "HIGH"
+    if posture == "CONTAINMENT_RECOMMENDED":
+        return "HIGH" if scenario.get("failure_severity") in ("SEVERE", "CRITICAL") else "MODERATE"
+    if posture == "INSTITUTIONAL_CAUTION_REQUIRED":
+        return "MODERATE"
+    if posture == "MONITORING_ELEVATED":
+        return "GUARDED"
+    return "LOW"
+
+
+def _gcc_escalation_threshold(posture: str, scenario: Dict[str, Any]) -> str:
+    if posture == "CONSTITUTIONAL_LOCK_REQUIRED":
+        return "IMMEDIATE"
+    if posture == "ESCALATION_REQUIRED":
+        return "IMMEDIATE"
+    if posture == "CONTAINMENT_RECOMMENDED":
+        return "MATERIAL"
+    if posture == "INSTITUTIONAL_CAUTION_REQUIRED":
+        return "HEIGHTENED"
+    if posture == "MONITORING_ELEVATED":
+        return "WATCH"
+    if scenario.get("scenario_state") == "GOVERNANCE_FAILURE_CONTAINED":
+        return "NONE"
+    return "NONE"
+
+
+def _gcc_containment_readiness(
+    posture: str,
+    scenario: Dict[str, Any],
+    resilience: Dict[str, Any],
+    audit: Dict[str, Any],
+    stability: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> str:
+    strength = scenario.get("containment_strength", "WEAK")
+    if posture in ("CONSTITUTIONAL_LOCK_REQUIRED", "ESCALATION_REQUIRED"):
+        return "NONE" if strength in ("NONE", "WEAK") else "WEAK"
+    if strength == "STRONG":
+        return "STRONG"
+    if strength == "MODERATE":
+        return "MODERATE"
+    if strength == "LIMITED":
+        return "LIMITED"
+
+    score = (
+        float(stability.get("stability_score", 0.0) or 0.0) * 0.25
+        + float(audit.get("evidence_integrity_score", 0.0) or 0.0) * 0.25
+        + float(decision.get("governance_maturity_score", 0.0) or 0.0) * 0.20
+    )
+    recovery = resilience.get("recovery_probability", "LOW")
+    if recovery in ("HIGH", "VERY_HIGH"):
+        score += 0.15
+    elif recovery == "VERY_LOW":
+        score -= 0.15
+
+    if score >= 0.55:
+        return "MODERATE"
+    if score >= 0.30:
+        return "LIMITED"
+    return "WEAK"
+
+
+def _gcc_intervention_drivers(
+    posture: str,
+    regime: Dict[str, Any],
+    scenario: Dict[str, Any],
+    resilience: Dict[str, Any],
+    stability: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> List[str]:
+    drivers: List[str] = []
+
+    if posture == "CONSTITUTIONAL_LOCK_REQUIRED":
+        drivers.append(f"Constitutional pressure: {regime.get('regime_display', '—')}")
+        drivers.append(f"Resilience: {resilience.get('resilience_display', '—')}")
+        drivers.append(f"Failure scenario: {scenario.get('scenario_display', '—')}")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Containment strength: {scenario.get('containment_strength', '—')}")
+    elif posture == "CONTAINMENT_RECOMMENDED":
+        drivers.append(f"Failure scenario: {scenario.get('scenario_display', '—')}")
+        drivers.append(f"Stability: {stability.get('stability_display', '—')}")
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Recovery probability: {resilience.get('recovery_probability', '—')}")
+    elif posture == "OBSERVATION_ONLY":
+        drivers.append(f"Failure scenario: {scenario.get('scenario_display', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Stability score: {_gcc_fmt_conf(stability.get('stability_score'))}")
+        drivers.append("Failure risk contained")
+    elif posture == "ESCALATION_REQUIRED":
+        drivers.append(f"Failure severity: {scenario.get('failure_severity', '—')}")
+        drivers.append(f"Failure probability: {scenario.get('failure_probability', '—')}")
+        drivers.append(f"Institutional urgency elevated")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+    else:
+        drivers.append(f"Stability: {stability.get('stability_display', '—')}")
+        drivers.append(f"Improvement blocked or limited")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Containment strength: {scenario.get('containment_strength', '—')}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_intervention(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    improvement: Dict[str, Any],
+    scenario: Dict[str, Any],
+) -> Dict[str, Any]:
+    snap = _gcc_collect_governance_snapshot(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+
+    scenario_state = scenario.get("scenario_state", "")
+    failure_severity = scenario.get("failure_severity", "MINOR")
+    failure_prob = scenario.get("failure_probability", "LOW")
+    containment = scenario.get("containment_strength", "WEAK")
+    resilience_state = resilience.get("resilience_state", "")
+    improvement_state = improvement.get("improvement_state", "")
+    stability_state = stability.get("stability_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+
+    def _match_constitutional_lock() -> bool:
+        return (
+            scenario_state
+            in (
+                "SYSTEMIC_GOVERNANCE_FAILURE_RISK",
+                "CONSTITUTIONAL_BREAKDOWN_RISK",
+            )
+            or (
+                resilience_state == "GOVERNANCE_RECOVERY_BLOCKED"
+                and snap["constitutional_safe"] is False
+            )
+            or (
+                improvement_state == "IMPROVEMENT_TRAJECTORY_BLOCKED"
+                and regime.get("regime") == "CONSTITUTIONAL_STRESS"
+                and containment in ("NONE", "WEAK")
+            )
+        )
+
+    def _match_escalation_required() -> bool:
+        return (
+            failure_severity in ("SEVERE", "CRITICAL")
+            and scenario_state
+            in (
+                "GOVERNANCE_DECISION_PARALYSIS",
+                "TRUSTWORTHINESS_COLLAPSE_RISK",
+            )
+        ) or (
+            failure.get("risk_severity") == "CRITICAL"
+            and failure_prob in ("HIGH", "VERY_HIGH")
+            and decision.get("discussability") == "NOT_DISCUSSABLE"
+        )
+
+    def _match_containment_recommended() -> bool:
+        return (
+            scenario_state
+            in (
+                "FRAGMENTATION_RISK_ELEVATED",
+                "AUDITABILITY_FAILURE_RISK",
+                "RECOVERABLE_GOVERNANCE_STRESS",
+            )
+            or stability_state
+            in (
+                "GOVERNANCE_DETERIORATING",
+                "REASONING_INSTABILITY_DETECTED",
+            )
+        ) and failure_prob in ("MODERATE", "HIGH", "VERY_HIGH")
+
+    def _match_caution_required() -> bool:
+        return (
+            resilience_state
+            in (
+                "LOW_GOVERNANCE_RESILIENCE",
+                "RECOVERABLE_FRAGMENTATION",
+            )
+            or improvement_state
+            in (
+                "INSTITUTIONAL_IMPROVEMENT_POSSIBLE",
+                "GOVERNANCE_LEARNING_STALLED",
+            )
+            or (trust < 0.35 and contradiction_count >= 1)
+        )
+
+    def _match_monitoring_elevated() -> bool:
+        return (
+            scenario_state == "FRAGMENTATION_RISK_ELEVATED"
+            or stability_state in ("INSTITUTIONAL_DRIFT_DETECTED", "CONFIDENCE_OSCILLATION_RISK")
+            or failure_prob == "MODERATE"
+        )
+
+    def _match_observation_only() -> bool:
+        return (
+            scenario_state == "GOVERNANCE_FAILURE_CONTAINED"
+            and stability_state in ("STABLE_GOVERNANCE_POSTURE", "GOVERNANCE_STABILITY_IMPROVING")
+            and failure_prob in ("VERY_LOW", "LOW")
+            and contradiction_count == 0
+        )
+
+    matchers = {
+        "CONSTITUTIONAL_LOCK_REQUIRED": _match_constitutional_lock,
+        "ESCALATION_REQUIRED": _match_escalation_required,
+        "CONTAINMENT_RECOMMENDED": _match_containment_recommended,
+        "INSTITUTIONAL_CAUTION_REQUIRED": _match_caution_required,
+        "MONITORING_ELEVATED": _match_monitoring_elevated,
+        "OBSERVATION_ONLY": _match_observation_only,
+    }
+
+    posture = "INSTITUTIONAL_CAUTION_REQUIRED"
+    for candidate in _GCC_INTERVENTION_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            posture = candidate
+            break
+
+    urgency = _gcc_institutional_urgency(posture, scenario)
+    escalation = _gcc_escalation_threshold(posture, scenario)
+    readiness_level = _gcc_containment_readiness(
+        posture, scenario, resilience, audit, stability, decision
+    )
+    drivers = _gcc_intervention_drivers(
+        posture, regime, scenario, resilience, stability, tension, integrity, coherence
+    )
+    protocol_steps = _GCC_INTERVENTION_PROTOCOL.get(posture, ["Continue observation only"])
+
+    return {
+        "intervention_posture": posture,
+        "intervention_display": _GCC_INTERVENTION_DISPLAY.get(
+            posture, posture.replace("_", " ").title()
+        ),
+        "institutional_urgency": urgency,
+        "escalation_threshold": escalation,
+        "containment_readiness": readiness_level,
+        "drivers": drivers,
+        "interpretation": _GCC_INTERVENTION_INTERPRETATION.get(posture, ""),
+        "institutional_action": _GCC_INTERVENTION_ACTION.get(posture, "CONTINUE_OBSERVATION"),
+        "containment_protocol": protocol_steps,
+    }
+
+
+def _gcc_render_intervention_intelligence(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    consensus: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    failure: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    improvement: Dict[str, Any],
+    scenario: Dict[str, Any],
+) -> Dict[str, Any]:
+    intervention = _gcc_detect_governance_intervention(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+        improvement=improvement,
+        scenario=scenario,
+    )
+
+    st.markdown("### Governance Institutional Intervention & Containment Intelligence")
+    st.caption(
+        "Intervention posture analysis — what institutional containment and escalation posture is appropriate. "
+        "**Read-only intervention view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Intervention Posture", intervention["intervention_display"])
+    c2.metric("Institutional Urgency", intervention["institutional_urgency"])
+    c3.metric("Escalation Threshold", intervention["escalation_threshold"])
+    c4.metric("Containment Readiness", intervention["containment_readiness"])
+
+    posture = intervention["intervention_posture"]
+    urgency = intervention["institutional_urgency"]
+    if posture == "CONSTITUTIONAL_LOCK_REQUIRED" or urgency == "CRITICAL":
+        st.error(intervention["interpretation"])
+    elif posture in ("ESCALATION_REQUIRED", "CONTAINMENT_RECOMMENDED") or urgency == "HIGH":
+        st.warning(intervention["interpretation"])
+    elif posture == "OBSERVATION_ONLY":
+        st.success(intervention["interpretation"])
+    else:
+        st.info(intervention["interpretation"])
+
+    st.markdown("**Containment Drivers**")
+    for driver in intervention["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Institutional Action", intervention["institutional_action"])
+    a2.metric("Protocol Steps", len(intervention["containment_protocol"]))
+
+    st.markdown("**Institutional Containment Protocol**")
+    for step in intervention["containment_protocol"]:
+        if posture in ("CONSTITUTIONAL_LOCK_REQUIRED", "ESCALATION_REQUIRED"):
+            st.warning(f"• {step}")
+        else:
+            st.markdown(f'<div class="gcc-block-item">• {step}</div>', unsafe_allow_html=True)
+
+    with st.expander("Intervention analysis detail", expanded=False):
+        st.markdown(f"- **Internal posture:** `{intervention['intervention_posture']}`")
+        st.markdown(f"- **Failure scenario:** `{scenario.get('scenario_state', '—')}`")
+        st.markdown(f"- **Resilience state:** `{resilience.get('resilience_state', '—')}`")
+        st.markdown(f"- **Improvement state:** `{improvement.get('improvement_state', '—')}`")
+
+    return intervention
+
+
+_GCC_INST_EVIDENCE_PRIORITY: Tuple[str, ...] = (
+    "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+    "TRUSTWORTHINESS_MATERIALLY_IMPAIRED",
+    "CONFIDENCE_OVEREXTENDED",
+    "EVIDENCE_QUALITY_DEGRADING",
+    "PARTIALLY_SUPPORTED_CONFIDENCE",
+    "CONFIDENCE_SUPPORTED",
+    "EVIDENCE_INTEGRITY_STRONG",
+)
+
+_GCC_INST_EVIDENCE_DISPLAY: Dict[str, str] = {
+    "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED": "Institutional Confidence Unsupported",
+    "TRUSTWORTHINESS_MATERIALLY_IMPAIRED": "Trustworthiness Materially Impaired",
+    "CONFIDENCE_OVEREXTENDED": "Confidence Overextended",
+    "EVIDENCE_QUALITY_DEGRADING": "Evidence Quality Degrading",
+    "PARTIALLY_SUPPORTED_CONFIDENCE": "Partially Supported Confidence",
+    "CONFIDENCE_SUPPORTED": "Confidence Supported",
+    "EVIDENCE_INTEGRITY_STRONG": "Evidence Integrity Strong",
+}
+
+_GCC_INST_EVIDENCE_INTERPRETATION: Dict[str, str] = {
+    "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED": (
+        "Governance confidence currently appears insufficiently supported by institutional evidence. "
+        "Trustworthiness, auditability, and governance defensibility remain constrained, reducing "
+        "institutional confidence in governance conclusions."
+    ),
+    "TRUSTWORTHINESS_MATERIALLY_IMPAIRED": (
+        "Institutional trustworthiness is materially impaired. Evidence quality is weak and "
+        "governance confidence should be treated with significant caution."
+    ),
+    "CONFIDENCE_OVEREXTENDED": (
+        "Governance confidence appears to exceed available evidence quality. Institutional reasoning "
+        "may be overstated and defensibility is weakened."
+    ),
+    "EVIDENCE_QUALITY_DEGRADING": (
+        "Evidence quality is degrading. Auditability and confidence integrity are weakening, "
+        "reducing institutional reliability of governance outputs."
+    ),
+    "PARTIALLY_SUPPORTED_CONFIDENCE": (
+        "Governance confidence appears partially supported by available evidence. Institutional trust "
+        "remains conditional and continued observation is warranted."
+    ),
+    "CONFIDENCE_SUPPORTED": (
+        "Governance confidence appears mostly supported by institutional evidence. Trustworthiness "
+        "and defensibility remain acceptable under current conditions."
+    ),
+    "EVIDENCE_INTEGRITY_STRONG": (
+        "Governance evidence integrity appears strong. Institutional trustworthiness, auditability, "
+        "and confidence support remain aligned and governance outputs appear defensible."
+    ),
+}
+
+_GCC_INST_EVIDENCE_ACTION: Dict[str, str] = {
+    "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "TRUSTWORTHINESS_MATERIALLY_IMPAIRED": "IMPROVE_CONFIDENCE_INTEGRITY",
+    "CONFIDENCE_OVEREXTENDED": "REDUCE_CONTRADICTIONS",
+    "EVIDENCE_QUALITY_DEGRADING": "IMPROVE_AUDITABILITY",
+    "PARTIALLY_SUPPORTED_CONFIDENCE": "MONITOR_EVIDENCE_QUALITY",
+    "CONFIDENCE_SUPPORTED": "CONTINUE_OBSERVATION",
+    "EVIDENCE_INTEGRITY_STRONG": "CONTINUE_OBSERVATION",
+}
+
+_GCC_INST_EVIDENCE_PROTOCOL: Dict[str, List[str]] = {
+    "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED": [
+        "Monitor trustworthiness deterioration",
+        "Preserve constitutional safeguards if confidence weakens",
+        "Observe confidence inflation risk",
+        "Reassess auditability deterioration",
+    ],
+    "TRUSTWORTHINESS_MATERIALLY_IMPAIRED": [
+        "Improve governance evidence quality",
+        "Monitor trustworthiness deterioration",
+        "Monitor contradiction severity",
+    ],
+    "CONFIDENCE_OVEREXTENDED": [
+        "Observe confidence inflation risk",
+        "Monitor contradiction severity",
+        "Reassess auditability deterioration",
+    ],
+    "EVIDENCE_QUALITY_DEGRADING": [
+        "Reassess auditability deterioration",
+        "Monitor trustworthiness deterioration",
+        "Improve governance evidence quality",
+    ],
+    "PARTIALLY_SUPPORTED_CONFIDENCE": [
+        "Monitor evidence quality",
+        "Monitor contradiction severity",
+        "Observe confidence inflation risk",
+    ],
+    "CONFIDENCE_SUPPORTED": [
+        "Continue observation",
+        "Monitor routine evidence signals",
+    ],
+    "EVIDENCE_INTEGRITY_STRONG": [
+        "Continue observation",
+        "Monitor routine evidence signals",
+    ],
+}
+
+
+def _gcc_confidence_reliability(evidence_state: str, trust: float) -> str:
+    if evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED":
+        return "VERY_LOW"
+    if evidence_state in ("TRUSTWORTHINESS_MATERIALLY_IMPAIRED", "CONFIDENCE_OVEREXTENDED"):
+        return "LOW"
+    if evidence_state in ("EVIDENCE_QUALITY_DEGRADING", "PARTIALLY_SUPPORTED_CONFIDENCE"):
+        return "MODERATE"
+    if evidence_state == "CONFIDENCE_SUPPORTED":
+        return "HIGH"
+    if evidence_state == "EVIDENCE_INTEGRITY_STRONG":
+        return "VERY_HIGH"
+    if trust < 0.25:
+        return "VERY_LOW"
+    if trust < 0.40:
+        return "LOW"
+    if trust < 0.55:
+        return "MODERATE"
+    if trust < 0.70:
+        return "HIGH"
+    return "VERY_HIGH"
+
+
+def _gcc_trustworthiness_state(trust: float, integrity: Dict[str, Any]) -> str:
+    integrity_state = integrity.get("integrity_state", "")
+    if trust < 0.20 or integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
+        return "BROKEN"
+    if trust < 0.35 or integrity.get("overconfidence_risk") in ("HIGH", "CRITICAL"):
+        return "WEAK"
+    if trust < 0.50:
+        return "LIMITED"
+    if trust < 0.70:
+        return "ACCEPTABLE"
+    return "STRONG"
+
+
+def _gcc_institutional_defensibility(
+    evidence_state: str,
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> str:
+    if evidence_state in (
+        "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+        "TRUSTWORTHINESS_MATERIALLY_IMPAIRED",
+    ):
+        return "NONE" if evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED" else "WEAK"
+    if evidence_state in ("CONFIDENCE_OVEREXTENDED", "EVIDENCE_QUALITY_DEGRADING"):
+        return "WEAK"
+    if evidence_state == "PARTIALLY_SUPPORTED_CONFIDENCE":
+        return "LIMITED"
+    if evidence_state == "CONFIDENCE_SUPPORTED":
+        return "MODERATE"
+
+    score = (
+        float(audit.get("evidence_integrity_score", 0.0) or 0.0) * 0.35
+        + float(coherence.get("logic_score", 0.0) or 0.0) * 0.30
+        + float(decision.get("governance_maturity_score", 0.0) or 0.0) * 0.20
+    )
+    if evidence_state == "EVIDENCE_INTEGRITY_STRONG" or score >= 0.65:
+        return "STRONG"
+    if score >= 0.45:
+        return "MODERATE"
+    return "LIMITED"
+
+
+def _gcc_inst_evidence_drivers(
+    evidence_state: str,
+    integrity: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> List[str]:
+    drivers: List[str] = []
+
+    if evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED":
+        drivers.append("Governance confidence exceeds evidence quality")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append(
+            f"Defensibility constrained by coherence: {coherence.get('coherence_display', '—')}"
+        )
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+    elif evidence_state == "CONFIDENCE_SUPPORTED":
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Maturity: {_gcc_fmt_conf(decision.get('governance_maturity_score'))}")
+    elif evidence_state == "EVIDENCE_INTEGRITY_STRONG":
+        drivers.append("Governance evidence strong")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append("Institutional defensibility high")
+    elif evidence_state == "CONFIDENCE_OVEREXTENDED":
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Overconfidence risk: {integrity.get('overconfidence_risk', '—')}")
+        drivers.append(f"Trust discount: {_gcc_fmt_conf(integrity.get('confidence_discount'))}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+    else:
+        drivers.append(f"Integrity: {integrity.get('integrity_display', '—')}")
+        drivers.append(f"Auditability: {audit.get('audit_display', '—')}")
+        drivers.append(f"Evidence score: {_gcc_fmt_conf(audit.get('evidence_integrity_score'))}")
+        drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_institutional_evidence(
+    *,
+    integrity: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    decision: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    intervention: Dict[str, Any],
+) -> Dict[str, Any]:
+    trust = float(integrity.get("discounted_trust_score", 0.0) or 0.0)
+    raw_conf = float(integrity.get("raw_confidence_context", 0.0) or 0.0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    integrity_state = integrity.get("integrity_state", "")
+    audit_state = audit.get("audit_state", "")
+    overconf = integrity.get("overconfidence_risk", "NONE")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    evidence_score = float(audit.get("evidence_integrity_score", 0.0) or 0.0)
+    logic_score = float(coherence.get("logic_score", 0.0) or 0.0)
+
+    def _match_unsupported() -> bool:
+        return (
+            audit_state == "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE"
+            or intervention.get("intervention_posture") == "CONSTITUTIONAL_LOCK_REQUIRED"
+            or (
+                trust < 0.25
+                and evidence_score < 0.20
+                and integrity_state
+                in (
+                    "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+                    "GOVERNANCE_OVERCONFIDENT",
+                )
+            )
+        )
+
+    def _match_impaired() -> bool:
+        return trust < 0.35 and audit_state in (
+            "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+            "EVIDENCE_FRAGMENTED",
+            "LOW_AUDITABILITY",
+            "SPARSE_EVIDENCE",
+        )
+
+    def _match_overextended() -> bool:
+        return (
+            integrity_state == "GOVERNANCE_OVERCONFIDENT"
+            or overconf in ("HIGH", "CRITICAL")
+            or (raw_conf >= 0.70 and trust < 0.45 and maturity < 0.30)
+        )
+
+    def _match_degrading() -> bool:
+        return (
+            audit_state in ("EVIDENCE_FRAGMENTED", "LOW_AUDITABILITY")
+            and stability.get("stability_state")
+            in (
+                "GOVERNANCE_DETERIORATING",
+                "REASONING_INSTABILITY_DETECTED",
+            )
+        ) or (
+            integrity_state == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS"
+            and audit.get("explainability_quality") in ("POOR", "LIMITED")
+        )
+
+    def _match_partial() -> bool:
+        return (
+            trust >= 0.25
+            and evidence_score >= 0.15
+            and logic_score >= 0.20
+            and contradiction_count <= 2
+            and audit_state not in ("CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",)
+        )
+
+    def _match_supported() -> bool:
+        return (
+            trust >= 0.45
+            and evidence_score >= 0.35
+            and logic_score >= 0.35
+            and contradiction_count <= 1
+            and integrity_state
+            not in (
+                "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+                "GOVERNANCE_OVERCONFIDENT",
+            )
+        )
+
+    def _match_strong() -> bool:
+        return (
+            audit_state == "HIGH_AUDITABILITY"
+            and trust >= 0.55
+            and evidence_score >= 0.50
+            and logic_score >= 0.50
+            and contradiction_count == 0
+            and coherence.get("coherence_state")
+            in (
+                "HIGHLY_COHERENT_GOVERNANCE",
+                "MODERATELY_COHERENT_GOVERNANCE",
+                "LOGICALLY_CONSTRAINED_BUT_COHERENT",
+            )
+            and resilience.get("resilience_state") == "HIGH_GOVERNANCE_RESILIENCE"
+        )
+
+    matchers = {
+        "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED": _match_unsupported,
+        "TRUSTWORTHINESS_MATERIALLY_IMPAIRED": _match_impaired,
+        "CONFIDENCE_OVEREXTENDED": _match_overextended,
+        "EVIDENCE_QUALITY_DEGRADING": _match_degrading,
+        "PARTIALLY_SUPPORTED_CONFIDENCE": _match_partial,
+        "CONFIDENCE_SUPPORTED": _match_supported,
+        "EVIDENCE_INTEGRITY_STRONG": _match_strong,
+    }
+
+    evidence_state = "PARTIALLY_SUPPORTED_CONFIDENCE"
+    for candidate in _GCC_INST_EVIDENCE_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            evidence_state = candidate
+            break
+
+    reliability = _gcc_confidence_reliability(evidence_state, trust)
+    trust_state = _gcc_trustworthiness_state(trust, integrity)
+    defensibility = _gcc_institutional_defensibility(evidence_state, audit, coherence, decision)
+    drivers = _gcc_inst_evidence_drivers(
+        evidence_state, integrity, audit, coherence, tension, decision
+    )
+    protocol = _GCC_INST_EVIDENCE_PROTOCOL.get(evidence_state, ["Monitor evidence quality"])
+
+    return {
+        "evidence_state": evidence_state,
+        "evidence_display": _GCC_INST_EVIDENCE_DISPLAY.get(
+            evidence_state, evidence_state.replace("_", " ").title()
+        ),
+        "confidence_reliability": reliability,
+        "trustworthiness_state": trust_state,
+        "institutional_defensibility": defensibility,
+        "drivers": drivers,
+        "interpretation": _GCC_INST_EVIDENCE_INTERPRETATION.get(evidence_state, ""),
+        "integrity_action": _GCC_INST_EVIDENCE_ACTION.get(evidence_state, "CONTINUE_OBSERVATION"),
+        "evidence_protocol": protocol,
+    }
+
+
+def _gcc_render_institutional_evidence_intelligence(
+    *,
+    integrity: Dict[str, Any],
+    audit: Dict[str, Any],
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    decision: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    intervention: Dict[str, Any],
+) -> Dict[str, Any]:
+    evidence = _gcc_detect_governance_institutional_evidence(
+        integrity=integrity,
+        audit=audit,
+        coherence=coherence,
+        tension=tension,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        intervention=intervention,
+    )
+
+    st.markdown("### Governance Institutional Confidence & Evidence Integrity Intelligence")
+    st.caption(
+        "Evidence trustworthiness analysis — how defensible governance confidence and conclusions are. "
+        "**Read-only integrity view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Evidence Integrity State", evidence["evidence_display"])
+    c2.metric("Confidence Reliability", evidence["confidence_reliability"])
+    c3.metric("Trustworthiness State", evidence["trustworthiness_state"])
+    c4.metric("Institutional Defensibility", evidence["institutional_defensibility"])
+
+    state = evidence["evidence_state"]
+    if state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED":
+        st.error(evidence["interpretation"])
+    elif state in (
+        "TRUSTWORTHINESS_MATERIALLY_IMPAIRED",
+        "CONFIDENCE_OVEREXTENDED",
+        "EVIDENCE_QUALITY_DEGRADING",
+    ):
+        st.warning(evidence["interpretation"])
+    elif state in ("CONFIDENCE_SUPPORTED", "EVIDENCE_INTEGRITY_STRONG"):
+        st.success(evidence["interpretation"])
+    else:
+        st.info(evidence["interpretation"])
+
+    st.markdown("**Evidence Drivers**")
+    for driver in evidence["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Integrity Action", evidence["integrity_action"])
+    a2.metric("Protocol Steps", len(evidence["evidence_protocol"]))
+
+    st.markdown("**Evidence Integrity Protocol**")
+    for step in evidence["evidence_protocol"]:
+        if state in (
+            "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+            "TRUSTWORTHINESS_MATERIALLY_IMPAIRED",
+        ):
+            st.warning(f"• {step}")
+        else:
+            st.markdown(f'<div class="gcc-block-item">• {step}</div>', unsafe_allow_html=True)
+
+    with st.expander("Evidence integrity analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{evidence['evidence_state']}`")
+        st.markdown(f"- **Integrity state:** `{integrity.get('integrity_state', '—')}`")
+        st.markdown(f"- **Auditability state:** `{audit.get('audit_state', '—')}`")
+        st.markdown(
+            f"- **Intervention posture:** `{intervention.get('intervention_posture', '—')}`"
+        )
+
+    return evidence
+
+
+_GCC_INST_CONSENSUS_PRIORITY: Tuple[str, ...] = (
+    "INSTITUTIONAL_CONSENSUS_BROKEN",
+    "GOVERNANCE_INTERNAL_CONFLICT",
+    "FRAGMENTATION_ELEVATED",
+    "PARTIAL_ALIGNMENT",
+    "GOVERNANCE_CONSENSUS_FORMING",
+    "INSTITUTIONAL_ALIGNMENT_STRONG",
+)
+
+_GCC_INST_CONSENSUS_DISPLAY: Dict[str, str] = {
+    "INSTITUTIONAL_CONSENSUS_BROKEN": "Institutional Consensus Broken",
+    "GOVERNANCE_INTERNAL_CONFLICT": "Governance Internal Conflict",
+    "FRAGMENTATION_ELEVATED": "Fragmentation Elevated",
+    "PARTIAL_ALIGNMENT": "Partial Alignment",
+    "GOVERNANCE_CONSENSUS_FORMING": "Governance Consensus Forming",
+    "INSTITUTIONAL_ALIGNMENT_STRONG": "Institutional Alignment Strong",
+}
+
+_GCC_INST_CONSENSUS_INTERPRETATION: Dict[str, str] = {
+    "INSTITUTIONAL_CONSENSUS_BROKEN": (
+        "Governance alignment appears materially impaired. Institutional disagreement, fragmented "
+        "coherence, and elevated contradictions constrain governance consistency and reduce "
+        "confidence in unified institutional posture."
+    ),
+    "GOVERNANCE_INTERNAL_CONFLICT": (
+        "Governance internal conflict is present. Contradictions and misaligned reasoning reduce "
+        "institutional agreement and escalation posture consistency."
+    ),
+    "FRAGMENTATION_ELEVATED": (
+        "Governance fragmentation is elevated. Institutional coherence is weakening and alignment "
+        "requires continued containment monitoring."
+    ),
+    "PARTIAL_ALIGNMENT": (
+        "Governance appears partially aligned. Institutional reasoning remains mixed, though "
+        "fragmentation appears manageable and coherence remains recoverable."
+    ),
+    "GOVERNANCE_CONSENSUS_FORMING": (
+        "Governance consensus appears to be forming. Contradictions are declining and institutional "
+        "agreement signals are stabilizing."
+    ),
+    "INSTITUTIONAL_ALIGNMENT_STRONG": (
+        "Governance alignment appears institutionally strong. Coherence, trustworthiness, and "
+        "escalation posture remain consistent across governance reasoning."
+    ),
+}
+
+_GCC_INST_CONSENSUS_ACTION: Dict[str, str] = {
+    "INSTITUTIONAL_CONSENSUS_BROKEN": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "GOVERNANCE_INTERNAL_CONFLICT": "IMPROVE_GOVERNANCE_COHERENCE",
+    "FRAGMENTATION_ELEVATED": "REDUCE_FRAGMENTATION",
+    "PARTIAL_ALIGNMENT": "MONITOR_ALIGNMENT_SIGNALS",
+    "GOVERNANCE_CONSENSUS_FORMING": "STABILIZE_ESCALATION_POSTURE",
+    "INSTITUTIONAL_ALIGNMENT_STRONG": "CONTINUE_OBSERVATION",
+}
+
+_GCC_INST_CONSENSUS_PROTOCOL: Dict[str, List[str]] = {
+    "INSTITUTIONAL_CONSENSUS_BROKEN": [
+        "Monitor contradiction severity",
+        "Observe escalation inconsistency",
+        "Reassess governance coherence",
+        "Stabilize institutional posture",
+    ],
+    "GOVERNANCE_INTERNAL_CONFLICT": [
+        "Improve governance coherence",
+        "Monitor contradiction severity",
+        "Observe escalation inconsistency",
+    ],
+    "FRAGMENTATION_ELEVATED": [
+        "Reduce governance fragmentation",
+        "Monitor contradiction severity",
+        "Reassess governance coherence",
+    ],
+    "PARTIAL_ALIGNMENT": [
+        "Monitor alignment signals",
+        "Observe escalation inconsistency",
+        "Reassess governance coherence",
+    ],
+    "GOVERNANCE_CONSENSUS_FORMING": [
+        "Stabilize escalation posture",
+        "Continue observation if alignment strengthens",
+        "Monitor contradiction severity",
+    ],
+    "INSTITUTIONAL_ALIGNMENT_STRONG": [
+        "Continue observation if alignment strengthens",
+        "Monitor routine alignment signals",
+    ],
+}
+
+
+def _gcc_inst_alignment_strength_label(
+    consensus_state: str,
+    alignment_state: str,
+    cross_section: str,
+) -> str:
+    if alignment_state == "INSTITUTIONAL_CONSENSUS_BROKEN":
+        return "NONE"
+    if alignment_state in ("GOVERNANCE_INTERNAL_CONFLICT", "FRAGMENTATION_ELEVATED"):
+        return "WEAK"
+    if alignment_state == "PARTIAL_ALIGNMENT" or cross_section in ("LOW", "MODERATE"):
+        return "LIMITED"
+    if alignment_state == "GOVERNANCE_CONSENSUS_FORMING":
+        return "MODERATE"
+    if alignment_state == "INSTITUTIONAL_ALIGNMENT_STRONG":
+        return "STRONG"
+    if consensus_state in ("STRONG_CONSENSUS", "CONSTITUTIONAL_CONSENSUS"):
+        return "STRONG"
+    return "LIMITED"
+
+
+def _gcc_fragmentation_severity(
+    alignment_state: str,
+    tension: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> str:
+    count = int(tension.get("contradiction_count", 0) or 0)
+    reasoning = coherence.get("reasoning_chain_status", "")
+
+    if alignment_state == "INSTITUTIONAL_CONSENSUS_BROKEN" or count >= 3:
+        return "SEVERE"
+    if alignment_state in ("GOVERNANCE_INTERNAL_CONFLICT", "FRAGMENTATION_ELEVATED") or count >= 2:
+        return "MATERIAL"
+    if count >= 1 or reasoning in ("FRAGMENTED", "BROKEN"):
+        return "MODERATE"
+    if alignment_state == "PARTIAL_ALIGNMENT":
+        return "LOW"
+    return "MINIMAL"
+
+
+def _gcc_governance_coherence_label(
+    coherence: Dict[str, Any],
+    alignment_state: str,
+) -> str:
+    reasoning = coherence.get("reasoning_chain_status", "")
+    narrative = coherence.get("narrative_integrity", "")
+
+    if alignment_state == "INSTITUTIONAL_CONSENSUS_BROKEN" or reasoning == "BROKEN":
+        return "BROKEN"
+    if alignment_state in ("GOVERNANCE_INTERNAL_CONFLICT", "FRAGMENTATION_ELEVATED"):
+        return "WEAK"
+    if alignment_state == "PARTIAL_ALIGNMENT" or narrative in ("WEAK", "PARTIAL"):
+        return "LIMITED"
+    if alignment_state == "GOVERNANCE_CONSENSUS_FORMING":
+        return "STABLE"
+    if alignment_state == "INSTITUTIONAL_ALIGNMENT_STRONG" or narrative == "HIGHLY_COHERENT":
+        return "STRONG"
+    return "LIMITED"
+
+
+def _gcc_escalation_disagreement(
+    decision: Dict[str, Any],
+    intervention: Dict[str, Any],
+) -> bool:
+    escalation = decision.get("escalation_readiness", "NONE")
+    posture = intervention.get("intervention_posture", "")
+    discussable = decision.get("discussability", "NOT_DISCUSSABLE")
+
+    if posture in ("CONSTITUTIONAL_LOCK_REQUIRED", "ESCALATION_REQUIRED") and escalation in (
+        "NONE",
+        "VERY_LOW",
+    ):
+        return True
+    if posture == "OBSERVATION_ONLY" and escalation in ("MODERATE", "HIGH"):
+        return True
+    if discussable == "NOT_DISCUSSABLE" and posture == "ESCALATION_REQUIRED":
+        return False
+    return (
+        posture in ("CONTAINMENT_RECOMMENDED", "ESCALATION_REQUIRED")
+        and escalation in ("NONE", "VERY_LOW")
+        and discussable in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY")
+    )
+
+
+def _gcc_inst_alignment_drivers(
+    alignment_state: str,
+    consensus: Dict[str, Any],
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    intervention: Dict[str, Any],
+    escalation_disagreement: bool,
+) -> List[str]:
+    drivers: List[str] = []
+
+    if alignment_state == "INSTITUTIONAL_CONSENSUS_BROKEN":
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+        if escalation_disagreement:
+            drivers.append("Escalation disagreement visible")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+    elif alignment_state == "FRAGMENTATION_ELEVATED":
+        drivers.append("Governance fragmentation rising")
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Stability pressured: {coherence.get('cross_section_agreement', '—')}")
+    elif alignment_state == "INSTITUTIONAL_ALIGNMENT_STRONG":
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Escalation: {decision.get('escalation_readiness', '—')}")
+        drivers.append(f"Intervention: {intervention.get('intervention_display', '—')}")
+    else:
+        drivers.append(f"Consensus: {consensus.get('consensus_display', '—')}")
+        drivers.append(f"Tension: {tension.get('tension_display', '—')}")
+        drivers.append(f"Cross-section: {coherence.get('cross_section_agreement', '—')}")
+        if escalation_disagreement:
+            drivers.append("Escalation disagreement visible")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_institutional_alignment(
+    *,
+    consensus: Dict[str, Any],
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    evidence: Dict[str, Any],
+    intervention: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> Dict[str, Any]:
+    consensus_state = consensus.get("consensus_state", "")
+    coherence_state = coherence.get("coherence_state", "")
+    reasoning = coherence.get("reasoning_chain_status", "")
+    cross_section = coherence.get("cross_section_agreement", "MODERATE")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    tension_level = tension.get("tension_level", "NO_TENSION")
+    escalation_disagreement = _gcc_escalation_disagreement(decision, intervention)
+    direction = hist.get("confidence_direction", "stable")
+
+    def _match_broken() -> bool:
+        return (
+            consensus_state == "CONFLICTED_GOVERNANCE"
+            or (
+                reasoning == "BROKEN"
+                and contradiction_count >= 2
+                and cross_section in ("VERY_LOW", "LOW")
+            )
+            or (
+                coherence_state
+                in (
+                    "FRAGMENTED_REASONING_CHAIN",
+                    "INTERNALLY_INCONSISTENT_GOVERNANCE",
+                )
+                and contradiction_count >= 3
+            )
+        )
+
+    def _match_internal_conflict() -> bool:
+        return (
+            contradiction_count >= 2
+            and (
+                consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+                or escalation_disagreement
+            )
+            and tension_level in ("MODERATE_TENSION", "HIGH_TENSION", "CRITICAL_TENSION")
+        )
+
+    def _match_fragmentation_elevated() -> bool:
+        return (
+            consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE")
+            or coherence_state == "FRAGMENTED_REASONING_CHAIN"
+            or contradiction_count >= 2
+        )
+
+    def _match_partial() -> bool:
+        return (
+            cross_section in ("MODERATE", "LOW")
+            or consensus_state == "MODERATE_CONSENSUS"
+            or (
+                contradiction_count <= 2
+                and coherence_state
+                in (
+                    "MODERATELY_COHERENT_GOVERNANCE",
+                    "LOW_COHERENCE_GOVERNANCE",
+                )
+            )
+        )
+
+    def _match_forming() -> bool:
+        return (
+            direction == "improving"
+            and contradiction_count <= 1
+            and reasoning not in ("BROKEN", "FRAGMENTED")
+            and stability.get("stability_state")
+            in (
+                "GOVERNANCE_STABILITY_IMPROVING",
+                "STABLE_GOVERNANCE_POSTURE",
+            )
+        )
+
+    def _match_strong() -> bool:
+        return (
+            consensus_state
+            in (
+                "STRONG_CONSENSUS",
+                "CONSTITUTIONAL_CONSENSUS",
+                "PRE_RUNTIME_CONVERGENCE",
+            )
+            and contradiction_count == 0
+            and coherence_state
+            in (
+                "HIGHLY_COHERENT_GOVERNANCE",
+                "MODERATELY_COHERENT_GOVERNANCE",
+                "LOGICALLY_CONSTRAINED_BUT_COHERENT",
+            )
+            and cross_section in ("HIGH", "VERY_HIGH")
+            and not escalation_disagreement
+            and evidence.get("evidence_state")
+            in (
+                "CONFIDENCE_SUPPORTED",
+                "EVIDENCE_INTEGRITY_STRONG",
+                "PARTIALLY_SUPPORTED_CONFIDENCE",
+            )
+        )
+
+    matchers = {
+        "INSTITUTIONAL_CONSENSUS_BROKEN": _match_broken,
+        "GOVERNANCE_INTERNAL_CONFLICT": _match_internal_conflict,
+        "FRAGMENTATION_ELEVATED": _match_fragmentation_elevated,
+        "PARTIAL_ALIGNMENT": _match_partial,
+        "GOVERNANCE_CONSENSUS_FORMING": _match_forming,
+        "INSTITUTIONAL_ALIGNMENT_STRONG": _match_strong,
+    }
+
+    alignment_state = "PARTIAL_ALIGNMENT"
+    for candidate in _GCC_INST_CONSENSUS_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            alignment_state = candidate
+            break
+
+    alignment_strength = _gcc_inst_alignment_strength_label(
+        consensus_state, alignment_state, cross_section
+    )
+    fragmentation = _gcc_fragmentation_severity(alignment_state, tension, coherence)
+    coherence_label = _gcc_governance_coherence_label(coherence, alignment_state)
+    drivers = _gcc_inst_alignment_drivers(
+        alignment_state,
+        consensus,
+        coherence,
+        tension,
+        integrity,
+        decision,
+        intervention,
+        escalation_disagreement,
+    )
+    protocol = _GCC_INST_CONSENSUS_PROTOCOL.get(alignment_state, ["Monitor alignment signals"])
+
+    return {
+        "alignment_state": alignment_state,
+        "alignment_display": _GCC_INST_CONSENSUS_DISPLAY.get(
+            alignment_state, alignment_state.replace("_", " ").title()
+        ),
+        "alignment_strength": alignment_strength,
+        "fragmentation_severity": fragmentation,
+        "governance_coherence": coherence_label,
+        "drivers": drivers,
+        "interpretation": _GCC_INST_CONSENSUS_INTERPRETATION.get(alignment_state, ""),
+        "alignment_action": _GCC_INST_CONSENSUS_ACTION.get(
+            alignment_state, "MONITOR_ALIGNMENT_SIGNALS"
+        ),
+        "consensus_protocol": protocol,
+        "escalation_disagreement": escalation_disagreement,
+    }
+
+
+def _gcc_render_institutional_alignment_intelligence(
+    *,
+    consensus: Dict[str, Any],
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    evidence: Dict[str, Any],
+    intervention: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> Dict[str, Any]:
+    alignment = _gcc_detect_governance_institutional_alignment(
+        consensus=consensus,
+        coherence=coherence,
+        tension=tension,
+        integrity=integrity,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        evidence=evidence,
+        intervention=intervention,
+        hist=hist,
+    )
+
+    st.markdown("### Governance Institutional Consensus & Alignment Intelligence")
+    st.caption(
+        "Institutional alignment analysis — whether governance reasoning is internally consistent. "
+        "**Read-only consensus view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Consensus State", alignment["alignment_display"])
+    c2.metric("Alignment Strength", alignment["alignment_strength"])
+    c3.metric("Fragmentation Severity", alignment["fragmentation_severity"])
+    c4.metric("Governance Coherence", alignment["governance_coherence"])
+
+    state = alignment["alignment_state"]
+    if state == "INSTITUTIONAL_CONSENSUS_BROKEN":
+        st.error(alignment["interpretation"])
+    elif state in ("GOVERNANCE_INTERNAL_CONFLICT", "FRAGMENTATION_ELEVATED"):
+        st.warning(alignment["interpretation"])
+    elif state == "INSTITUTIONAL_ALIGNMENT_STRONG":
+        st.success(alignment["interpretation"])
+    else:
+        st.info(alignment["interpretation"])
+
+    st.markdown("**Alignment Drivers**")
+    for driver in alignment["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Alignment Action", alignment["alignment_action"])
+    a2.metric("Protocol Steps", len(alignment["consensus_protocol"]))
+
+    st.markdown("**Institutional Consensus Protocol**")
+    for step in alignment["consensus_protocol"]:
+        if state in ("INSTITUTIONAL_CONSENSUS_BROKEN", "GOVERNANCE_INTERNAL_CONFLICT"):
+            st.warning(f"• {step}")
+        else:
+            st.markdown(f'<div class="gcc-block-item">• {step}</div>', unsafe_allow_html=True)
+
+    with st.expander("Alignment analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{alignment['alignment_state']}`")
+        st.markdown(f"- **Consensus state:** `{consensus.get('consensus_state', '—')}`")
+        st.markdown(f"- **Coherence state:** `{coherence.get('coherence_state', '—')}`")
+        st.markdown(
+            f"- **Escalation disagreement:** `{'Yes' if alignment['escalation_disagreement'] else 'No'}`"
+        )
+
+    return alignment
+
+
+_GCC_DECISION_QUALITY_PRIORITY: Tuple[str, ...] = (
+    "INSTITUTIONAL_REASONING_BROKEN",
+    "DECISION_QUALITY_MATERIALLY_IMPAIRED",
+    "REASONING_INCONSISTENT",
+    "DECISION_QUALITY_RECOVERABLE",
+    "INSTITUTIONAL_REASONING_STABILIZING",
+    "HIGH_QUALITY_GOVERNANCE_REASONING",
+)
+
+_GCC_DECISION_QUALITY_DISPLAY: Dict[str, str] = {
+    "INSTITUTIONAL_REASONING_BROKEN": "Institutional Reasoning Broken",
+    "DECISION_QUALITY_MATERIALLY_IMPAIRED": "Decision Quality Materially Impaired",
+    "REASONING_INCONSISTENT": "Reasoning Inconsistent",
+    "DECISION_QUALITY_RECOVERABLE": "Decision Quality Recoverable",
+    "INSTITUTIONAL_REASONING_STABILIZING": "Institutional Reasoning Stabilizing",
+    "HIGH_QUALITY_GOVERNANCE_REASONING": "High Quality Governance Reasoning",
+}
+
+_GCC_DECISION_QUALITY_INTERPRETATION: Dict[str, str] = {
+    "INSTITUTIONAL_REASONING_BROKEN": (
+        "Governance decision quality appears materially impaired. Fragmented coherence, weak evidence "
+        "integrity, and elevated contradictions constrain institutional confidence in governance reasoning."
+    ),
+    "DECISION_QUALITY_MATERIALLY_IMPAIRED": (
+        "Governance conclusions remain weak under institutional scrutiny. Reasoning quality and "
+        "defensibility are materially constrained."
+    ),
+    "REASONING_INCONSISTENT": (
+        "Governance reasoning appears inconsistent. Institutional logic and escalation posture remain "
+        "misaligned across governance layers."
+    ),
+    "DECISION_QUALITY_RECOVERABLE": (
+        "Governance decision quality remains weakened but recoverable. Institutional coherence and "
+        "defensibility remain sufficient to justify continued observation."
+    ),
+    "INSTITUTIONAL_REASONING_STABILIZING": (
+        "Governance reasoning appears to be stabilizing. Coherence and institutional quality signals "
+        "suggest decision quality may be improving."
+    ),
+    "HIGH_QUALITY_GOVERNANCE_REASONING": (
+        "Governance reasoning appears institutionally strong. Decision quality, evidence integrity, "
+        "and institutional coherence remain aligned under scrutiny."
+    ),
+}
+
+_GCC_DECISION_QUALITY_ACTION: Dict[str, str] = {
+    "INSTITUTIONAL_REASONING_BROKEN": "PRESERVE_CONSTITUTIONAL_LOCK",
+    "DECISION_QUALITY_MATERIALLY_IMPAIRED": "IMPROVE_REASONING_INTEGRITY",
+    "REASONING_INCONSISTENT": "IMPROVE_GOVERNANCE_COHERENCE",
+    "DECISION_QUALITY_RECOVERABLE": "MONITOR_REASONING_QUALITY",
+    "INSTITUTIONAL_REASONING_STABILIZING": "CONTINUE_OBSERVATION",
+    "HIGH_QUALITY_GOVERNANCE_REASONING": "CONTINUE_OBSERVATION",
+}
+
+_GCC_DECISION_QUALITY_PROTOCOL: Dict[str, List[str]] = {
+    "INSTITUTIONAL_REASONING_BROKEN": [
+        "Improve governance coherence",
+        "Monitor contradiction severity",
+        "Reassess institutional defensibility",
+        "Monitor evidence integrity deterioration",
+    ],
+    "DECISION_QUALITY_MATERIALLY_IMPAIRED": [
+        "Improve reasoning integrity",
+        "Monitor evidence integrity deterioration",
+        "Reassess institutional defensibility",
+    ],
+    "REASONING_INCONSISTENT": [
+        "Observe reasoning inconsistency",
+        "Improve governance coherence",
+        "Monitor contradiction severity",
+    ],
+    "DECISION_QUALITY_RECOVERABLE": [
+        "Monitor reasoning quality",
+        "Continue observation if reasoning stabilizes",
+        "Monitor contradiction severity",
+    ],
+    "INSTITUTIONAL_REASONING_STABILIZING": [
+        "Continue observation if reasoning stabilizes",
+        "Monitor reasoning quality",
+    ],
+    "HIGH_QUALITY_GOVERNANCE_REASONING": [
+        "Continue observation",
+        "Monitor routine reasoning signals",
+    ],
+}
+
+
+def _gcc_reasoning_integrity_label(
+    quality_state: str,
+    coherence: Dict[str, Any],
+    alignment: Dict[str, Any],
+) -> str:
+    reasoning = coherence.get("reasoning_chain_status", "")
+    if quality_state == "INSTITUTIONAL_REASONING_BROKEN" or reasoning == "BROKEN":
+        return "BROKEN"
+    if quality_state in ("DECISION_QUALITY_MATERIALLY_IMPAIRED", "REASONING_INCONSISTENT"):
+        return "WEAK"
+    if (
+        quality_state == "DECISION_QUALITY_RECOVERABLE"
+        or alignment.get("governance_coherence") == "LIMITED"
+    ):
+        return "LIMITED"
+    if quality_state == "INSTITUTIONAL_REASONING_STABILIZING":
+        return "MODERATE"
+    if quality_state == "HIGH_QUALITY_GOVERNANCE_REASONING":
+        return "STRONG"
+    return "LIMITED"
+
+
+def _gcc_decision_defensibility(
+    quality_state: str,
+    evidence: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> str:
+    base = evidence.get("institutional_defensibility", "LIMITED")
+    if quality_state == "INSTITUTIONAL_REASONING_BROKEN":
+        return "NONE"
+    if quality_state == "DECISION_QUALITY_MATERIALLY_IMPAIRED":
+        return "WEAK"
+    if quality_state == "HIGH_QUALITY_GOVERNANCE_REASONING":
+        return "STRONG"
+    if float(decision.get("governance_maturity_score", 0.0) or 0.0) >= 0.50 and base == "MODERATE":
+        return "MODERATE"
+    return base
+
+
+def _gcc_stability_under_scrutiny(
+    quality_state: str,
+    evidence: Dict[str, Any],
+    stability: Dict[str, Any],
+    alignment: Dict[str, Any],
+) -> str:
+    if quality_state == "INSTITUTIONAL_REASONING_BROKEN":
+        return "UNSTABLE"
+    if quality_state in ("DECISION_QUALITY_MATERIALLY_IMPAIRED", "REASONING_INCONSISTENT"):
+        return "FRAGILE"
+    if quality_state == "DECISION_QUALITY_RECOVERABLE":
+        return "CONDITIONAL"
+    if quality_state == "INSTITUTIONAL_REASONING_STABILIZING":
+        return "STABLE"
+    if quality_state == "HIGH_QUALITY_GOVERNANCE_REASONING":
+        return "RESILIENT"
+    if evidence.get("confidence_reliability") in ("VERY_LOW", "LOW"):
+        return "FRAGILE"
+    if float(stability.get("stability_score", 0.0) or 0.0) >= 0.55:
+        return "STABLE"
+    return "CONDITIONAL"
+
+
+def _gcc_decision_quality_drivers(
+    quality_state: str,
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    decision: Dict[str, Any],
+    stability: Dict[str, Any],
+) -> List[str]:
+    drivers: List[str] = []
+
+    if quality_state == "INSTITUTIONAL_REASONING_BROKEN":
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Contradictions: {tension.get('contradiction_count', 0)}")
+        drivers.append(f"Trustworthiness: {_gcc_fmt_conf(integrity.get('discounted_trust_score'))}")
+        drivers.append(f"Evidence: {evidence.get('evidence_display', '—')}")
+        drivers.append(f"Defensibility: {evidence.get('institutional_defensibility', '—')}")
+    elif quality_state == "REASONING_INCONSISTENT":
+        if alignment.get("escalation_disagreement"):
+            drivers.append("Escalation posture inconsistent")
+        drivers.append(f"Alignment: {alignment.get('alignment_display', '—')}")
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Consensus alignment: {alignment.get('alignment_strength', '—')}")
+    elif quality_state == "HIGH_QUALITY_GOVERNANCE_REASONING":
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Evidence: {evidence.get('evidence_display', '—')}")
+        drivers.append(f"Alignment: {alignment.get('alignment_display', '—')}")
+        drivers.append(f"Maturity: {_gcc_fmt_conf(decision.get('governance_maturity_score'))}")
+    else:
+        drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
+        drivers.append(f"Evidence reliability: {evidence.get('confidence_reliability', '—')}")
+        drivers.append(f"Alignment: {alignment.get('alignment_display', '—')}")
+        drivers.append(f"Stability score: {_gcc_fmt_conf(stability.get('stability_score'))}")
+
+    return drivers[:6]
+
+
+def _gcc_detect_governance_decision_quality(
+    *,
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    intervention: Dict[str, Any],
+    improvement: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> Dict[str, Any]:
+    reasoning_chain = coherence.get("reasoning_chain_status", "")
+    coherence_state = coherence.get("coherence_state", "")
+    alignment_state = alignment.get("alignment_state", "")
+    evidence_state = evidence.get("evidence_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    logic_score = float(coherence.get("logic_score", 0.0) or 0.0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    direction = hist.get("confidence_direction", "stable")
+    escalation_disagreement = alignment.get("escalation_disagreement", False)
+
+    def _match_broken() -> bool:
+        return (
+            alignment_state == "INSTITUTIONAL_CONSENSUS_BROKEN"
+            or (
+                reasoning_chain == "BROKEN"
+                and evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED"
+                and contradiction_count >= 2
+            )
+            or (
+                coherence_state
+                in (
+                    "FRAGMENTED_REASONING_CHAIN",
+                    "INTERNALLY_INCONSISTENT_GOVERNANCE",
+                )
+                and evidence.get("institutional_defensibility") in ("NONE", "WEAK")
+            )
+        )
+
+    def _match_impaired() -> bool:
+        return evidence_state in (
+            "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+            "TRUSTWORTHINESS_MATERIALLY_IMPAIRED",
+        ) or (logic_score < 0.25 and evidence.get("confidence_reliability") in ("VERY_LOW", "LOW"))
+
+    def _match_inconsistent() -> bool:
+        return (
+            escalation_disagreement
+            or alignment_state in ("GOVERNANCE_INTERNAL_CONFLICT", "FRAGMENTATION_ELEVATED")
+            or coherence_state == "INTERNALLY_INCONSISTENT_GOVERNANCE"
+        )
+
+    def _match_recoverable() -> bool:
+        return (
+            resilience.get("resilience_state")
+            in (
+                "RECOVERABLE_FRAGMENTATION",
+                "REVERSIBLE_GOVERNANCE_DETERIORATION",
+                "MODERATE_GOVERNANCE_RESILIENCE",
+            )
+            and alignment_state in ("PARTIAL_ALIGNMENT", "FRAGMENTATION_ELEVATED")
+            and evidence_state
+            in (
+                "PARTIALLY_SUPPORTED_CONFIDENCE",
+                "EVIDENCE_QUALITY_DEGRADING",
+            )
+        )
+
+    def _match_stabilizing() -> bool:
+        return (
+            alignment_state == "GOVERNANCE_CONSENSUS_FORMING"
+            or improvement.get("improvement_state") == "GOVERNANCE_ADAPTATION_EMERGING"
+            or (
+                direction == "improving"
+                and contradiction_count <= 1
+                and reasoning_chain not in ("BROKEN",)
+            )
+        )
+
+    def _match_high_quality() -> bool:
+        return (
+            alignment_state == "INSTITUTIONAL_ALIGNMENT_STRONG"
+            and evidence_state in ("CONFIDENCE_SUPPORTED", "EVIDENCE_INTEGRITY_STRONG")
+            and logic_score >= 0.50
+            and contradiction_count == 0
+            and maturity >= 0.40
+            and intervention.get("intervention_posture") == "OBSERVATION_ONLY"
+        )
+
+    matchers = {
+        "INSTITUTIONAL_REASONING_BROKEN": _match_broken,
+        "DECISION_QUALITY_MATERIALLY_IMPAIRED": _match_impaired,
+        "REASONING_INCONSISTENT": _match_inconsistent,
+        "DECISION_QUALITY_RECOVERABLE": _match_recoverable,
+        "INSTITUTIONAL_REASONING_STABILIZING": _match_stabilizing,
+        "HIGH_QUALITY_GOVERNANCE_REASONING": _match_high_quality,
+    }
+
+    quality_state = "DECISION_QUALITY_RECOVERABLE"
+    for candidate in _GCC_DECISION_QUALITY_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            quality_state = candidate
+            break
+
+    reasoning_integrity = _gcc_reasoning_integrity_label(quality_state, coherence, alignment)
+    defensibility = _gcc_decision_defensibility(quality_state, evidence, decision)
+    scrutiny = _gcc_stability_under_scrutiny(quality_state, evidence, stability, alignment)
+    drivers = _gcc_decision_quality_drivers(
+        quality_state, coherence, tension, integrity, evidence, alignment, decision, stability
+    )
+    protocol = _GCC_DECISION_QUALITY_PROTOCOL.get(quality_state, ["Monitor reasoning quality"])
+
+    return {
+        "quality_state": quality_state,
+        "quality_display": _GCC_DECISION_QUALITY_DISPLAY.get(
+            quality_state, quality_state.replace("_", " ").title()
+        ),
+        "reasoning_integrity": reasoning_integrity,
+        "institutional_defensibility": defensibility,
+        "stability_under_scrutiny": scrutiny,
+        "drivers": drivers,
+        "interpretation": _GCC_DECISION_QUALITY_INTERPRETATION.get(quality_state, ""),
+        "reasoning_action": _GCC_DECISION_QUALITY_ACTION.get(
+            quality_state, "MONITOR_REASONING_QUALITY"
+        ),
+        "decision_protocol": protocol,
+    }
+
+
+def _gcc_render_decision_quality_intelligence(
+    *,
+    coherence: Dict[str, Any],
+    tension: Dict[str, Any],
+    integrity: Dict[str, Any],
+    decision: Dict[str, Any],
+    stability: Dict[str, Any],
+    resilience: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    intervention: Dict[str, Any],
+    improvement: Dict[str, Any],
+    hist: Dict[str, Any],
+) -> None:
+    quality = _gcc_detect_governance_decision_quality(
+        coherence=coherence,
+        tension=tension,
+        integrity=integrity,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        evidence=evidence,
+        alignment=alignment,
+        intervention=intervention,
+        improvement=improvement,
+        hist=hist,
+    )
+
+    st.markdown("### Governance Institutional Decision Quality & Reasoning Integrity Intelligence")
+    st.caption(
+        "Decision quality analysis — whether governance conclusions are institutionally sound under scrutiny. "
+        "**Read-only reasoning view. Not runtime enablement.**"
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Decision Quality State", quality["quality_display"])
+    c2.metric("Reasoning Integrity", quality["reasoning_integrity"])
+    c3.metric("Institutional Defensibility", quality["institutional_defensibility"])
+    c4.metric("Stability Under Scrutiny", quality["stability_under_scrutiny"])
+
+    state = quality["quality_state"]
+    if state == "INSTITUTIONAL_REASONING_BROKEN":
+        st.error(quality["interpretation"])
+    elif state in ("DECISION_QUALITY_MATERIALLY_IMPAIRED", "REASONING_INCONSISTENT"):
+        st.warning(quality["interpretation"])
+    elif state == "HIGH_QUALITY_GOVERNANCE_REASONING":
+        st.success(quality["interpretation"])
+    else:
+        st.info(quality["interpretation"])
+
+    st.markdown("**Decision Drivers**")
+    for driver in quality["drivers"]:
+        st.markdown(f'<div class="gcc-hist-metric">• {driver}</div>', unsafe_allow_html=True)
+
+    a1, a2 = st.columns(2)
+    a1.metric("Recommended Reasoning Action", quality["reasoning_action"])
+    a2.metric("Protocol Steps", len(quality["decision_protocol"]))
+
+    st.markdown("**Institutional Decision Integrity Protocol**")
+    for step in quality["decision_protocol"]:
+        if state in ("INSTITUTIONAL_REASONING_BROKEN", "DECISION_QUALITY_MATERIALLY_IMPAIRED"):
+            st.warning(f"• {step}")
+        else:
+            st.markdown(f'<div class="gcc-block-item">• {step}</div>', unsafe_allow_html=True)
+
+    with st.expander("Decision quality analysis detail", expanded=False):
+        st.markdown(f"- **Internal state:** `{quality['quality_state']}`")
+        st.markdown(f"- **Coherence state:** `{coherence.get('coherence_state', '—')}`")
+        st.markdown(f"- **Evidence state:** `{evidence.get('evidence_state', '—')}`")
+        st.markdown(f"- **Alignment state:** `{alignment.get('alignment_state', '—')}`")
+
+
+_GCC_EXECUTIVE_VERDICT_PRIORITY: Tuple[str, ...] = (
+    "CONSTITUTIONALLY_LOCKED_GOVERNANCE",
+    "SYSTEMIC_GOVERNANCE_INSTABILITY",
+    "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS",
+    "GOVERNANCE_STABILIZING",
+    "GOVERNANCE_OPERATIONALLY_STABLE",
+)
+
+_GCC_EXECUTIVE_VERDICT_DISPLAY: Dict[str, str] = {
+    "CONSTITUTIONALLY_LOCKED_GOVERNANCE": "Constitutionally Locked Governance",
+    "SYSTEMIC_GOVERNANCE_INSTABILITY": "Systemic Governance Instability",
+    "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS": "Governance Under Institutional Stress",
+    "GOVERNANCE_STABILIZING": "Governance Stabilizing",
+    "GOVERNANCE_OPERATIONALLY_STABLE": "Governance Operationally Stable",
+}
+
+_GCC_EXECUTIVE_VERDICT_MEMO: Dict[str, str] = {
+    "CONSTITUTIONALLY_LOCKED_GOVERNANCE": (
+        "Governance remains constitutionally constrained. Fragmented institutional alignment, "
+        "weak trustworthiness, and impaired reasoning quality continue to prevent runtime governance "
+        "readiness. Constitutional safeguards remain appropriate and escalation is not presently justified."
+    ),
+    "SYSTEMIC_GOVERNANCE_INSTABILITY": (
+        "Governance exhibits systemic institutional instability. Fragmented coherence, weak evidence "
+        "integrity, and defensive intervention posture constrain operator confidence. Containment "
+        "and observation remain the appropriate institutional response."
+    ),
+    "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS": (
+        "Governance is under institutional stress. Contradictions, weakened alignment, and constrained "
+        "defensibility warrant heightened monitoring while constitutional safeguards remain in place."
+    ),
+    "GOVERNANCE_STABILIZING": (
+        "Governance shows stabilizing signals. Institutional quality is improving, though runtime "
+        "readiness has not yet been demonstrated. Continued observation remains appropriate."
+    ),
+    "GOVERNANCE_OPERATIONALLY_STABLE": (
+        "Governance appears operationally stable. Coherence, trustworthiness, and alignment remain "
+        "sufficiently strong for continued institutional observation."
+    ),
+}
+
+_GCC_EXECUTIVE_OPERATOR_ACTION: Dict[str, str] = {
+    "CONSTITUTIONALLY_LOCKED_GOVERNANCE": "MAINTAIN_CONSTITUTIONAL_LOCK",
+    "SYSTEMIC_GOVERNANCE_INSTABILITY": "REDUCE_FRAGMENTATION",
+    "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS": "MONITOR_GOVERNANCE_STRESS",
+    "GOVERNANCE_STABILIZING": "CONTINUE_OBSERVATION",
+    "GOVERNANCE_OPERATIONALLY_STABLE": "CONTINUE_OBSERVATION",
+}
+
+_GCC_SEVERITY_PRIORITY: Tuple[str, ...] = (
+    "CRITICAL_LOCK",
+    "HIGH_RISK",
+    "ELEVATED",
+    "WATCH",
+    "NORMAL",
+)
+
+_GCC_SEVERITY_DISPLAY: Dict[str, str] = {
+    "CRITICAL_LOCK": "Critical Lock",
+    "HIGH_RISK": "High Risk",
+    "ELEVATED": "Elevated",
+    "WATCH": "Watch",
+    "NORMAL": "Normal",
+}
+
+_GCC_ATTENTION_MEMO: Dict[str, str] = {
+    "CRITICAL_LOCK": (
+        "Governance remains constitutionally locked. Runtime posture is blocked and no immediate "
+        "intervention beyond normal governance refresh is required. Maintain constitutional "
+        "safeguards and avoid escalation fatigue."
+    ),
+    "HIGH_RISK": (
+        "Governance quality remains materially impaired and deserves elevated operator awareness. "
+        "Intraday review is appropriate while governance fragmentation and trust deterioration "
+        "are monitored."
+    ),
+    "ELEVATED": (
+        "Governance stress is visible and warrants active monitoring. Routine daily review remains "
+        "appropriate while constitutional safeguards stay in place."
+    ),
+    "WATCH": (
+        "Governance shows mild deterioration signals. Operator awareness is appropriate; routine "
+        "monitoring remains sufficient unless stress indicators worsen."
+    ),
+    "NORMAL": (
+        "Governance posture remains stable and institutionally healthy. Routine monitoring "
+        "remains sufficient."
+    ),
+}
+
+_GCC_DIRECTION_PRIORITY: Tuple[str, ...] = (
+    "RAPIDLY_DETERIORATING",
+    "DETERIORATING",
+    "STRESSED_BUT_STABLE",
+    "STABILIZING",
+    "IMPROVING",
+    "OPERATIONALLY_STABLE",
+)
+
+_GCC_DIRECTION_DISPLAY: Dict[str, str] = {
+    "RAPIDLY_DETERIORATING": "Rapidly Deteriorating",
+    "DETERIORATING": "Deteriorating",
+    "STRESSED_BUT_STABLE": "Stressed but Stable",
+    "STABILIZING": "Stabilizing",
+    "IMPROVING": "Improving",
+    "OPERATIONALLY_STABLE": "Operationally Stable",
+}
+
+_GCC_TREND_MEMO: Dict[str, str] = {
+    "RAPIDLY_DETERIORATING": (
+        "Governance quality appears to be deteriorating rapidly. Fragmentation, trust "
+        "deterioration, and contradiction persistence justify closer observation while "
+        "constitutional safeguards remain active."
+    ),
+    "DETERIORATING": (
+        "Governance trajectory is weakening. Institutional quality, coherence, or trust "
+        "signals are declining and warrant elevated monitoring."
+    ),
+    "STRESSED_BUT_STABLE": (
+        "Governance remains impaired but directional deterioration is not accelerating. "
+        "Constitutional safeguards remain appropriate and routine governance refresh remains "
+        "sufficient."
+    ),
+    "STABILIZING": (
+        "Governance shows stabilizing directional signals. Contradictions may be declining "
+        "and institutional posture appears to be recovering gradually."
+    ),
+    "IMPROVING": (
+        "Governance trajectory appears favorable. Institutional coherence and trust signals "
+        "show gradual improvement."
+    ),
+    "OPERATIONALLY_STABLE": (
+        "Governance direction remains stable with low drift. Institutional quality appears "
+        "durable and routine observation remains sufficient."
+    ),
+}
+
+_GCC_COCKPIT_CONFIDENCE_PRIORITY: Tuple[str, ...] = (
+    "VERY_LOW",
+    "LOW",
+    "GUARDED",
+    "MODERATE",
+    "HIGH",
+    "VERY_HIGH",
+)
+
+_GCC_COCKPIT_CONFIDENCE_DISPLAY: Dict[str, str] = {
+    "VERY_LOW": "Very Low",
+    "LOW": "Low",
+    "GUARDED": "Guarded",
+    "MODERATE": "Moderate",
+    "HIGH": "High",
+    "VERY_HIGH": "Very High",
+}
+
+_GCC_COCKPIT_CONFIDENCE_MEMO: Dict[str, str] = {
+    "VERY_LOW": (
+        "Governance interpretation confidence remains weak. Fragmented reasoning, impaired "
+        "evidence integrity, and institutional inconsistency reduce confidence in the "
+        "cockpit's conclusions."
+    ),
+    "LOW": (
+        "Governance cockpit interpretation appears fragile. Weak trust signals and constrained "
+        "evidence warrant caution when acting on governance conclusions."
+    ),
+    "GUARDED": (
+        "Governance interpretation remains conditionally reliable. Institutional signals remain "
+        "usable, though continued observation and caution are warranted."
+    ),
+    "MODERATE": (
+        "Governance cockpit interpretation appears reasonably stable. Evidence and directional "
+        "signals are sufficiently aligned for routine institutional use."
+    ),
+    "HIGH": (
+        "Governance cockpit interpretation appears institutionally reliable. Evidence integrity, "
+        "coherence, and directional consistency remain aligned."
+    ),
+    "VERY_HIGH": (
+        "Governance cockpit appears institutionally trustworthy. Interpretation is stable, "
+        "signal reliability is strong, and governance conclusions are well supported."
+    ),
+}
+
+_GCC_PLAYBOOK_DISCIPLINE_MEMO: Dict[str, str] = {
+    "MAINTAIN_CONSTITUTIONAL_LOCK": (
+        "Governance remains impaired but stable. Operators should maintain constitutional "
+        "safeguards, avoid premature escalation, and continue disciplined observation during "
+        "scheduled refresh windows."
+    ),
+    "REDUCE_FRAGMENTATION": (
+        "Governance fragmentation warrants elevated discipline. Observation intensity should "
+        "increase while alignment and consensus signals are reassessed for stabilization."
+    ),
+    "IMPROVE_CONFIDENCE_INTEGRITY": (
+        "Evidence and confidence integrity require operator attention. Continue observation "
+        "while trustworthiness and auditability signals are monitored for recovery."
+    ),
+    "MONITOR_GOVERNANCE_STRESS": (
+        "Governance remains under institutional stress. Maintain heightened monitoring while "
+        "constitutional safeguards stay in place and escalation remains deferred."
+    ),
+    "CONTINUE_DISCIPLINED_OBSERVATION": (
+        "Governance posture supports continued disciplined observation. Routine monitoring "
+        "remains appropriate unless stress or drift indicators worsen."
+    ),
+    "PREPARE_ESCALATION_REVIEW": (
+        "Governance deterioration warrants elevated discipline. Observation intensity should "
+        "increase while escalation readiness and fragmentation risks are reassessed."
+    ),
+}
+
+_GCC_PERSISTENCE_PRIORITY: Tuple[str, ...] = (
+    "ENTRENCHED_INSTABILITY",
+    "PERSISTENT_LOCK",
+    "TRANSITIONING",
+    "STABILIZING",
+    "SHORT_TERM_VARIATION",
+    "OPERATIONALLY_DURABLE",
+)
+
+_GCC_PERSISTENCE_DISPLAY: Dict[str, str] = {
+    "ENTRENCHED_INSTABILITY": "Entrenched Instability",
+    "PERSISTENT_LOCK": "Persistent Lock",
+    "TRANSITIONING": "Transitioning",
+    "STABILIZING": "Stabilizing",
+    "SHORT_TERM_VARIATION": "Short-Term Variation",
+    "OPERATIONALLY_DURABLE": "Operationally Durable",
+}
+
+_GCC_TEMPORAL_MEMO: Dict[str, str] = {
+    "ENTRENCHED_INSTABILITY": (
+        "Governance deterioration appears persistent and institutionally difficult to resolve. "
+        "Elevated observation and escalation readiness remain appropriate."
+    ),
+    "PERSISTENT_LOCK": (
+        "Governance remains constitutionally constrained but directionally stable. Recovery "
+        "appears gradual and operators should maintain disciplined observation without "
+        "escalation fatigue."
+    ),
+    "TRANSITIONING": (
+        "Governance posture appears to be in transition. Directional movement is visible and "
+        "operators should monitor regime shifts during scheduled review windows."
+    ),
+    "STABILIZING": (
+        "Governance posture appears to be improving gradually. Institutional recovery signals "
+        "remain early but observable."
+    ),
+    "SHORT_TERM_VARIATION": (
+        "Governance disturbance appears limited in duration. Routine observation remains "
+        "appropriate unless persistence indicators worsen."
+    ),
+    "OPERATIONALLY_DURABLE": (
+        "Governance posture appears operationally durable. Institutional consistency remains "
+        "stable and routine monitoring remains sufficient."
+    ),
+}
+
+_GCC_DELTA_PRIORITY: Tuple[str, ...] = (
+    "REGIME_SHIFT_EMERGING",
+    "MATERIAL_DETERIORATION",
+    "MATERIAL_IMPROVEMENT",
+    "MIXED_TRANSITION",
+    "STABLE_NO_MATERIAL_CHANGE",
+)
+
+_GCC_DELTA_DISPLAY: Dict[str, str] = {
+    "REGIME_SHIFT_EMERGING": "Regime Shift Emerging",
+    "MATERIAL_DETERIORATION": "Material Deterioration",
+    "MATERIAL_IMPROVEMENT": "Material Improvement",
+    "MIXED_TRANSITION": "Mixed Transition",
+    "STABLE_NO_MATERIAL_CHANGE": "Stable - No Material Change",
+}
+
+_GCC_DELTA_CHANGE_MEMO: Dict[str, str] = {
+    "REGIME_SHIFT_EMERGING": (
+        "Governance appears to be entering a material institutional transition. Directional "
+        "movement is significant and operators should monitor regime shift signals closely."
+    ),
+    "MATERIAL_DETERIORATION": (
+        "Governance quality appears to be weakening materially. Elevated observation is "
+        "warranted as trust, coherence, or institutional consistency deteriorate."
+    ),
+    "MATERIAL_IMPROVEMENT": (
+        "Governance quality appears to be improving materially. Institutional repair signals "
+        "are visible though continued observation remains appropriate."
+    ),
+    "MIXED_TRANSITION": (
+        "Governance signals remain mixed. Institutional change is observable but insufficiently "
+        "coherent to justify strong directional conclusions."
+    ),
+    "STABLE_NO_MATERIAL_CHANGE": (
+        "Governance posture remains materially unchanged. Institutional direction, constitutional "
+        "safeguards, and governance trajectory remain stable without evidence of regime transition."
+    ),
+}
+
+_GCC_POSITIVE_CHANGE_DISPLAY: Dict[str, str] = {
+    "NONE": "None",
+    "TRUST_IMPROVEMENT": "Trust Improvement",
+    "ALIGNMENT_IMPROVEMENT": "Alignment Improvement",
+    "COHERENCE_STABILIZATION": "Coherence Stabilization",
+    "CONTRADICTION_REDUCTION": "Contradiction Reduction",
+    "EVIDENCE_STRENGTHENING": "Evidence Strengthening",
+    "GOVERNANCE_STABILIZATION": "Governance Stabilization",
+}
+
+_GCC_NEGATIVE_CHANGE_DISPLAY: Dict[str, str] = {
+    "NONE": "None",
+    "TRUST_DETERIORATION": "Trust Deterioration",
+    "ALIGNMENT_FRAGMENTATION": "Alignment Fragmentation",
+    "COHERENCE_BREAKDOWN": "Coherence Breakdown",
+    "CONTRADICTION_ACCELERATION": "Contradiction Acceleration",
+    "EVIDENCE_DEGRADATION": "Evidence Degradation",
+    "GOVERNANCE_INSTABILITY": "Governance Instability",
+}
+
+_GCC_FORWARD_OUTLOOK_PRIORITY: Tuple[str, ...] = (
+    "STRUCTURAL_DETERIORATION_RISK",
+    "PERSISTENT_CONSTRAINT",
+    "MIXED_FORWARD_PATH",
+    "STABILIZATION_PATH",
+    "OPERATIONALLY_STABLE_PATH",
+)
+
+_GCC_FORWARD_OUTLOOK_DISPLAY: Dict[str, str] = {
+    "STRUCTURAL_DETERIORATION_RISK": "Structural Deterioration Risk",
+    "PERSISTENT_CONSTRAINT": "Persistent Constraint",
+    "MIXED_FORWARD_PATH": "Mixed Forward Path",
+    "STABILIZATION_PATH": "Stabilization Path",
+    "OPERATIONALLY_STABLE_PATH": "Operationally Stable Path",
+}
+
+_GCC_FORWARD_FORECAST_MEMO: Dict[str, str] = {
+    "STRUCTURAL_DETERIORATION_RISK": (
+        "Governance deterioration risk appears elevated. Increased observation of fragmentation, "
+        "trust deterioration, and institutional instability is warranted."
+    ),
+    "PERSISTENT_CONSTRAINT": (
+        "Governance is expected to remain constitutionally constrained in the near term. "
+        "Institutional deterioration does not appear to be accelerating, and disciplined "
+        "observation remains appropriate."
+    ),
+    "MIXED_FORWARD_PATH": (
+        "Governance forward trajectory remains uncertain. Mixed stabilization and deterioration "
+        "signals warrant guarded observation without strong directional assumptions."
+    ),
+    "STABILIZATION_PATH": (
+        "Governance posture shows signs of gradual stabilization. Institutional recovery signals "
+        "remain early but observable."
+    ),
+    "OPERATIONALLY_STABLE_PATH": (
+        "Governance appears likely to remain operationally stable. Institutional durability "
+        "remains sufficient for routine forward observation."
+    ),
+}
+
+_GCC_SCENARIO_PRIORITY: Tuple[str, ...] = (
+    "CONSTITUTIONAL_CONSTRAINT_SCENARIO",
+    "FRAGMENTATION_STRESS_SCENARIO",
+    "REGIME_TRANSITION_SCENARIO",
+    "STABILIZATION_SCENARIO",
+    "OPERATIONALLY_STABLE_SCENARIO",
+)
+
+_GCC_SCENARIO_DISPLAY: Dict[str, str] = {
+    "CONSTITUTIONAL_CONSTRAINT_SCENARIO": "Constitutional Constraint",
+    "FRAGMENTATION_STRESS_SCENARIO": "Fragmentation Stress",
+    "REGIME_TRANSITION_SCENARIO": "Regime Transition",
+    "STABILIZATION_SCENARIO": "Stabilization",
+    "OPERATIONALLY_STABLE_SCENARIO": "Operationally Stable",
+}
+
+_GCC_NEXT_REGIME_DISPLAY: Dict[str, str] = {
+    "CONSTITUTIONAL_LOCK_PERSISTS": "Constitutional Lock Persists",
+    "FRAGMENTATION_ELEVATES": "Fragmentation Elevates",
+    "GOVERNANCE_STABILIZES": "Governance Stabilizes",
+    "MIXED_TRANSITION": "Mixed Transition",
+    "OPERATIONAL_STABILITY": "Operational Stability",
+}
+
+_GCC_SCENARIO_MEMO: Dict[str, str] = {
+    "CONSTITUTIONAL_CONSTRAINT_SCENARIO": (
+        "Governance is expected to remain constitutionally constrained in the near term. "
+        "Operators should monitor contradiction persistence and trust drift while avoiding "
+        "escalation fatigue."
+    ),
+    "FRAGMENTATION_STRESS_SCENARIO": (
+        "Governance fragmentation stress remains material. Operators should monitor alignment, "
+        "coherence, and contradiction persistence for further deterioration."
+    ),
+    "REGIME_TRANSITION_SCENARIO": (
+        "Governance appears to be entering a transition phase. Institutional deterioration and "
+        "stabilization signals remain mixed and continued observation is warranted."
+    ),
+    "STABILIZATION_SCENARIO": (
+        "Governance stabilization signals are gradually improving. Institutional repair remains "
+        "early but increasingly observable."
+    ),
+    "OPERATIONALLY_STABLE_SCENARIO": (
+        "Governance appears operationally stable. Institutional posture remains durable and "
+        "material regime transition appears unlikely."
+    ),
+}
+
+_GCC_DECISION_BRIEF_PRIORITY: Tuple[str, ...] = (
+    "LOCKED_OBSERVE_ONLY",
+    "LOCKED_HEIGHTENED_MONITORING",
+    "GOVERNANCE_REPAIR_REQUIRED",
+    "TRANSITION_WATCH",
+    "STABLE_CONTINUE_MONITORING",
+)
+
+_GCC_DECISION_BRIEF_DISPLAY: Dict[str, str] = {
+    "LOCKED_OBSERVE_ONLY": "Locked Observe Only",
+    "LOCKED_HEIGHTENED_MONITORING": "Locked Heightened Monitoring",
+    "GOVERNANCE_REPAIR_REQUIRED": "Governance Repair Required",
+    "TRANSITION_WATCH": "Transition Watch",
+    "STABLE_CONTINUE_MONITORING": "Stable Continue Monitoring",
+}
+
+_GCC_GOVERNANCE_MODE_DISPLAY: Dict[str, str] = {
+    "CONSTITUTIONAL_LOCK_MODE": "Constitutional Lock Mode",
+    "CONTAINMENT_MODE": "Containment Mode",
+    "REPAIR_MODE": "Repair Mode",
+    "TRANSITION_MODE": "Transition Mode",
+    "OBSERVATION_MODE": "Observation Mode",
+}
+
+_GCC_DECISION_INSTRUCTION: Dict[str, str] = {
+    "LOCKED_OBSERVE_ONLY": "MAINTAIN_LOCK_AND_OBSERVE",
+    "LOCKED_HEIGHTENED_MONITORING": "MONITOR_TRIGGER_CONDITIONS",
+    "GOVERNANCE_REPAIR_REQUIRED": "REVIEW_GOVERNANCE_REPAIR",
+    "TRANSITION_WATCH": "PREPARE_ESCALATION_REVIEW",
+    "STABLE_CONTINUE_MONITORING": "CONTINUE_ROUTINE_MONITORING",
+}
+
+_GCC_DECISION_BRIEF_MEMO: Dict[str, str] = {
+    "LOCKED_OBSERVE_ONLY": (
+        "Governance remains constitutionally locked but directionally stable. Operators should "
+        "maintain safeguards, avoid runtime enablement, and continue observation at the next refresh."
+    ),
+    "LOCKED_HEIGHTENED_MONITORING": (
+        "Governance remains locked with elevated stress signals. Operators should monitor trigger "
+        "conditions and reassess if trust, coherence, or contradiction signals deteriorate."
+    ),
+    "GOVERNANCE_REPAIR_REQUIRED": (
+        "Governance quality requires institutional repair. Runtime enablement remains inappropriate "
+        "while confidence, coherence, or alignment signals remain impaired."
+    ),
+    "TRANSITION_WATCH": (
+        "Governance may be entering a regime transition. Operators should monitor trigger conditions "
+        "and maintain escalation readiness without premature action."
+    ),
+    "STABLE_CONTINUE_MONITORING": (
+        "Governance appears stable. Routine monitoring remains sufficient and no escalation posture "
+        "is required."
+    ),
+}
+
+
+def _gcc_build_governance_intelligence_stack(
+    *,
+    readiness: Dict[str, Any],
+    admission: Dict[str, Any],
+    eligibility: Dict[str, Any],
+    recommendation: Dict[str, Any],
+    review: Dict[str, Any],
+    verdict: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    dossier_record: Dict[str, Any],
+) -> Dict[str, Any]:
+    common = dict(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    hist = _gcc_analyze_governance_history(**common)
+    regime = _gcc_detect_governance_regime(**common, hist=hist)
+    forecast = _gcc_detect_governance_forecast(**common, hist=hist, regime=regime)
+    tension = _gcc_detect_governance_tensions(**common, hist=hist, regime=regime, forecast=forecast)
+    consensus = _gcc_detect_governance_consensus(
+        **common, hist=hist, regime=regime, forecast=forecast, tension=tension
+    )
+    integrity = _gcc_detect_confidence_integrity(
+        **common, hist=hist, regime=regime, forecast=forecast, tension=tension, consensus=consensus
+    )
+    decision = _gcc_detect_decision_readiness(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+    )
+    failure = _gcc_detect_governance_failure_modes(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+    )
+    audit = _gcc_detect_governance_auditability(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+    )
+    coherence = _gcc_detect_governance_coherence(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+    )
+    stability = _gcc_detect_governance_stability(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+    )
+    resilience = _gcc_detect_governance_resilience(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+    )
+    improvement = _gcc_detect_governance_improvement(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+    )
+    scenario = _gcc_detect_governance_failure_scenario(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+        improvement=improvement,
+    )
+    intervention = _gcc_detect_governance_intervention(
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+        improvement=improvement,
+        scenario=scenario,
+    )
+    evidence = _gcc_detect_governance_institutional_evidence(
+        integrity=integrity,
+        audit=audit,
+        coherence=coherence,
+        tension=tension,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        intervention=intervention,
+    )
+    alignment = _gcc_detect_governance_institutional_alignment(
+        consensus=consensus,
+        coherence=coherence,
+        tension=tension,
+        integrity=integrity,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        evidence=evidence,
+        intervention=intervention,
+        hist=hist,
+    )
+    quality = _gcc_detect_governance_decision_quality(
+        coherence=coherence,
+        tension=tension,
+        integrity=integrity,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        evidence=evidence,
+        alignment=alignment,
+        intervention=intervention,
+        improvement=improvement,
+        hist=hist,
+    )
+    return {
+        "hist": hist,
+        "regime": regime,
+        "forecast": forecast,
+        "tension": tension,
+        "consensus": consensus,
+        "integrity": integrity,
+        "decision": decision,
+        "failure": failure,
+        "audit": audit,
+        "coherence": coherence,
+        "stability": stability,
+        "resilience": resilience,
+        "improvement": improvement,
+        "scenario": scenario,
+        "intervention": intervention,
+        "evidence": evidence,
+        "alignment": alignment,
+        "quality": quality,
+    }
+
+
+def _gcc_executive_stability_summary(quality: Dict[str, Any], stability: Dict[str, Any]) -> str:
+    scrutiny = quality.get("stability_under_scrutiny", "CONDITIONAL")
+    mapping = {
+        "UNSTABLE": "BROKEN",
+        "FRAGILE": "WEAK",
+        "CONDITIONAL": "CONDITIONAL",
+        "STABLE": "STABLE",
+        "RESILIENT": "STRONG",
+    }
+    return mapping.get(scrutiny, "CONDITIONAL")
+
+
+def _gcc_executive_trust_summary(evidence: Dict[str, Any]) -> str:
+    trust = evidence.get("trustworthiness_state", "LIMITED")
+    if trust == "BROKEN":
+        return "BROKEN"
+    if trust == "WEAK":
+        return "WEAK"
+    if trust == "LIMITED":
+        return "LIMITED"
+    if trust == "ACCEPTABLE":
+        return "ACCEPTABLE"
+    return "STRONG"
+
+
+def _gcc_executive_alignment_summary(alignment: Dict[str, Any]) -> str:
+    strength = alignment.get("alignment_strength", "LIMITED")
+    state = alignment.get("alignment_state", "")
+    if state == "INSTITUTIONAL_CONSENSUS_BROKEN" or strength == "NONE":
+        return "FRACTURED"
+    if strength == "WEAK":
+        return "WEAK"
+    if strength in ("LIMITED", "MODERATE"):
+        return "PARTIAL"
+    if strength == "STRONG":
+        return "STRONG"
+    return "PARTIAL"
+
+
+def _gcc_constitutional_runtime_posture(
+    dossier_summary: Dict[str, Any],
+    intervention: Dict[str, Any],
+    decision: Dict[str, Any],
+    regime: Dict[str, Any],
+) -> str:
+    mutation_allowed = bool(_gcc_get(dossier_summary, "runtime_mutation_allowed", False))
+    posture = intervention.get("intervention_posture", "")
+    if not mutation_allowed or posture == "CONSTITUTIONAL_LOCK_REQUIRED":
+        return "BLOCKED"
+    if regime.get("regime") == "CONSTITUTIONAL_STRESS":
+        return "CONSTRAINED"
+    if posture in ("CONTAINMENT_RECOMMENDED", "INSTITUTIONAL_CAUTION_REQUIRED"):
+        return "GUARDED"
+    if posture in ("MONITORING_ELEVATED", "OBSERVATION_ONLY"):
+        return "OBSERVED"
+    if mutation_allowed and decision.get("readiness_state") in (
+        "GOVERNANCE_REVIEW_ELIGIBLE",
+        "OPERATOR_COMMITTEE_REVIEW_ELIGIBLE",
+    ):
+        return "READY"
+    return "OBSERVED"
+
+
+def _gcc_executive_top_risks(
+    scenario: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    quality: Dict[str, Any],
+    decision: Dict[str, Any],
+    regime: Dict[str, Any],
+    tension: Dict[str, Any],
+) -> List[str]:
+    risks: List[str] = []
+    for warning in scenario.get("early_warnings") or []:
+        if warning not in risks:
+            risks.append(warning)
+    if evidence.get("evidence_state") == "CONFIDENCE_OVEREXTENDED":
+        risks.append("Confidence inflation risk")
+    if alignment.get("alignment_state") in (
+        "FRAGMENTATION_ELEVATED",
+        "GOVERNANCE_INTERNAL_CONFLICT",
+        "INSTITUTIONAL_CONSENSUS_BROKEN",
+    ):
+        risks.append("Governance fragmentation")
+    if float(decision.get("governance_maturity_score", 0.0) or 0.0) < 0.20:
+        risks.append("Institutional immaturity")
+    if regime.get("regime") == "CONSTITUTIONAL_STRESS":
+        risks.append("Constitutional pressure persistence")
+    if quality.get("institutional_defensibility") in ("NONE", "WEAK"):
+        risks.append("Weak decision defensibility")
+    if (
+        int(tension.get("contradiction_count", 0) or 0) >= 2
+        and "Contradiction persistence" not in risks
+    ):
+        risks.append("Contradiction persistence")
+    return risks[:5]
+
+
+def _gcc_detect_executive_verdict(
+    *,
+    dossier_summary: Dict[str, Any],
+    regime: Dict[str, Any],
+    tension: Dict[str, Any],
+    decision: Dict[str, Any],
+    scenario: Dict[str, Any],
+    intervention: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    quality: Dict[str, Any],
+    improvement: Dict[str, Any],
+    stability: Dict[str, Any],
+) -> Dict[str, Any]:
+    mutation_allowed = bool(_gcc_get(dossier_summary, "runtime_mutation_allowed", False))
+    intervention_posture = intervention.get("intervention_posture", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+
+    def _match_locked() -> bool:
+        return intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED" or (
+            not mutation_allowed and regime.get("regime") == "CONSTITUTIONAL_STRESS"
+        )
+
+    def _match_systemic() -> bool:
+        return (
+            scenario.get("scenario_state") == "SYSTEMIC_GOVERNANCE_FAILURE_RISK"
+            or quality.get("quality_state") == "INSTITUTIONAL_REASONING_BROKEN"
+            or alignment.get("alignment_state") == "INSTITUTIONAL_CONSENSUS_BROKEN"
+        )
+
+    def _match_stress() -> bool:
+        return (
+            intervention_posture
+            in (
+                "CONTAINMENT_RECOMMENDED",
+                "INSTITUTIONAL_CAUTION_REQUIRED",
+                "ESCALATION_REQUIRED",
+            )
+            or stability.get("stability_state")
+            in (
+                "GOVERNANCE_DETERIORATING",
+                "REASONING_INSTABILITY_DETECTED",
+            )
+            or contradiction_count >= 2
+        )
+
+    def _match_stabilizing() -> bool:
+        return (
+            improvement.get("improvement_state")
+            in (
+                "GOVERNANCE_ADAPTATION_EMERGING",
+                "GOVERNANCE_MATURITY_IMPROVING",
+            )
+            or stability.get("stability_state") == "GOVERNANCE_STABILITY_IMPROVING"
+            or alignment.get("alignment_state") == "GOVERNANCE_CONSENSUS_FORMING"
+        )
+
+    def _match_stable() -> bool:
+        return (
+            intervention_posture == "OBSERVATION_ONLY"
+            and quality.get("quality_state") == "HIGH_QUALITY_GOVERNANCE_REASONING"
+            and alignment.get("alignment_state") == "INSTITUTIONAL_ALIGNMENT_STRONG"
+            and evidence.get("evidence_state")
+            in ("CONFIDENCE_SUPPORTED", "EVIDENCE_INTEGRITY_STRONG")
+        )
+
+    matchers = {
+        "CONSTITUTIONALLY_LOCKED_GOVERNANCE": _match_locked,
+        "SYSTEMIC_GOVERNANCE_INSTABILITY": _match_systemic,
+        "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS": _match_stress,
+        "GOVERNANCE_STABILIZING": _match_stabilizing,
+        "GOVERNANCE_OPERATIONALLY_STABLE": _match_stable,
+    }
+
+    verdict_state = "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS"
+    for candidate in _GCC_EXECUTIVE_VERDICT_PRIORITY:
+        fn = matchers.get(candidate)
+        if fn and fn():
+            verdict_state = candidate
+            break
+
+    stability_summary = _gcc_executive_stability_summary(quality, stability)
+    trust_summary = _gcc_executive_trust_summary(evidence)
+    alignment_summary = _gcc_executive_alignment_summary(alignment)
+    runtime_posture = _gcc_constitutional_runtime_posture(
+        dossier_summary, intervention, decision, regime
+    )
+    top_risks = _gcc_executive_top_risks(
+        scenario, evidence, alignment, quality, decision, regime, tension
+    )
+    why_drivers = [
+        f"Intervention: {intervention.get('intervention_display', '—')}",
+        f"Failure scenario: {scenario.get('scenario_display', '—')}",
+        f"Decision quality: {quality.get('quality_display', '—')}",
+        f"Evidence integrity: {evidence.get('evidence_display', '—')}",
+        f"Alignment: {alignment.get('alignment_display', '—')}",
+    ]
+
+    return {
+        "verdict_state": verdict_state,
+        "verdict_display": _GCC_EXECUTIVE_VERDICT_DISPLAY.get(
+            verdict_state, verdict_state.replace("_", " ").title()
+        ),
+        "stability_summary": stability_summary,
+        "trust_summary": trust_summary,
+        "alignment_summary": alignment_summary,
+        "runtime_posture": runtime_posture,
+        "top_risks": top_risks,
+        "executive_memo": _GCC_EXECUTIVE_VERDICT_MEMO.get(verdict_state, ""),
+        "operator_action": _GCC_EXECUTIVE_OPERATOR_ACTION.get(
+            verdict_state, "CONTINUE_OBSERVATION"
+        ),
+        "why_drivers": why_drivers,
+    }
+
+
+def _gcc_detect_governance_attention(
+    *,
+    executive: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    regime: Dict[str, Any],
+    tension: Dict[str, Any],
+    decision: Dict[str, Any],
+    scenario: Dict[str, Any],
+    intervention: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    quality: Dict[str, Any],
+    failure: Dict[str, Any],
+    integrity: Dict[str, Any],
+) -> Dict[str, Any]:
+    verdict_state = executive["verdict_state"]
+    runtime_posture = executive["runtime_posture"]
+    trust_summary = executive["trust_summary"]
+    stability_summary = executive["stability_summary"]
+    intervention_posture = intervention.get("intervention_posture", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    mutation_allowed = bool(_gcc_get(dossier_summary, "runtime_mutation_allowed", False))
+
+    def _match_critical_lock() -> bool:
+        return (
+            verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+            or (runtime_posture == "BLOCKED" and (maturity < 0.25 or not mutation_allowed))
+        )
+
+    def _match_high_risk() -> bool:
+        return (
+            verdict_state == "SYSTEMIC_GOVERNANCE_INSTABILITY"
+            or scenario.get("scenario_state") == "SYSTEMIC_GOVERNANCE_FAILURE_RISK"
+            or quality.get("quality_state") == "INSTITUTIONAL_REASONING_BROKEN"
+            or (trust_summary in ("BROKEN", "WEAK") and contradiction_count >= 2)
+            or (
+                intervention_posture == "ESCALATION_REQUIRED"
+                and failure.get("risk_severity") in ("SEVERE", "CRITICAL")
+            )
+        )
+
+    def _match_elevated() -> bool:
+        return (
+            verdict_state == "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS"
+            or intervention_posture
+            in (
+                "CONTAINMENT_RECOMMENDED",
+                "INSTITUTIONAL_CAUTION_REQUIRED",
+            )
+            or trust_summary in ("BROKEN", "WEAK", "LIMITED")
+            or stability_summary in ("BROKEN", "WEAK", "CONDITIONAL")
+            or integrity.get("integrity_state")
+            in (
+                "GOVERNANCE_CONFIDENCE_WEAK",
+                "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
+                "GOVERNANCE_OVERCONFIDENT",
+            )
+        )
+
+    def _match_watch() -> bool:
+        return (
+            verdict_state == "GOVERNANCE_STABILIZING"
+            or intervention_posture == "MONITORING_ELEVATED"
+            or stability_summary == "CONDITIONAL"
+            or contradiction_count == 1
+        )
+
+    def _match_normal() -> bool:
+        return verdict_state == "GOVERNANCE_OPERATIONALLY_STABLE" or (
+            intervention_posture == "OBSERVATION_ONLY"
+            and trust_summary in ("ACCEPTABLE", "STRONG")
+            and runtime_posture in ("OBSERVED", "READY")
+        )
+
+    severity_matchers = {
+        "CRITICAL_LOCK": _match_critical_lock,
+        "HIGH_RISK": _match_high_risk,
+        "ELEVATED": _match_elevated,
+        "WATCH": _match_watch,
+        "NORMAL": _match_normal,
+    }
+
+    severity = "ELEVATED"
+    for candidate in _GCC_SEVERITY_PRIORITY:
+        fn = severity_matchers.get(candidate)
+        if fn and fn():
+            severity = candidate
+            break
+
+    attention_map = {
+        "CRITICAL_LOCK": "HIGH",
+        "HIGH_RISK": "IMMEDIATE",
+        "ELEVATED": "MODERATE",
+        "WATCH": "LOW",
+        "NORMAL": "PASSIVE",
+    }
+    if intervention_posture == "ESCALATION_REQUIRED" and severity == "HIGH_RISK":
+        attention = "IMMEDIATE"
+    else:
+        attention = attention_map.get(severity, "MODERATE")
+
+    cadence_map = {
+        "CRITICAL_LOCK": "NEXT_REFRESH",
+        "HIGH_RISK": "INTRADAY",
+        "ELEVATED": "DAILY",
+        "WATCH": "DAILY",
+        "NORMAL": "DAILY",
+    }
+    review_cadence = cadence_map.get(severity, "DAILY")
+    if intervention_posture == "ESCALATION_REQUIRED":
+        review_cadence = "IMMEDIATE_REVIEW"
+    elif severity == "HIGH_RISK" and scenario.get("failure_probability") in ("HIGH", "VERY_HIGH"):
+        review_cadence = "CONTINUOUS_MONITORING"
+
+    escalation_threshold = intervention.get("escalation_threshold", "NONE")
+    esc_cls = str(_gcc_get(dossier_summary, "human_escalation_classification") or "").upper()
+    if intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED" or severity == "CRITICAL_LOCK":
+        escalation_urgency = "LOW"
+    elif intervention_posture == "ESCALATION_REQUIRED" or escalation_threshold == "IMMEDIATE":
+        escalation_urgency = "IMMEDIATE"
+    elif (
+        escalation_threshold == "MATERIAL"
+        or alignment.get("alignment_state") == "INSTITUTIONAL_CONSENSUS_BROKEN"
+    ):
+        escalation_urgency = "MATERIAL"
+    elif escalation_threshold in ("HEIGHTENED", "WATCH") or trust_summary in ("BROKEN", "WEAK"):
+        escalation_urgency = "GUARDED"
+    elif esc_cls == "NO_ESCALATION" and severity in ("NORMAL", "WATCH"):
+        escalation_urgency = "NONE"
+    else:
+        escalation_urgency = "LOW"
+
+    return {
+        "severity": severity,
+        "severity_display": _GCC_SEVERITY_DISPLAY.get(severity, severity.replace("_", " ").title()),
+        "attention_level": attention,
+        "review_cadence": review_cadence,
+        "escalation_urgency": escalation_urgency,
+        "attention_memo": _GCC_ATTENTION_MEMO.get(severity, ""),
+    }
+
+
+def _gcc_detect_governance_trend(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    forecast: Dict[str, Any],
+    tension: Dict[str, Any],
+    stability: Dict[str, Any],
+    improvement: Dict[str, Any],
+    resilience: Dict[str, Any],
+    scenario: Dict[str, Any],
+    intervention: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    quality: Dict[str, Any],
+    failure: Dict[str, Any],
+) -> Dict[str, Any]:
+    verdict_state = executive["verdict_state"]
+    severity = attention["severity"]
+    trust_summary = executive["trust_summary"]
+    direction = hist.get("confidence_direction", "stable")
+    momentum = hist.get("institutional_momentum", "NONE")
+    stability_state = stability.get("stability_state", "")
+    improvement_state = improvement.get("improvement_state", "")
+    resilience_state = resilience.get("resilience_state", "")
+    intervention_posture = intervention.get("intervention_posture", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    drift_severity = stability.get("drift_severity", "LOW")
+    volatility = stability.get("volatility_level", "LOW")
+    regression_risk = forecast.get("regression_risk", "NONE")
+    trajectory = forecast.get("trajectory", "")
+
+    constitutional_lock_stable = (
+        (
+            severity == "CRITICAL_LOCK"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+        )
+        and direction in ("stable", "dormant")
+        and momentum != "HIGH"
+    )
+
+    def _match_rapidly_deteriorating() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            (direction == "deteriorating" and momentum == "HIGH")
+            or (stability_state == "GOVERNANCE_DETERIORATING" and direction == "deteriorating")
+            or drift_severity == "CRITICAL"
+            or volatility == "EXTREME"
+            or (
+                regression_risk == "HIGH"
+                and direction == "deteriorating"
+                and contradiction_count >= 2
+            )
+        )
+
+    def _match_deteriorating() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            direction == "deteriorating"
+            or (
+                stability_state == "GOVERNANCE_DETERIORATING"
+                and direction not in ("stable", "dormant")
+            )
+            or (
+                stability_state == "REASONING_INSTABILITY_DETECTED" and direction == "deteriorating"
+            )
+            or (
+                trajectory == "GOVERNANCE_REGRESSION_RISK"
+                and direction in ("deteriorating", "mixed")
+            )
+            or (
+                improvement_state
+                in (
+                    "IMPROVEMENT_TRAJECTORY_BLOCKED",
+                    "GOVERNANCE_LEARNING_STALLED",
+                )
+                and direction in ("deteriorating", "mixed")
+            )
+            or (
+                stability_state == "GOVERNANCE_VOLATILITY_ELEVATED"
+                and direction in ("deteriorating", "mixed")
+            )
+        )
+
+    def _match_stressed_but_stable() -> bool:
+        if constitutional_lock_stable:
+            return True
+        return (
+            verdict_state == "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS"
+            and direction in ("stable", "dormant")
+            and stability_state
+            not in (
+                "GOVERNANCE_DETERIORATING",
+                "REASONING_INSTABILITY_DETECTED",
+            )
+        )
+
+    def _match_stabilizing() -> bool:
+        return (
+            verdict_state == "GOVERNANCE_STABILIZING"
+            or improvement_state
+            in (
+                "GOVERNANCE_ADAPTATION_EMERGING",
+                "CONTRADICTIONS_DECLINING",
+            )
+            or stability_state == "GOVERNANCE_STABILITY_IMPROVING"
+            or (
+                direction == "improving"
+                and regime.get("regime") == "CONSTITUTIONAL_STRESS"
+                and contradiction_count <= 1
+            )
+        )
+
+    def _match_improving() -> bool:
+        return (
+            direction == "improving"
+            and improvement_state
+            in (
+                "GOVERNANCE_MATURITY_IMPROVING",
+                "GOVERNANCE_EVOLUTION_STRENGTHENING",
+                "CONTRADICTIONS_DECLINING",
+            )
+        ) or trajectory in ("GOVERNANCE_IMPROVING", "GOVERNANCE_ACCELERATING")
+
+    def _match_operationally_stable() -> bool:
+        return verdict_state == "GOVERNANCE_OPERATIONALLY_STABLE" or (
+            stability_state == "STABLE_GOVERNANCE_POSTURE"
+            and direction in ("stable", "improving")
+            and contradiction_count == 0
+            and trust_summary in ("ACCEPTABLE", "STRONG")
+        )
+
+    direction_matchers = {
+        "RAPIDLY_DETERIORATING": _match_rapidly_deteriorating,
+        "DETERIORATING": _match_deteriorating,
+        "STRESSED_BUT_STABLE": _match_stressed_but_stable,
+        "STABILIZING": _match_stabilizing,
+        "IMPROVING": _match_improving,
+        "OPERATIONALLY_STABLE": _match_operationally_stable,
+    }
+
+    governance_direction = "STRESSED_BUT_STABLE"
+    for candidate in _GCC_DIRECTION_PRIORITY:
+        fn = direction_matchers.get(candidate)
+        if fn and fn():
+            governance_direction = candidate
+            break
+
+    if momentum == "HIGH" or drift_severity == "CRITICAL" or volatility == "EXTREME":
+        trend_velocity = "RAPID"
+    elif momentum == "MODERATE" or drift_severity == "HIGH" or volatility == "HIGH":
+        trend_velocity = "FAST"
+    elif momentum == "LOW" or drift_severity == "MODERATE" or volatility == "MODERATE":
+        trend_velocity = "MODERATE"
+    elif direction in ("stable", "dormant") and momentum == "NONE":
+        trend_velocity = "MINIMAL"
+    else:
+        trend_velocity = "SLOW"
+
+    drift_map = {
+        "CRITICAL": "SEVERE",
+        "HIGH": "MATERIAL",
+        "MODERATE": "GUARDED",
+        "LOW": "LOW",
+        "NONE": "NONE",
+    }
+    drift_risk = drift_map.get(drift_severity, "LOW")
+    if drift_risk == "LOW" and (
+        contradiction_count >= 2
+        or trust_summary in ("BROKEN", "WEAK")
+        or alignment.get("alignment_state")
+        in (
+            "FRAGMENTATION_ELEVATED",
+            "GOVERNANCE_INTERNAL_CONFLICT",
+        )
+    ):
+        drift_risk = "GUARDED"
+    if (
+        quality.get("quality_state") == "INSTITUTIONAL_REASONING_BROKEN"
+        and scenario.get("scenario_state") == "SYSTEMIC_GOVERNANCE_FAILURE_RISK"
+    ):
+        drift_risk = "SEVERE"
+
+    if scenario.get("scenario_state") in (
+        "SYSTEMIC_GOVERNANCE_FAILURE_RISK",
+        "CONSTITUTIONAL_BREAKDOWN_RISK",
+    ) and governance_direction in ("RAPIDLY_DETERIORATING", "DETERIORATING"):
+        structural_outlook = "COLLAPSING"
+    elif resilience_state in (
+        "GOVERNANCE_RECOVERY_BLOCKED",
+        "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+    ) or failure.get("risk_severity") in ("CRITICAL", "HIGH"):
+        structural_outlook = "FRAGILE"
+    elif (
+        resilience_state
+        in (
+            "RECOVERABLE_FRAGMENTATION",
+            "REVERSIBLE_GOVERNANCE_DETERIORATION",
+            "MODERATE_GOVERNANCE_RESILIENCE",
+        )
+        or improvement_state == "INSTITUTIONAL_IMPROVEMENT_POSSIBLE"
+    ):
+        structural_outlook = "RECOVERABLE"
+    elif (
+        stability_state == "STABLE_GOVERNANCE_POSTURE"
+        or resilience_state == "HIGH_GOVERNANCE_RESILIENCE"
+    ):
+        structural_outlook = "STABLE"
+    elif governance_direction == "STRESSED_BUT_STABLE" or severity == "CRITICAL_LOCK":
+        structural_outlook = "CONDITIONAL"
+    else:
+        structural_outlook = "CONDITIONAL"
+
+    if governance_direction == "STRESSED_BUT_STABLE":
+        if direction in ("stable", "dormant") and momentum == "NONE":
+            trend_velocity = "MINIMAL"
+        elif direction in ("stable", "dormant"):
+            trend_velocity = "SLOW"
+        if constitutional_lock_stable:
+            drift_risk = "LOW"
+        elif drift_risk in ("SEVERE", "MATERIAL"):
+            drift_risk = "GUARDED" if contradiction_count >= 2 else "LOW"
+        if structural_outlook in ("COLLAPSING", "FRAGILE"):
+            structural_outlook = "RECOVERABLE"
+
+    return {
+        "governance_direction": governance_direction,
+        "direction_display": _GCC_DIRECTION_DISPLAY.get(
+            governance_direction, governance_direction.replace("_", " ").title()
+        ),
+        "trend_velocity": trend_velocity,
+        "drift_risk": drift_risk,
+        "structural_outlook": structural_outlook,
+        "trend_memo": _GCC_TREND_MEMO.get(governance_direction, ""),
+    }
+
+
+def _gcc_cockpit_signal_conflicts(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    evidence: Dict[str, Any],
+) -> int:
+    conflicts = 0
+    verdict = executive["verdict_state"]
+    severity = attention["severity"]
+    direction = trend["governance_direction"]
+    velocity = trend["trend_velocity"]
+
+    if verdict == "GOVERNANCE_OPERATIONALLY_STABLE" and direction in (
+        "DETERIORATING",
+        "RAPIDLY_DETERIORATING",
+    ):
+        conflicts += 1
+    if verdict == "GOVERNANCE_STABILIZING" and direction == "RAPIDLY_DETERIORATING":
+        conflicts += 1
+    if severity == "NORMAL" and direction in ("DETERIORATING", "RAPIDLY_DETERIORATING"):
+        conflicts += 1
+    if (
+        severity == "HIGH_RISK"
+        and direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+    ):
+        conflicts += 1
+    if executive["runtime_posture"] == "READY" and direction not in (
+        "IMPROVING",
+        "OPERATIONALLY_STABLE",
+    ):
+        conflicts += 1
+    if (
+        executive["trust_summary"] in ("STRONG", "ACCEPTABLE")
+        and evidence.get("evidence_state") == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED"
+    ):
+        conflicts += 1
+    if executive["alignment_summary"] == "STRONG" and direction in (
+        "DETERIORATING",
+        "RAPIDLY_DETERIORATING",
+    ):
+        conflicts += 1
+    return conflicts
+
+
+def _gcc_detect_governance_signal_confidence(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    hist: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    quality: Dict[str, Any],
+    decision: Dict[str, Any],
+    tension: Dict[str, Any],
+    stability: Dict[str, Any],
+    integrity: Dict[str, Any],
+    coherence: Dict[str, Any],
+) -> Dict[str, Any]:
+    trust_summary = executive["trust_summary"]
+    stability_summary = executive["stability_summary"]
+    alignment_summary = executive["alignment_summary"]
+    evidence_state = evidence.get("evidence_state", "")
+    quality_state = quality.get("quality_state", "")
+    alignment_state = alignment.get("alignment_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    velocity = trend["trend_velocity"]
+    drift_risk = trend["drift_risk"]
+    gov_direction = trend["governance_direction"]
+    volatility = stability.get("volatility_level", "LOW")
+    conflicts = _gcc_cockpit_signal_conflicts(
+        executive=executive, attention=attention, trend=trend, evidence=evidence
+    )
+
+    interpretation_coherent = (
+        gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+        and drift_risk in ("LOW", "NONE")
+        and conflicts == 0
+    )
+
+    def _match_very_low() -> bool:
+        if interpretation_coherent:
+            return False
+        return (
+            conflicts >= 2
+            or (
+                quality_state == "INSTITUTIONAL_REASONING_BROKEN"
+                and alignment_state
+                in (
+                    "INSTITUTIONAL_CONSENSUS_BROKEN",
+                    "GOVERNANCE_INTERNAL_CONFLICT",
+                )
+            )
+            or (
+                evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED"
+                and coherence.get("coherence_state")
+                in (
+                    "FRAGMENTED_REASONING_CHAIN",
+                    "INTERNALLY_INCONSISTENT_GOVERNANCE",
+                )
+                and contradiction_count >= 2
+            )
+        )
+
+    def _match_low() -> bool:
+        if interpretation_coherent:
+            return False
+        return (
+            trust_summary in ("BROKEN", "WEAK")
+            or quality_state == "INSTITUTIONAL_REASONING_BROKEN"
+            or evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED"
+            or conflicts == 1
+        )
+
+    def _match_guarded() -> bool:
+        return (
+            interpretation_coherent
+            or (
+                gov_direction == "STRESSED_BUT_STABLE"
+                and velocity in ("MINIMAL", "SLOW")
+                and conflicts <= 1
+            )
+            or (
+                trust_summary in ("LIMITED", "WEAK", "BROKEN")
+                and drift_risk in ("LOW", "NONE", "GUARDED")
+                and velocity in ("MINIMAL", "SLOW", "MODERATE")
+            )
+        )
+
+    def _match_moderate() -> bool:
+        return (
+            trust_summary in ("ACCEPTABLE", "LIMITED")
+            and quality_state
+            not in (
+                "INSTITUTIONAL_REASONING_BROKEN",
+                "DECISION_QUALITY_MATERIALLY_IMPAIRED",
+            )
+            and gov_direction not in ("RAPIDLY_DETERIORATING",)
+            and conflicts == 0
+        )
+
+    def _match_high() -> bool:
+        return (
+            trust_summary in ("ACCEPTABLE", "STRONG")
+            and alignment_summary in ("ALIGNED", "STRONG", "PARTIAL")
+            and evidence_state in ("CONFIDENCE_SUPPORTED", "EVIDENCE_INTEGRITY_STRONG")
+            and quality_state == "HIGH_QUALITY_GOVERNANCE_REASONING"
+        )
+
+    def _match_very_high() -> bool:
+        return (
+            executive["verdict_state"] == "GOVERNANCE_OPERATIONALLY_STABLE"
+            and trust_summary == "STRONG"
+            and gov_direction == "OPERATIONALLY_STABLE"
+            and drift_risk in ("LOW", "NONE")
+            and conflicts == 0
+        )
+
+    confidence_matchers = {
+        "VERY_LOW": _match_very_low,
+        "LOW": _match_low,
+        "GUARDED": _match_guarded,
+        "MODERATE": _match_moderate,
+        "HIGH": _match_high,
+        "VERY_HIGH": _match_very_high,
+    }
+
+    cockpit_confidence = "GUARDED"
+    for candidate in _GCC_COCKPIT_CONFIDENCE_PRIORITY:
+        fn = confidence_matchers.get(candidate)
+        if fn and fn():
+            cockpit_confidence = candidate
+            break
+
+    reliability_map = {
+        "BROKEN": "BROKEN",
+        "WEAK": "WEAK",
+        "LIMITED": "GUARDED",
+        "ACCEPTABLE": "ACCEPTABLE",
+        "STRONG": "STRONG",
+    }
+    reliability = reliability_map.get(trust_summary, "GUARDED")
+    if quality_state == "INSTITUTIONAL_REASONING_BROKEN":
+        reliability = "BROKEN"
+    elif quality_state == "DECISION_QUALITY_MATERIALLY_IMPAIRED" and reliability not in ("BROKEN",):
+        reliability = "WEAK"
+    elif evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED" and reliability == "STRONG":
+        reliability = "GUARDED"
+    if interpretation_coherent and reliability in ("BROKEN", "WEAK"):
+        reliability = "GUARDED"
+
+    if (
+        gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+        and attention["severity"] == "CRITICAL_LOCK"
+    ):
+        false_alarm_risk = "LOW"
+    elif conflicts >= 2:
+        false_alarm_risk = "HIGH"
+    elif conflicts == 1:
+        false_alarm_risk = "MATERIAL"
+    elif attention["severity"] == "HIGH_RISK" and gov_direction == "STRESSED_BUT_STABLE":
+        false_alarm_risk = "GUARDED"
+    elif velocity == "RAPID" and gov_direction == "RAPIDLY_DETERIORATING":
+        false_alarm_risk = "GUARDED"
+    else:
+        false_alarm_risk = "LOW"
+
+    if volatility == "EXTREME" or velocity == "RAPID":
+        interpretation_stability = "VOLATILE"
+    elif velocity == "FAST" or drift_risk in ("SEVERE", "MATERIAL"):
+        interpretation_stability = "UNSTABLE"
+    elif gov_direction == "OPERATIONALLY_STABLE" and drift_risk in ("LOW", "NONE"):
+        interpretation_stability = "DURABLE"
+    elif interpretation_coherent or gov_direction == "STRESSED_BUT_STABLE":
+        interpretation_stability = "CONDITIONAL"
+    elif velocity in ("MINIMAL", "SLOW") and conflicts == 0:
+        interpretation_stability = "STABLE"
+    else:
+        interpretation_stability = "CONDITIONAL"
+
+    return {
+        "cockpit_confidence": cockpit_confidence,
+        "confidence_display": _GCC_COCKPIT_CONFIDENCE_DISPLAY.get(
+            cockpit_confidence, cockpit_confidence.replace("_", " ").title()
+        ),
+        "reliability_level": reliability,
+        "false_alarm_risk": false_alarm_risk,
+        "interpretation_stability": interpretation_stability,
+        "confidence_memo": _GCC_COCKPIT_CONFIDENCE_MEMO.get(cockpit_confidence, ""),
+    }
+
+
+def _gcc_detect_governance_operator_playbook(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    signal_conf: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+    intervention: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    quality: Dict[str, Any],
+    tension: Dict[str, Any],
+    scenario: Dict[str, Any],
+) -> Dict[str, Any]:
+    verdict_state = executive["verdict_state"]
+    severity = attention["severity"]
+    review_cadence = attention["review_cadence"]
+    escalation_urgency = attention["escalation_urgency"]
+    runtime_posture = executive["runtime_posture"]
+    trust_summary = executive["trust_summary"]
+    gov_direction = trend["governance_direction"]
+    velocity = trend["trend_velocity"]
+    drift_risk = trend["drift_risk"]
+    intervention_posture = intervention.get("intervention_posture", "")
+    evidence_state = evidence.get("evidence_state", "")
+    alignment_state = alignment.get("alignment_state", "")
+    quality_state = quality.get("quality_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    mutation_allowed = bool(_gcc_get(dossier_summary, "runtime_mutation_allowed", False))
+
+    constitutional_lock_stable = (
+        (
+            severity == "CRITICAL_LOCK"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+            or runtime_posture == "BLOCKED"
+        )
+        and gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+    )
+
+    if constitutional_lock_stable:
+        priority_action = "MAINTAIN_CONSTITUTIONAL_LOCK"
+    elif (
+        intervention_posture == "ESCALATION_REQUIRED"
+        or escalation_urgency == "IMMEDIATE"
+        or (severity == "HIGH_RISK" and gov_direction in ("DETERIORATING", "RAPIDLY_DETERIORATING"))
+    ):
+        priority_action = "PREPARE_ESCALATION_REVIEW"
+    elif (
+        verdict_state == "SYSTEMIC_GOVERNANCE_INSTABILITY"
+        or gov_direction in ("DETERIORATING", "RAPIDLY_DETERIORATING")
+        or (
+            alignment_state
+            in (
+                "FRAGMENTATION_ELEVATED",
+                "GOVERNANCE_INTERNAL_CONFLICT",
+                "INSTITUTIONAL_CONSENSUS_BROKEN",
+            )
+            and gov_direction not in ("STRESSED_BUT_STABLE",)
+        )
+    ):
+        priority_action = "REDUCE_FRAGMENTATION"
+    elif evidence_state in (
+        "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+        "CONFIDENCE_OVEREXTENDED",
+        "EVIDENCE_QUALITY_DEGRADING",
+    ) or trust_summary in ("BROKEN", "WEAK"):
+        priority_action = "IMPROVE_CONFIDENCE_INTEGRITY"
+    elif (
+        severity == "CRITICAL_LOCK"
+        or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+        or runtime_posture == "BLOCKED"
+    ):
+        priority_action = "MAINTAIN_CONSTITUTIONAL_LOCK"
+    elif (
+        severity in ("ELEVATED", "WATCH")
+        or verdict_state == "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS"
+    ):
+        priority_action = "MONITOR_GOVERNANCE_STRESS"
+    elif verdict_state == "GOVERNANCE_OPERATIONALLY_STABLE":
+        priority_action = "CONTINUE_DISCIPLINED_OBSERVATION"
+    else:
+        priority_action = executive.get("operator_action", "CONTINUE_DISCIPLINED_OBSERVATION")
+        if priority_action == "CONTINUE_OBSERVATION":
+            priority_action = "CONTINUE_DISCIPLINED_OBSERVATION"
+
+    immediate: List[str] = []
+    if priority_action == "MAINTAIN_CONSTITUTIONAL_LOCK":
+        immediate.extend(
+            [
+                "Maintain constitutional safeguards",
+                f"Continue {review_cadence.replace('_', ' ').lower()} review cadence",
+                "Monitor contradiction persistence",
+                "Observe trustworthiness trend",
+            ]
+        )
+    elif priority_action == "REDUCE_FRAGMENTATION":
+        immediate.extend(
+            [
+                "Increase governance observation",
+                "Review fragmentation signals",
+                "Reassess alignment and consensus posture",
+                "Review escalation threshold",
+            ]
+        )
+    elif priority_action == "IMPROVE_CONFIDENCE_INTEGRITY":
+        immediate.extend(
+            [
+                "Monitor evidence integrity signals",
+                "Review confidence reliability posture",
+                "Observe trustworthiness deterioration",
+                "Maintain constitutional safeguards",
+            ]
+        )
+    elif priority_action == "PREPARE_ESCALATION_REVIEW":
+        immediate.extend(
+            [
+                "Increase governance observation",
+                "Review escalation threshold and dossier posture",
+                "Reassess evidence deterioration",
+                "Monitor fragmentation and contradiction signals",
+            ]
+        )
+    elif priority_action == "MONITOR_GOVERNANCE_STRESS":
+        immediate.extend(
+            [
+                "Maintain heightened governance monitoring",
+                "Track contradiction and coherence signals",
+                "Observe intervention posture changes",
+            ]
+        )
+    else:
+        immediate.extend(
+            [
+                "Continue routine governance observation",
+                "Monitor directional and drift signals",
+                "Review governance refresh outputs",
+            ]
+        )
+
+    if contradiction_count >= 2 and "Monitor contradiction persistence" not in immediate:
+        immediate.append("Monitor contradiction persistence")
+    if velocity in ("FAST", "RAPID") and "Track drift acceleration" not in immediate:
+        immediate.append("Track drift acceleration")
+    immediate = immediate[:6]
+
+    deferred: List[str] = []
+    if alignment_state in (
+        "FRAGMENTATION_ELEVATED",
+        "GOVERNANCE_INTERNAL_CONFLICT",
+        "GOVERNANCE_CONSENSUS_FORMING",
+    ):
+        deferred.append("Reassess governance coherence")
+    if trust_summary in ("BROKEN", "WEAK", "LIMITED"):
+        deferred.append("Monitor confidence recovery")
+    if escalation_urgency not in ("NONE", "LOW"):
+        deferred.append("Revisit escalation posture")
+    if alignment_summary := executive.get("alignment_summary"):
+        if alignment_summary in ("WEAK", "PARTIAL", "FRACTURED"):
+            deferred.append("Review alignment stabilization")
+    if gov_direction in ("STABILIZING", "STRESSED_BUT_STABLE"):
+        deferred.append("Reassess institutional maturity trajectory")
+    if not deferred:
+        deferred.append("Review governance ladder progression")
+    deferred = deferred[:5]
+
+    blocked: List[str] = []
+    if not mutation_allowed or runtime_posture == "BLOCKED":
+        blocked.extend(
+            [
+                "Runtime enablement",
+                "Governance relaxation",
+                "Policy override",
+                "Autonomy escalation",
+                "Runtime mutation",
+            ]
+        )
+    elif runtime_posture in ("CONSTRAINED", "GUARDED"):
+        blocked.extend(
+            [
+                "Runtime enablement",
+                "Policy override",
+                "Autonomy escalation",
+            ]
+        )
+    elif intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED":
+        blocked.extend(
+            [
+                "Runtime mutation",
+                "Governance relaxation",
+            ]
+        )
+    if not blocked:
+        blocked.append("Premature runtime enablement without review")
+    blocked = blocked[:6]
+
+    monitoring: List[str] = []
+    if contradiction_count >= 1:
+        monitoring.append("Contradiction severity")
+    if executive.get("stability_summary") in ("BROKEN", "WEAK", "CONDITIONAL"):
+        monitoring.append("Governance coherence")
+    if trust_summary in ("BROKEN", "WEAK", "LIMITED"):
+        monitoring.append("Trustworthiness trend")
+    if evidence_state in (
+        "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+        "EVIDENCE_QUALITY_DEGRADING",
+        "CONFIDENCE_OVEREXTENDED",
+    ):
+        monitoring.append("Evidence integrity deterioration")
+    if drift_risk not in ("LOW", "NONE"):
+        monitoring.append("Drift acceleration")
+    if alignment_state in (
+        "FRAGMENTATION_ELEVATED",
+        "GOVERNANCE_INTERNAL_CONFLICT",
+        "INSTITUTIONAL_CONSENSUS_BROKEN",
+    ):
+        monitoring.append("Alignment fragmentation")
+    for risk in executive.get("top_risks") or []:
+        label = risk.split(" risk")[0].strip()
+        if label and label not in monitoring and len(monitoring) < 6:
+            monitoring.append(label)
+    if not monitoring:
+        monitoring.extend(
+            [
+                "Governance coherence",
+                "Trustworthiness trend",
+                "Evidence integrity",
+            ]
+        )
+    monitoring = monitoring[:6]
+
+    discipline_memo = _GCC_PLAYBOOK_DISCIPLINE_MEMO.get(
+        priority_action,
+        _GCC_PLAYBOOK_DISCIPLINE_MEMO["CONTINUE_DISCIPLINED_OBSERVATION"],
+    )
+
+    return {
+        "priority_action": priority_action,
+        "immediate_actions": immediate,
+        "deferred_actions": deferred,
+        "blocked_actions": blocked,
+        "monitoring_priorities": monitoring,
+        "discipline_memo": discipline_memo,
+    }
+
+
+def _gcc_detect_governance_temporal(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    playbook: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    stability: Dict[str, Any],
+    improvement: Dict[str, Any],
+    resilience: Dict[str, Any],
+    intervention: Dict[str, Any],
+    decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    verdict_state = executive["verdict_state"]
+    severity = attention["severity"]
+    review_cadence = attention["review_cadence"]
+    attention_level = attention["attention_level"]
+    gov_direction = trend["governance_direction"]
+    velocity = trend["trend_velocity"]
+    drift_risk = trend["drift_risk"]
+    structural_outlook = trend["structural_outlook"]
+    runtime_posture = executive["runtime_posture"]
+    intervention_posture = intervention.get("intervention_posture", "")
+    resilience_state = resilience.get("resilience_state", "")
+    recovery_prob = resilience.get("recovery_probability", "LOW")
+    improvement_state = improvement.get("improvement_state", "")
+    stability_state = stability.get("stability_state", "")
+    hist_direction = hist.get("confidence_direction", "stable")
+    hist_momentum = hist.get("institutional_momentum", "NONE")
+    transition_n = len(hist.get("transitions") or [])
+    has_transitions = bool(hist.get("has_transitions"))
+    maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
+    regime_key = regime.get("regime", "")
+
+    constitutional_lock_stable = (
+        (
+            severity == "CRITICAL_LOCK"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+        )
+        and gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+    )
+
+    def _match_entrenched() -> bool:
+        return (
+            gov_direction in ("DETERIORATING", "RAPIDLY_DETERIORATING")
+            and velocity in ("FAST", "RAPID")
+            and resilience_state
+            in (
+                "GOVERNANCE_RECOVERY_BLOCKED",
+                "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+            )
+            and improvement_state
+            in (
+                "IMPROVEMENT_TRAJECTORY_BLOCKED",
+                "GOVERNANCE_LEARNING_STALLED",
+            )
+        )
+
+    def _match_persistent_lock() -> bool:
+        return constitutional_lock_stable or (
+            playbook.get("priority_action") == "MAINTAIN_CONSTITUTIONAL_LOCK"
+            and gov_direction == "STRESSED_BUT_STABLE"
+            and velocity in ("MINIMAL", "SLOW")
+        )
+
+    def _match_transitioning() -> bool:
+        return (
+            hist_direction in ("mixed", "deteriorating", "improving")
+            and hist_momentum in ("MODERATE", "HIGH")
+        ) or (
+            gov_direction == "TRANSITIONING"
+            or (transition_n >= 2 and velocity in ("MODERATE", "FAST"))
+        )
+
+    def _match_stabilizing() -> bool:
+        return (
+            gov_direction == "STABILIZING"
+            or verdict_state == "GOVERNANCE_STABILIZING"
+            or improvement_state
+            in (
+                "GOVERNANCE_ADAPTATION_EMERGING",
+                "CONTRADICTIONS_DECLINING",
+                "GOVERNANCE_MATURITY_IMPROVING",
+            )
+        )
+
+    def _match_short_term() -> bool:
+        return (
+            severity in ("WATCH", "NORMAL")
+            and velocity in ("MINIMAL", "SLOW")
+            and transition_n <= 1
+            and gov_direction not in ("DETERIORATING", "RAPIDLY_DETERIORATING")
+        )
+
+    def _match_durable() -> bool:
+        return (
+            verdict_state == "GOVERNANCE_OPERATIONALLY_STABLE"
+            or gov_direction == "OPERATIONALLY_STABLE"
+        )
+
+    persistence_matchers = {
+        "ENTRENCHED_INSTABILITY": _match_entrenched,
+        "PERSISTENT_LOCK": _match_persistent_lock,
+        "TRANSITIONING": _match_transitioning,
+        "STABILIZING": _match_stabilizing,
+        "SHORT_TERM_VARIATION": _match_short_term,
+        "OPERATIONALLY_DURABLE": _match_durable,
+    }
+
+    governance_persistence = "PERSISTENT_LOCK"
+    for candidate in _GCC_PERSISTENCE_PRIORITY:
+        fn = persistence_matchers.get(candidate)
+        if fn and fn():
+            governance_persistence = candidate
+            break
+
+    if (
+        hist_direction == "dormant"
+        and hist_momentum == "NONE"
+        and not has_transitions
+        and regime_key == "CONSTITUTIONAL_STRESS"
+    ):
+        regime_duration = "PERSISTENT"
+    elif hist_direction in ("stable", "dormant") and hist_momentum == "NONE" and transition_n == 0:
+        regime_duration = "ESTABLISHED"
+    elif transition_n >= 4 or hist_momentum == "HIGH":
+        regime_duration = "DEVELOPING"
+    elif transition_n >= 2:
+        regime_duration = "SHORT"
+    elif transition_n == 1:
+        regime_duration = "SHORT"
+    elif not hist.get("has_history"):
+        regime_duration = "NEW"
+    elif maturity >= 0.40 and stability_state == "STABLE_GOVERNANCE_POSTURE":
+        regime_duration = "STRUCTURAL"
+    elif hist_direction in ("stable", "dormant"):
+        regime_duration = "ESTABLISHED"
+    else:
+        regime_duration = "DEVELOPING"
+
+    if velocity == "RAPID" or (gov_direction == "RAPIDLY_DETERIORATING" and velocity == "FAST"):
+        momentum_strength = "ACCELERATING"
+    elif hist_momentum == "HIGH" or velocity == "FAST":
+        momentum_strength = "STRONG"
+    elif hist_momentum == "MODERATE" or velocity == "MODERATE":
+        momentum_strength = "MODERATE"
+    elif hist_momentum == "LOW" or velocity == "SLOW":
+        momentum_strength = "WEAK"
+    else:
+        momentum_strength = "NONE"
+
+    if constitutional_lock_stable or (
+        structural_outlook == "RECOVERABLE" and gov_direction == "STRESSED_BUT_STABLE"
+    ):
+        recovery_horizon = "LONG"
+    elif structural_outlook == "COLLAPSING" or recovery_prob == "VERY_LOW":
+        recovery_horizon = "EXTENDED"
+    elif recovery_prob in ("MODERATE", "HIGH") or gov_direction == "STABILIZING":
+        recovery_horizon = "MEDIUM"
+    elif gov_direction == "OPERATIONALLY_STABLE" or recovery_prob == "HIGH":
+        recovery_horizon = "SHORT"
+    elif recovery_prob == "LOW" and gov_direction == "STRESSED_BUT_STABLE":
+        recovery_horizon = "LONG"
+    else:
+        recovery_horizon = "UNKNOWN"
+
+    if constitutional_lock_stable and review_cadence == "NEXT_REFRESH":
+        fatigue_risk = "LOW"
+    elif attention_level == "IMMEDIATE" and review_cadence in (
+        "IMMEDIATE_REVIEW",
+        "CONTINUOUS_MONITORING",
+    ):
+        fatigue_risk = "HIGH"
+    elif attention_level in ("HIGH", "IMMEDIATE") and velocity in ("FAST", "RAPID"):
+        fatigue_risk = "MATERIAL"
+    elif attention_level == "MODERATE" or review_cadence == "INTRADAY":
+        fatigue_risk = "GUARDED"
+    elif severity in ("WATCH", "NORMAL") and velocity in ("MINIMAL", "SLOW"):
+        fatigue_risk = "NONE"
+    else:
+        fatigue_risk = "LOW"
+
+    return {
+        "governance_persistence": governance_persistence,
+        "persistence_display": _GCC_PERSISTENCE_DISPLAY.get(
+            governance_persistence, governance_persistence.replace("_", " ").title()
+        ),
+        "regime_duration": regime_duration,
+        "momentum_strength": momentum_strength,
+        "recovery_horizon": recovery_horizon,
+        "fatigue_risk": fatigue_risk,
+        "temporal_memo": _GCC_TEMPORAL_MEMO.get(governance_persistence, ""),
+    }
+
+
+def _gcc_detect_governance_delta(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    temporal: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+    tension: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    quality: Dict[str, Any],
+    coherence: Dict[str, Any],
+    improvement: Dict[str, Any],
+    stability: Dict[str, Any],
+    intervention: Dict[str, Any],
+) -> Dict[str, Any]:
+    gov_direction = trend["governance_direction"]
+    velocity = trend["trend_velocity"]
+    drift_risk = trend["drift_risk"]
+    trust_summary = executive["trust_summary"]
+    hist_direction = hist.get("confidence_direction", "stable")
+    hist_momentum = hist.get("institutional_momentum", "NONE")
+    transition_n = len(hist.get("transitions") or [])
+    persistence = temporal.get("governance_persistence", "")
+    momentum_strength = temporal.get("momentum_strength", "NONE")
+    intervention_posture = intervention.get("intervention_posture", "")
+    severity = attention["severity"]
+    verdict_state = executive["verdict_state"]
+    improvement_state = improvement.get("improvement_state", "")
+    stability_state = stability.get("stability_state", "")
+    evidence_state = evidence.get("evidence_state", "")
+    alignment_state = alignment.get("alignment_state", "")
+    coherence_state = coherence.get("coherence_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+
+    constitutional_lock_stable = (
+        (
+            severity == "CRITICAL_LOCK"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+        )
+        and gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+    )
+
+    def _match_regime_shift() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            persistence == "TRANSITIONING"
+            or (
+                velocity in ("FAST", "RAPID")
+                and gov_direction in ("DETERIORATING", "RAPIDLY_DETERIORATING", "STABILIZING")
+            )
+            or (hist_direction == "mixed" and hist_momentum in ("MODERATE", "HIGH"))
+            or momentum_strength in ("STRONG", "ACCELERATING")
+        )
+
+    def _match_material_deterioration() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            gov_direction in ("DETERIORATING", "RAPIDLY_DETERIORATING")
+            or hist_direction == "deteriorating"
+            or stability_state == "GOVERNANCE_DETERIORATING"
+        )
+
+    def _match_material_improvement() -> bool:
+        return (
+            gov_direction in ("IMPROVING", "STABILIZING")
+            or hist_direction == "improving"
+            or improvement_state
+            in (
+                "CONTRADICTIONS_DECLINING",
+                "GOVERNANCE_MATURITY_IMPROVING",
+                "GOVERNANCE_EVOLUTION_STRENGTHENING",
+            )
+        )
+
+    def _match_mixed() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return hist_direction == "mixed" or (
+            improvement_state
+            in ("GOVERNANCE_ADAPTATION_EMERGING", "INSTITUTIONAL_IMPROVEMENT_POSSIBLE")
+            and trust_summary in ("BROKEN", "WEAK")
+        )
+
+    def _match_stable() -> bool:
+        return (
+            constitutional_lock_stable
+            or (
+                gov_direction == "STRESSED_BUT_STABLE"
+                and velocity in ("MINIMAL", "SLOW")
+                and drift_risk in ("LOW", "NONE")
+                and hist_direction in ("stable", "dormant")
+                and momentum_strength == "NONE"
+            )
+            or (
+                gov_direction == "OPERATIONALLY_STABLE"
+                and velocity in ("MINIMAL", "SLOW")
+                and transition_n == 0
+            )
+        )
+
+    delta_matchers = {
+        "REGIME_SHIFT_EMERGING": _match_regime_shift,
+        "MATERIAL_DETERIORATION": _match_material_deterioration,
+        "MATERIAL_IMPROVEMENT": _match_material_improvement,
+        "MIXED_TRANSITION": _match_mixed,
+        "STABLE_NO_MATERIAL_CHANGE": _match_stable,
+    }
+
+    delta_state = "STABLE_NO_MATERIAL_CHANGE"
+    for candidate in _GCC_DELTA_PRIORITY:
+        fn = delta_matchers.get(candidate)
+        if fn and fn():
+            delta_state = candidate
+            break
+
+    positive_scores: Dict[str, int] = {
+        "NONE": 0,
+        "TRUST_IMPROVEMENT": 0,
+        "ALIGNMENT_IMPROVEMENT": 0,
+        "COHERENCE_STABILIZATION": 0,
+        "CONTRADICTION_REDUCTION": 0,
+        "EVIDENCE_STRENGTHENING": 0,
+        "GOVERNANCE_STABILIZATION": 0,
+    }
+    negative_scores: Dict[str, int] = {
+        "NONE": 0,
+        "TRUST_DETERIORATION": 0,
+        "ALIGNMENT_FRAGMENTATION": 0,
+        "COHERENCE_BREAKDOWN": 0,
+        "CONTRADICTION_ACCELERATION": 0,
+        "EVIDENCE_DEGRADATION": 0,
+        "GOVERNANCE_INSTABILITY": 0,
+    }
+
+    if improvement_state == "CONTRADICTIONS_DECLINING":
+        positive_scores["CONTRADICTION_REDUCTION"] += 3
+    if gov_direction in ("STABILIZING", "STRESSED_BUT_STABLE") and velocity in ("MINIMAL", "SLOW"):
+        positive_scores["GOVERNANCE_STABILIZATION"] += 2
+    if hist_direction == "improving":
+        positive_scores["TRUST_IMPROVEMENT"] += 2
+    if alignment_state == "GOVERNANCE_CONSENSUS_FORMING":
+        positive_scores["ALIGNMENT_IMPROVEMENT"] += 2
+    if coherence_state in ("HIGHLY_COHERENT_GOVERNANCE", "MODERATELY_COHERENT_GOVERNANCE"):
+        positive_scores["COHERENCE_STABILIZATION"] += 2
+    if evidence_state in ("CONFIDENCE_SUPPORTED", "EVIDENCE_INTEGRITY_STRONG"):
+        positive_scores["EVIDENCE_STRENGTHENING"] += 2
+
+    if trust_summary in ("BROKEN", "WEAK"):
+        negative_scores["TRUST_DETERIORATION"] += 3
+    if alignment_state in (
+        "FRAGMENTATION_ELEVATED",
+        "GOVERNANCE_INTERNAL_CONFLICT",
+        "INSTITUTIONAL_CONSENSUS_BROKEN",
+    ):
+        negative_scores["ALIGNMENT_FRAGMENTATION"] += 3
+    if coherence_state in (
+        "FRAGMENTED_REASONING_CHAIN",
+        "INTERNALLY_INCONSISTENT_GOVERNANCE",
+        "LOW_COHERENCE_GOVERNANCE",
+    ):
+        negative_scores["COHERENCE_BREAKDOWN"] += 3
+    if (
+        contradiction_count >= 2
+        and hist_direction == "deteriorating"
+        and velocity in ("FAST", "RAPID", "MODERATE")
+    ):
+        negative_scores["CONTRADICTION_ACCELERATION"] += 3
+    elif contradiction_count >= 2 and delta_state != "STABLE_NO_MATERIAL_CHANGE":
+        negative_scores["CONTRADICTION_ACCELERATION"] += 1
+    if evidence_state in (
+        "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+        "EVIDENCE_QUALITY_DEGRADING",
+    ):
+        negative_scores["EVIDENCE_DEGRADATION"] += 2
+    if gov_direction in ("DETERIORATING", "RAPIDLY_DETERIORATING"):
+        negative_scores["GOVERNANCE_INSTABILITY"] += 3
+
+    if delta_state == "STABLE_NO_MATERIAL_CHANGE":
+        largest_positive = "NONE"
+        largest_negative = "NONE"
+    else:
+        pos_key = max(positive_scores, key=positive_scores.get)
+        neg_key = max(negative_scores, key=negative_scores.get)
+        largest_positive = pos_key if positive_scores[pos_key] > 0 else "NONE"
+        largest_negative = neg_key if negative_scores[neg_key] > 0 else "NONE"
+
+    if constitutional_lock_stable or delta_state == "STABLE_NO_MATERIAL_CHANGE":
+        regime_shift_probability = "LOW"
+    elif delta_state == "REGIME_SHIFT_EMERGING":
+        regime_shift_probability = "HIGH"
+    elif delta_state == "MIXED_TRANSITION":
+        regime_shift_probability = "GUARDED"
+    elif delta_state == "MATERIAL_DETERIORATION" and velocity in ("FAST", "RAPID"):
+        regime_shift_probability = "MATERIAL"
+    elif persistence == "TRANSITIONING" or transition_n >= 2:
+        regime_shift_probability = "GUARDED"
+    elif momentum_strength in ("STRONG", "ACCELERATING"):
+        regime_shift_probability = "MATERIAL"
+    else:
+        regime_shift_probability = "LOW"
+
+    drivers: List[str] = []
+    if delta_state == "STABLE_NO_MATERIAL_CHANGE":
+        drivers.extend(
+            [
+                "Governance direction unchanged",
+                "Drift minimal",
+                "Constitutional posture stable",
+                "No material escalation signals",
+            ]
+        )
+    elif delta_state == "REGIME_SHIFT_EMERGING":
+        if coherence_state in ("FRAGMENTED_REASONING_CHAIN", "LOW_COHERENCE_GOVERNANCE"):
+            drivers.append("Governance coherence deteriorating")
+        if trust_summary in ("BROKEN", "WEAK"):
+            drivers.append("Trust weakening")
+        if contradiction_count >= 2 and velocity not in ("MINIMAL", "SLOW"):
+            drivers.append("Contradictions accelerating")
+        if alignment_state in ("FRAGMENTATION_ELEVATED", "GOVERNANCE_INTERNAL_CONFLICT"):
+            drivers.append("Alignment fragmenting")
+    elif delta_state == "MATERIAL_DETERIORATION":
+        if trust_summary in ("BROKEN", "WEAK"):
+            drivers.append("Trustworthiness deteriorating")
+        if coherence_state in ("FRAGMENTED_REASONING_CHAIN", "INTERNALLY_INCONSISTENT_GOVERNANCE"):
+            drivers.append("Governance coherence weakening")
+        if evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED":
+            drivers.append("Evidence integrity constrained")
+        if contradiction_count >= 1:
+            drivers.append("Contradiction persistence elevated")
+    elif delta_state == "MATERIAL_IMPROVEMENT":
+        if improvement_state == "CONTRADICTIONS_DECLINING":
+            drivers.append("Contradictions declining")
+        if hist_direction == "improving":
+            drivers.append("Trust stabilizing")
+        if coherence_state not in ("FRAGMENTED_REASONING_CHAIN", "LOW_COHERENCE_GOVERNANCE"):
+            drivers.append("Governance coherence improving")
+        if evidence_state in ("CONFIDENCE_SUPPORTED", "PARTIALLY_SUPPORTED_CONFIDENCE"):
+            drivers.append("Confidence integrity strengthening")
+    elif delta_state == "MIXED_TRANSITION":
+        drivers.append("Mixed historical confidence direction")
+        if trust_summary in ("BROKEN", "WEAK", "LIMITED"):
+            drivers.append("Trust signals remain constrained")
+        if improvement_state in (
+            "GOVERNANCE_ADAPTATION_EMERGING",
+            "INSTITUTIONAL_IMPROVEMENT_POSSIBLE",
+        ):
+            drivers.append("Partial improvement signals emerging")
+        drivers.append("Institutional ambiguity persists")
+
+    for change in (hist.get("changes") or [])[:2]:
+        if change not in drivers and len(drivers) < 6:
+            drivers.append(change.rstrip("."))
+    drivers = drivers[:6]
+
+    return {
+        "delta_state": delta_state,
+        "delta_display": _GCC_DELTA_DISPLAY.get(delta_state, delta_state.replace("_", " ").title()),
+        "largest_positive_change": largest_positive,
+        "positive_display": _GCC_POSITIVE_CHANGE_DISPLAY.get(
+            largest_positive, largest_positive.replace("_", " ").title()
+        ),
+        "largest_negative_change": largest_negative,
+        "negative_display": _GCC_NEGATIVE_CHANGE_DISPLAY.get(
+            largest_negative, largest_negative.replace("_", " ").title()
+        ),
+        "regime_shift_probability": regime_shift_probability,
+        "change_drivers": drivers,
+        "change_memo": _GCC_DELTA_CHANGE_MEMO.get(delta_state, ""),
+    }
+
+
+def _gcc_detect_governance_forward_forecast(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    temporal: Dict[str, Any],
+    delta: Dict[str, Any],
+    forecast: Dict[str, Any],
+    scenario: Dict[str, Any],
+    resilience: Dict[str, Any],
+    intervention: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    tension: Dict[str, Any],
+    hist: Dict[str, Any],
+    regime: Dict[str, Any],
+) -> Dict[str, Any]:
+    gov_direction = trend["governance_direction"]
+    velocity = trend["trend_velocity"]
+    drift_risk = trend["drift_risk"]
+    structural_outlook = trend["structural_outlook"]
+    trust_summary = executive["trust_summary"]
+    runtime_posture = executive["runtime_posture"]
+    intervention_posture = intervention.get("intervention_posture", "")
+    severity = attention["severity"]
+    verdict_state = executive["verdict_state"]
+    delta_state = delta.get("delta_state", "")
+    regime_shift = delta.get("regime_shift_probability", "LOW")
+    persistence = temporal.get("governance_persistence", "")
+    momentum_strength = temporal.get("momentum_strength", "NONE")
+    regression_risk = forecast.get("regression_risk", "NONE")
+    trajectory = forecast.get("trajectory", "")
+    resilience_state = resilience.get("resilience_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    hist_direction = hist.get("confidence_direction", "stable")
+
+    constitutional_lock_stable = (
+        (
+            severity == "CRITICAL_LOCK"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+        )
+        and gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+        and delta_state == "STABLE_NO_MATERIAL_CHANGE"
+    )
+
+    def _match_structural_deterioration() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            gov_direction in ("DETERIORATING", "RAPIDLY_DETERIORATING")
+            or persistence == "ENTRENCHED_INSTABILITY"
+            or structural_outlook == "COLLAPSING"
+            or (regression_risk == "HIGH" and velocity in ("FAST", "RAPID"))
+            or scenario.get("scenario_state") == "SYSTEMIC_GOVERNANCE_FAILURE_RISK"
+        )
+
+    def _match_persistent_constraint() -> bool:
+        return (
+            constitutional_lock_stable
+            or (
+                persistence == "PERSISTENT_LOCK"
+                and gov_direction == "STRESSED_BUT_STABLE"
+                and velocity in ("MINIMAL", "SLOW")
+            )
+            or (
+                trajectory == "CONSTITUTIONALLY_CONSTRAINED"
+                and runtime_posture == "BLOCKED"
+                and delta_state == "STABLE_NO_MATERIAL_CHANGE"
+            )
+        )
+
+    def _match_mixed_forward() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            delta_state == "MIXED_TRANSITION"
+            or hist_direction == "mixed"
+            or trajectory == "GOVERNANCE_REGRESSION_RISK"
+            or regime_shift == "GUARDED"
+        )
+
+    def _match_stabilization() -> bool:
+        return (
+            gov_direction in ("STABILIZING", "IMPROVING")
+            or persistence == "STABILIZING"
+            or trajectory in ("GOVERNANCE_IMPROVING", "GOVERNANCE_ACCELERATING")
+        )
+
+    def _match_operationally_stable() -> bool:
+        return (
+            gov_direction == "OPERATIONALLY_STABLE"
+            or verdict_state == "GOVERNANCE_OPERATIONALLY_STABLE"
+            or persistence == "OPERATIONALLY_DURABLE"
+        )
+
+    outlook_matchers = {
+        "STRUCTURAL_DETERIORATION_RISK": _match_structural_deterioration,
+        "PERSISTENT_CONSTRAINT": _match_persistent_constraint,
+        "MIXED_FORWARD_PATH": _match_mixed_forward,
+        "STABILIZATION_PATH": _match_stabilization,
+        "OPERATIONALLY_STABLE_PATH": _match_operationally_stable,
+    }
+
+    forward_outlook = "PERSISTENT_CONSTRAINT"
+    for candidate in _GCC_FORWARD_OUTLOOK_PRIORITY:
+        fn = outlook_matchers.get(candidate)
+        if fn and fn():
+            forward_outlook = candidate
+            break
+
+    if constitutional_lock_stable or forward_outlook == "PERSISTENT_CONSTRAINT":
+        transition_probability = "LOW"
+    elif forward_outlook == "STRUCTURAL_DETERIORATION_RISK":
+        transition_probability = "HIGH"
+    elif forward_outlook == "MIXED_FORWARD_PATH" or regime_shift == "GUARDED":
+        transition_probability = "GUARDED"
+    elif regime_shift == "MATERIAL":
+        transition_probability = "MATERIAL"
+    elif delta_state == "REGIME_SHIFT_EMERGING":
+        transition_probability = "HIGH"
+    else:
+        transition_probability = regime_shift if regime_shift != "NONE" else "LOW"
+
+    if forward_outlook == "STRUCTURAL_DETERIORATION_RISK" or velocity == "RAPID":
+        stability_risk_forecast = "SEVERE"
+    elif gov_direction == "DETERIORATING" or drift_risk == "SEVERE":
+        stability_risk_forecast = "MATERIAL"
+    elif drift_risk == "MATERIAL" or regression_risk == "MODERATE":
+        stability_risk_forecast = "GUARDED"
+    elif constitutional_lock_stable or (
+        forward_outlook == "PERSISTENT_CONSTRAINT" and velocity in ("MINIMAL", "SLOW")
+    ):
+        stability_risk_forecast = "LOW"
+    elif drift_risk in ("LOW", "NONE") and delta_state == "STABLE_NO_MATERIAL_CHANGE":
+        stability_risk_forecast = "MINIMAL"
+    else:
+        stability_risk_forecast = "GUARDED"
+
+    if forward_outlook == "STRUCTURAL_DETERIORATION_RISK" or transition_probability == "HIGH":
+        warning_sensitivity = "IMMEDIATE" if velocity == "RAPID" else "HIGH"
+    elif forward_outlook == "MIXED_FORWARD_PATH":
+        warning_sensitivity = "GUARDED"
+    elif constitutional_lock_stable or forward_outlook == "PERSISTENT_CONSTRAINT":
+        warning_sensitivity = "LOW"
+    elif forward_outlook == "OPERATIONALLY_STABLE_PATH":
+        warning_sensitivity = "PASSIVE"
+    elif forward_outlook == "STABILIZATION_PATH":
+        warning_sensitivity = "LOW"
+    else:
+        warning_sensitivity = "GUARDED"
+
+    warning_drivers: List[str] = []
+    if forward_outlook == "PERSISTENT_CONSTRAINT":
+        warning_drivers.extend(
+            [
+                "Monitor contradiction persistence",
+                "Watch trustworthiness drift",
+                "Observe governance coherence stability",
+                "Reassess regime transition signals",
+            ]
+        )
+    elif forward_outlook == "STRUCTURAL_DETERIORATION_RISK":
+        warning_drivers.extend(
+            [
+                "Monitor trust deterioration",
+                "Watch governance fragmentation acceleration",
+                "Observe contradiction intensity",
+                "Reassess escalation readiness",
+            ]
+        )
+    elif forward_outlook == "STABILIZATION_PATH":
+        warning_drivers.extend(
+            [
+                "Observe contradiction reduction",
+                "Monitor trust recovery",
+                "Watch evidence integrity stabilization",
+                "Reassess governance coherence",
+            ]
+        )
+    elif forward_outlook == "MIXED_FORWARD_PATH":
+        warning_drivers.extend(
+            [
+                "Monitor mixed directional signals",
+                "Watch trust and alignment divergence",
+                "Observe regime transition indicators",
+            ]
+        )
+    elif forward_outlook == "OPERATIONALLY_STABLE_PATH":
+        warning_drivers.extend(
+            [
+                "Monitor routine drift signals",
+                "Watch constitutional posture stability",
+            ]
+        )
+    else:
+        warning_drivers.append("Monitor governance directional signals")
+
+    for warning in (scenario.get("early_warnings") or [])[:2]:
+        if warning not in warning_drivers and len(warning_drivers) < 6:
+            warning_drivers.append(warning)
+    if (
+        trust_summary in ("BROKEN", "WEAK")
+        and "Watch trustworthiness drift" not in warning_drivers
+        and len(warning_drivers) < 6
+    ):
+        warning_drivers.append("Watch trustworthiness drift")
+    if (
+        alignment.get("alignment_state")
+        in (
+            "FRAGMENTATION_ELEVATED",
+            "GOVERNANCE_INTERNAL_CONFLICT",
+        )
+        and len(warning_drivers) < 6
+    ):
+        warning_drivers.append("Watch alignment fragmentation")
+    warning_drivers = warning_drivers[:6]
+
+    return {
+        "forward_outlook": forward_outlook,
+        "outlook_display": _GCC_FORWARD_OUTLOOK_DISPLAY.get(
+            forward_outlook, forward_outlook.replace("_", " ").title()
+        ),
+        "regime_transition_probability": transition_probability,
+        "stability_risk_forecast": stability_risk_forecast,
+        "early_warning_sensitivity": warning_sensitivity,
+        "early_warning_drivers": warning_drivers,
+        "forecast_memo": _GCC_FORWARD_FORECAST_MEMO.get(forward_outlook, ""),
+    }
+
+
+def _gcc_detect_governance_scenario_matrix(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    temporal: Dict[str, Any],
+    delta: Dict[str, Any],
+    forward: Dict[str, Any],
+    scenario: Dict[str, Any],
+    intervention: Dict[str, Any],
+    evidence: Dict[str, Any],
+    alignment: Dict[str, Any],
+    coherence: Dict[str, Any],
+    improvement: Dict[str, Any],
+    tension: Dict[str, Any],
+) -> Dict[str, Any]:
+    verdict_state = executive["verdict_state"]
+    severity = attention["severity"]
+    runtime_posture = executive["runtime_posture"]
+    trust_summary = executive["trust_summary"]
+    gov_direction = trend["governance_direction"]
+    velocity = trend["trend_velocity"]
+    drift_risk = trend["drift_risk"]
+    structural_outlook = trend["structural_outlook"]
+    intervention_posture = intervention.get("intervention_posture", "")
+    delta_state = delta.get("delta_state", "")
+    forward_outlook = forward.get("forward_outlook", "")
+    transition_prob = forward.get("regime_transition_probability", "LOW")
+    scenario_state = scenario.get("scenario_state", "")
+    alignment_state = alignment.get("alignment_state", "")
+    coherence_state = coherence.get("coherence_state", "")
+    improvement_state = improvement.get("improvement_state", "")
+    contradiction_count = int(tension.get("contradiction_count", 0) or 0)
+    persistence = temporal.get("governance_persistence", "")
+
+    constitutional_lock_stable = (
+        (
+            severity == "CRITICAL_LOCK"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+            or runtime_posture == "BLOCKED"
+        )
+        and gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+        and delta_state == "STABLE_NO_MATERIAL_CHANGE"
+    )
+
+    def _match_constitutional_constraint() -> bool:
+        return (
+            constitutional_lock_stable
+            or (forward_outlook == "PERSISTENT_CONSTRAINT" and runtime_posture == "BLOCKED")
+            or (
+                intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+                and gov_direction == "STRESSED_BUT_STABLE"
+                and velocity in ("MINIMAL", "SLOW")
+            )
+        )
+
+    def _match_fragmentation_stress() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            alignment_state
+            in (
+                "FRAGMENTATION_ELEVATED",
+                "GOVERNANCE_INTERNAL_CONFLICT",
+                "INSTITUTIONAL_CONSENSUS_BROKEN",
+            )
+            or scenario_state == "FRAGMENTATION_RISK_ELEVATED"
+            or (
+                contradiction_count >= 2
+                and coherence_state
+                in (
+                    "FRAGMENTED_REASONING_CHAIN",
+                    "LOW_COHERENCE_GOVERNANCE",
+                )
+            )
+        )
+
+    def _match_regime_transition() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            delta_state == "REGIME_SHIFT_EMERGING"
+            or forward_outlook == "MIXED_FORWARD_PATH"
+            or delta_state == "MIXED_TRANSITION"
+            or persistence == "TRANSITIONING"
+        )
+
+    def _match_stabilization() -> bool:
+        return (
+            forward_outlook == "STABILIZATION_PATH"
+            or gov_direction in ("STABILIZING", "IMPROVING")
+            or improvement_state
+            in (
+                "CONTRADICTIONS_DECLINING",
+                "GOVERNANCE_MATURITY_IMPROVING",
+                "GOVERNANCE_ADAPTATION_EMERGING",
+            )
+            or scenario_state == "RECOVERABLE_GOVERNANCE_STRESS"
+        )
+
+    def _match_operationally_stable() -> bool:
+        return (
+            verdict_state == "GOVERNANCE_OPERATIONALLY_STABLE"
+            or gov_direction == "OPERATIONALLY_STABLE"
+            or forward_outlook == "OPERATIONALLY_STABLE_PATH"
+        )
+
+    scenario_matchers = {
+        "CONSTITUTIONAL_CONSTRAINT_SCENARIO": _match_constitutional_constraint,
+        "FRAGMENTATION_STRESS_SCENARIO": _match_fragmentation_stress,
+        "REGIME_TRANSITION_SCENARIO": _match_regime_transition,
+        "STABILIZATION_SCENARIO": _match_stabilization,
+        "OPERATIONALLY_STABLE_SCENARIO": _match_operationally_stable,
+    }
+
+    governance_scenario = "CONSTITUTIONAL_CONSTRAINT_SCENARIO"
+    for candidate in _GCC_SCENARIO_PRIORITY:
+        fn = scenario_matchers.get(candidate)
+        if fn and fn():
+            governance_scenario = candidate
+            break
+
+    next_regime_map = {
+        "CONSTITUTIONAL_CONSTRAINT_SCENARIO": "CONSTITUTIONAL_LOCK_PERSISTS",
+        "FRAGMENTATION_STRESS_SCENARIO": "FRAGMENTATION_ELEVATES",
+        "REGIME_TRANSITION_SCENARIO": "MIXED_TRANSITION",
+        "STABILIZATION_SCENARIO": "GOVERNANCE_STABILIZES",
+        "OPERATIONALLY_STABLE_SCENARIO": "OPERATIONAL_STABILITY",
+    }
+    most_likely_next_regime = next_regime_map.get(governance_scenario, "MIXED_TRANSITION")
+
+    if constitutional_lock_stable or governance_scenario == "CONSTITUTIONAL_CONSTRAINT_SCENARIO":
+        deterioration_trigger_risk = "LOW"
+    elif (
+        forward_outlook == "STRUCTURAL_DETERIORATION_RISK"
+        or delta_state == "MATERIAL_DETERIORATION"
+    ):
+        deterioration_trigger_risk = "HIGH"
+    elif drift_risk in ("SEVERE", "MATERIAL") or transition_prob == "HIGH":
+        deterioration_trigger_risk = "MATERIAL"
+    elif contradiction_count >= 2 and velocity in ("MODERATE", "FAST", "RAPID"):
+        deterioration_trigger_risk = "GUARDED"
+    elif trust_summary in ("BROKEN", "WEAK") and delta_state != "STABLE_NO_MATERIAL_CHANGE":
+        deterioration_trigger_risk = "GUARDED"
+    else:
+        deterioration_trigger_risk = "LOW"
+
+    if governance_scenario == "OPERATIONALLY_STABLE_SCENARIO":
+        stabilization_trigger_probability = "HIGH"
+    elif governance_scenario == "STABILIZATION_SCENARIO":
+        stabilization_trigger_probability = "MODERATE"
+    elif (
+        constitutional_lock_stable
+        or structural_outlook == "RECOVERABLE"
+        or scenario_state == "RECOVERABLE_GOVERNANCE_STRESS"
+    ):
+        stabilization_trigger_probability = "GUARDED"
+    elif improvement_state in (
+        "INSTITUTIONAL_IMPROVEMENT_POSSIBLE",
+        "GOVERNANCE_ADAPTATION_EMERGING",
+    ):
+        stabilization_trigger_probability = "GUARDED"
+    elif forward_outlook == "STRUCTURAL_DETERIORATION_RISK":
+        stabilization_trigger_probability = "NONE"
+    else:
+        stabilization_trigger_probability = "LOW"
+
+    deterioration_triggers: List[str] = []
+    if contradiction_count >= 1:
+        deterioration_triggers.append("Rising contradiction intensity")
+    if trust_summary in ("BROKEN", "WEAK"):
+        deterioration_triggers.append("Trust deterioration")
+    if alignment_state in (
+        "FRAGMENTATION_ELEVATED",
+        "GOVERNANCE_INTERNAL_CONFLICT",
+        "INSTITUTIONAL_CONSENSUS_BROKEN",
+    ):
+        deterioration_triggers.append("Governance fragmentation acceleration")
+    if coherence_state in (
+        "FRAGMENTED_REASONING_CHAIN",
+        "INTERNALLY_INCONSISTENT_GOVERNANCE",
+        "LOW_COHERENCE_GOVERNANCE",
+    ):
+        deterioration_triggers.append("Coherence weakening")
+    if evidence.get("evidence_state") in (
+        "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED",
+        "EVIDENCE_QUALITY_DEGRADING",
+    ):
+        deterioration_triggers.append("Evidence integrity degradation")
+    if attention.get("escalation_urgency") in ("MATERIAL", "IMMEDIATE"):
+        deterioration_triggers.append("Escalation disagreement growth")
+    if not deterioration_triggers:
+        deterioration_triggers.append("No active deterioration triggers identified")
+    deterioration_triggers = deterioration_triggers[:5]
+
+    stabilization_triggers: List[str] = []
+    if improvement_state == "CONTRADICTIONS_DECLINING" or contradiction_count <= 1:
+        stabilization_triggers.append("Contradiction reduction")
+    if trust_summary in ("ACCEPTABLE", "STRONG") or improvement_state in (
+        "GOVERNANCE_MATURITY_IMPROVING",
+    ):
+        stabilization_triggers.append("Trust stabilization")
+    if coherence_state in (
+        "MODERATELY_COHERENT_GOVERNANCE",
+        "HIGHLY_COHERENT_GOVERNANCE",
+        "LOGICALLY_CONSTRAINED_BUT_COHERENT",
+    ):
+        stabilization_triggers.append("Governance coherence improvement")
+    if evidence.get("evidence_state") in (
+        "CONFIDENCE_SUPPORTED",
+        "EVIDENCE_INTEGRITY_STRONG",
+        "PARTIALLY_SUPPORTED_CONFIDENCE",
+    ):
+        stabilization_triggers.append("Evidence integrity strengthening")
+    if alignment_state == "GOVERNANCE_CONSENSUS_FORMING":
+        stabilization_triggers.append("Alignment stabilization")
+    if structural_outlook == "RECOVERABLE":
+        stabilization_triggers.append("Recoverable institutional posture")
+    if governance_scenario == "CONSTITUTIONAL_CONSTRAINT_SCENARIO":
+        for trigger in (
+            "Contradiction reduction",
+            "Trust stabilization",
+            "Governance coherence improvement",
+        ):
+            if trigger not in stabilization_triggers:
+                stabilization_triggers.insert(0, trigger)
+    if not stabilization_triggers:
+        stabilization_triggers.extend(
+            [
+                "Contradiction reduction",
+                "Trust stabilization",
+                "Governance coherence improvement",
+            ]
+        )
+    stabilization_triggers = stabilization_triggers[:5]
+
+    return {
+        "governance_scenario": governance_scenario,
+        "scenario_display": _GCC_SCENARIO_DISPLAY.get(
+            governance_scenario, governance_scenario.replace("_", " ").title()
+        ),
+        "most_likely_next_regime": most_likely_next_regime,
+        "next_regime_display": _GCC_NEXT_REGIME_DISPLAY.get(
+            most_likely_next_regime, most_likely_next_regime.replace("_", " ").title()
+        ),
+        "deterioration_trigger_risk": deterioration_trigger_risk,
+        "stabilization_trigger_probability": stabilization_trigger_probability,
+        "deterioration_triggers": deterioration_triggers,
+        "stabilization_triggers": stabilization_triggers,
+        "scenario_memo": _GCC_SCENARIO_MEMO.get(governance_scenario, ""),
+    }
+
+
+def _gcc_detect_governance_decision_brief(
+    *,
+    executive: Dict[str, Any],
+    attention: Dict[str, Any],
+    trend: Dict[str, Any],
+    signal_conf: Dict[str, Any],
+    playbook: Dict[str, Any],
+    temporal: Dict[str, Any],
+    delta: Dict[str, Any],
+    forward: Dict[str, Any],
+    scenario_matrix: Dict[str, Any],
+    intervention: Dict[str, Any],
+) -> Dict[str, Any]:
+    verdict_state = executive["verdict_state"]
+    severity = attention["severity"]
+    runtime_posture = executive["runtime_posture"]
+    trust_summary = executive["trust_summary"]
+    gov_direction = trend["governance_direction"]
+    velocity = trend["trend_velocity"]
+    drift_risk = trend["drift_risk"]
+    intervention_posture = intervention.get("intervention_posture", "")
+    delta_state = delta.get("delta_state", "")
+    forward_outlook = forward.get("forward_outlook", "")
+    priority_action = playbook.get("priority_action", "")
+    deterioration_risk = scenario_matrix.get("deterioration_trigger_risk", "LOW")
+    governance_scenario = scenario_matrix.get("governance_scenario", "")
+    attention_level = attention.get("attention_level", "MODERATE")
+    reliability = signal_conf.get("reliability_level", "GUARDED")
+
+    constitutional_lock_stable = (
+        (
+            severity == "CRITICAL_LOCK"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+            or runtime_posture == "BLOCKED"
+        )
+        and gov_direction == "STRESSED_BUT_STABLE"
+        and velocity in ("MINIMAL", "SLOW")
+        and delta_state == "STABLE_NO_MATERIAL_CHANGE"
+        and deterioration_risk == "LOW"
+    )
+
+    def _match_locked_observe_only() -> bool:
+        return constitutional_lock_stable or (
+            priority_action == "MAINTAIN_CONSTITUTIONAL_LOCK"
+            and gov_direction == "STRESSED_BUT_STABLE"
+            and velocity in ("MINIMAL", "SLOW")
+            and deterioration_risk == "LOW"
+            and forward_outlook == "PERSISTENT_CONSTRAINT"
+        )
+
+    def _match_locked_heightened() -> bool:
+        if _match_locked_observe_only():
+            return False
+        return (
+            severity == "CRITICAL_LOCK"
+            or runtime_posture == "BLOCKED"
+            or verdict_state == "CONSTITUTIONALLY_LOCKED_GOVERNANCE"
+            or intervention_posture == "CONSTITUTIONAL_LOCK_REQUIRED"
+        ) and (
+            attention_level in ("HIGH", "IMMEDIATE")
+            or severity == "HIGH_RISK"
+            or deterioration_risk in ("GUARDED", "MATERIAL", "HIGH")
+            or forward.get("early_warning_sensitivity") in ("GUARDED", "HIGH", "IMMEDIATE")
+        )
+
+    def _match_repair_required() -> bool:
+        if constitutional_lock_stable:
+            return False
+        return (
+            priority_action
+            in (
+                "IMPROVE_CONFIDENCE_INTEGRITY",
+                "REDUCE_FRAGMENTATION",
+            )
+            or reliability in ("BROKEN", "WEAK")
+            or trust_summary in ("BROKEN", "WEAK")
+            or governance_scenario == "FRAGMENTATION_STRESS_SCENARIO"
+        )
+
+    def _match_transition_watch() -> bool:
+        return (
+            delta_state in ("REGIME_SHIFT_EMERGING", "MIXED_TRANSITION")
+            or forward_outlook == "MIXED_FORWARD_PATH"
+            or governance_scenario == "REGIME_TRANSITION_SCENARIO"
+            or priority_action == "PREPARE_ESCALATION_REVIEW"
+            or forward.get("regime_transition_probability") in ("GUARDED", "MATERIAL", "HIGH")
+        )
+
+    def _match_stable_continue() -> bool:
+        return (
+            verdict_state == "GOVERNANCE_OPERATIONALLY_STABLE"
+            or gov_direction == "OPERATIONALLY_STABLE"
+            or (severity == "NORMAL" and delta_state == "STABLE_NO_MATERIAL_CHANGE")
+        )
+
+    brief_matchers = {
+        "LOCKED_OBSERVE_ONLY": _match_locked_observe_only,
+        "LOCKED_HEIGHTENED_MONITORING": _match_locked_heightened,
+        "GOVERNANCE_REPAIR_REQUIRED": _match_repair_required,
+        "TRANSITION_WATCH": _match_transition_watch,
+        "STABLE_CONTINUE_MONITORING": _match_stable_continue,
+    }
+
+    final_brief = "LOCKED_OBSERVE_ONLY"
+    for candidate in _GCC_DECISION_BRIEF_PRIORITY:
+        fn = brief_matchers.get(candidate)
+        if fn and fn():
+            final_brief = candidate
+            break
+
+    if final_brief in ("LOCKED_OBSERVE_ONLY", "LOCKED_HEIGHTENED_MONITORING"):
+        governance_mode = "CONSTITUTIONAL_LOCK_MODE"
+    elif governance_scenario == "FRAGMENTATION_STRESS_SCENARIO":
+        governance_mode = "CONTAINMENT_MODE"
+    elif final_brief == "GOVERNANCE_REPAIR_REQUIRED":
+        governance_mode = "REPAIR_MODE"
+    elif final_brief == "TRANSITION_WATCH":
+        governance_mode = "TRANSITION_MODE"
+    else:
+        governance_mode = "OBSERVATION_MODE"
+
+    immediate_instruction = _GCC_DECISION_INSTRUCTION.get(
+        final_brief, "CONTINUE_ROUTINE_MONITORING"
+    )
+
+    monitoring = playbook.get("monitoring_priorities") or []
+    det_triggers = scenario_matrix.get("deterioration_triggers") or []
+    if trust_summary in ("BROKEN", "WEAK") and "Trustworthiness drift" not in monitoring:
+        primary_watch = "Trustworthiness drift"
+    elif "Trust deterioration" in det_triggers:
+        primary_watch = "Trustworthiness drift"
+    elif "Rising contradiction intensity" in det_triggers:
+        primary_watch = "Contradiction persistence"
+    elif "Governance fragmentation acceleration" in det_triggers:
+        primary_watch = "Alignment fragmentation"
+    elif "Coherence weakening" in det_triggers:
+        primary_watch = "Governance coherence weakening"
+    elif forward.get("regime_transition_probability") in ("GUARDED", "MATERIAL", "HIGH"):
+        primary_watch = "Regime transition signals"
+    elif monitoring:
+        primary_watch = monitoring[0]
+    else:
+        primary_watch = "Governance directional signals"
+
+    blocked = playbook.get("blocked_actions") or []
+    if runtime_posture == "BLOCKED" or final_brief.startswith("LOCKED"):
+        primary_blocked = "Runtime enablement"
+    elif blocked:
+        primary_blocked = blocked[0]
+    else:
+        primary_blocked = "Premature runtime enablement"
+
+    return {
+        "final_brief": final_brief,
+        "brief_display": _GCC_DECISION_BRIEF_DISPLAY.get(
+            final_brief, final_brief.replace("_", " ").title()
+        ),
+        "governance_mode": governance_mode,
+        "mode_display": _GCC_GOVERNANCE_MODE_DISPLAY.get(
+            governance_mode, governance_mode.replace("_", " ").title()
+        ),
+        "immediate_instruction": immediate_instruction,
+        "primary_watch_condition": primary_watch,
+        "primary_blocked_condition": primary_blocked,
+        "decision_memo": _GCC_DECISION_BRIEF_MEMO.get(final_brief, ""),
+    }
+
+
+def _gcc_render_decision_brief_card(brief: Dict[str, Any]) -> None:
+    st.markdown("#### Operator Decision Brief")
+    st.caption("Executive compression — final governance posture in one view. **Read-only.**")
+
+    r1c1, r1c2, r1c3 = st.columns(3)
+    r1c1.metric("Final Operator Brief", brief["brief_display"])
+    r1c2.metric("Governance Mode", brief["mode_display"])
+    r1c3.metric("Immediate Instruction", brief["immediate_instruction"])
+
+    r2c1, r2c2 = st.columns(2)
+    r2c1.metric("Watch Condition", brief["primary_watch_condition"])
+    r2c2.metric("Blocked Condition", brief["primary_blocked_condition"])
+
+    final_brief = brief["final_brief"]
+    if final_brief == "LOCKED_OBSERVE_ONLY":
+        st.warning(brief["decision_memo"])
+    elif final_brief in ("LOCKED_HEIGHTENED_MONITORING", "TRANSITION_WATCH"):
+        st.warning(brief["decision_memo"])
+    elif final_brief == "GOVERNANCE_REPAIR_REQUIRED":
+        st.error(brief["decision_memo"])
+    elif final_brief == "STABLE_CONTINUE_MONITORING":
+        st.success(brief["decision_memo"])
+    else:
+        st.info(brief["decision_memo"])
+
+    st.markdown("---")
+
+
+def _gcc_render_executive_summary_intelligence(
+    *,
+    stack: Dict[str, Any],
+    dossier_summary: Dict[str, Any],
+) -> None:
+    executive = _gcc_detect_executive_verdict(
+        dossier_summary=dossier_summary,
+        regime=stack["regime"],
+        tension=stack["tension"],
+        decision=stack["decision"],
+        scenario=stack["scenario"],
+        intervention=stack["intervention"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        quality=stack["quality"],
+        improvement=stack["improvement"],
+        stability=stack["stability"],
+    )
+
+    st.markdown("### Governance Executive Summary & Institutional Verdict Intelligence")
+    st.caption(
+        "Operator cockpit — synthesized governance posture at a glance. "
+        "**Read-only executive view. Drill down in sections below.**"
+    )
+
+    attention = _gcc_detect_governance_attention(
+        executive=executive,
+        dossier_summary=dossier_summary,
+        regime=stack["regime"],
+        tension=stack["tension"],
+        decision=stack["decision"],
+        scenario=stack["scenario"],
+        intervention=stack["intervention"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        quality=stack["quality"],
+        failure=stack["failure"],
+        integrity=stack["integrity"],
+    )
+    trend = _gcc_detect_governance_trend(
+        executive=executive,
+        attention=attention,
+        hist=stack["hist"],
+        regime=stack["regime"],
+        forecast=stack["forecast"],
+        tension=stack["tension"],
+        stability=stack["stability"],
+        improvement=stack["improvement"],
+        resilience=stack["resilience"],
+        scenario=stack["scenario"],
+        intervention=stack["intervention"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        quality=stack["quality"],
+        failure=stack["failure"],
+    )
+    signal_conf = _gcc_detect_governance_signal_confidence(
+        executive=executive,
+        attention=attention,
+        trend=trend,
+        hist=stack["hist"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        quality=stack["quality"],
+        decision=stack["decision"],
+        tension=stack["tension"],
+        stability=stack["stability"],
+        integrity=stack["integrity"],
+        coherence=stack["coherence"],
+    )
+    playbook = _gcc_detect_governance_operator_playbook(
+        executive=executive,
+        attention=attention,
+        trend=trend,
+        signal_conf=signal_conf,
+        dossier_summary=dossier_summary,
+        intervention=stack["intervention"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        quality=stack["quality"],
+        tension=stack["tension"],
+        scenario=stack["scenario"],
+    )
+    temporal = _gcc_detect_governance_temporal(
+        executive=executive,
+        attention=attention,
+        trend=trend,
+        playbook=playbook,
+        hist=stack["hist"],
+        regime=stack["regime"],
+        stability=stack["stability"],
+        improvement=stack["improvement"],
+        resilience=stack["resilience"],
+        intervention=stack["intervention"],
+        decision=stack["decision"],
+    )
+    delta = _gcc_detect_governance_delta(
+        executive=executive,
+        attention=attention,
+        trend=trend,
+        temporal=temporal,
+        hist=stack["hist"],
+        regime=stack["regime"],
+        tension=stack["tension"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        quality=stack["quality"],
+        coherence=stack["coherence"],
+        improvement=stack["improvement"],
+        stability=stack["stability"],
+        intervention=stack["intervention"],
+    )
+    forward = _gcc_detect_governance_forward_forecast(
+        executive=executive,
+        attention=attention,
+        trend=trend,
+        temporal=temporal,
+        delta=delta,
+        forecast=stack["forecast"],
+        scenario=stack["scenario"],
+        resilience=stack["resilience"],
+        intervention=stack["intervention"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        tension=stack["tension"],
+        hist=stack["hist"],
+        regime=stack["regime"],
+    )
+    scenario_matrix = _gcc_detect_governance_scenario_matrix(
+        executive=executive,
+        attention=attention,
+        trend=trend,
+        temporal=temporal,
+        delta=delta,
+        forward=forward,
+        scenario=stack["scenario"],
+        intervention=stack["intervention"],
+        evidence=stack["evidence"],
+        alignment=stack["alignment"],
+        coherence=stack["coherence"],
+        improvement=stack["improvement"],
+        tension=stack["tension"],
+    )
+    decision_brief = _gcc_detect_governance_decision_brief(
+        executive=executive,
+        attention=attention,
+        trend=trend,
+        signal_conf=signal_conf,
+        playbook=playbook,
+        temporal=temporal,
+        delta=delta,
+        forward=forward,
+        scenario_matrix=scenario_matrix,
+        intervention=stack["intervention"],
+    )
+    _gcc_render_decision_brief_card(decision_brief)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Institutional Verdict", executive["verdict_display"])
+    c2.metric("Stability", executive["stability_summary"])
+    c3.metric("Trust", executive["trust_summary"])
+    c4.metric("Alignment", executive["alignment_summary"])
+    c5.metric("Runtime Posture", executive["runtime_posture"])
+
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Severity", attention["severity_display"])
+    s2.metric("Operator Attention", attention["attention_level"])
+    s3.metric("Review Cadence", attention["review_cadence"])
+    s4.metric("Escalation Urgency", attention["escalation_urgency"])
+
+    severity = attention["severity"]
+    if severity == "CRITICAL_LOCK":
+        st.warning(attention["attention_memo"])
+    elif severity == "HIGH_RISK":
+        st.error(attention["attention_memo"])
+    elif severity == "ELEVATED":
+        st.warning(attention["attention_memo"])
+    elif severity == "NORMAL":
+        st.success(attention["attention_memo"])
+    else:
+        st.info(attention["attention_memo"])
+
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Governance Direction", trend["direction_display"])
+    t2.metric("Trend Velocity", trend["trend_velocity"])
+    t3.metric("Drift Risk", trend["drift_risk"])
+    t4.metric("Structural Outlook", trend["structural_outlook"])
+
+    gov_dir = trend["governance_direction"]
+    if gov_dir == "RAPIDLY_DETERIORATING":
+        st.error(trend["trend_memo"])
+    elif gov_dir == "DETERIORATING":
+        st.warning(trend["trend_memo"])
+    elif gov_dir == "STRESSED_BUT_STABLE":
+        st.info(trend["trend_memo"])
+    elif gov_dir == "OPERATIONALLY_STABLE":
+        st.success(trend["trend_memo"])
+    else:
+        st.info(trend["trend_memo"])
+
+    cf1, cf2, cf3, cf4 = st.columns(4)
+    cf1.metric("Cockpit Confidence", signal_conf["confidence_display"])
+    cf2.metric("Reliability Level", signal_conf["reliability_level"])
+    cf3.metric("False Alarm Risk", signal_conf["false_alarm_risk"])
+    cf4.metric("Interpretation Stability", signal_conf["interpretation_stability"])
+
+    conf_level = signal_conf["cockpit_confidence"]
+    if conf_level in ("VERY_LOW", "LOW"):
+        st.error(signal_conf["confidence_memo"])
+    elif conf_level == "GUARDED":
+        st.info(signal_conf["confidence_memo"])
+    elif conf_level in ("HIGH", "VERY_HIGH"):
+        st.success(signal_conf["confidence_memo"])
+    else:
+        st.info(signal_conf["confidence_memo"])
+
+    st.metric("Priority Operator Action", playbook["priority_action"])
+
+    pb_left, pb_right = st.columns(2)
+    with pb_left:
+        st.markdown("**Immediate Actions**")
+        for action in playbook["immediate_actions"]:
+            st.markdown(f"- {action}")
+        st.markdown("**Monitoring Priorities**")
+        for target in playbook["monitoring_priorities"]:
+            st.markdown(f"- {target}")
+    with pb_right:
+        st.markdown("**Deferred Actions**")
+        for action in playbook["deferred_actions"]:
+            st.markdown(f"- {action}")
+        st.markdown("**Blocked Actions**")
+        for action in playbook["blocked_actions"]:
+            st.markdown(f"- {action}")
+
+    if playbook["priority_action"] in ("PREPARE_ESCALATION_REVIEW", "REDUCE_FRAGMENTATION"):
+        st.warning(playbook["discipline_memo"])
+    elif playbook["priority_action"] == "MAINTAIN_CONSTITUTIONAL_LOCK":
+        st.info(playbook["discipline_memo"])
+    else:
+        st.info(playbook["discipline_memo"])
+
+    tm1, tm2, tm3, tm4, tm5 = st.columns(5)
+    tm1.metric("Governance Persistence", temporal["persistence_display"])
+    tm2.metric("Regime Duration", temporal["regime_duration"])
+    tm3.metric("Momentum Strength", temporal["momentum_strength"])
+    tm4.metric("Recovery Horizon", temporal["recovery_horizon"])
+    tm5.metric("Governance Fatigue Risk", temporal["fatigue_risk"])
+
+    persistence = temporal["governance_persistence"]
+    if persistence == "ENTRENCHED_INSTABILITY":
+        st.error(temporal["temporal_memo"])
+    elif persistence in ("PERSISTENT_LOCK", "TRANSITIONING"):
+        st.info(temporal["temporal_memo"])
+    elif persistence == "OPERATIONALLY_DURABLE":
+        st.success(temporal["temporal_memo"])
+    else:
+        st.info(temporal["temporal_memo"])
+
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Governance Delta State", delta["delta_display"])
+    d2.metric("Largest Positive Change", delta["positive_display"])
+    d3.metric("Largest Negative Change", delta["negative_display"])
+    d4.metric("Regime Shift Probability", delta["regime_shift_probability"])
+
+    st.markdown("**Dominant Change Drivers**")
+    for driver in delta["change_drivers"]:
+        st.markdown(f"- {driver}")
+
+    delta_state = delta["delta_state"]
+    if delta_state == "REGIME_SHIFT_EMERGING":
+        st.error(delta["change_memo"])
+    elif delta_state == "MATERIAL_DETERIORATION":
+        st.warning(delta["change_memo"])
+    elif delta_state == "MATERIAL_IMPROVEMENT":
+        st.success(delta["change_memo"])
+    else:
+        st.info(delta["change_memo"])
+
+    f1, f2, f3, f4 = st.columns(4)
+    f1.metric("Forward Governance Outlook", forward["outlook_display"])
+    f2.metric("Regime Transition Probability", forward["regime_transition_probability"])
+    f3.metric("Stability Risk Forecast", forward["stability_risk_forecast"])
+    f4.metric("Early Warning Sensitivity", forward["early_warning_sensitivity"])
+
+    st.markdown("**Early Warning Drivers**")
+    for driver in forward["early_warning_drivers"]:
+        st.markdown(f"- {driver}")
+
+    forward_outlook = forward["forward_outlook"]
+    if forward_outlook == "STRUCTURAL_DETERIORATION_RISK":
+        st.error(forward["forecast_memo"])
+    elif forward_outlook == "MIXED_FORWARD_PATH":
+        st.warning(forward["forecast_memo"])
+    elif forward_outlook == "STABILIZATION_PATH":
+        st.success(forward["forecast_memo"])
+    else:
+        st.info(forward["forecast_memo"])
+
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1.metric("Governance Scenario State", scenario_matrix["scenario_display"])
+    sc2.metric("Most Likely Next Regime", scenario_matrix["next_regime_display"])
+    sc3.metric("Deterioration Trigger Risk", scenario_matrix["deterioration_trigger_risk"])
+    sc4.metric(
+        "Stabilization Trigger Probability",
+        scenario_matrix["stabilization_trigger_probability"],
+    )
+
+    trig_left, trig_right = st.columns(2)
+    with trig_left:
+        st.markdown("**Deterioration Triggers**")
+        for trigger in scenario_matrix["deterioration_triggers"]:
+            st.markdown(f"- {trigger}")
+    with trig_right:
+        st.markdown("**Stabilization Triggers**")
+        for trigger in scenario_matrix["stabilization_triggers"]:
+            st.markdown(f"- {trigger}")
+
+    gov_scenario = scenario_matrix["governance_scenario"]
+    if gov_scenario == "FRAGMENTATION_STRESS_SCENARIO":
+        st.warning(scenario_matrix["scenario_memo"])
+    elif gov_scenario == "REGIME_TRANSITION_SCENARIO":
+        st.warning(scenario_matrix["scenario_memo"])
+    elif gov_scenario == "STABILIZATION_SCENARIO":
+        st.success(scenario_matrix["scenario_memo"])
+    else:
+        st.info(scenario_matrix["scenario_memo"])
+
+    state = executive["verdict_state"]
+    if state in ("CONSTITUTIONALLY_LOCKED_GOVERNANCE", "SYSTEMIC_GOVERNANCE_INSTABILITY"):
+        st.error(executive["executive_memo"])
+    elif state == "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS":
+        st.warning(executive["executive_memo"])
+    elif state == "GOVERNANCE_OPERATIONALLY_STABLE":
+        st.success(executive["executive_memo"])
+    else:
+        st.info(executive["executive_memo"])
+
+    st.markdown("**Top Governance Risks**")
+    for risk in executive["top_risks"]:
+        if state in ("CONSTITUTIONALLY_LOCKED_GOVERNANCE", "SYSTEMIC_GOVERNANCE_INSTABILITY"):
+            st.warning(f"• {risk}")
+        else:
+            st.markdown(f'<div class="gcc-hist-metric">• {risk}</div>', unsafe_allow_html=True)
+
+    st.metric("Recommended Operator Action", executive["operator_action"])
+
+    with st.expander("Why governance reached this verdict", expanded=False):
+        for driver in executive["why_drivers"]:
+            st.markdown(f"- {driver}")
+        st.markdown(
+            f"- **Runtime mutation allowed:** `{bool(_gcc_get(dossier_summary, 'runtime_mutation_allowed', False))}`"
+        )
+
+
+def page_governance_command_center() -> None:
+    """Governance Command Center — institutional operator view of runtime governance (read-only)."""
+    st.title("🏛 Governance Command Center")
+    st.caption(
+        "Phase 2 institutional operator dashboard. Surfaces runtime governance status, "
+        "constitutional posture, institutional verdict, and human escalation dossier. "
+        "**Read-only observability — no execution, no broker calls, no runtime mutation.**"
+    )
+
+    readiness = _ad_load_json(GCC_READINESS_SUMMARY_PATH, "Runtime readiness summary") or {}
+    admission = _ad_load_json(GCC_ADMISSION_SUMMARY_PATH, "Runtime admission summary") or {}
+    eligibility = (
+        _ad_load_json(GCC_ELIGIBILITY_SUMMARY_PATH, "Constitutional eligibility summary") or {}
+    )
+    recommendation = (
+        _ad_load_json(GCC_RECOMMENDATION_SUMMARY_PATH, "Enablement recommendation summary") or {}
+    )
+    review = _ad_load_json(GCC_REVIEW_SUMMARY_PATH, "Enablement review summary") or {}
+    verdict = _ad_load_json(GCC_VERDICT_SUMMARY_PATH, "Institutional verdict summary") or {}
+    dossier_summary = (
+        _ad_load_json(GCC_DOSSIER_SUMMARY_PATH, "Human escalation dossier summary") or {}
+    )
+    dossier_record = _ad_load_json(GCC_DOSSIER_JSON_PATH, "Human escalation dossier") or {}
+
+    any_data = any(
+        isinstance(d, dict) and d
+        for d in (
+            readiness,
+            admission,
+            eligibility,
+            recommendation,
+            review,
+            verdict,
+            dossier_summary,
+        )
+    )
+    if not any_data:
+        st.info(
+            "No runtime governance artifacts found yet. Run the ARM runtime governance pipeline "
+            "(Steps 53–60) to populate `data/results/arm_runtime_governance_*` outputs."
+        )
+
+    st.markdown(_GCC_UX_CSS, unsafe_allow_html=True)
+
+    if any_data:
+        gcc_stack = _gcc_build_governance_intelligence_stack(
+            readiness=readiness,
+            admission=admission,
+            eligibility=eligibility,
+            recommendation=recommendation,
+            review=review,
+            verdict=verdict,
+            dossier_summary=dossier_summary,
+            dossier_record=dossier_record,
+        )
+        _gcc_render_executive_summary_intelligence(
+            stack=gcc_stack,
+            dossier_summary=dossier_summary,
+        )
+        st.markdown("---")
+
+    # ── SECTION 1 — RUNTIME GOVERNANCE STATUS ────────────────────────
+    st.markdown("### Runtime Governance Status")
+    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+    with r1c1:
+        _gcc_render_card(
+            "Runtime Readiness",
+            _gcc_get(readiness, "runtime_readiness_classification"),
+            _gcc_get(readiness, "readiness_confidence"),
+            _gcc_get(readiness, "readiness_state"),
+        )
+    with r1c2:
+        _gcc_render_card(
+            "Runtime Admission",
+            _gcc_get(admission, "runtime_admission_classification"),
+            _gcc_get(admission, "admission_confidence"),
+            _gcc_get(admission, "admission_state"),
+        )
+    with r1c3:
+        _gcc_render_card(
+            "Constitutional Eligibility",
+            _gcc_get(eligibility, "runtime_constitutional_eligibility_classification"),
+            _gcc_get(eligibility, "constitutional_eligibility_confidence"),
+            _gcc_get(eligibility, "constitutional_eligibility_state"),
+        )
+    with r1c4:
+        _gcc_render_card(
+            "Recommendation",
+            _gcc_get(recommendation, "runtime_enablement_recommendation_classification"),
+            _gcc_get(recommendation, "recommendation_confidence"),
+            _gcc_get(recommendation, "recommendation_state"),
+        )
+
+    r2c1, r2c2, r2c3 = st.columns(3)
+    with r2c1:
+        _gcc_render_card(
+            "Formal Review",
+            _gcc_get(review, "runtime_enablement_review_classification"),
+            _gcc_get(review, "review_confidence"),
+            _gcc_get(review, "review_state"),
+        )
+    with r2c2:
+        _gcc_render_card(
+            "Institutional Verdict",
+            _gcc_get(verdict, "runtime_verdict_classification"),
+            _gcc_get(verdict, "verdict_confidence"),
+            _gcc_get(verdict, "verdict_state"),
+        )
+    with r2c3:
+        _gcc_render_card(
+            "Human Escalation",
+            _gcc_get(dossier_summary, "human_escalation_classification"),
+            _gcc_get(dossier_summary, "escalation_confidence"),
+            _gcc_get(dossier_summary, "dossier_state"),
+        )
+
+    # ── SECTION 2 — GOVERNANCE LADDER ────────────────────────────────
+    st.markdown("### Governance Ladder")
+    st.caption("Institutional progression across the runtime governance pipeline.")
+
+    stage_sources: List[Tuple[str, Dict[str, Any]]] = [
+        ("Readiness", readiness),
+        ("Admission", admission),
+        ("Eligibility", eligibility),
+        ("Recommendation", recommendation),
+        ("Review", review),
+        ("Verdict", verdict),
+        ("Human Escalation", dossier_summary),
+    ]
+    ladder_rows: List[Tuple[str, Any, Any, Any]] = []
+    for idx, (label, src) in enumerate(stage_sources):
+        state_key, cls_key, conf_key = _GCC_LADDER_STAGES[idx][1:]
+        ladder_rows.append(
+            (
+                label,
+                _gcc_get(src, cls_key),
+                _gcc_get(src, conf_key),
+                _gcc_get(src, state_key),
+            )
+        )
+    _gcc_render_ladder(ladder_rows)
+
+    # ── SECTION 3 — WHY RUNTIME IS BLOCKED ───────────────────────────
+    st.markdown("### Why Runtime Is Blocked")
+    blocked_groups = _gcc_collect_blocked_reason_groups(
+        readiness,
+        admission,
+        eligibility,
+        recommendation,
+        review,
+        verdict,
+        dossier_summary,
+        dossier_record,
+    )
+    st.warning("Runtime governance is blocked because:")
+    for group_name, items in blocked_groups:
+        st.markdown(f'<div class="gcc-block-group">{group_name}</div>', unsafe_allow_html=True)
+        for reason in items:
+            st.markdown(f'<div class="gcc-block-item">• {reason}</div>', unsafe_allow_html=True)
+
+    # ── SECTION 4 — INSTITUTIONAL RUNTIME POSITION ───────────────────
+    st.markdown("### Institutional Runtime Position")
+    dossier = _gcc_get(dossier_record, "human_escalation_dossier") or {}
+    position = (
+        _gcc_get(dossier, "institutional_runtime_position")
+        or _gcc_get(dossier_summary, "institutional_runtime_position")
+        or _gcc_get(verdict, "institutional_runtime_position")
+        or "—"
+    )
+    future_candidate = _gcc_get(
+        dossier, "future_runtime_candidate", _gcc_get(dossier_summary, "future_runtime_candidate")
+    )
+    constitutional_safe = _gcc_get(dossier, "constitutional_safe")
+    mutation_allowed = _gcc_get(dossier_summary, "runtime_mutation_allowed", False)
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Institutional position", str(position))
+    p2.metric("Future runtime candidate", "Yes" if future_candidate is True else "No")
+    p3.metric("Constitutional safe", "Yes" if constitutional_safe is True else "No")
+    p4.metric("Runtime mutation allowed", "Yes" if mutation_allowed is True else "No")
+
+    st.error(
+        "**Runtime is locked.** `runtime_mutation_allowed = false` — this dashboard does not "
+        "enable, authorize, or mutate live runtime policy."
+    )
+
+    # ── SECTION 5 — EXECUTIVE BRIEFING ───────────────────────────────
+    st.markdown("### Executive Briefing")
+    executive_summary = _gcc_get(dossier, "executive_summary")
+    if executive_summary:
+        st.info(executive_summary)
+    else:
+        st.info(
+            "Executive briefing unavailable. Run the human escalation dossier engine "
+            "(`python -m services.arm_runtime_governance_human_escalation_dossier_engine`) "
+            "to populate the institutional briefing."
+        )
+
+    recs = _gcc_get(dossier_record, "recommendations") or []
+    if recs:
+        with st.expander("Governance recommendations", expanded=False):
+            for rec in recs:
+                st.markdown(f"- {rec}")
+
+    # ── SECTION 6 — GOVERNANCE CONFIDENCE TIMELINE ───────────────────
+    st.markdown("### Governance Confidence Timeline")
+    fig, max_conf = _gcc_build_confidence_timeline()
+    if fig is not None:
+        st.plotly_chart(fig, use_container_width=True)
+        if max_conf is not None and max_conf <= 0.01:
+            st.info(
+                "Governance confidence is currently dormant.\n\n"
+                "Timeline will become informative as governance maturity evolves."
+            )
+    else:
+        st.info(
+            "Governance confidence timeline unavailable. Memory CSVs will appear after the "
+            "runtime governance engines accumulate observation cycles."
+        )
+
+    # ── SECTION 6B — GOVERNANCE HISTORICAL INTELLIGENCE ──────────────
+    hist = _gcc_analyze_governance_history(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+    )
+    _gcc_render_historical_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+    )
+
+    # ── SECTION 6C — GOVERNANCE REGIME DETECTION ─────────────────────
+    regime = _gcc_render_regime_detection(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+    )
+
+    # ── SECTION 6D — GOVERNANCE FORECASTING & TRAJECTORY ─────────────
+    forecast = _gcc_render_forecast_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+    )
+
+    # ── SECTION 6E — GOVERNANCE CONTRADICTION & TENSION ──────────────
+    tension = _gcc_render_tension_detection(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+    )
+
+    # ── SECTION 6F — GOVERNANCE CONVERGENCE / CONSENSUS ──────────────
+    consensus = _gcc_render_consensus_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+    )
+
+    # ── SECTION 6G — GOVERNANCE CONFIDENCE INTEGRITY ─────────────────
+    integrity = _gcc_render_confidence_integrity(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+    )
+
+    # ── SECTION 6H — GOVERNANCE DECISION READINESS ───────────────────
+    decision = _gcc_render_decision_readiness(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+    )
+
+    # ── SECTION 6I — GOVERNANCE FAILURE MODES & INSTITUTIONAL RISK ───
+    failure = _gcc_render_failure_mode_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+    )
+
+    # ── SECTION 6J — GOVERNANCE AUDITABILITY & EVIDENCE INTEGRITY ──
+    audit = _gcc_render_auditability_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+    )
+
+    # ── SECTION 6K — GOVERNANCE COHERENCE & LOGIC INTEGRITY ────────
+    coherence = _gcc_render_coherence_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+    )
+
+    # ── SECTION 6L — GOVERNANCE STABILITY & DRIFT INTELLIGENCE ─────
+    stability = _gcc_render_stability_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+    )
+
+    # ── SECTION 6M — GOVERNANCE RESILIENCE & RECOVERY INTELLIGENCE ─
+    resilience = _gcc_render_resilience_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+    )
+
+    # ── SECTION 6N — GOVERNANCE LEARNING & IMPROVEMENT INTELLIGENCE ─
+    improvement = _gcc_render_improvement_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+    )
+
+    # ── SECTION 6O — GOVERNANCE FAILURE SCENARIO INTELLIGENCE ──────
+    scenario = _gcc_render_failure_scenario_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+        improvement=improvement,
+    )
+
+    # ── SECTION 6P — GOVERNANCE INTERVENTION & CONTAINMENT ─────────
+    intervention = _gcc_render_intervention_intelligence(
+        readiness=readiness,
+        admission=admission,
+        eligibility=eligibility,
+        recommendation=recommendation,
+        review=review,
+        verdict=verdict,
+        dossier_summary=dossier_summary,
+        dossier_record=dossier_record,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
+        integrity=integrity,
+        decision=decision,
+        failure=failure,
+        audit=audit,
+        coherence=coherence,
+        stability=stability,
+        resilience=resilience,
+        improvement=improvement,
+        scenario=scenario,
+    )
+
+    # ── SECTION 6Q — CONFIDENCE & EVIDENCE INTEGRITY INTELLIGENCE ──
+    evidence = _gcc_render_institutional_evidence_intelligence(
+        integrity=integrity,
+        audit=audit,
+        coherence=coherence,
+        tension=tension,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        intervention=intervention,
+    )
+
+    # ── SECTION 6R — CONSENSUS & ALIGNMENT INTELLIGENCE ────────────
+    alignment = _gcc_render_institutional_alignment_intelligence(
+        consensus=consensus,
+        coherence=coherence,
+        tension=tension,
+        integrity=integrity,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        evidence=evidence,
+        intervention=intervention,
+        hist=hist,
+    )
+
+    # ── SECTION 6S — DECISION QUALITY & REASONING INTEGRITY ────────
+    _gcc_render_decision_quality_intelligence(
+        coherence=coherence,
+        tension=tension,
+        integrity=integrity,
+        decision=decision,
+        stability=stability,
+        resilience=resilience,
+        evidence=evidence,
+        alignment=alignment,
+        intervention=intervention,
+        improvement=improvement,
+        hist=hist,
+    )
+
+    # ── SECTION 7 — HUMAN ESCALATION DOSSIER ─────────────────────────
+    st.markdown("### Human Escalation Dossier")
+    if not dossier:
+        st.info("Human escalation dossier record not found yet.")
+    else:
+        posture = _gcc_get(dossier, "recommended_operator_posture", "—")
+        st.success(f"**Recommended operator posture:** `{posture}`")
+
+        with st.expander("Case for runtime governance", expanded=True):
+            for item in _gcc_get(dossier, "case_for_runtime") or ["No supporting case recorded."]:
+                st.markdown(f"- {item}")
+
+        with st.expander("Case against runtime governance", expanded=True):
+            for item in _gcc_get(dossier, "case_against_runtime") or ["No opposing case recorded."]:
+                st.warning(item)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Key risks**")
+            for item in _gcc_get(dossier, "key_risks") or ["—"]:
+                st.markdown(f"- {item}")
+        with c2:
+            st.markdown("**Key safeguards**")
+            for item in _gcc_get(dossier, "key_safeguards") or ["—"]:
+                st.markdown(f"- {item}")
+
+        chain = _gcc_get(dossier, "governance_chain_summary")
+        if isinstance(chain, dict) and chain:
+            with st.expander("Governance chain snapshot", expanded=False):
+                chain_df = pd.DataFrame([{"stage": k, "state": v} for k, v in chain.items()])
+                _ei_render_table(chain_df, height=220)
+
+    gen_bits: List[str] = []
+    for label, obj in (
+        ("dossier", dossier_summary),
+        ("verdict", verdict),
+        ("readiness", readiness),
+    ):
+        ts = _gcc_get(obj, "generated_at_utc")
+        if ts:
+            gen_bits.append(f"{label}=`{ts}`")
+    if gen_bits:
+        st.caption(" • ".join(gen_bits))
+
+
+# ──────────────────────────────
 # ROUTER (single source of truth)
 # ──────────────────────────────
 PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
@@ -8974,6 +21021,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("System", "✅ Applied Adjustments"): page_applied_adjustments,
     ("System", "🧪 Adaptation Simulation"): page_adaptation_simulation,
     ("System", "📊 Performance Intelligence"): page_performance_intelligence,
+    ("System", "🏛 Governance Command Center"): page_governance_command_center,
     ("System", "Execution / Health"): page_execution_health,
     ("System", "🚦 Live Orders Panel"): page_live_orders_panel,
     ("System", "🟢 Live Run (Phase 1.5)"): page_live_run,
@@ -9013,6 +21061,7 @@ SECTIONS: Dict[str, List[str]] = {
         "✅ Applied Adjustments",
         "🧪 Adaptation Simulation",
         "📊 Performance Intelligence",
+        "🏛 Governance Command Center",
         "Execution / Health",
         "🚦 Live Orders Panel",
         "🟢 Live Run (Phase 1.5)",
