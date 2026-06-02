@@ -64,8 +64,25 @@ Governance does **not** promise market outcomes. It promises **disciplined obser
 | **100** | [Constitution & Charter](./Triton_Governance_Constitution_Operating_Charter.md) | Supreme principles, index, rules, glossary | Orientation; conflict resolution; attestation | Executive, Committee, all | Constitutional breach → immediate | Supersedes informal guidance |
 | **102** | [Operator Handbook](./Triton_Operator_Handbook.md) | Daily operator loop, watch states, playbooks, checklist | **Every operator shift** | Operator, Senior Operator | Same as 90–93 via summaries | Distills 90–101 for console use |
 | **103** | [Developer Governance Handbook](./Triton_Developer_Governance_Handbook.md) | Engineering boundaries, safeguards, anti-patterns, PR checklist | Policy-adjacent design/PR | Developer, Engineer, Admin | Lead before safeguard changes | Distills 90–102 for engineering |
+| **104** | [Executive Governance Handbook](./Triton_Executive_Governance_Handbook.md) | Strategic oversight, watch states, ratification, scorecards | Weekly; daily if CRITICAL/Hard Halt | Founder, Committee, Executive | L4 / constitutional / Hard lift | Distills 90–103 for executives |
+| **106** | [Governance Committee Charter](./Triton_Governance_Committee_Charter.md) | Committee operating loop, votes, Hard lift, constitutional approval | Scheduled + L4/Hard Halt sessions | Governance Committee | Quorum votes; Executive constitutional tier | Steps 93, 94, 98, 100 |
+| **107** | [Audit & Regulatory Readiness](./Triton_Governance_Audit_Regulatory_Readiness_Handbook.md) | Evidence preservation, diligence Q&A, retention, audit pack | Quarterly; diligence events | Audit, compliance, Committee, LPs | Adverse pack → Committee **5bd** | Steps 90–106 evidence index |
+| **108** | [Crisis Management & Recovery](./Triton_Governance_Crisis_Recovery_Handbook.md) | Crisis classification, emergency response, Hard Halt, normalization | Active crisis; post-systemic review | All crisis chain roles | Constitutional/systemic → Committee+Exec | Steps 90–107 under stress |
+| **109** | [War Games & Stress Testing](./Triton_Governance_Wargaming_Stress_Testing_Handbook.md) | Rehearsal tiers, resilience scoring, extreme scenarios | Quarterly war game+; annual systemic | Lead, Committee, all roles in exercises | Critical exercise fail → remediation | Steps 95 drills + 108 live crisis |
+| **110** | [Readiness Scoring & Certification](./Triton_Governance_Readiness_Certification_Framework.md) | IRS bands, institutional `GOVCERT-INST`, authority gates | Quarterly IRS; annual certification | Lead, Committee, Executive | Revoke on R1–R8 / safeguard breach | Steps 92, 94, 95, 107–109 inputs |
+| **111** | [Institutional Memory & Succession](./Triton_Governance_Institutional_Memory_Succession_Framework.md) | Knowledge continuity, `GOVSUCC` handoffs, key-person risk | Per transition; annual drill | Lead, Committee | MULTI_ROLE / Founder absence | Steps 97, 98, 107–110 |
+| **112** | [Meta-Governance & Constitutional Evolution](./Triton_Governance_Meta_Governance_Framework.md) | Governance-of-governance, `GOVMETA`/`GOVCHG`, drift control | Proposed change; annual review | Lead, Committee, Executive | Constitutional instability | Steps 98, 100, 106, 110–111 |
+| **113** | [Governance Codex](./Triton_Governance_Codex.md) | Unified constitutional system map, priority order, interoperability | Orientation; conflict routing; audit “show the system” | All roles | Interpretation disputes → 100 + 98 | Steps 90–112 synthesis |
+| **114** | [Maturity Roadmap & Milestones](./Triton_Governance_Maturity_Roadmap.md) | Multi-year stages, capability gating, `GOVMAT` advancement | Stage review; advancement/regression | Lead, Committee, Executive | Stage regress / false maturity | Steps 94, 110, 113 |
+| **115** | [Strategic Foresight & Scenario Planning](./Triton_Governance_Strategic_Foresight_Framework.md) | `GOVFORE` scenarios, horizons, black swan preparedness | Annual + quarterly NEAR signals | Lead, Committee, Executive | Convergence / BLACK_SWAN live | Steps 99, 109–114 |
+| **116** | [Ethics & Decision Integrity](./Triton_Governance_Ethics_Integrity_Framework.md) | Institutional values, `GOVETH`, integrity under pressure | Quarterly review; pressure events | All roles; Committee | GOVERNANCE_INTEGRITY_RISK / trust decay | Steps 93, 100, 106–107, 110 |
+| **117** | [Stakeholder Trust & Legitimacy](./Triton_Governance_Stakeholder_Trust_Framework.md) | External trust, `GOVTRUST`, reputation & communication discipline | Quarterly; LP/audit events | Lead, Committee, Executive | Legitimacy / crisis trust events | Steps 96–97, 107–108, 116 |
+| **118** | [Capital Stewardship & Fiduciary Discipline](./Triton_Governance_Capital_Stewardship_Framework.md) | Capital domains, `GOVCAP`, preservation & fiduciary duty | Quarterly; preservation events | All roles; Committee | CAPITAL_PRESERVATION_BREACH | Steps 90, 100, 116–117 |
+| **119** | [Postmortems & Institutional Learning](./Triton_Governance_Postmortem_Learning_Framework.md) | `GOVPM`, near-miss intelligence, anti-repeat learning | Per incident; quarterly learning review | All roles; Committee | REPEAT_FAILURE_RISK / LEARNING_DEFICIT | Steps 90, 107, 111–112 |
+| **120** | [Decision Quality & Cognitive Risk](./Triton_Governance_Decision_Quality_Framework.md) | Judgment calibration, `GOVDQ`, bias awareness under uncertainty | Material decisions; quarterly review | All roles; Committee | Repeated cognitive blind spot | Steps 90–91, 116, 119 |
+| **121** | [Precedent & Constitutional Case Law](./Triton_Governance_Precedent_Case_Law_Framework.md) | `GOVPREC` index, interpretations, escalation consistency | Material decisions; ambiguity lookup | Lead, Committee | Conflicting ACTIVE precedent | Steps 100, 111–113, 119–120 |
 
-**Library count:** 13 governance manuals (Steps 90–100, 102–103) + this README (Step 101).
+**Library count:** 30 governance manuals (Steps 90–100, 102–104, 106–121) + this README (Step 101).
 
 ---
 
@@ -76,16 +93,33 @@ Governance does **not** promise market outcomes. It promises **disciplined obser
 | Situation | Go to | Why |
 |-----------|-------|-----|
 | Something went wrong | **Step 90** | Severity, containment, template |
+| Postmortem / near-miss / repeat failure? | **Step 119** | `GOVPM` after contain; learn before blame |
+| Capital / fiduciary / preservation concern? | **Step 118** + **100** | `GOVCAP` → halt → escalate |
 | What should I do right now? | **Step 102** or **91** | Handbook daily loop; GCC brief → command |
+| Uncertain judgment / bias / escalation hesitation? | **Step 120** | Classify → evidence → escalate |
 | Governance health worsening? | **Step 92 + 99** | KPIs + watch state |
 | Who approves this? | **Step 93** | Authority matrix |
-| Are we institutional-grade yet? | **Step 94** | Maturity / readiness gates |
-| How do we test governance? | **Step 95** | Drills and validation |
+| Are we institutional-grade yet? | **Step 94** + **110** + **114** | Current level + IRS + roadmap stage |
+| How do we test governance? | **Step 95** + **109** | Drills; war games & resilience |
+| Future risk or scenario planning? | **Step 115** | `GOVFORE` → war-game → readiness |
 | How do we report governance? | **Step 96** | Reports and audit pack |
 | How do we train operators? | **Step 97** | Certification tracks |
-| How do we safely change governance? | **Step 98** | Versioning and approval |
+| How do we safely change governance? | **Step 98** + **112** | `GOVCHG` execution; meta-governance loop |
 | How do we monitor governance? | **Step 99** | Early warning |
-| What are the constitutional rules? | **Step 100** | Charter + glossary |
+| What are the constitutional rules? | **Step 100** + **113** Codex |
+| How does the whole system fit together? | **Step 113** | Unified map — manuals stay authoritative |
+| Committee vote / quorum? | **Step 106** | Charter + glossary |
+| Audit / LP / regulator diligence? | **Step 107** + **96** + **117** | Audit pack; trust & legitimacy discipline |
+| Active governance crisis? | **Step 108** | Classify → contain → recover |
+| Rehearse governance crisis? | **Step 109** | War game before reality |
+| Is governance objectively ready? | **Step 110** | IRS + institutional cert |
+| Leadership or role transition? | **Step 111** | `GOVSUCC` succession playbook |
+| How does governance improve itself? | **Step 112** | `GOVMETA` → classify → `GOVCHG` |
+| Governance advancement or stage concern? | **Step 114** | `GOVMAT` gates + timeline |
+| Governance conflict / unclear ownership? | **Step 113** Card 8 | Stricter containment → 98 |
+| Same question again / precedent lookup? | **Step 121** | `GOVPREC` — cite, distinguish, or retire |
+| Ethics, pressure, or integrity concern? | **Step 116** | `GOVETH` → escalate → contain |
+| Stakeholder trust or reputation concern? | **Step 117** | `GOVTRUST` → evidence-aligned communication |
 | Where am I in the library? | **This README** | Navigation only |
 
 ---
@@ -206,21 +240,21 @@ Governance does **not** promise market outcomes. It promises **disciplined obser
 
 | Track | Manuals |
 |-------|---------|
-| **Read first** | 100 → 90 (L4) → 93 |
-| **Core** | 90, 93, 94, 96 (quarterly pack), 98 (constitutional) |
-| **Advanced** | 92, 95, 99 |
-| **Escalation** | 100, 90 |
-| **Reference** | README |
+| **Read first** | [106](./Triton_Governance_Committee_Charter.md) → 100 → 93 |
+| **Core** | 106, 90 (L4), 93, 94, 96, 98 |
+| **Advanced** | 92, 95, 99, 104 (Executive interface) |
+| **Escalation** | Executive constitutional ratification |
+| **Reference** | README; 106 Card 9 session checklist |
 
 ### Executive Oversight
 
 | Track | Manuals |
 |-------|---------|
-| **Read first** | 100 → 92 (scorecard) → 96 (exec comms) |
-| **Core** | 100, 92, 96, 99 (GWS), 94 (readiness disclaimer) |
-| **Advanced** | 90 (L4), 93, 98 |
-| **Escalation** | 90, 100 |
-| **Reference** | README Card 7 Executive Quick Start |
+| **Read first** | [104](./Triton_Executive_Governance_Handbook.md) → 100 → 92 |
+| **Core** | 104, 100, 92, 96, 99, 94 |
+| **Advanced** | 90 (L4), 93, 98, 95 (validation attestation) |
+| **Escalation** | Card 4 (104); 90, 100 |
+| **Reference** | 102/103 for context only—do not micromanage |
 
 ### Developer / Engineer
 
@@ -328,11 +362,11 @@ Step 100 (orientation) → Step 97 (track) → Step 91 + 90 → Step 95 (assess)
 
 | Stage | Action |
 |-------|--------|
-| **Read first** | [Step 100](./Triton_Governance_Constitution_Operating_Charter.md) charter + Card 8 scorecard |
-| **Read second** | [Step 92](./Triton_Governance_Metrics_KPI_Framework.md) GHS; [Step 96](./Triton_Governance_Reporting_Audit_Framework.md) exec comms |
-| **Daily reference** | [Step 99](./Triton_Governance_Observability_Monitoring_Framework.md) GWS (when CRITICAL) |
-| **Escalation** | [Step 90](./Triton_Governance_Incident_Escalation_Framework.md) L4 notify rules |
-| **Advanced** | [Step 94](./Triton_Governance_Lifecycle_Maturity_Framework.md) readiness (not runtime auth) |
+| **Read first** | [Step 104](./Triton_Executive_Governance_Handbook.md) Cards 3, 4, 8 |
+| **Read second** | [Step 100](./Triton_Governance_Constitution_Operating_Charter.md) + [Step 92](./Triton_Governance_Metrics_KPI_Framework.md) |
+| **Daily reference** | 104 Card 9 (CRITICAL/Hard Halt); else weekly scorecard |
+| **Escalation** | 104 Card 4; [Step 90](./Triton_Governance_Incident_Escalation_Framework.md) L4 |
+| **Advanced** | [Step 94](./Triton_Governance_Lifecycle_Maturity_Framework.md), [98](./Triton_Governance_Change_Management_Framework.md) |
 
 ---
 
@@ -367,7 +401,7 @@ Step 100 (orientation) → Step 97 (track) → Step 91 + 90 → Step 95 (assess)
 | **Constitution layer** | Supreme rules, operating loop, glossary | **100** |
 | **Operations layer** | Shift actions, incidents, authority | **90, 91, 93, 102** |
 | **Monitoring layer** | Continuous watch, early warning | **99** (consumes **92**) |
-| **Oversight layer** | Metrics, maturity, reporting, audit | **92, 94, 96** |
+| **Oversight layer** | Metrics, maturity, reporting, audit | **92, 94, 96, 104** |
 | **Assurance layer** | Proof drills and validation | **95** |
 | **Training layer** | Competency and continuity | **97** |
 | **Change layer** | Safe manual evolution | **98** |
