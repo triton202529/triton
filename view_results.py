@@ -5,8 +5,6 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
 
 st.set_page_config(page_title="Triton AI Unified Dashboard", layout="wide")
 st.title("📊 Triton AI Unified Dashboard")
@@ -59,10 +57,12 @@ with tabs[0]:
     if not df.empty and "date" in df and "total_value" in df:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
-        fig = px.line(df, x="date", y="total_value", title="Portfolio Value Over Time")
-        fig.update_traces(line=dict(color="blue"))
-        fig.update_layout(hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
+        fig, ax = plt.subplots()
+        ax.plot(df["date"], df["total_value"], color="blue", linewidth=2)
+        ax.set_title("Portfolio Value Over Time")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Total Value")
+        st.pyplot(fig)
     else:
         st.warning("Missing 'date' or 'total_value' in portfolio_history.csv")
 
@@ -149,9 +149,13 @@ with tabs[8]:
     st.subheader("🏦 Portfolio Allocations")
     df = load_csv("trade_log.csv")
     if not df.empty and "action" in df and "quantity" in df and "ticker" in df:
-        latest = df[df["action"] == "BUY"].groupby("ticker")["quantity"].sum()
-        fig = go.Figure(data=[go.Pie(labels=latest.index, values=latest.values)])
-        st.plotly_chart(fig)
+        buy_df = df[df["action"] == "BUY"].copy()
+        buy_df["quantity"] = pd.to_numeric(buy_df["quantity"], errors="coerce").fillna(0)
+        latest = buy_df.groupby("ticker")["quantity"].sum()
+        fig, ax = plt.subplots()
+        ax.pie(latest.values, labels=latest.index, autopct="%1.1f%%")
+        ax.set_title("Portfolio Allocations")
+        st.pyplot(fig)
         display_dataframe(latest.reset_index())
     else:
         st.warning("Missing necessary fields in trade_log.csv")
@@ -278,11 +282,11 @@ with tabs[17]:
         ticker_hits["sl_rate"] = (ticker_hits["hit_sl"] / ticker_hits["total"]).fillna(0)
         display_dataframe(ticker_hits[["tp_rate", "sl_rate"]])
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=ticker_hits.index, y=ticker_hits["tp_rate"], name="TP Rate", marker_color="green"))
-        fig.add_trace(go.Bar(x=ticker_hits.index, y=ticker_hits["sl_rate"], name="SL Rate", marker_color="red"))
-        fig.update_layout(barmode="group", title="SL/TP Hit Rates by Ticker")
-        st.plotly_chart(fig)
+        fig, ax = plt.subplots()
+        ticker_hits[["tp_rate", "sl_rate"]].plot(kind="bar", ax=ax, color=["green", "red"])
+        ax.set_title("SL/TP Hit Rates by Ticker")
+        ax.set_ylabel("Rate")
+        st.pyplot(fig)
 
 # Tab 19 - Model Comparison
 with tabs[18]:
@@ -295,8 +299,12 @@ with tabs[18]:
 
         if {"ticker", "model", "rmse"}.issubset(df.columns):
             st.markdown("### 📊 RMSE by Model and Ticker")
-            fig = px.bar(df, x="ticker", y="rmse", color="model", barmode="group", title="Model RMSE by Ticker")
-            st.plotly_chart(fig, use_container_width=True)
+            rmse_chart = df.pivot_table(index="ticker", columns="model", values="rmse", aggfunc="mean")
+            fig, ax = plt.subplots()
+            rmse_chart.plot(kind="bar", ax=ax)
+            ax.set_title("Model RMSE by Ticker")
+            ax.set_ylabel("RMSE")
+            st.pyplot(fig)
 
             selected_ticker = st.selectbox("🔍 Select Ticker for Comparison", df["ticker"].unique())
             filtered = df[df["ticker"] == selected_ticker]
@@ -330,10 +338,12 @@ with tabs[19]:
             st.markdown("### 📈 Avg Sentiment per Signal Type")
             if "signal" in merged.columns and "sentiment" in merged.columns:
                 sentiment_by_signal = merged.groupby("signal")["sentiment"].mean().dropna()
-                fig = px.bar(sentiment_by_signal, x=sentiment_by_signal.index, y=sentiment_by_signal.values,
-                             labels={"x": "Signal", "y": "Avg Sentiment"},
-                             title="Average Sentiment per Signal Type")
-                st.plotly_chart(fig)
+                fig, ax = plt.subplots()
+                sentiment_by_signal.plot(kind="bar", ax=ax)
+                ax.set_title("Average Sentiment per Signal Type")
+                ax.set_xlabel("Signal")
+                ax.set_ylabel("Avg Sentiment")
+                st.pyplot(fig)
         else:
             st.warning("Required columns missing in input files.")
     else:
@@ -355,11 +365,11 @@ with tabs[20]:
     - 🔬 Use this tab to build and refine TRITON’s intelligence
     """)
 
-    uploaded_file = st.file_uploader("Upload your stock data CSV", type=["csv"])
+    csv_path = st.text_input("Path to stock data CSV")
 
-    if uploaded_file:
+    if csv_path:
         try:
-            df = pd.read_csv(uploaded_file, parse_dates=["date"])
+            df = pd.read_csv(csv_path, parse_dates=["date"])
             st.success("✅ File loaded successfully!")
             display_dataframe(df.head())
 
