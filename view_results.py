@@ -21,6 +21,13 @@ def load_csv(filename):
         st.error(f"❌ Could not load {filename}: {e}")
         return pd.DataFrame()
 
+def display_dataframe(df, *args, **kwargs):
+    display_df = df.copy()
+    object_columns = display_df.select_dtypes(include=["object"]).columns
+    for col in object_columns:
+        display_df[col] = display_df[col].where(display_df[col].isna(), display_df[col].astype(str))
+    st.dataframe(display_df, *args, **kwargs)
+
 tabs = st.tabs([
     "📈 Portfolio History", "📋 Trade Log", "📊 Strategy vs Market", "🧠 AI Signals",
     "📁 Raw CSV", "📋 Backtest Summary", "📉 Risk Report", "📊 Strategy Diagnostics",
@@ -49,7 +56,7 @@ with tabs[1]:
     st.subheader("📋 Trade Log")
     df = load_csv("trade_log.csv")
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 3
 with tabs[2]:
@@ -67,7 +74,7 @@ with tabs[3]:
     st.subheader("🧠 AI Signals")
     df = load_csv("signals_with_rationale.csv")
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 5
 with tabs[4]:
@@ -76,21 +83,21 @@ with tabs[4]:
     selected = st.selectbox("Select CSV to preview", files)
     df = load_csv(selected)
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 6
 with tabs[5]:
     st.subheader("📋 Backtest Summary")
     df = load_csv("backtest_summary.csv")
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 7
 with tabs[6]:
     st.subheader("📉 Risk Report")
     df = load_csv("risk_report.csv")
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 8
 with tabs[7]:
@@ -120,7 +127,7 @@ with tabs[7]:
 
             st.markdown("### 📊 Win/Loss Count by Ticker")
             win_loss = df.groupby("ticker")["win"].value_counts().unstack(fill_value=0)
-            st.dataframe(win_loss)
+            display_dataframe(win_loss)
 
 # Tab 9
 with tabs[8]:
@@ -130,7 +137,7 @@ with tabs[8]:
         latest = df[df["action"] == "BUY"].groupby("ticker")["quantity"].sum()
         fig = go.Figure(data=[go.Pie(labels=latest.index, values=latest.values)])
         st.plotly_chart(fig)
-        st.dataframe(latest.reset_index())
+        display_dataframe(latest.reset_index())
     else:
         st.warning("Missing necessary fields in trade_log.csv")
 
@@ -141,21 +148,21 @@ with tabs[9]:
     if not df.empty and "ticker" in df.columns:
         for ticker in df["ticker"].unique():
             st.markdown(f"### {ticker}")
-            st.dataframe(df[df["ticker"] == ticker])
+            display_dataframe(df[df["ticker"] == ticker])
 
 # Tab 11
 with tabs[10]:
     st.subheader("📘 Fundamentals")
     df = load_csv("fundamentals.csv")
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 12
 with tabs[11]:
     st.subheader("📈 Stock Scores")
     df = load_csv("stock_scores.csv")
     if not df.empty and "total_score" in df.columns:
-        st.dataframe(df.sort_values("total_score", ascending=False))
+        display_dataframe(df.sort_values("total_score", ascending=False))
 
 # Tab 13
 with tabs[12]:
@@ -166,28 +173,28 @@ with tabs[12]:
     if not scores.empty:
         top = scores.sort_values("total_score", ascending=False).head(10)
         st.markdown("### 🔝 Top 10 by Score")
-        st.dataframe(top)
+        display_dataframe(top)
 
         if not signals.empty and "date" in signals.columns and "ticker" in signals.columns:
             recent = signals[signals["date"] == signals["date"].max()]
             if "ticker" in top.columns and "ticker" in recent.columns:
                 merged = pd.merge(top, recent, on="ticker", how="left")
                 st.markdown("### 🎯 AI BUY Picks")
-                st.dataframe(merged[merged["signal"] == "BUY"])
+                display_dataframe(merged[merged["signal"] == "BUY"])
 
 # Tab 14
 with tabs[13]:
     st.subheader("📰 News Sentiment")
     df = load_csv("news_sentiment.csv")
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 15
 with tabs[14]:
     st.subheader("🚨 Smart Alerts")
     df = load_csv("alerts.csv")
     if not df.empty:
-        st.dataframe(df)
+        display_dataframe(df)
 
 # Tab 16
 with tabs[15]:
@@ -195,12 +202,12 @@ with tabs[15]:
     df = load_csv("economic_calendar.csv")
     if not df.empty and "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"])
-        st.dataframe(df)
+        display_dataframe(df)
 
         today = pd.Timestamp.today().normalize()
         upcoming = df[df["date"] >= today]
         st.markdown("### 🕒 Upcoming Events")
-        st.dataframe(upcoming)
+        display_dataframe(upcoming)
 
         countries = sorted(df["country"].dropna().unique())
         selected_countries = st.multiselect("🌍 Filter by Country", countries, default=countries)
@@ -210,7 +217,7 @@ with tabs[15]:
 
         filtered = df[df["country"].isin(selected_countries) & df["importance"].isin(selected_levels)]
         st.markdown(f"### 📌 Filtered Events ({len(filtered)} results)")
-        st.dataframe(filtered)
+        display_dataframe(filtered)
         st.download_button("📥 Download Filtered Calendar", filtered.to_csv(index=False), file_name="filtered_calendar.csv")
 
 # Tab 17
@@ -222,7 +229,7 @@ with tabs[16]:
         selected_ticker = st.selectbox("Select Ticker", sorted(tickers))
         filtered = df[df["ticker"] == selected_ticker].sort_values("importance", ascending=False)
         st.bar_chart(filtered.set_index("feature")["importance"])
-        st.dataframe(filtered)
+        display_dataframe(filtered)
     else:
         st.warning("Missing data or columns in feature_importance.csv")
 
@@ -248,13 +255,13 @@ with tabs[17]:
 
         st.markdown("### 📈 SL/TP Hits by Ticker")
         ticker_hits = df.groupby("ticker")[["hit_sl", "hit_tp"]].sum()
-        st.dataframe(ticker_hits)
+        display_dataframe(ticker_hits)
 
         st.markdown("### 📉 SL/TP Hit Rate")
         ticker_hits["total"] = ticker_hits["hit_sl"] + ticker_hits["hit_tp"]
         ticker_hits["tp_rate"] = (ticker_hits["hit_tp"] / ticker_hits["total"]).fillna(0)
         ticker_hits["sl_rate"] = (ticker_hits["hit_sl"] / ticker_hits["total"]).fillna(0)
-        st.dataframe(ticker_hits[["tp_rate", "sl_rate"]])
+        display_dataframe(ticker_hits[["tp_rate", "sl_rate"]])
 
         fig = go.Figure()
         fig.add_trace(go.Bar(x=ticker_hits.index, y=ticker_hits["tp_rate"], name="TP Rate", marker_color="green"))
@@ -269,7 +276,7 @@ with tabs[18]:
     df = load_csv("model_comparison.csv")
     if not df.empty:
         st.markdown("### 📋 Raw Model Comparison Table")
-        st.dataframe(df)
+        display_dataframe(df)
 
         if {"ticker", "model", "rmse"}.issubset(df.columns):
             st.markdown("### 📊 RMSE by Model and Ticker")
@@ -278,7 +285,7 @@ with tabs[18]:
 
             selected_ticker = st.selectbox("🔍 Select Ticker for Comparison", df["ticker"].unique())
             filtered = df[df["ticker"] == selected_ticker]
-            st.dataframe(filtered)
+            display_dataframe(filtered)
         else:
             st.warning("Missing columns in model_comparison.csv: expected 'ticker', 'model', 'rmse'")
     else:
@@ -303,7 +310,7 @@ with tabs[19]:
             merged = pd.merge(signals, sentiment, on=["ticker", "date"], how="left")
 
             st.markdown("### 🧠 Signals Fused with Sentiment")
-            st.dataframe(merged)
+            display_dataframe(merged)
 
             st.markdown("### 📈 Avg Sentiment per Signal Type")
             if "signal" in merged.columns and "sentiment" in merged.columns:
@@ -339,7 +346,7 @@ with tabs[20]:
         try:
             df = pd.read_csv(uploaded_file, parse_dates=["date"])
             st.success("✅ File loaded successfully!")
-            st.dataframe(df.head())
+            display_dataframe(df.head())
 
             if 'close' not in df.columns or 'date' not in df.columns:
                 st.error("❌ CSV must include 'date' and 'close' columns.")
