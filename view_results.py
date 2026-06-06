@@ -21,12 +21,27 @@ def load_csv(filename):
         st.error(f"❌ Could not load {filename}: {e}")
         return pd.DataFrame()
 
-def display_dataframe(df, *args, **kwargs):
+def display_dataframe(df, max_rows=1000):
     display_df = df.copy()
-    object_columns = display_df.select_dtypes(include=["object"]).columns
+    object_columns = display_df.select_dtypes(include=["object", "string"]).columns
     for col in object_columns:
         display_df[col] = display_df[col].where(display_df[col].isna(), display_df[col].astype(str))
-    st.dataframe(display_df, *args, **kwargs)
+    if len(display_df) > max_rows:
+        st.caption(f"Showing first {max_rows:,} of {len(display_df):,} rows.")
+        display_df = display_df.head(max_rows)
+    html = display_df.to_html(index=False, classes="triton-table")
+    st.markdown(
+        """
+        <style>
+        .triton-table-wrapper { overflow-x: auto; }
+        .triton-table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
+        .triton-table th, .triton-table td { border: 1px solid #ddd; padding: 0.35rem; text-align: left; }
+        .triton-table th { background-color: #f6f8fa; position: sticky; top: 0; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(f'<div class="triton-table-wrapper">{html}</div>', unsafe_allow_html=True)
 
 tabs = st.tabs([
     "📈 Portfolio History", "📋 Trade Log", "📊 Strategy vs Market", "🧠 AI Signals",
