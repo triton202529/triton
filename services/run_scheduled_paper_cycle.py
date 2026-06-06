@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 import time
@@ -20,6 +21,18 @@ SUMMARY_JSON = RESULTS / "paper_trade_cycle_summary.json"
 LOG_CSV = RESULTS / "paper_trade_cycle_log.csv"
 EXEC_DROP_JSON = RESULTS / "execution_drop_diagnostics.json"
 VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+
+
+def _paper_execution_env_enabled() -> bool:
+    return os.environ.get("TRITON_ENABLE_PAPER_EXECUTION", "").strip() == "1"
+
+
+def _validate_paper_execution_env() -> bool:
+    if _paper_execution_env_enabled():
+        print("[PAPER_EXECUTION_AUTH] TRITON_ENABLE_PAPER_EXECUTION=1", flush=True)
+        return True
+    print("[PAPER_EXEC_BLOCK] TRITON_ENABLE_PAPER_EXECUTION not enabled", flush=True)
+    return False
 
 
 def _utc_iso() -> str:
@@ -254,6 +267,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     verbose = bool(args.verbose) or bool(cfg.get("verbose_subprocess", True))
     vp = bool(cfg.get("verbose_pipeline", True))
 
+    paper_exec_env_ok = _validate_paper_execution_env()
+
     try:
         from services.arm_mode import (
             append_arm_mode_log,
@@ -325,11 +340,26 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # PAPER ONLY — this module never invokes live
     mode = "paper"
-    if str(cfg.get("mode", "paper")).lower() != "paper":
+    cfg_mode = str(cfg.get("mode", "paper")).lower()
+    if cfg_mode == "live":
+        print(
+            "[LIVE_EXECUTION_BLOCKED] live mode not permitted in scheduled paper cycle", flush=True
+        )
+        notes.append("live_mode_blocked")
+        paper_exec_env_ok = False
+    elif cfg_mode != "paper":
         notes.append("config mode was not paper; forced paper")
     want_ex = bool(cfg.get("run_execute_trades", True)) and not args.skip_execute_trades
     ex_skip = (not want_ex) or (not arm_perms.get("execute_trades", False))
     mg_skip = args.skip_manage_positions or (not bool(cfg.get("run_manage_positions", True)))
+
+    if not paper_exec_env_ok:
+        notes.append("paper_execution_env_blocked: TRITON_ENABLE_PAPER_EXECUTION not set to 1")
+        ex_skip = True
+        manage_exec = False
+        moo_exec_cancel = False
+        rpl_exec = False
+        srom_exec = False
 
     cfg_snapshot = {
         "manage_positions_execute": manage_exec,
@@ -360,6 +390,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "arm_mode": arm_mode_label,
         "arm_block_reasons": list(arm_block_reasons),
         "arm_effective_permissions": dict(arm_perms),
+        "paper_execution_env_enabled": paper_exec_env_ok,
+        "live_execution_permitted": False,
     }
 
     if arm_block_reasons:
@@ -372,6 +404,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         notes.append("manage_open_orders --execute-cancel blocked by ARM policy")
     if want_rpl_exec and not arm_perms.get("reprice_order_ladder_execute"):
         notes.append("reprice_order_ladder --execute blocked by ARM policy")
+    if not paper_exec_env_ok and want_ex:
+        notes.append("execute_trades blocked: TRITON_ENABLE_PAPER_EXECUTION not enabled")
 
     def run_stage(
         cmd: List[str],
@@ -471,7 +505,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     er = run_stage(ex_cmd, skip=ex_skip, treat_blocked=True)
     stages_out["execute_trades"] = _stage_dict(er)
 
-    if _should_auto_execute_manage_positions(
+    if paper_exec_env_ok and _should_auto_execute_manage_positions(
         cfg=cfg,
         arm_perms=arm_perms,
         ex_skip=ex_skip,

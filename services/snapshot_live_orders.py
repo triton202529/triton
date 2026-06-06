@@ -172,14 +172,12 @@ def _ensure_positions_contract(df: pd.DataFrame) -> pd.DataFrame:
 def _auto_heal_contracts() -> None:
     """
     Auto-heal contracts (prevents regressions from other writers).
-    Optional; never fail snapshot because normalizer isn't available.
+    Uses repo-root-resolved paths via services.normalize_results_contracts.
+    SystemExit from contract failures propagates (not caught here).
     """
-    try:
-        from services.normalize_results_contracts import main as normalize_results_contracts  # type: ignore
+    from services.normalize_results_contracts import main as normalize_results_contracts  # type: ignore
 
-        normalize_results_contracts()
-    except Exception:
-        pass
+    normalize_results_contracts()
 
 
 # ------------------------------------------------------------

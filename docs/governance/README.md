@@ -81,8 +81,26 @@ Governance does **not** promise market outcomes. It promises **disciplined obser
 | **119** | [Postmortems & Institutional Learning](./Triton_Governance_Postmortem_Learning_Framework.md) | `GOVPM`, near-miss intelligence, anti-repeat learning | Per incident; quarterly learning review | All roles; Committee | REPEAT_FAILURE_RISK / LEARNING_DEFICIT | Steps 90, 107, 111–112 |
 | **120** | [Decision Quality & Cognitive Risk](./Triton_Governance_Decision_Quality_Framework.md) | Judgment calibration, `GOVDQ`, bias awareness under uncertainty | Material decisions; quarterly review | All roles; Committee | Repeated cognitive blind spot | Steps 90–91, 116, 119 |
 | **121** | [Precedent & Constitutional Case Law](./Triton_Governance_Precedent_Case_Law_Framework.md) | `GOVPREC` index, interpretations, escalation consistency | Material decisions; ambiguity lookup | Lead, Committee | Conflicting ACTIVE precedent | Steps 100, 111–113, 119–120 |
+| **122** | [Health Intelligence & Observability Synthesis](./Triton_Governance_Health_Intelligence_Framework.md) | 13-domain health, `GOVINTEL`, condition class (HEALTHY→CRITICAL) | Weekly/quarterly synthesis | Lead, Committee, Executive | CRITICAL_GOVERNANCE_RISK | Steps 92, 99, 110, 114 |
+| **123** | [Resilience & Survivability](./Triton_Governance_Resilience_Survivability_Framework.md) | `GOVRES` states, mission-critical functions, graceful degradation | Disruption; annual endurance review | Lead, Committee, Executive | CONSTITUTIONAL_EMERGENCY | Steps 108, 111–112, 122 |
+| **124** | [Mission Alignment & Institutional Purpose](./Triton_Governance_Mission_Alignment_Framework.md) | Purpose domains, `GOVALIGN`, mission drift (ALIGNED→CRITICAL) | Material decisions; annual purpose review | Committee, Executive, Lead | CRITICAL_MISSION_DEVIATION | Steps 100, 113–114, 118, 122 |
+| **125** | [Complexity Management & Anti-Bureaucracy](./Triton_Governance_Complexity_Management_Framework.md) | `GOVCX`, simplification loop, bureaucracy states | Quarterly; annual sunset agenda | Lead, Committee | BUREAUCRATIC_RISK | Steps 112–114, 124 |
+| **126** | [Scalability & Organizational Evolution](./Triton_Governance_Scalability_Evolution_Framework.md) | `GOVSCALE`, scale states, entity/jurisdiction gates | Per expansion; semi-annual review | Committee, Executive, Lead | Governance lag / chaotic growth | Steps 111, 114–115, 125 |
+| **127** | [Delegation & Decision Rights](./Triton_Governance_Delegation_Authority_Framework.md) | `GOVDELEG`, authority domains, non-delegable boundaries | Per assignment; annual authority review | All roles; Committee | Ultra vires / authority concentration | Steps 93, 106, 111, 126 |
+| **128** | [Constitutional Amendment & Evolution Control](./Triton_Governance_Constitutional_Amendment_Framework.md) | `GOVAMEND`, protection tiers, amendment classes | Per proposal; annual integrity review | Committee, Executive, Lead | Constitutional erosion / drift | Steps 98, 100, 112, 127 |
+| **129** | [Legitimacy, Mandate & Social License](./Triton_Governance_Legitimacy_Mandate_Framework.md) | `GOVMAND`, legitimacy states, mandate renewal | Annual mandate review; per challenge | Committee, Executive, Lead | LEGITIMACY_CRISIS / social-license loss | Steps 117, 124, 128 |
+| **130** | [Governance Operating System (GOS)](./Triton_Governance_Operating_System_Framework.md) | `GOVGOS`, constitutional architecture, full-library integration | Orientation; annual GOS review; conflict routing | All roles | Multi-framework / constitutional conflict | Steps 90–129 capstone |
+| **131** | [Library Consolidation & Audit](./Triton_Governance_Consolidation_Audit_Framework.md) | `GOVAUDIT-LIB`, consistency audit, master reference, certification | Annual library audit; post-major change | Lead, Committee, Audit | Unresolved contradiction / cert FAIL | Steps 90–130 QA |
+| **132** | [Master Glossary & Reference Standard](./Triton_Governance_Master_Glossary.md) | Terminology authority, canonical definitions, abbreviations | Authoring; audit; orientation; term disputes | All roles | Terminology conflict → 132 + 131 | Steps 90–131 language |
+| **133** | [Dependency Matrix & Relationship Map](./Triton_Governance_Dependency_Matrix.md) | `GOVDEP`, framework dependencies, change impact, propagation | Change impact; architecture review; annual audit | Lead, Committee, Authors | Critical path / traceability gap | Steps 90–132 traceability |
+| **134** | [Cross-Reference & Traceability](./Triton_Governance_Traceability_Framework.md) | `GOVTRACE`, evidence chains, doctrine trace, audit/decision/change lineage | Investigations; audit; MATERIAL+ change | Lead, Audit, Committee | Broken evidence chain | Steps 107, 131–133 |
+| **135** | [Final Certification & Release](./Triton_Governance_Final_Certification_Framework.md) | `GOVRELEASE`, `GOVCERT-GOS`, GOS versioning, recertification | Annual recert; major/minor release | Committee, Executive, Lead | Cert FAIL / unauthorized release | Steps 131–134; corpus 90–134 |
+| **136** | [Committee Operating Pack](./Triton_Governance_Committee_Operating_Pack.md) | `GOVCOMM`, `GOVDEC`, `GOVACTION`, `GOVESC` templates & registers | Every Committee session; quarterly review pack | Committee, Chair, Secretary | Oral votes / missing records | Step 106 authority; post-135 operations |
+| **137** | [Audit Pack & Evidence Collection](./Triton_Governance_Audit_Pack.md) | `GOVAUDIT`, `GOVEVID`, `GOVFIND`, `GOVREM` operational toolkit | Assurance audits; investigations; diligence | Audit, Compliance, Committee | Critical finding open | Steps 107, 131–135; 136 records |
 
-**Library count:** 30 governance manuals (Steps 90–100, 102–104, 106–121) + this README (Step 101).
+**Library count:** 46 governance manuals (Steps 90–100, 102–104, 106–137) + this README (Step 101).
+
+**Certified release:** `GOS-LIB-1.0.0-2026-06-01` · `GOVRELEASE-2026-06-01-001` · **PASS WITH OBSERVATIONS** (see Step 135)
 
 ---
 
@@ -97,29 +115,45 @@ Governance does **not** promise market outcomes. It promises **disciplined obser
 | Capital / fiduciary / preservation concern? | **Step 118** + **100** | `GOVCAP` → halt → escalate |
 | What should I do right now? | **Step 102** or **91** | Handbook daily loop; GCC brief → command |
 | Uncertain judgment / bias / escalation hesitation? | **Step 120** | Classify → evidence → escalate |
-| Governance health worsening? | **Step 92 + 99** | KPIs + watch state |
-| Who approves this? | **Step 93** | Authority matrix |
+| Governance health worsening? | **Step 122** + **92** + **99** | 13-domain synthesis; GHS + GWS |
+| Who approves this? | **Step 93** + **127** | Matrix; delegation class & `GOVDELEG` |
 | Are we institutional-grade yet? | **Step 94** + **110** + **114** | Current level + IRS + roadmap stage |
 | How do we test governance? | **Step 95** + **109** | Drills; war games & resilience |
 | Future risk or scenario planning? | **Step 115** | `GOVFORE` → war-game → readiness |
 | How do we report governance? | **Step 96** | Reports and audit pack |
 | How do we train operators? | **Step 97** | Certification tracks |
-| How do we safely change governance? | **Step 98** + **112** | `GOVCHG` execution; meta-governance loop |
-| How do we monitor governance? | **Step 99** | Early warning |
-| What are the constitutional rules? | **Step 100** + **113** Codex |
-| How does the whole system fit together? | **Step 113** | Unified map — manuals stay authoritative |
-| Committee vote / quorum? | **Step 106** | Charter + glossary |
-| Audit / LP / regulator diligence? | **Step 107** + **96** + **117** | Audit pack; trust & legitimacy discipline |
+| How do we safely change governance? | **Step 98** + **112** + **128** | `GOVCHG` execution; `GOVMETA`; amendment doctrine |
+| How do we monitor governance? | **Step 99** + **122** | GWS daily; quarterly health intelligence |
+| What are the constitutional rules? | **Step 100** + **113** Codex + **124** purpose + **128** amendment |
+| How does the whole system fit together? | **Step 130** + **133** + **113** + **101** | GOS; dependencies; Codex; navigator |
+| Committee vote / quorum? | **Step 106** + **136** | Charter authority; operating pack templates |
+| Audit / LP / regulator diligence? | **Step 107** + **137** + **96** + **134** | Readiness; operational audit pack; reporting |
 | Active governance crisis? | **Step 108** | Classify → contain → recover |
+| Partial failure / degraded governance? | **Step 123** | `GOVRES` state → protect mission-critical |
 | Rehearse governance crisis? | **Step 109** | War game before reality |
-| Is governance objectively ready? | **Step 110** | IRS + institutional cert |
+| Is governance objectively ready? | **Step 110** + **135** | IRS + `GOVCERT-GOS` library release |
 | Leadership or role transition? | **Step 111** | `GOVSUCC` succession playbook |
-| How does governance improve itself? | **Step 112** | `GOVMETA` → classify → `GOVCHG` |
-| Governance advancement or stage concern? | **Step 114** | `GOVMAT` gates + timeline |
-| Governance conflict / unclear ownership? | **Step 113** Card 8 | Stricter containment → 98 |
+| How does governance improve itself? | **Step 112** + **125** | `GOVMETA` → classify → simplify → `GOVCHG` |
+| Governance advancement or stage concern? | **Step 114** + **126** | `GOVMAT` gates + scale state |
+| Governance conflict / unclear ownership? | **Step 130** Card 5 + **113** + **127** | Precedence hierarchy; stricter rule |
 | Same question again / precedent lookup? | **Step 121** | `GOVPREC` — cite, distinguish, or retire |
 | Ethics, pressure, or integrity concern? | **Step 116** | `GOVETH` → escalate → contain |
-| Stakeholder trust or reputation concern? | **Step 117** | `GOVTRUST` → evidence-aligned communication |
+| Stakeholder trust or reputation concern? | **Step 117** + **129** | `GOVTRUST` comms; `GOVMAND` mandate |
+| Mission drift / purpose conflict? | **Step 124** | `GOVALIGN` → Card 3 drift class |
+| Governance bloat / bureaucracy / sprawl? | **Step 125** | `GOVCX` → simplify via 98, keep safeguards |
+| Scaling / entity / jurisdiction growth? | **Step 126** | `GOVSCALE` → readiness before expand |
+| Delegation / temp authority / who can decide? | **Step 127** + **93** | `GOVDELEG` class → matrix → document |
+| Constitutional amendment / safeguard change? | **Step 128** + **98** | `GOVAMEND` class → Committee → `GOVCHG` |
+| Constitutional drift / erosion concern? | **Step 128** + **113** | Stricter rule; integrity review |
+| Legitimacy / mandate / social-license concern? | **Step 129** + **117** | `GOVMAND` state → renewal loop |
+| Governance architecture / integration question? | **Step 130** | Tiers, dependencies, operating states |
+| Library audit / consistency / certification? | **Step 131** + **132** + **137** | `GOVAUDIT-LIB`; assurance fieldwork |
+| Governance term / abbreviation meaning? | **Step 132** | Canonical definition; deprecated variants |
+| Framework dependencies / change impact? | **Step 133** + **98** | `GOVDEP`; upstream/downstream matrix |
+| Evidence chain / audit trace / prove governance? | **Step 134** + **107** | `GOVTRACE`; doctrine → action lineage |
+| GOS certified release / recertification? | **Step 135** | `GOVRELEASE`; `GOS-LIB-*` version |
+| Run a Committee meeting / decision / action log? | **Step 136** + **106** | Agenda; `GOVDEC`; registers |
+| Run a governance audit / collect evidence / findings? | **Step 137** + **107** | `GOVAUDIT`; `GOVEVID`; `GOVFIND` |
 | Where am I in the library? | **This README** | Navigation only |
 
 ---

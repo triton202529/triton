@@ -20,6 +20,8 @@ New-Item -ItemType File -Path $lockFile -Force | Out-Null
 
 try {
     Add-Content $logFile "$(Get-Date -Format s) [START] Running scheduled paper trade cycle..."
+    $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
+    Add-Content $logFile "$(Get-Date -Format s) [LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
     $pipelineOut = & "C:\Users\akimw\triton\.venv\Scripts\python.exe" -m services.run_scheduled_paper_cycle --verbose 2>&1
     $code = $LASTEXITCODE
     $pipelineOut | Add-Content -Path $logFile

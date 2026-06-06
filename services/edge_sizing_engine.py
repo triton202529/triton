@@ -59,8 +59,8 @@ RISK_PENALTY_HEAVY = 0.50  # FORCE_EXIT / BLOCK_NEW_BUY
 RISK_PENALTY_MEDIUM = 0.20  # TRIM_PRIORITY
 
 # Tier thresholds applied to the FINAL edge_score (after blocked override).
-TIER_STRONG_MIN = 1.0
-TIER_NORMAL_MIN = 0.5
+TIER_STRONG_MIN = 0.75
+TIER_NORMAL_MIN = 0.40
 
 TIER_MULTIPLIER: Dict[str, float] = {
     "STRONG_EDGE": 1.25,
@@ -405,6 +405,39 @@ def run(
     if not recs.empty:
         for tier, n in recs["sizing_tier"].value_counts().items():
             counts[str(tier)] = int(n)
+
+    if not recs.empty:
+        edge_scores = pd.to_numeric(recs["edge_score"], errors="coerce")
+        print(
+            "[EDGE_DIAGNOSTICS] "
+            f"avg_edge={edge_scores.mean():.3f} "
+            f"max_edge={edge_scores.max():.3f} "
+            f"min_edge={edge_scores.min():.3f} "
+            f"strong_threshold={TIER_STRONG_MIN:.2f} "
+            f"normal_threshold={TIER_NORMAL_MIN:.2f}",
+            flush=True,
+        )
+
+        top = recs.copy()
+        top["__edge_score_num"] = pd.to_numeric(top["edge_score"], errors="coerce")
+        top = top.sort_values("__edge_score_num", ascending=False).head(10)
+
+        print(
+            "[EDGE_TOP] "
+            + ", ".join(
+                [
+                    f"{str(r.get('ticker', ''))}:{float(r.get('__edge_score_num', 0.0)):.2f}"
+                    for _, r in top.iterrows()
+                    if pd.notna(r.get("__edge_score_num"))
+                ]
+            ),
+            flush=True,
+        )
+    else:
+        print(
+            "[EDGE_DIAGNOSTICS] no recommendations generated",
+            flush=True,
+        )
 
     print(
         f"[EDGE_SIZING] total={len(recs)} "

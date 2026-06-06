@@ -66,7 +66,7 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -162,6 +162,18 @@ def _finalize_place_diag_once(
             p.update(extra)
         p.setdefault("source", "place_live_orders")
         finalize_artifacts(p, write_log=True)
+    except Exception:
+        pass
+    try:
+        from services.paper_execution_audit import flush_placement_audit
+
+        flush_placement_audit(
+            mode=str(_PLACE_CTX.get("mode") or "paper"),
+            session=str(_PLACE_CTX.get("session") or ""),
+            diag_rows=list(_PLACE_DIAG_ROWS),
+            planned_orders=_PLACE_CTX.get("planned_orders") or [],
+            dry_run=bool(_PLACE_CTX.get("dry_run", True)),
+        )
     except Exception:
         pass
 
@@ -1617,6 +1629,8 @@ def main() -> None:
     _PLACE_CTX["mode"] = mode
     _PLACE_CTX["session"] = placement_session
     _PLACE_CTX["orders_path"] = str(orders_path)
+    _PLACE_CTX["dry_run"] = bool(args.dry_run)
+    _PLACE_CTX["planned_orders"] = []
 
     # Make session truth obvious (prevents “why is polling empty?” confusion)
     print(
@@ -1732,6 +1746,50 @@ def main() -> None:
     # Load open orders and index them
     open_orders = list_open_orders(broker)
     open_idx = build_open_index(open_orders)
+    open_side_keys: Set[Tuple[str, str]] = set(open_idx.keys())
+
+    from services.duplicate_order_guard import (
+        check_duplicate_order,
+        log_duplicate_block,
+        record_planned_intents,
+        record_session_intent,
+    )
+
+    batch_submitted_keys: Set[Tuple[str, str]] = set()
+    duplicate_blocked = 0
+
+    def _block_duplicate_row(
+        r: Any,
+        reason: str,
+        *,
+        phase_status: str = "blocked",
+        reason_code: str = "DUPLICATE_OPEN_ORDER",
+    ) -> None:
+        nonlocal duplicate_blocked
+        duplicate_blocked += 1
+        log_duplicate_block(
+            symbol=r.symbol,
+            side=r.side,
+            reason=reason,
+            mode=mode,
+            session=placement_session,
+            qty=r.qty,
+            price=r.limit_price,
+        )
+        _PLACE_DIAG_ROWS.append(
+            make_row(
+                run_mode=mode,
+                symbol=r.symbol,
+                stance="",
+                planned_qty=r.qty,
+                phase="placement_validation",
+                status=phase_status,
+                reason_code=reason_code,
+                reason_detail=f"duplicate_block reason={reason}",
+                source="place_live_orders",
+                session=placement_session,
+            )
+        )
 
     planned: List[PlannedOrder] = []
     batch_notional_est = 0.0
@@ -1787,43 +1845,29 @@ def main() -> None:
             time.sleep(0.25)
         open_orders = list_open_orders(broker)
         open_idx = build_open_index(open_orders)
+        open_side_keys = set(open_idx.keys())
 
     for r in rows:
-        key = (r.symbol, r.side)
-        existing = open_idx.get(key, [])
-
-        if existing:
-            if args.block_on_duplicates:
-                _PLACE_DIAG_ROWS.append(
-                    make_row(
-                        run_mode=mode,
-                        symbol=r.symbol,
-                        stance="",
-                        planned_qty=r.qty,
-                        phase="placement_validation",
-                        status="blocked",
-                        reason_code="DUPLICATE_OPEN_ORDER",
-                        reason_detail=f"Existing open {r.side} order(s); block_on_duplicates",
-                        source="place_live_orders",
-                        session=placement_session,
-                    )
-                )
-                die(f"[DUPLICATE_OPEN_BLOCK] Existing open {r.side} order(s) for {r.symbol}.")
-            in_flight_sat += 1
-            _PLACE_DIAG_ROWS.append(
-                make_row(
-                    run_mode=mode,
-                    symbol=r.symbol,
-                    stance="",
-                    planned_qty=r.qty,
-                    phase="placement_validation",
-                    status="kept",
-                    reason_code="IN_FLIGHT_ORDER",
-                    reason_detail="Existing open order already satisfies execution intent",
-                    source="place_live_orders",
-                    session=placement_session,
-                )
+        dup, dup_reason = check_duplicate_order(
+            symbol=r.symbol,
+            side=r.side,
+            session=placement_session,
+            open_side_keys=open_side_keys,
+            batch_submitted=batch_submitted_keys,
+        )
+        if dup:
+            _block_duplicate_row(
+                r,
+                dup_reason,
+                phase_status="kept" if dup_reason == "OPEN_BROKER_ORDER" else "blocked",
+                reason_code=(
+                    "IN_FLIGHT_ORDER"
+                    if dup_reason == "OPEN_BROKER_ORDER"
+                    else "DUPLICATE_OPEN_ORDER"
+                ),
             )
+            if dup_reason == "OPEN_BROKER_ORDER":
+                in_flight_sat += 1
             continue
 
         if r.side == "sell" and not args.allow_shorts:
@@ -2032,6 +2076,13 @@ def main() -> None:
         return
 
     if not planned:
+        if duplicate_blocked > 0:
+            print(
+                f"[DUPLICATE_SESSION_SATISFIED] duplicate_blocked={duplicate_blocked} "
+                f"session={placement_session} (no new submits required)"
+            )
+            _finalize_place_diag_once(blocked=False)
+            return
         if in_flight_sat > 0:
             print(
                 f"[IN_FLIGHT_SATISFIED] {in_flight_sat} row(s) already have matching open orders; "
@@ -2108,13 +2159,23 @@ def main() -> None:
     if not args.dry_run:
         idempotency_block(st, fingerprint, args.idempotency_ttl_min, args.force)
 
+    _PLACE_CTX["planned_orders"] = list(planned)
+
     if args.dry_run:
         print(
             f"[DRY_RUN] no broker.submit_order -- planned={len(planned)} fingerprint={fingerprint[:12]}... "
             f"est_batch_notional={batch_notional_est:.2f} in_flight_sat={in_flight_sat} "
+            f"duplicate_blocked={duplicate_blocked} "
             f"cancelled_duplicates={cancelled_duplicates} illegal_sells={illegal_sells} "
             f"placement_session={placement_session} log_session={log_session}"
         )
+        if planned:
+            record_planned_intents(
+                planned,
+                session=placement_session,
+                mode=mode,
+                source="place_live_orders_dry_run",
+            )
         for p in planned:
             ref_txt = f" ref={p.ref_price}" if p.ref_price else ""
             print(
@@ -2164,6 +2225,42 @@ def main() -> None:
             pass
 
     for p in planned:
+        dup, dup_reason = check_duplicate_order(
+            symbol=p.symbol,
+            side=p.side,
+            session=placement_session,
+            open_side_keys=open_side_keys,
+            batch_submitted=batch_submitted_keys,
+        )
+        if dup:
+            duplicate_blocked += 1
+            log_duplicate_block(
+                symbol=p.symbol,
+                side=p.side,
+                reason=dup_reason,
+                mode=mode,
+                session=placement_session,
+                qty=p.qty,
+                price=p.limit_price,
+                order_type=p.order_type,
+            )
+            _PLACE_DIAG_ROWS.append(
+                make_row(
+                    run_mode=mode,
+                    symbol=p.symbol,
+                    stance="",
+                    planned_qty=p.qty,
+                    phase="placement_submit",
+                    status="blocked",
+                    reason_code="DUPLICATE_OPEN_ORDER",
+                    reason_detail=f"duplicate_block reason={dup_reason}",
+                    source="place_live_orders",
+                    session=placement_session,
+                    client_order_id=p.client_order_id,
+                )
+            )
+            failed += 1
+            continue
         try:
             resp = broker.submit_order(
                 symbol=p.symbol,
@@ -2219,6 +2316,25 @@ def main() -> None:
                     client_order_id=p.client_order_id,
                 )
             )
+            try:
+                from services.order_discipline import normalize_side as _nd
+                from services.order_discipline import normalize_symbol as _ns
+
+                _sk = _ns(p.symbol)
+                _sd = _nd(p.side)
+                if _sk and _sd:
+                    batch_submitted_keys.add((_sk, _sd))
+                    record_session_intent(
+                        session=placement_session,
+                        symbol=p.symbol,
+                        side=p.side,
+                        qty=p.qty,
+                        mode=mode,
+                        source="place_live_orders_submit",
+                        status=str(status or "submitted"),
+                    )
+            except Exception:
+                pass
 
             if args.verbose:
                 if p.order_type == "limit":
@@ -2294,7 +2410,7 @@ def main() -> None:
     )
     print(
         f"[DONE] placement_session={placement_session} log_session={log_session} "
-        f"planned={len(planned)} placed={placed} failed={failed} ok={ok} "
+        f"planned={len(planned)} placed={placed} failed={failed} duplicate_blocked={duplicate_blocked} ok={ok} "
         f"fingerprint={fingerprint[:12]}... est_batch_notional={batch_notional_est:.2f} log={log_path}"
     )
     print(

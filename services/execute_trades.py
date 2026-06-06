@@ -4365,6 +4365,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         opportunities_seen=len(df),
     )
 
+    if args.mode == "paper":
+        try:
+            from services.paper_execution_audit import write_execute_trades_plan_audit
+
+            write_execute_trades_plan_audit(plan_lines, session=session_tag, mode=args.mode)
+        except Exception:
+            pass
+
     print(
         f"[execute_trades] mode={args.mode} dry_run={dry_run} opportunities={len(df)} planned={len(planned)} skipped={skipped}"
     )

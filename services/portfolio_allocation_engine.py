@@ -865,6 +865,51 @@ def build_recommendations(
     current_positions = int(len(held_df))
     available_slots = max(0, int(max_positions) - current_positions)
 
+    # Allocation diagnostics: explain why candidates are not becoming OPEN_NEW / ADD.
+    # These are read-only counters used for debugging the candidate pipeline.
+    if df.empty:
+        diag_buy_add_lifecycle = 0
+        diag_positive_signal = 0
+        diag_strong_edge = 0
+        diag_conf_pass = 0
+        diag_delta_pass = 0
+        diag_open_gate_candidates = 0
+        rejection_reasons: Dict[str, int] = {}
+    else:
+        edge_numeric = pd.to_numeric(df["edge_score"], errors="coerce")
+        confidence_numeric = pd.to_numeric(df["confidence"], errors="coerce")
+        delta_numeric = pd.to_numeric(df["delta_pct"], errors="coerce")
+        lifecycle_upper = df["lifecycle_action"].astype(str).str.upper()
+        signal_upper = df["signal"].astype(str).str.upper()
+        sizing_upper = df["sizing_tier"].astype(str).str.upper()
+
+        strong_edge_mask = (edge_numeric >= STRONG_EDGE_SCORE) | (
+            sizing_upper == SIZING_TIER_STRONG_EDGE
+        )
+        conf_pass_mask = confidence_numeric >= MIN_OPEN_NEW_CONFIDENCE
+        delta_pass_mask = delta_numeric > 0
+        buy_add_lifecycle_mask = lifecycle_upper.isin(["BUY", ACTION_ADD])
+        positive_signal_mask = signal_upper.isin(list(POSITIVE_SIGNAL_LABELS))
+
+        diag_buy_add_lifecycle = int(buy_add_lifecycle_mask.sum())
+        diag_positive_signal = int(positive_signal_mask.sum())
+        diag_strong_edge = int(strong_edge_mask.sum())
+        diag_conf_pass = int(conf_pass_mask.sum())
+        diag_delta_pass = int(delta_pass_mask.sum())
+
+        open_gate_mask = (
+            (df["is_currently_held"] == False)  # noqa: E712
+            & buy_add_lifecycle_mask
+            & strong_edge_mask
+            & conf_pass_mask
+            & delta_pass_mask
+        )
+        diag_open_gate_candidates = int(open_gate_mask.sum())
+
+        rejection_reasons = {}
+        for reason in df["reason"].astype(str).fillna("UNKNOWN"):
+            rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+
     # top_5_opportunities: actionable adds/opens ranked by allocation_score
     # then edge_score then confidence (deterministic tie-break).
     top_opps: List[Dict[str, Any]] = []
@@ -952,6 +997,24 @@ def build_recommendations(
         "high_risk_positions": sorted(
             set(_flag_symbols(RISK_FLAG_FORCE_EXIT) + _flag_symbols(RISK_FLAG_TRIM_PRIORITY))
         ),
+        # Diagnostics
+        "allocation_diagnostics": {
+            "universe_count": int(len(df)),
+            "currently_held_count": current_positions,
+            "available_slots": int(available_slots),
+            "buy_add_lifecycle_count": diag_buy_add_lifecycle,
+            "positive_signal_count": diag_positive_signal,
+            "strong_edge_count": diag_strong_edge,
+            "confidence_pass_count": diag_conf_pass,
+            "delta_pass_count": diag_delta_pass,
+            "open_gate_candidates": diag_open_gate_candidates,
+            "open_new_candidates": open_new_n,
+            "add_candidates": add_n,
+            "watch_candidates": watch_n,
+            "top_rejection_reasons": dict(
+                sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True)[:10]
+            ),
+        },
         # Opportunity ranking
         "top_5_opportunities": top_opps,
     }
@@ -1039,6 +1102,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"exit={summary['exit_candidates']} "
         f"trim={summary['trim_candidates']} "
         f"block={summary['blocked_candidates']}",
+        flush=True,
+    )
+    diag = summary.get("allocation_diagnostics", {})
+    print(
+        "[ALLOC_DIAGNOSTICS] "
+        f"universe={diag.get('universe_count', 0)} "
+        f"held={diag.get('currently_held_count', 0)} "
+        f"slots={diag.get('available_slots', 0)} "
+        f"buy_add_lifecycle={diag.get('buy_add_lifecycle_count', 0)} "
+        f"positive_signal={diag.get('positive_signal_count', 0)} "
+        f"strong_edge={diag.get('strong_edge_count', 0)} "
+        f"conf_pass={diag.get('confidence_pass_count', 0)} "
+        f"delta_pass={diag.get('delta_pass_count', 0)} "
+        f"open_gate={diag.get('open_gate_candidates', 0)} "
+        f"open_new={diag.get('open_new_candidates', 0)} "
+        f"add={diag.get('add_candidates', 0)} "
+        f"watch={diag.get('watch_candidates', 0)}",
+        flush=True,
+    )
+    print(
+        f"[ALLOC_REJECTION_TOP] {diag.get('top_rejection_reasons', {})}",
         flush=True,
     )
     top_syms = [o["ticker"] for o in summary.get("top_5_opportunities", [])]

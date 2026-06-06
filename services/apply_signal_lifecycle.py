@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -22,6 +22,7 @@ SIGNALS_RATIONALE = RESULTS_DIR / "signals_with_rationale.csv"
 SIGNALS_FALLBACK = RESULTS_DIR / "signals.csv"
 OUT_LIFECYCLE = RESULTS_DIR / "signal_lifecycle.csv"
 STATE_PATH = RESULTS_DIR / "signal_state.json"
+POSITIONS_SNAPSHOT = RESULTS_DIR / "positions_snapshot.csv"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -46,6 +47,13 @@ STATE_PATH = RESULTS_DIR / "signal_state.json"
 #     since ADD has stricter confidence/delta thresholds upstream).
 #   - FLAT + ADD/TRIM/EXIT               → WAIT  (no position to act on).
 #   - Any remaining invalid pair         → WAIT  (catch-all, never crashes).
+#
+# Important safety addition:
+#   Before lifecycle is rebuilt, signal_state.json is synchronized to the
+#   broker position snapshot. This prevents stale LONG memory from converting
+#   fresh BUY signals into HOLD after the account has been manually flattened.
+#   This is still read-only with respect to broker/execution; it only updates
+#   the lifecycle memory file to match the latest local positions_snapshot.csv.
 # ──────────────────────────────────────────────────────────────────────
 _VALID_POSITION_STATES = frozenset({"LONG", "FLAT"})
 _VALID_ACTIONS = frozenset({"BUY", "ADD", "HOLD", "TRIM", "EXIT", "WAIT"})
@@ -73,6 +81,208 @@ def _coerce_str(x: Any) -> str:
     except Exception:
         pass
     return str(x).strip().upper()
+
+
+def _norm_state_symbol(x: Any) -> str:
+    """Normalize symbols for lifecycle/broker-state comparisons."""
+    if x is None:
+        return ""
+    try:
+        if pd.isna(x):
+            return ""
+    except Exception:
+        pass
+
+    s = str(x).strip().upper()
+    # Broker/lifecycle may disagree on BRK.B vs BRK-B.
+    if s == "BRK.B":
+        s = "BRK-B"
+    return s
+
+
+def _norm_ticker(x: Any) -> str:
+    """Normalize ticker keys used by lifecycle state and broker snapshots."""
+    s = _coerce_str(x)
+    if not s:
+        return ""
+    return s.replace(".", "-")
+
+
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        if pd.isna(x):
+            return default
+        return float(x)
+    except Exception:
+        return default
+
+
+def _load_state_file(path: Path) -> Dict[str, Any]:
+    if not path.exists() or path.stat().st_size == 0:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_state_file(path: Path, state: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+
+
+def _load_broker_long_tickers(path: Path = POSITIONS_SNAPSHOT) -> Set[str]:
+    """
+    Read local positions_snapshot.csv and return symbols that are truly LONG.
+
+    This does not call the broker. It only uses the latest snapshot already
+    written by services.snapshot_live_orders. Empty/missing/malformed snapshot
+    safely returns an empty set, which is the correct representation after a
+    manual account flatten if snapshot_live_orders wrote positions_written=0.
+    """
+    out: Set[str] = set()
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return out
+        df = pd.read_csv(path)
+    except Exception:
+        return out
+
+    if df is None or df.empty:
+        return out
+
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    sym_col = next((c for c in ("ticker", "symbol", "Symbol") if c in df.columns), None)
+    if sym_col is None:
+        return out
+
+    qty_col = next((c for c in ("qty", "qty_available", "quantity") if c in df.columns), None)
+    mv_col = next((c for c in ("market_value", "value") if c in df.columns), None)
+
+    for _, row in df.iterrows():
+        ticker = _norm_ticker(row.get(sym_col))
+        if not ticker:
+            continue
+
+        qty = _safe_float(row.get(qty_col), default=1.0) if qty_col else 1.0
+        mv = _safe_float(row.get(mv_col), default=1.0) if mv_col else 1.0
+
+        if qty > 0 and mv > 0:
+            out.add(ticker)
+
+    return out
+
+
+def _sync_signal_state_with_broker_snapshot(
+    *,
+    state_path: Path,
+    signals_df: pd.DataFrame,
+    positions_snapshot: Path = POSITIONS_SNAPSHOT,
+) -> Dict[str, int]:
+    """
+    Synchronize signal_state.json position_state with broker truth snapshot.
+
+    Why this exists:
+      If Triton previously held positions, signal_state.json may still say LONG.
+      After the operator manually exits all positions, fresh BUY signals can be
+      incorrectly treated as LONG+BUY and normalized to HOLD. This sync fixes
+      that by forcing tickers absent from positions_snapshot.csv to FLAT before
+      apply_lifecycle() runs.
+
+    Safety:
+      - No broker calls.
+      - No orders.
+      - No execution mutation.
+      - Only lifecycle memory is corrected to match local broker snapshot.
+    """
+    if signals_df is None or signals_df.empty:
+        return {
+            "signals_tickers": 0,
+            "broker_long": 0,
+            "forced_flat": 0,
+            "forced_long": 0,
+            "unchanged": 0,
+        }
+
+    ticker_col = next((c for c in ("ticker", "symbol", "sym") if c in signals_df.columns), None)
+    if ticker_col is None:
+        print(
+            "[LIFECYCLE_BROKER_SYNC] skipped reason=no_ticker_column_in_signals",
+            flush=True,
+        )
+        return {
+            "signals_tickers": 0,
+            "broker_long": 0,
+            "forced_flat": 0,
+            "forced_long": 0,
+            "unchanged": 0,
+        }
+
+    signal_tickers = sorted(
+        {_norm_ticker(v) for v in signals_df[ticker_col].tolist() if _norm_ticker(v)}
+    )
+    broker_long = _load_broker_long_tickers(positions_snapshot)
+    state = _load_state_file(state_path)
+
+    forced_flat = 0
+    forced_long = 0
+    unchanged = 0
+
+    for ticker in signal_tickers:
+        current = state.get(ticker)
+        if not isinstance(current, dict):
+            current = {}
+
+        old_pos = _coerce_str(current.get("position_state")) or "FLAT"
+        target_pos = "LONG" if ticker in broker_long else "FLAT"
+
+        if old_pos != target_pos:
+            current["position_state"] = target_pos
+            if target_pos == "FLAT":
+                # Clear stale long-side memory. This lets fresh BUY signals become
+                # BUY instead of being interpreted as already-held HOLDs.
+                current["last_action"] = "NONE"
+                current["last_change_date"] = None
+                current["cooldown_until"] = None
+                forced_flat += 1
+            else:
+                # Broker says long; keep state conservative and aligned.
+                current["last_action"] = current.get("last_action") or "HOLD"
+                forced_long += 1
+            state[ticker] = current
+        else:
+            unchanged += 1
+
+    try:
+        _save_state_file(state_path, state)
+    except Exception as e:
+        print(
+            f"[LIFECYCLE_BROKER_SYNC] save_failed error={type(e).__name__}: {e}",
+            flush=True,
+        )
+
+    print(
+        "[LIFECYCLE_BROKER_SYNC] "
+        f"signals_tickers={len(signal_tickers)} "
+        f"broker_long={len(broker_long)} "
+        f"forced_flat={forced_flat} "
+        f"forced_long={forced_long} "
+        f"unchanged={unchanged} "
+        f"positions_snapshot={positions_snapshot}",
+        flush=True,
+    )
+
+    return {
+        "signals_tickers": len(signal_tickers),
+        "broker_long": len(broker_long),
+        "forced_flat": forced_flat,
+        "forced_long": forced_long,
+        "unchanged": unchanged,
+    }
 
 
 def _normalize_pair(pos_in: str, act_in: str) -> Tuple[str, str, List[Tuple[str, str, str, str]]]:
@@ -143,7 +353,45 @@ def _normalize_lifecycle_dataframe(df: pd.DataFrame) -> Tuple[int, int, int]:
         pos_in = _coerce_str(df.at[idx, "position_state"])
         act_in = _coerce_str(df.at[idx, action_col])
 
+        # Entry-preservation fix:
+        # apply_lifecycle() records position_state *after* a BUY transition, so
+        # a valid FLAT -> BUY entry can appear here as LONG + BUY. The older
+        # normalizer treated every LONG + BUY as invalid and converted it to
+        # HOLD, which erased new-entry opportunities before broker reconciliation
+        # could build trade_opportunities.csv. When the row itself shows this was
+        # a fresh BUY transition, normalize the pair to FLAT + BUY instead. That
+        # represents the pre-trade broker state needed by downstream opportunity
+        # classification and remains a valid self-check pair.
+        state_changed_raw = (
+            _coerce_str(df.at[idx, "state_changed"]) if "state_changed" in df.columns else ""
+        )
+        last_action_raw = (
+            _coerce_str(df.at[idx, "last_action"]) if "last_action" in df.columns else ""
+        )
+        decision_reason_raw = (
+            str(df.at[idx, "lifecycle_decision_reason"]).strip().lower()
+            if "lifecycle_decision_reason" in df.columns
+            else ""
+        )
+        is_fresh_entry_buy = (
+            pos_in == "LONG"
+            and act_in == "BUY"
+            and (
+                state_changed_raw in {"TRUE", "1", "YES"}
+                or last_action_raw == "BUY"
+                or "flat_buy_to_buy" in decision_reason_raw
+            )
+        )
+        pre_changes: List[Tuple[str, str, str, str]] = []
+        if is_fresh_entry_buy:
+            pre_changes.append(
+                ("position_state", pos_in, "FLAT", "entry_buy_preserve_pre_trade_flat")
+            )
+            pos_in = "FLAT"
+
         new_pos, new_act, changes = _normalize_pair(pos_in, act_in)
+        if pre_changes:
+            changes = pre_changes + changes
 
         if changes:
             rows_normalized += 1
@@ -327,6 +575,68 @@ def _lifecycle_is_stale(signals_path: Path) -> Tuple[bool, str]:
     return False, ""
 
 
+def _preserve_entry_buys_against_broker_snapshot(
+    df: pd.DataFrame,
+    *,
+    positions_snapshot: Path = POSITIONS_SNAPSHOT,
+) -> int:
+    """
+    Preserve BUY intent for broker-flat symbols before row-pair normalization.
+
+    apply_lifecycle() stores position_state after applying a BUY transition, so a
+    valid new entry can appear as LONG + BUY inside signal_lifecycle.csv. The
+    normalizer then treats LONG + BUY as invalid and converts it to HOLD.
+
+    The broker snapshot is the authority for pre-trade position state. If the
+    broker does not currently hold the symbol and lifecycle_action/stance is BUY,
+    force the row pair back to FLAT + BUY so downstream opportunity generation
+    can classify it as ENTRY. This is read-only with respect to broker/execution.
+    """
+    if df is None or df.empty or "ticker" not in df.columns:
+        return 0
+
+    broker_long = _load_broker_long_tickers(positions_snapshot)
+    action_col = (
+        "lifecycle_action"
+        if "lifecycle_action" in df.columns
+        else ("stance" if "stance" in df.columns else None)
+    )
+    if action_col is None:
+        return 0
+
+    changed = 0
+    for idx in df.index:
+        ticker = _norm_state_symbol(df.at[idx, "ticker"])
+        if not ticker or ticker in broker_long:
+            continue
+        act = _coerce_str(df.at[idx, action_col])
+        sig = _coerce_str(df.at[idx, "signal"]) if "signal" in df.columns else ""
+        if act == "BUY" or sig == "BUY" and act == "BUY":
+            old_pos = (
+                _coerce_str(df.at[idx, "position_state"]) if "position_state" in df.columns else ""
+            )
+            if old_pos != "FLAT":
+                df.at[idx, "position_state"] = "FLAT"
+                changed += 1
+                print(
+                    f"[LIFECYCLE_ENTRY_BUY_PRESERVED] ticker={ticker} "
+                    f"old_position_state={old_pos or '<empty>'} new_position_state=FLAT "
+                    f"reason=broker_flat_buy_entry",
+                    flush=True,
+                )
+            if "stance" in df.columns:
+                df.at[idx, "stance"] = "BUY"
+            if "lifecycle_action" in df.columns:
+                df.at[idx, "lifecycle_action"] = "BUY"
+
+    print(
+        f"[LIFECYCLE_ENTRY_PRESERVE_SUMMARY] broker_long={len(broker_long)} "
+        f"entry_buys_preserved={changed} positions_snapshot={positions_snapshot}",
+        flush=True,
+    )
+    return changed
+
+
 def _rebuild_lifecycle(src: Path) -> int:
     """
     Core rebuild path shared between main() and ensure_lifecycle_fresh().
@@ -336,6 +646,14 @@ def _rebuild_lifecycle(src: Path) -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(src)
+
+    # Critical broker-state sync: stale LONG state was causing FLAT account
+    # BUY signals to become HOLD. Sync before apply_lifecycle reads STATE_PATH.
+    _sync_signal_state_with_broker_snapshot(
+        state_path=STATE_PATH,
+        signals_df=df,
+        positions_snapshot=POSITIONS_SNAPSHOT,
+    )
 
     lc_cfg = load_lifecycle_config()
     print("[LIFECYCLE CONFIG]", lc_cfg)
@@ -370,6 +688,15 @@ def _rebuild_lifecycle(src: Path) -> int:
         state_path=STATE_PATH,
         cfg=engine_cfg,
         lifecycle_logic=lifecycle_logic,
+    )
+
+    # Important: preserve new-entry BUY rows before pair normalization.
+    # Without this, apply_lifecycle() may output LONG + BUY for a fresh
+    # entry transition, and the normalizer converts it to HOLD. Broker
+    # snapshot truth determines whether the symbol is actually pre-trade FLAT.
+    _preserve_entry_buys_against_broker_snapshot(
+        out_df,
+        positions_snapshot=POSITIONS_SNAPSHOT,
     )
 
     rows_norm, fields_changed, remaining_invalid = _normalize_lifecycle_dataframe(out_df)

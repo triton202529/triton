@@ -10,6 +10,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
 
+. (Join-Path $scriptDir "loop_lock_utils.ps1")
+
 $loopLogDir = "data\results\continuous_loop"
 New-Item -ItemType Directory -Force -Path $loopLogDir | Out-Null
 
@@ -18,6 +20,8 @@ $loopLog = Join-Path $loopLogDir "continuous_loop_$startedAt.log"
 $lockFile = "data\live\continuous_loop.lock"
 
 New-Item -ItemType Directory -Force -Path "data\live" | Out-Null
+
+Clear-OrphanLoopLock -LockFile $lockFile -ScriptName "run_continuous_loop.ps1" | Out-Null
 
 if (Test-Path $lockFile) {
     Write-Host "[BLOCKED] Continuous loop lock already exists: $lockFile" -ForegroundColor Red
@@ -40,6 +44,14 @@ try {
     Log-Line "MaxCycles=$MaxCycles"
     Log-Line "LoopLog=$loopLog"
 
+    $graceMinutes = [Math]::Max(50, $IntervalMinutes + 10)
+    $hbRefresh = python -m services.loop_safety --refresh --source continuous_loop `
+        --grace-minutes $graceMinutes --continuous-interval-minutes $IntervalMinutes 2>&1
+    Log-Line "[HEARTBEAT_REFRESH] grace_minutes=$graceMinutes output=$hbRefresh"
+
+    $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
+    Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
+
     $cycle = 0
 
     while ($true) {
@@ -47,6 +59,9 @@ try {
 
         Log-Line ""
         Log-Line "[CYCLE_START] cycle=$cycle"
+
+        $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
+        Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
 
         powershell -ExecutionPolicy Bypass -File .\scripts\run_market_open.ps1
         $rc = $LASTEXITCODE

@@ -183,6 +183,15 @@ GUARD_SNAPSHOT_PATH = RESULTS_DIR / "guard_snapshot.json"
 RISK_REPORT_PATH = RESULTS_DIR / "risk_report.json"  # produced by services/generate_risk_report.py
 RISK_STATE_PATH = RESULTS_DIR / "adaptive_risk_state.json"  # legacy/optional fallback
 
+# Risk Office (Capital Preservation Doctrine stack — read-only watchdog artifacts)
+CPI_JSON_PATH = RESULTS_DIR / "capital_preservation_intelligence.json"
+CPE_JSON_PATH = RESULTS_DIR / "capital_preservation_escalation.json"
+CPA_JSON_PATH = RESULTS_DIR / "capital_preservation_advisory.json"
+CPD_JSON_PATH = RESULTS_DIR / "capital_preservation_decision_support.json"
+GOV_RISK_SUMMARY_PATH = RESULTS_DIR / "governance_risk_summary.json"
+WATCHDOG_ALERTS_PATH = RESULTS_DIR / "watchdog_alerts.json"
+WATCHDOG_STATUS_PATH = RESULTS_DIR / "watchdog_status.json"
+
 LIVE_ORDERS_PATH = RESULTS_DIR / "live_orders.csv"
 
 LIVE_ARMED_PATH = RESULTS_DIR / "live_armed.json"
@@ -264,6 +273,30 @@ GCC_VERDICT_MEM_PATH = (
     RESULTS_DIR / "arm_runtime_governance_institutional_verdict_engine_memory.csv"
 )
 GCC_DOSSIER_MEM_PATH = RESULTS_DIR / "arm_runtime_governance_human_escalation_dossier_memory.csv"
+
+# Governance Library Center (Step 138 — read-only documentation UI)
+GOVERNANCE_DOCS_DIR = PROJECT_ROOT / "docs" / "governance"
+
+# Governance Operations Platform (Steps 139–146 — read-only CSV registries)
+from dashboard import governance_operations as _gov_ops
+
+load_governance_csv = _gov_ops.load_governance_csv
+normalize_governance_status = _gov_ops.normalize_governance_status
+safe_parse_datetime = _gov_ops.safe_parse_datetime
+compute_record_age_days = _gov_ops.compute_record_age_days
+filter_dataframe_by_search = _gov_ops.filter_dataframe_by_search
+render_governance_kpi_card = _gov_ops.render_governance_kpi_card
+render_selected_record = _gov_ops.render_selected_record
+build_governance_timeline = _gov_ops.build_governance_timeline
+page_governance_evidence_registry = _gov_ops.page_governance_evidence_registry
+page_governance_audit_center = _gov_ops.page_governance_audit_center
+page_governance_decision_registry = _gov_ops.page_governance_decision_registry
+page_governance_escalation_registry = _gov_ops.page_governance_escalation_registry
+page_governance_traceability_explorer = _gov_ops.page_governance_traceability_explorer
+page_governance_investigation_center = _gov_ops.page_governance_investigation_center
+page_governance_intelligence_lab = _gov_ops.page_governance_intelligence_lab
+page_governance_timeline_center = _gov_ops.page_governance_timeline_center
+render_gcc_operations_overview = _gov_ops.render_gcc_operations_overview
 
 # Nice-to-have (do not force FAIL)
 MODEL_COMPARISON_PATH = RESULTS_DIR / "model_comparison.csv"
@@ -3389,6 +3422,399 @@ def page_risk_report() -> None:
 
     st.caption(f"Loaded: **{used}**")
     st.json(data)
+
+
+def page_risk_office() -> None:
+    """🛡️ Risk Office — capital preservation posture (read-only)."""
+    try:
+        from dashboard.risk_office import render_risk_office_dashboard
+        from dashboard.advanced_risk_intelligence import render_predictive_risk_section
+
+        render_risk_office_dashboard(RESULTS_DIR)
+        st.markdown("---")
+        render_predictive_risk_section(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Risk Office dashboard failed to load: {_short_err(e)}")
+
+
+def page_defensive_simulation_lab() -> None:
+    """🧪 Defensive Simulation Lab — counterfactual risk controls (read-only)."""
+    try:
+        from dashboard.advanced_risk_intelligence import render_defensive_simulation_lab
+
+        render_defensive_simulation_lab(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Defensive Simulation Lab failed to load: {_short_err(e)}")
+
+
+def page_executive_risk_command_center() -> None:
+    """🏛 Executive Risk Command Center — leadership briefing (read-only)."""
+    try:
+        from dashboard.advanced_risk_intelligence import render_executive_risk_command_center
+
+        render_executive_risk_command_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Executive Risk Command Center failed to load: {_short_err(e)}")
+
+
+def page_defensive_automation_sandbox() -> None:
+    """🧱 Defensive Automation Sandbox — hypothetical actions only (no execution)."""
+    try:
+        from dashboard.activation_safety import render_defensive_automation_sandbox
+
+        render_defensive_automation_sandbox(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Defensive Automation Sandbox failed to load: {_short_err(e)}")
+
+
+def page_human_approval_center() -> None:
+    """👤 Human Approval Center — queue status only (no execution)."""
+    try:
+        from dashboard.activation_safety import render_human_approval_center
+
+        render_human_approval_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Human Approval Center failed to load: {_short_err(e)}")
+
+
+def page_protective_action_policy_center() -> None:
+    """🛡️ Protective Action Policy Center — policy definitions (all disabled)."""
+    try:
+        from dashboard.activation_safety import render_protective_action_policy_center
+
+        render_protective_action_policy_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Protective Action Policy Center failed to load: {_short_err(e)}")
+
+
+def page_governance_authorization_center() -> None:
+    """🏛 Governance Authorization Center — four-layer authorization gate (read-only)."""
+    try:
+        from dashboard.governance_execution_readiness import render_governance_authorization_center
+
+        render_governance_authorization_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Authorization Center failed to load: {_short_err(e)}")
+
+
+def page_execution_readiness_center() -> None:
+    """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
+    try:
+        from dashboard.governance_execution_readiness import render_execution_readiness_center
+
+        render_execution_readiness_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Execution Readiness Center failed to load: {_short_err(e)}")
+
+
+def page_protective_action_trials() -> None:
+    """🧪 Protective Action Trials — paper-mode simulations only."""
+    try:
+        from dashboard.governance_execution_readiness import render_protective_action_trials
+
+        render_protective_action_trials(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Protective Action Trials failed to load: {_short_err(e)}")
+
+
+def page_protective_action_evaluation() -> None:
+    """📊 Protective Action Evaluation — trial effectiveness scoring (read-only)."""
+    try:
+        from dashboard.capital_preservation_evaluation import render_protective_action_evaluation
+
+        render_protective_action_evaluation(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Protective Action Evaluation failed to load: {_short_err(e)}")
+
+
+def page_adaptive_capital_preservation() -> None:
+    """🧠 Adaptive Capital Preservation — learn from simulations (no actions)."""
+    try:
+        from dashboard.capital_preservation_evaluation import render_adaptive_capital_preservation
+
+        render_adaptive_capital_preservation(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Adaptive Capital Preservation failed to load: {_short_err(e)}")
+
+
+def page_capital_preservation_governor() -> None:
+    """👑 Capital Preservation Governor — unified preservation posture (advisory)."""
+    try:
+        from dashboard.capital_preservation_evaluation import render_capital_preservation_governor
+
+        render_capital_preservation_governor(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Capital Preservation Governor failed to load: {_short_err(e)}")
+
+
+def page_capital_preservation_audit_center() -> None:
+    """📋 Capital Preservation Audit Center — unified preservation audit trail."""
+    try:
+        from dashboard.institutional_autonomy import render_capital_preservation_audit_center
+
+        render_capital_preservation_audit_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Capital Preservation Audit Center failed to load: {_short_err(e)}")
+
+
+def page_preservation_stress_lab() -> None:
+    """🧪 Preservation Stress Lab — counterfactual stress scenarios (simulation only)."""
+    try:
+        from dashboard.institutional_autonomy import render_preservation_stress_lab
+
+        render_preservation_stress_lab(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Preservation Stress Lab failed to load: {_short_err(e)}")
+
+
+def page_preservation_certification_center() -> None:
+    """🏅 Preservation Certification Center — paper-mode certification scoring."""
+    try:
+        from dashboard.institutional_autonomy import render_preservation_certification_center
+
+        render_preservation_certification_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Preservation Certification Center failed to load: {_short_err(e)}")
+
+
+def page_risk_committee_oversight() -> None:
+    """🏛 Risk Committee Oversight — committee assessments across preservation domains."""
+    try:
+        from dashboard.institutional_protection import render_risk_committee_oversight
+
+        render_risk_committee_oversight(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Risk Committee Oversight failed to load: {_short_err(e)}")
+
+
+def page_accountability_registry() -> None:
+    """📑 Accountability Registry — protective decision path traceability."""
+    try:
+        from dashboard.institutional_protection import render_accountability_registry
+
+        render_accountability_registry(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Accountability Registry failed to load: {_short_err(e)}")
+
+
+def page_preservation_governance_board() -> None:
+    """👑 Preservation Governance Board — unified advisory authority layer."""
+    try:
+        from dashboard.institutional_protection import render_preservation_governance_board
+
+        render_preservation_governance_board(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Preservation Governance Board failed to load: {_short_err(e)}")
+
+
+def page_investment_committee_review() -> None:
+    """🏛 Investment Committee Review — portfolio, risk, governance, certification, readiness."""
+    try:
+        from dashboard.institutional_operations import render_investment_committee_review
+
+        render_investment_committee_review(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Investment Committee Review failed to load: {_short_err(e)}")
+
+
+def page_triton_maturity_assessment() -> None:
+    """📈 Triton Maturity Assessment — institutional maturity scoring."""
+    try:
+        from dashboard.institutional_operations import render_triton_maturity_assessment
+
+        render_triton_maturity_assessment(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Triton Maturity Assessment failed to load: {_short_err(e)}")
+
+
+def page_strategic_oversight_center() -> None:
+    """🎯 Strategic Oversight Center — unified strategic advisory view."""
+    try:
+        from dashboard.institutional_operations import render_strategic_oversight_center
+
+        render_strategic_oversight_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Strategic Oversight Center failed to load: {_short_err(e)}")
+
+
+def page_decision_quality_center() -> None:
+    """🧩 Decision Quality Center — advisory and escalation consistency scoring."""
+    try:
+        from dashboard.institutional_intelligence import render_decision_quality_center
+
+        render_decision_quality_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Decision Quality Center failed to load: {_short_err(e)}")
+
+
+def page_institutional_intelligence() -> None:
+    """🏛 Institutional Intelligence — cross-layer institutional scoring."""
+    try:
+        from dashboard.institutional_intelligence import render_institutional_intelligence
+
+        render_institutional_intelligence(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Institutional Intelligence failed to load: {_short_err(e)}")
+
+
+def page_strategic_self_improvement() -> None:
+    """🚀 Strategic Self-Improvement — prioritized enhancement advisory."""
+    try:
+        from dashboard.institutional_intelligence import render_strategic_self_improvement
+
+        render_strategic_self_improvement(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Strategic Self-Improvement failed to load: {_short_err(e)}")
+
+
+def page_institutional_memory() -> None:
+    """🧠 Institutional Memory — persistent organizational event memory."""
+    try:
+        from dashboard.institutional_memory import render_institutional_memory
+
+        render_institutional_memory(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Institutional Memory failed to load: {_short_err(e)}")
+
+
+def page_institutional_knowledge_graph() -> None:
+    """🕸 Institutional Knowledge Graph — component relationship map."""
+    try:
+        from dashboard.institutional_memory import render_institutional_knowledge_graph
+
+        render_institutional_knowledge_graph(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Institutional Knowledge Graph failed to load: {_short_err(e)}")
+
+
+def page_organizational_learning_center() -> None:
+    """📚 Organizational Learning Center — pattern analysis and lessons."""
+    try:
+        from dashboard.institutional_memory import render_organizational_learning_center
+
+        render_organizational_learning_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Organizational Learning Center failed to load: {_short_err(e)}")
+
+
+def page_strategic_reasoning_center() -> None:
+    """♟ Strategic Reasoning Center — strategic importance ranking."""
+    try:
+        from dashboard.strategic_intelligence import render_strategic_reasoning_center
+
+        render_strategic_reasoning_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Strategic Reasoning Center failed to load: {_short_err(e)}")
+
+
+def page_consequence_forecast_center() -> None:
+    """🔮 Consequence Forecast Center — 90-day institutional projections."""
+    try:
+        from dashboard.strategic_intelligence import render_consequence_forecast_center
+
+        render_consequence_forecast_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Consequence Forecast Center failed to load: {_short_err(e)}")
+
+
+def page_institutional_wisdom_center() -> None:
+    """📜 Institutional Wisdom Center — long-term advisory guidance."""
+    try:
+        from dashboard.strategic_intelligence import render_institutional_wisdom_center
+
+        render_institutional_wisdom_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Institutional Wisdom Center failed to load: {_short_err(e)}")
+
+
+def page_scenario_planning_center() -> None:
+    """🗺 Scenario Planning Center — institutional scenario lenses."""
+    try:
+        from dashboard.institutional_planning import render_scenario_planning_center
+
+        render_scenario_planning_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Scenario Planning Center failed to load: {_short_err(e)}")
+
+
+def page_future_path_analysis_center() -> None:
+    """🛣 Future Path Analysis — trajectory evaluation."""
+    try:
+        from dashboard.institutional_planning import render_future_path_analysis_center
+
+        render_future_path_analysis_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Future Path Analysis failed to load: {_short_err(e)}")
+
+
+def page_strategic_priorities_center() -> None:
+    """🎯 Strategic Priorities Center — ranked institutional objectives."""
+    try:
+        from dashboard.institutional_planning import render_strategic_priorities_center
+
+        render_strategic_priorities_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Strategic Priorities Center failed to load: {_short_err(e)}")
+
+
+def page_attention_allocation_center() -> None:
+    """🎯 Attention Allocation Center — institutional focus scoring."""
+    try:
+        from dashboard.institutional_optimization import render_attention_allocation_center
+
+        render_attention_allocation_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Attention Allocation Center failed to load: {_short_err(e)}")
+
+
+def page_system_coordination_center() -> None:
+    """🔗 System Coordination Center — cross-system alignment."""
+    try:
+        from dashboard.institutional_optimization import render_system_coordination_center
+
+        render_system_coordination_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"System Coordination Center failed to load: {_short_err(e)}")
+
+
+def page_institutional_optimization_center() -> None:
+    """⚡ Institutional Optimization Center — optimization opportunities."""
+    try:
+        from dashboard.institutional_optimization import render_institutional_optimization_center
+
+        render_institutional_optimization_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Institutional Optimization Center failed to load: {_short_err(e)}")
+
+
+def page_causal_reasoning_center() -> None:
+    """🔍 Causal Reasoning Center — cause-effect analysis for institutional issues."""
+    try:
+        from dashboard.institutional_reasoning import render_causal_reasoning_center
+
+        render_causal_reasoning_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Causal Reasoning Center failed to load: {_short_err(e)}")
+
+
+def page_explainability_center() -> None:
+    """📖 Explainability Center — plain-language institutional explanations."""
+    try:
+        from dashboard.institutional_reasoning import render_explainability_center
+
+        render_explainability_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Explainability Center failed to load: {_short_err(e)}")
+
+
+def page_institutional_insights_center() -> None:
+    """💡 Institutional Insights — strategic observations and synthesized headlines."""
+    try:
+        from dashboard.institutional_reasoning import render_institutional_insights_center
+
+        render_institutional_insights_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Institutional Insights failed to load: {_short_err(e)}")
 
 
 def page_strategy_diagnostics() -> None:
@@ -20397,6 +20823,15 @@ def page_governance_command_center() -> None:
         "**Read-only observability — no execution, no broker calls, no runtime mutation.**"
     )
 
+    dossier_summary_early = (
+        _ad_load_json(GCC_DOSSIER_SUMMARY_PATH, "Human escalation dossier summary") or {}
+    )
+    guard_snap = _ad_load_json(GUARD_SNAPSHOT_PATH, "Guard snapshot") or {}
+    render_gcc_operations_overview(
+        dossier_summary=dossier_summary_early,
+        guard_snapshot=guard_snap,
+    )
+
     readiness = _ad_load_json(GCC_READINESS_SUMMARY_PATH, "Runtime readiness summary") or {}
     admission = _ad_load_json(GCC_ADMISSION_SUMMARY_PATH, "Runtime admission summary") or {}
     eligibility = (
@@ -20991,6 +21426,572 @@ def page_governance_command_center() -> None:
 
 
 # ──────────────────────────────
+# GOVERNANCE LIBRARY CENTER (Step 138 — read-only)
+# ──────────────────────────────
+
+_GLC_CATEGORIES: Tuple[str, ...] = (
+    "Constitution & Foundations",
+    "Operations",
+    "Committee & Decision Records",
+    "Audit & Evidence",
+    "Certification & Release",
+    "Intelligence & Health",
+    "Continuity & Resilience",
+    "Ethics, Trust & Legitimacy",
+    "Scalability & Evolution",
+    "Glossary, Dependencies & Traceability",
+    "Other",
+)
+
+_GLC_IMPORTANT_SPECS: Tuple[Tuple[int, str, str], ...] = (
+    (
+        100,
+        "Governance Constitution",
+        "Supreme principles, operating charter, and institutional rules.",
+    ),
+    (
+        101,
+        "Governance README / Navigation",
+        "Canonical index and fast routing across the governance library.",
+    ),
+    (
+        106,
+        "Governance Committee Charter",
+        "Committee authority, quorum decisions, and constitutional adjudication.",
+    ),
+    (
+        113,
+        "Governance Codex",
+        "Unified system map, priority order, and framework interoperability.",
+    ),
+    (130, "Governance Operating System", "GOS capstone architecture integrating Steps 90–129."),
+    (132, "Master Glossary", "Terminology authority and canonical definitions."),
+    (133, "Dependency Matrix", "Framework dependencies, change impact, and relationship map."),
+    (134, "Traceability Framework", "Evidence chains and audit/decision/change lineage."),
+    (135, "Final Certification", "GOS release certification and recertification requirements."),
+    (
+        136,
+        "Committee Operating Pack",
+        "Committee session templates and decision/escalation registers.",
+    ),
+    (137, "Audit Pack", "Operational audit toolkit and evidence collection procedures."),
+)
+
+_GLC_WHERE_TO_GO: Tuple[Tuple[str, str], ...] = (
+    (
+        "Understand Triton's constitution",
+        "Step 100 Constitution · Step 113 Codex · Step 130 GOS · Step 101 README",
+    ),
+    (
+        "Run a committee meeting",
+        "Step 106 Committee Charter · Step 136 Committee Operating Pack · Step 93 Roles & Authority",
+    ),
+    (
+        "Find audit/evidence rules",
+        "Step 107 Audit Readiness · Step 134 Traceability · Step 137 Audit Pack · Step 131 Library Audit",
+    ),
+    (
+        "Check certification status",
+        "Step 135 Final Certification · Step 110 Readiness Certification · Step 97 Training Certification",
+    ),
+    (
+        "Look up a governance term",
+        "Step 132 Master Glossary · Step 101 README index",
+    ),
+    (
+        "Trace a decision back to authority",
+        "Step 127 Delegation · Step 134 Traceability · Step 93 Roles & Authority · Step 121 Precedent",
+    ),
+    (
+        "Review governance dependencies",
+        "Step 133 Dependency Matrix · Step 130 GOS · Step 113 Codex",
+    ),
+    (
+        "Understand governance command center outputs",
+        "Step 91 Operator Playbook · Step 102 Operator Handbook · GCC (System → Governance Command Center)",
+    ),
+)
+
+
+def _glc_parse_readme_index(readme_text: str) -> Dict[str, Tuple[int, str, str]]:
+    """filename -> (step, link_label, purpose column)."""
+    index: Dict[str, Tuple[int, str, str]] = {}
+    row_re = re.compile(r"\|\s*\*\*(\d+)\*\*\s*\|\s*\[([^\]]+)\]\(\./([^)]+)\)\s*\|\s*([^|]+)\|")
+    for step_s, label, fname, purpose in row_re.findall(readme_text):
+        index[fname.strip()] = (int(step_s), label.strip(), purpose.strip())
+    index["README.md"] = (
+        101,
+        "Governance README",
+        "Canonical navigation index for the governance library.",
+    )
+    return index
+
+
+def _glc_extract_title(head: str, filename: str) -> str:
+    for line in head.splitlines()[:30]:
+        line = line.strip()
+        if line.startswith("# "):
+            return line[2:].strip()
+    stem = Path(filename).stem.replace("_", " ")
+    return stem
+
+
+def _glc_extract_purpose_snippet(content: str) -> str:
+    lines = content.splitlines()
+    for i, line in enumerate(lines[:120]):
+        low = line.strip().lower()
+        if low in ("## purpose", "## purpose of the operator handbook") or low.startswith(
+            "## purpose "
+        ):
+            parts: List[str] = []
+            for j in range(i + 1, min(i + 12, len(lines))):
+                nxt = lines[j].strip()
+                if nxt.startswith("#") or nxt == "---":
+                    break
+                if nxt:
+                    parts.append(nxt.lstrip("> ").strip())
+            if parts:
+                return " ".join(parts)[:400]
+    for line in lines[1:25]:
+        t = line.strip()
+        if t and not t.startswith("#") and not t.startswith("|") and not t.startswith("**"):
+            if len(t) > 40:
+                return t[:400]
+    return ""
+
+
+def _glc_infer_category(step: Optional[int], filename: str, title: str) -> str:
+    blob = f"{filename} {title}".lower()
+    if step in (100, 101, 113, 128, 130) or any(
+        k in blob
+        for k in ("constitution", "codex", "operating_system", "meta_governance", "readme")
+    ):
+        return "Constitution & Foundations"
+    if step in (106, 136, 127, 121, 120, 93) or any(
+        k in blob
+        for k in ("committee", "delegation", "precedent", "decision_quality", "roles_authority")
+    ):
+        return "Committee & Decision Records"
+    if step in (107, 131, 137, 96) or any(
+        k in blob
+        for k in ("audit", "regulatory", "reporting_audit", "consolidation", "traceability")
+    ):
+        if step == 134:
+            return "Glossary, Dependencies & Traceability"
+        return "Audit & Evidence"
+    if step in (97, 110, 135) or any(
+        k in blob for k in ("training", "readiness_certification", "final_certification")
+    ):
+        return "Certification & Release"
+    if step in (92, 99, 122) or any(
+        k in blob for k in ("metrics_kpi", "observability", "health_intelligence")
+    ):
+        return "Intelligence & Health"
+    if step in (108, 109, 111, 123, 119) or any(
+        k in blob
+        for k in ("crisis", "wargaming", "resilience", "succession", "postmortem", "survivability")
+    ):
+        return "Continuity & Resilience"
+    if step in (116, 117, 129, 118) or any(
+        k in blob for k in ("ethics", "trust", "legitimacy", "stakeholder", "capital_stewardship")
+    ):
+        return "Ethics, Trust & Legitimacy"
+    if step in (114, 125, 126, 94) or any(
+        k in blob for k in ("maturity_roadmap", "scalability", "complexity", "lifecycle_maturity")
+    ):
+        return "Scalability & Evolution"
+    if step in (132, 133, 134) or any(
+        k in blob for k in ("glossary", "dependency_matrix", "traceability_framework")
+    ):
+        return "Glossary, Dependencies & Traceability"
+    if step in (90, 91, 98, 102, 103, 104, 115, 124) or any(
+        k in blob
+        for k in (
+            "incident",
+            "operator",
+            "developer",
+            "executive",
+            "change_management",
+            "foresight",
+            "mission_alignment",
+            "playbook",
+            "handbook",
+        )
+    ):
+        return "Operations"
+    return "Other"
+
+
+def _glc_rule_based_meta(
+    *, category: str, title: str, step: Optional[int], summary: str
+) -> Tuple[str, str, str]:
+    purpose = summary or f"Governance manual supporting {category.lower()}."
+    when = "Open when this topic applies to your role, audit, or operational situation."
+    if step == 100:
+        when = "Orientation, conflict resolution, constitutional attestation, and supreme-rule questions."
+    elif step == 101:
+        when = "Finding the right manual quickly; onboarding; library navigation."
+    elif step == 91:
+        when = "Every operator session after reading the GCC Operator Decision Brief."
+    elif step in (106, 136):
+        when = "Committee sessions, Hard Halt lift, constitutional votes, and formal governance records."
+    elif step in (107, 137):
+        when = "Audits, diligence, investigations, and evidence preservation."
+    elif step == 132:
+        when = "Terminology disputes, authoring, and audit language consistency."
+    elif step == 134:
+        when = "Tracing decisions, evidence chains, and audit lineage."
+    elif step in (92, 122):
+        when = "Weekly or quarterly governance health review and deterioration signals."
+    related = "See Step 101 README index and Step 113 Codex for routing."
+    if category == "Committee & Decision Records":
+        related = "Steps 106, 136, 93, 127; GCC for live posture."
+    elif category == "Audit & Evidence":
+        related = "Steps 107, 131, 134, 137; Step 96 reporting packs."
+    elif category == "Certification & Release":
+        related = "Steps 135, 110, 97, 95 validation drills."
+    return purpose, when, related
+
+
+@st.cache_data(show_spinner=False)
+def _glc_build_catalog(docs_dir_str: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    docs_dir = Path(docs_dir_str)
+    if not docs_dir.is_dir():
+        return [], f"Governance docs folder not found: {docs_dir}"
+
+    md_files = sorted(docs_dir.glob("*.md"))
+    if not md_files:
+        return [], "No markdown files found in docs/governance."
+
+    readme_path = docs_dir / "README.md"
+    index: Dict[str, Tuple[int, str, str]] = {}
+    if readme_path.is_file():
+        try:
+            index = _glc_parse_readme_index(
+                readme_path.read_text(encoding="utf-8", errors="replace")
+            )
+        except Exception:
+            index = {"README.md": (101, "Governance README", "Navigation index.")}
+
+    catalog: List[Dict[str, Any]] = []
+    for path in md_files:
+        rel = path.name
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            catalog.append(
+                {
+                    "rel_path": rel,
+                    "filename": rel,
+                    "step": index.get(rel, (None, "", ""))[0],
+                    "title": rel,
+                    "category": "Other",
+                    "summary": f"Could not read file: {exc}",
+                    "purpose": "",
+                    "when_to_use": "",
+                    "related": "",
+                    "modified_utc": "",
+                    "search_text": rel.lower(),
+                    "read_error": str(exc),
+                }
+            )
+            continue
+
+        head = content[:8000]
+        step: Optional[int] = None
+        link_label = ""
+        readme_purpose = ""
+        if rel in index:
+            step, link_label, readme_purpose = index[rel]
+        else:
+            m_end = re.search(r"\(Step\s+(\d{2,3})\s+completion\)", content[-800:], re.I)
+            if m_end:
+                step = int(m_end.group(1))
+            m_head = re.search(r"Step\s+(\d{2,3})", head[:500], re.I)
+            if m_head:
+                step = int(m_head.group(1))
+
+        title = _glc_extract_title(head, rel)
+        if link_label and link_label not in title:
+            short_title = link_label
+        else:
+            short_title = title
+
+        snippet = _glc_extract_purpose_snippet(content)
+        summary = readme_purpose or snippet or f"Governance manual: {short_title}."
+        category = _glc_infer_category(step, rel, title)
+        purpose, when_to_use, related = _glc_rule_based_meta(
+            category=category, title=title, step=step, summary=summary
+        )
+        if snippet and not readme_purpose:
+            purpose = snippet[:400]
+
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M UTC"
+            )
+        except Exception:
+            mtime = ""
+
+        search_text = " ".join(
+            [
+                rel,
+                title,
+                short_title,
+                summary,
+                category,
+                str(step or ""),
+                content[:16000],
+            ]
+        ).lower()
+
+        catalog.append(
+            {
+                "rel_path": rel,
+                "filename": rel,
+                "step": step,
+                "title": short_title,
+                "category": category,
+                "summary": summary,
+                "purpose": purpose,
+                "when_to_use": when_to_use,
+                "related": related,
+                "modified_utc": mtime,
+                "search_text": search_text,
+                "read_error": None,
+            }
+        )
+
+    catalog.sort(
+        key=lambda d: (
+            d["step"] is None,
+            d["step"] if d["step"] is not None else 9999,
+            d["title"].lower(),
+        )
+    )
+    return catalog, None
+
+
+@st.cache_data(show_spinner=False)
+def _glc_read_file(docs_dir_str: str, rel_path: str) -> Tuple[str, Optional[str]]:
+    path = Path(docs_dir_str) / rel_path
+    if not path.is_file() or path.suffix.lower() != ".md":
+        return "", "Invalid document path."
+    try:
+        resolved = path.resolve()
+        base = Path(docs_dir_str).resolve()
+        if base not in resolved.parents and resolved != base:
+            return "", "Path outside governance library."
+        return path.read_text(encoding="utf-8", errors="replace"), None
+    except Exception as exc:
+        return "", str(exc)
+
+
+def _glc_doc_by_step(catalog: List[Dict[str, Any]], step: int) -> Optional[Dict[str, Any]]:
+    for doc in catalog:
+        if doc.get("step") == step:
+            return doc
+    return None
+
+
+def _glc_filter_catalog(
+    catalog: List[Dict[str, Any]],
+    *,
+    query: str,
+    category: str,
+    step_min: Optional[int],
+    step_max: Optional[int],
+) -> List[Dict[str, Any]]:
+    q = query.strip().lower()
+    out: List[Dict[str, Any]] = []
+    for doc in catalog:
+        if category != "All" and doc.get("category") != category:
+            continue
+        stp = doc.get("step")
+        if step_min is not None and (stp is None or stp < step_min):
+            continue
+        if step_max is not None and (stp is None or stp > step_max):
+            continue
+        if q and q not in doc.get("search_text", ""):
+            continue
+        out.append(doc)
+    return out
+
+
+def page_governance_library_center() -> None:
+    """Governance Library Center — read-only browse/search for docs/governance manuals."""
+    st.title("📚 Governance Library Center")
+    st.caption(
+        "Central library for Triton governance manuals, operating packs, audit frameworks, "
+        "and constitutional references."
+    )
+    st.info(
+        "**Read-only documentation center.** This page does not change governance state, "
+        "runtime policy, broker behavior, or execution logic."
+    )
+
+    st.markdown(
+        """
+        <style>
+        .glc-banner{border-radius:10px;border:1px solid rgba(148,163,184,.35);
+        padding:.5rem .75rem;margin:.25rem 0 1rem 0;background:rgba(15,23,42,.45);}
+        .glc-imp{border-radius:10px;border:1px solid rgba(59,130,246,.35);
+        padding:.65rem .75rem;margin:.35rem 0;background:rgba(15,23,42,.35);min-height:7.5rem;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    catalog, catalog_err = _glc_build_catalog(str(GOVERNANCE_DOCS_DIR.resolve()))
+    if catalog_err:
+        st.warning(catalog_err)
+        return
+
+    st.caption(f"**{len(catalog)}** governance documents indexed from `docs/governance/`.")
+
+    # ── Important documents ──────────────────────────────────────────
+    st.markdown("### Important documents")
+    imp_cols = st.columns(2)
+    for idx, (step, label, purpose) in enumerate(_GLC_IMPORTANT_SPECS):
+        doc = _glc_doc_by_step(catalog, step)
+        col = imp_cols[idx % 2]
+        with col:
+            with st.container(border=True):
+                st.markdown(f"**Step {step} — {label}**")
+                st.caption(purpose)
+                if doc and not doc.get("read_error"):
+                    if st.button("Open / Read", key=f"glc_imp_open_{step}"):
+                        st.session_state["glc_selected_path"] = doc["rel_path"]
+                        st.rerun()
+                else:
+                    st.caption("_Document not found in library scan._")
+
+    st.markdown("---")
+
+    # ── Where do I go? ───────────────────────────────────────────────
+    with st.expander("What are you trying to do?", expanded=False):
+        for question, pointers in _GLC_WHERE_TO_GO:
+            st.markdown(f"**{question}**")
+            st.caption(f"→ {pointers}")
+
+    st.markdown("---")
+
+    # ── Search & filters ─────────────────────────────────────────────
+    st.markdown("### Browse & search")
+    f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
+    with f1:
+        search_q = st.text_input(
+            "Search",
+            placeholder="Title, step, keyword, filename, or content…",
+            key="glc_search_q",
+        )
+    with f2:
+        cat_filter = st.selectbox(
+            "Category",
+            ["All", *_GLC_CATEGORIES],
+            key="glc_cat_filter",
+        )
+    with f3:
+        use_step_min = st.checkbox("Min step", value=False, key="glc_use_min")
+        step_min = st.number_input("Min", min_value=90, max_value=200, value=90, key="glc_step_min")
+    with f4:
+        use_step_max = st.checkbox("Max step", value=False, key="glc_use_max")
+        step_max = st.number_input(
+            "Max", min_value=90, max_value=200, value=137, key="glc_step_max"
+        )
+
+    filtered = _glc_filter_catalog(
+        catalog,
+        query=search_q,
+        category=cat_filter,
+        step_min=int(step_min) if use_step_min else None,
+        step_max=int(step_max) if use_step_max else None,
+    )
+    st.caption(f"Showing **{len(filtered)}** of **{len(catalog)}** documents.")
+
+    if not filtered:
+        st.info("No documents match your filters. Clear search or widen the step range.")
+    else:
+        list_df = pd.DataFrame(
+            [
+                {
+                    "Step": d["step"] if d["step"] is not None else "—",
+                    "Title": d["title"],
+                    "Category": d["category"],
+                    "Summary": (d["summary"] or "")[:120]
+                    + ("…" if len(d["summary"] or "") > 120 else ""),
+                    "File": d["filename"],
+                    "Modified": d.get("modified_utc") or "—",
+                }
+                for d in filtered
+            ]
+        )
+        st.dataframe(list_df, use_container_width=True, hide_index=True)
+
+        pick_labels = [
+            f"Step {d['step']} — {d['title']}" if d["step"] is not None else d["title"]
+            for d in filtered
+        ]
+        pick_map = {lbl: d["rel_path"] for lbl, d in zip(pick_labels, filtered)}
+        pick_choice = st.selectbox(
+            "Select document to read",
+            ["—"] + pick_labels,
+            key="glc_pick_doc",
+        )
+        if st.button("Read selected document", key="glc_read_selected"):
+            if pick_choice and pick_choice != "—":
+                st.session_state["glc_selected_path"] = pick_map[pick_choice]
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── Document reader ────────────────────────────────────────────────
+    selected_rel = st.session_state.get("glc_selected_path")
+    if not selected_rel:
+        return
+
+    selected = next((d for d in catalog if d["rel_path"] == selected_rel), None)
+    if selected is None:
+        st.warning(f"Selected document not in catalog: `{selected_rel}`")
+        return
+
+    st.markdown("### Document reader")
+    if st.button("← Back to library list", key="glc_clear_reader"):
+        st.session_state.pop("glc_selected_path", None)
+        st.rerun()
+
+    if selected.get("read_error"):
+        st.error(f"Cannot read `{selected_rel}`: {selected['read_error']}")
+        return
+
+    content, read_err = _glc_read_file(str(GOVERNANCE_DOCS_DIR.resolve()), selected_rel)
+    if read_err:
+        st.error(f"Could not load `{selected_rel}`: {read_err}")
+        return
+
+    step_disp = selected["step"] if selected["step"] is not None else "—"
+    st.markdown(f"## {selected['title']}")
+    st.caption(
+        f"**File:** `docs/governance/{selected_rel}` · **Category:** {selected['category']} · "
+        f"**Step:** {step_disp} · **Modified:** {selected.get('modified_utc') or '—'}"
+    )
+
+    st.markdown("#### What this document is for")
+    st.write(selected.get("purpose") or selected.get("summary") or "—")
+    st.markdown("#### When to use it")
+    st.write(selected.get("when_to_use") or "—")
+    st.markdown("#### Related documents")
+    st.write(selected.get("related") or "—")
+
+    st.markdown("---")
+    with st.expander("Raw markdown source", expanded=False):
+        st.code(content, language="markdown")
+
+    st.markdown("---")
+    st.markdown(content)
+
+
+# ──────────────────────────────
 # ROUTER (single source of truth)
 # ──────────────────────────────
 PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
@@ -21008,6 +22009,60 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Signals", "Feature Importance"): page_feature_importance,
     ("Signals", "Model Comparison"): page_model_comparison,
     ("Risk & Guardrails", "Risk Report"): page_risk_report,
+    ("Risk & Guardrails", "🛡️ Risk Office"): page_risk_office,
+    ("Risk & Guardrails", "🧪 Defensive Simulation Lab"): page_defensive_simulation_lab,
+    ("Risk & Guardrails", "🏛 Executive Risk Command Center"): page_executive_risk_command_center,
+    ("Risk & Guardrails", "🧱 Defensive Automation Sandbox"): page_defensive_automation_sandbox,
+    ("Risk & Guardrails", "👤 Human Approval Center"): page_human_approval_center,
+    (
+        "Risk & Guardrails",
+        "🛡️ Protective Action Policy Center",
+    ): page_protective_action_policy_center,
+    (
+        "Risk & Guardrails",
+        "🏛 Governance Authorization Center",
+    ): page_governance_authorization_center,
+    ("Risk & Guardrails", "⚙️ Execution Readiness Center"): page_execution_readiness_center,
+    ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
+    ("Risk & Guardrails", "📊 Protective Action Evaluation"): page_protective_action_evaluation,
+    ("Risk & Guardrails", "🧠 Adaptive Capital Preservation"): page_adaptive_capital_preservation,
+    ("Risk & Guardrails", "👑 Capital Preservation Governor"): page_capital_preservation_governor,
+    (
+        "Risk & Guardrails",
+        "📋 Capital Preservation Audit Center",
+    ): page_capital_preservation_audit_center,
+    ("Risk & Guardrails", "🧪 Preservation Stress Lab"): page_preservation_stress_lab,
+    (
+        "Risk & Guardrails",
+        "🏅 Preservation Certification Center",
+    ): page_preservation_certification_center,
+    ("Risk & Guardrails", "🏛 Risk Committee Oversight"): page_risk_committee_oversight,
+    ("Risk & Guardrails", "📑 Accountability Registry"): page_accountability_registry,
+    ("Risk & Guardrails", "👑 Preservation Governance Board"): page_preservation_governance_board,
+    ("Risk & Guardrails", "🏛 Investment Committee Review"): page_investment_committee_review,
+    ("Risk & Guardrails", "📈 Triton Maturity Assessment"): page_triton_maturity_assessment,
+    ("Risk & Guardrails", "🎯 Strategic Oversight Center"): page_strategic_oversight_center,
+    ("Risk & Guardrails", "🧩 Decision Quality Center"): page_decision_quality_center,
+    ("Risk & Guardrails", "🏛 Institutional Intelligence"): page_institutional_intelligence,
+    ("Risk & Guardrails", "🚀 Strategic Self-Improvement"): page_strategic_self_improvement,
+    ("Risk & Guardrails", "🧠 Institutional Memory"): page_institutional_memory,
+    ("Risk & Guardrails", "🕸 Institutional Knowledge Graph"): page_institutional_knowledge_graph,
+    ("Risk & Guardrails", "📚 Organizational Learning Center"): page_organizational_learning_center,
+    ("Risk & Guardrails", "🔍 Causal Reasoning Center"): page_causal_reasoning_center,
+    ("Risk & Guardrails", "📖 Explainability Center"): page_explainability_center,
+    ("Risk & Guardrails", "💡 Institutional Insights"): page_institutional_insights_center,
+    ("Risk & Guardrails", "♟ Strategic Reasoning Center"): page_strategic_reasoning_center,
+    ("Risk & Guardrails", "🔮 Consequence Forecast Center"): page_consequence_forecast_center,
+    ("Risk & Guardrails", "📜 Institutional Wisdom Center"): page_institutional_wisdom_center,
+    ("Risk & Guardrails", "🗺 Scenario Planning Center"): page_scenario_planning_center,
+    ("Risk & Guardrails", "🛣 Future Path Analysis"): page_future_path_analysis_center,
+    ("Risk & Guardrails", "🎯 Strategic Priorities Center"): page_strategic_priorities_center,
+    ("Risk & Guardrails", "🎯 Attention Allocation Center"): page_attention_allocation_center,
+    ("Risk & Guardrails", "🔗 System Coordination Center"): page_system_coordination_center,
+    (
+        "Risk & Guardrails",
+        "⚡ Institutional Optimization Center",
+    ): page_institutional_optimization_center,
     ("Risk & Guardrails", "Strategy Diagnostics"): page_strategy_diagnostics,
     ("Research / Intel", "News Sentiment"): page_news_sentiment,
     ("Research / Intel", "Smart Alerts"): page_smart_alerts,
@@ -21022,6 +22077,15 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("System", "🧪 Adaptation Simulation"): page_adaptation_simulation,
     ("System", "📊 Performance Intelligence"): page_performance_intelligence,
     ("System", "🏛 Governance Command Center"): page_governance_command_center,
+    ("System", "📚 Governance Library Center"): page_governance_library_center,
+    ("System", "🗂 Governance Evidence Registry"): page_governance_evidence_registry,
+    ("System", "🧾 Governance Audit Center"): page_governance_audit_center,
+    ("System", "⚖️ Governance Decision Registry"): page_governance_decision_registry,
+    ("System", "🚨 Governance Escalation Registry"): page_governance_escalation_registry,
+    ("System", "🔗 Governance Traceability Explorer"): page_governance_traceability_explorer,
+    ("System", "🕵️ Governance Investigation Center"): page_governance_investigation_center,
+    ("System", "🧠 Governance Intelligence Lab"): page_governance_intelligence_lab,
+    ("System", "🕰 Governance Timeline Center"): page_governance_timeline_center,
     ("System", "Execution / Health"): page_execution_health,
     ("System", "🚦 Live Orders Panel"): page_live_orders_panel,
     ("System", "🟢 Live Run (Phase 1.5)"): page_live_run,
@@ -21049,7 +22113,49 @@ SECTIONS: Dict[str, List[str]] = {
         "Feature Importance",
         "Model Comparison",
     ],
-    "Risk & Guardrails": ["Risk Report", "Strategy Diagnostics"],
+    "Risk & Guardrails": [
+        "Risk Report",
+        "🛡️ Risk Office",
+        "🧪 Defensive Simulation Lab",
+        "🏛 Executive Risk Command Center",
+        "🧱 Defensive Automation Sandbox",
+        "👤 Human Approval Center",
+        "🛡️ Protective Action Policy Center",
+        "🏛 Governance Authorization Center",
+        "⚙️ Execution Readiness Center",
+        "🧪 Protective Action Trials",
+        "📊 Protective Action Evaluation",
+        "🧠 Adaptive Capital Preservation",
+        "👑 Capital Preservation Governor",
+        "📋 Capital Preservation Audit Center",
+        "🧪 Preservation Stress Lab",
+        "🏅 Preservation Certification Center",
+        "🏛 Risk Committee Oversight",
+        "📑 Accountability Registry",
+        "👑 Preservation Governance Board",
+        "🏛 Investment Committee Review",
+        "📈 Triton Maturity Assessment",
+        "🎯 Strategic Oversight Center",
+        "🧩 Decision Quality Center",
+        "🏛 Institutional Intelligence",
+        "🚀 Strategic Self-Improvement",
+        "🧠 Institutional Memory",
+        "🕸 Institutional Knowledge Graph",
+        "📚 Organizational Learning Center",
+        "🔍 Causal Reasoning Center",
+        "📖 Explainability Center",
+        "💡 Institutional Insights",
+        "♟ Strategic Reasoning Center",
+        "🔮 Consequence Forecast Center",
+        "📜 Institutional Wisdom Center",
+        "🗺 Scenario Planning Center",
+        "🛣 Future Path Analysis",
+        "🎯 Strategic Priorities Center",
+        "🎯 Attention Allocation Center",
+        "🔗 System Coordination Center",
+        "⚡ Institutional Optimization Center",
+        "Strategy Diagnostics",
+    ],
     "Research / Intel": ["News Sentiment", "Smart Alerts", "Economic Calendar"],
     "System": [
         "🧾 Data Contracts",
@@ -21062,6 +22168,15 @@ SECTIONS: Dict[str, List[str]] = {
         "🧪 Adaptation Simulation",
         "📊 Performance Intelligence",
         "🏛 Governance Command Center",
+        "📚 Governance Library Center",
+        "🗂 Governance Evidence Registry",
+        "🧾 Governance Audit Center",
+        "⚖️ Governance Decision Registry",
+        "🚨 Governance Escalation Registry",
+        "🔗 Governance Traceability Explorer",
+        "🕵️ Governance Investigation Center",
+        "🧠 Governance Intelligence Lab",
+        "🕰 Governance Timeline Center",
         "Execution / Health",
         "🚦 Live Orders Panel",
         "🟢 Live Run (Phase 1.5)",
