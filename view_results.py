@@ -11,10 +11,22 @@ st.title("📊 Triton AI Unified Dashboard")
 
 RESULTS_DIR = "data/results"
 
+def normalize_oversized_integer_columns(df):
+    for col in df.select_dtypes(include=["object"]).columns:
+        values = df[col].dropna().astype(str).str.strip()
+        if values.empty:
+            continue
+
+        integer_like = values.str.fullmatch(r"[+-]?\d+")
+        if integer_like.all() and values.str.len().max() > 18:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df
+
 def load_csv(filename):
     try:
         path = os.path.join(RESULTS_DIR, filename)
-        return pd.read_csv(path)
+        return normalize_oversized_integer_columns(pd.read_csv(path))
     except Exception as e:
         st.error(f"❌ Could not load {filename}: {e}")
         return pd.DataFrame()
