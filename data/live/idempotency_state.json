@@ -1466,6 +1466,14 @@
       "placed": 1,
       "session": "manage_pos_20260501_133114",
       "ts_utc": "2026-05-01T13:31:25Z"
+    },
+    {
+      "failed": 0,
+      "fingerprint": "453536761071f3f67bf328cb8971b98d72359214414182e8fe3976aa3cef697d",
+      "ok": true,
+      "placed": 8,
+      "session": "exec_trades_20260608_140805",
+      "ts_utc": "2026-06-08T14:08:17Z"
     }
   ],
   "submitted": {

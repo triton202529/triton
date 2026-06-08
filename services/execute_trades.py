@@ -4071,6 +4071,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     dry_run = not bool(args.execute)
 
+    try:
+        from services.paper_submission_gate_audit import audit_execute_trades_entry
+
+        audit_execute_trades_entry(
+            execute_flag=bool(args.execute),
+            mode=args.mode,
+            config=cfg,
+            argv=list(argv if argv is not None else sys.argv[1:]),
+        )
+    except Exception:
+        pass
+
     op_path = Path(args.opportunities_path) if args.opportunities_path else DEFAULT_OPPS
     orders_path = Path(args.orders_path) if args.orders_path else DEFAULT_ORDERS_TODAY
 
