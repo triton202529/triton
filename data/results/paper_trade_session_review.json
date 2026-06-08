@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-06-08T22:48:21Z",
+  "session_date": "2026-06-08",
+  "mode": "paper",
+  "initial_buys": [
+    "AMD",
+    "ARKK",
+    "GBTC",
+    "INTC",
+    "QQQ",
+    "SLV",
+    "TSLA",
+    "XLK"
+  ],
+  "adds": [
+    {
+      "symbol": "ARKK",
+      "add_qty": 1
+    }
+  ],
+  "exits_reviewed": [
+    "TSLA",
+    "SLV"
+  ],
+  "exit_reviews": [
+    {
+      "symbol": "TSLA",
+      "exit_type": "ROTATE_EXIT",
+      "entry_qty": 3.0,
+      "exit_qty": 3.0,
+      "entry_price": 401.993333,
+      "exit_price": 402.976667,
+      "realized_pl": 2.95,
+      "lifecycle_before": "WAIT",
+      "effective_stance_before": "WAIT",
+      "risk_flag": "OK",
+      "exit_reason": "ROTATE_EXIT/weak rotation",
+      "evidence": "total_pl=54.35; session_realized_pl=2.95; risk_flag=OK; allocation_action=; rotation=forced_rotation_weakest; audit_signal=ENTRY; audit_signal=ENTRY; audit_signal=ENTRY; audit_signal=ENTRY; audit_signal=ENTRY; audit_signal=BUY; audit_signal=plan; audit_signal=ROTATE_EXIT; audit_signal=plan; review_reason=ROTATE_EXIT sold full position despite OK risk_flag and positive total_pl (+54.35); rotation pressure on a winner may be too aggressive under turnover cap",
+      "verdict": "QUESTIONABLE",
+      "review_reason": "ROTATE_EXIT sold full position despite OK risk_flag and positive total_pl (+54.35); rotation pressure on a winner may be too aggressive under turnover cap"
+    },
+    {
+      "symbol": "SLV",
+      "exit_type": "FORCED_EXIT",
+      "entry_qty": 4.0,
+      "exit_qty": 4.0,
+      "entry_price": 61.37,
+      "exit_price": 61.89,
+      "realized_pl": 2.08,
+      "lifecycle_before": "BUY",
+      "effective_stance_before": "BUY",
+      "risk_flag": "TRIM_PRIORITY",
+      "exit_reason": "high_drag_protection/TRIM_PRIORITY/forced exit",
+      "evidence": "total_pl=-120.85; session_unrealized_pl=2.08; risk_flag=TRIM_PRIORITY; allocation_action=; audit=KEPT; audit=WRITTEN_TO_ORDERS_TODAY; historical_drag_exceeds_threshold; review_reason=Full EXIT applied under TRIM_PRIORITY/high_drag while session P/L was positive; stale cumulative drag (-120.85) drove forced exit rather than trim-only reduction",
+      "verdict": "QUESTIONABLE",
+      "review_reason": "Full EXIT applied under TRIM_PRIORITY/high_drag while session P/L was positive; stale cumulative drag (-120.85) drove forced exit rather than trim-only reduction"
+    }
+  ],
+  "verdict_counts": {
+    "CORRECT": 0,
+    "QUESTIONABLE": 2,
+    "INCORRECT": 0
+  },
+  "open_positions": [
+    "ARKK",
+    "GBTC",
+    "INTC",
+    "QQQ",
+    "XLK"
+  ],
+  "allocation_summary": {
+    "trim_priority_count": 17,
+    "force_exit_count": 1
+  },
+  "trade_log_rows": 11,
+  "summary": "Paper session 2026-06-08: 8 initial BUYs, 1 ADD(s), 2 reviewed exit(s), 5 open position(s). SLV exit driven by high_drag/TRIM_PRIORITY; TSLA by ROTATE_EXIT rotation.",
+  "disclaimer": "Read-only session review. No trades or execution changes."
+}

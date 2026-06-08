@@ -294,7 +294,7 @@ def _entry_certification_status(
     evaluation: Optional[str] = None,
     cert_status: str,
 ) -> str:
-    if execution_permitted or overall_auth:
+    if execution_permitted:
         return "NOT_CERTIFIED"
     if queue_status == "APPROVED":
         return "APPROVED_PENDING_EXECUTION_BLOCK"

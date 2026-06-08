@@ -16,15 +16,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 
-CERTIFICATION_AREAS = (
-    "Monitoring",
-    "Alerting",
-    "Governance",
-    "Authorization",
-    "Readiness",
-    "Simulation",
-    "Evaluation",
-    "Governor",
+from services.capital_preservation_certification import (
+    CERTIFICATION_AREAS,
+    compute_preservation_certification,
 )
 
 GOVERNANCE_BLOCK_LEVELS = frozenset(
@@ -503,150 +497,6 @@ def compute_stress_test_results(
         "baseline_cps": cps,
         "baseline_escalation": escalation,
         "disclaimer": "Stress tests are counterfactual simulations only. No broker actions.",
-    }
-
-
-def _area_result(certified: bool, score: int, notes: str) -> Dict[str, Any]:
-    return {"certified": certified, "score": score, "notes": notes}
-
-
-def compute_preservation_certification(
-    *,
-    cpi_doc: Dict[str, Any],
-    alerts_doc: Dict[str, Any],
-    gov_doc: Dict[str, Any],
-    auth_doc: Dict[str, Any],
-    readiness_doc: Dict[str, Any],
-    sim_doc: Dict[str, Any],
-    evaluation_doc: Dict[str, Any],
-    governor_doc: Dict[str, Any],
-    cpe_doc: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Phase 24: score certification areas from existing artifacts."""
-    ts = _iso_utc()
-    areas: Dict[str, Dict[str, Any]] = {}
-    failed: List[str] = []
-
-    cps = int(cpi_doc.get("capital_preservation_score") or 0)
-    monitoring_score = int(min(100, max(0, cps)))
-    monitoring_cert = bool(cpi_doc.get("generated_at")) and cps >= 30
-    areas["Monitoring"] = _area_result(
-        monitoring_cert,
-        monitoring_score,
-        f"CPS={cps}, band={cpi_doc.get('health_band')}, trend={cpi_doc.get('risk_trend')}",
-    )
-
-    active_count = len(alerts_doc.get("active_alerts") or [])
-    alert_score = 70 if alerts_doc.get("generated_at") else 20
-    if active_count > 0:
-        alert_score = min(100, alert_score + 10)
-    alert_cert = bool(alerts_doc.get("generated_at"))
-    areas["Alerting"] = _area_result(
-        alert_cert,
-        alert_score,
-        f"{active_count} active alerts tracked",
-    )
-
-    gov_level = str(gov_doc.get("governance_awareness_level") or "").upper()
-    gov_score = 80 if gov_level == "GREEN" else (60 if gov_level == "YELLOW" else 35)
-    gov_cert = gov_level not in GOVERNANCE_BLOCK_LEVELS and bool(gov_doc.get("generated_at"))
-    areas["Governance"] = _area_result(
-        gov_cert,
-        gov_score,
-        f"awareness={gov_level}, status={gov_doc.get('governance_status')}",
-    )
-
-    auth_score = 90 if auth_doc.get("overall_authorization") else 25
-    auth_cert = bool(
-        auth_doc.get("overall_authorization")
-        and auth_doc.get("execution_authorized")
-        and auth_doc.get("governance_authorized")
-    )
-    areas["Authorization"] = _area_result(
-        auth_cert,
-        auth_score,
-        f"overall={auth_doc.get('overall_authorization')}, execution={auth_doc.get('execution_authorized')}",
-    )
-
-    passing = readiness_doc.get("checks_passing_count", 0)
-    total = readiness_doc.get("checks_total", 8) or 8
-    readiness_score = int(round((passing / total) * 100)) if total else 0
-    readiness_cert = (
-        readiness_doc.get("readiness_status") == "READY"
-        and not readiness_doc.get("live_execution_permitted")
-        and readiness_score >= 75
-    )
-    areas["Readiness"] = _area_result(
-        readiness_cert,
-        readiness_score,
-        f"status={readiness_doc.get('readiness_status')}, {passing}/{total} checks passing",
-    )
-
-    sim_count = len(sim_doc.get("simulations") or [])
-    sim_score = min(100, 40 + sim_count * 8) if sim_doc.get("generated_at") else 0
-    sim_cert = sim_count >= 3 and bool(sim_doc.get("generated_at"))
-    areas["Simulation"] = _area_result(
-        sim_cert,
-        sim_score,
-        f"{sim_count} defensive simulations on file",
-    )
-
-    eval_count = evaluation_doc.get("evaluation_count", 0)
-    avg_eff = _safe_float(evaluation_doc.get("average_effectiveness"), 0.0) or 0.0
-    eval_score = int(min(100, avg_eff)) if eval_count else 0
-    eval_cert = eval_count >= 2 and avg_eff >= 50
-    areas["Evaluation"] = _area_result(
-        eval_cert,
-        eval_score,
-        f"{eval_count} trials evaluated, avg effectiveness={avg_eff}",
-    )
-
-    gov_conf = int(governor_doc.get("governor_confidence") or 0)
-    posture = str(governor_doc.get("preservation_posture") or "UNKNOWN")
-    governor_score = gov_conf
-    governor_cert = bool(governor_doc.get("generated_at")) and posture not in ("CRITICAL",)
-    areas["Governor"] = _area_result(
-        governor_cert,
-        governor_score,
-        f"posture={posture}, confidence={gov_conf}%",
-    )
-
-    for name, area in areas.items():
-        if not area["certified"]:
-            failed.append(name)
-
-    certification_score = (
-        round(sum(a["score"] for a in areas.values()) / len(areas), 1) if areas else 0.0
-    )
-    certified_count = sum(1 for a in areas.values() if a["certified"])
-
-    if (
-        auth_doc.get("execution_authorized")
-        or readiness_doc.get("live_execution_permitted")
-        or auth_doc.get("overall_authorization")
-    ):
-        certification_status = "NOT_CERTIFIED"
-    elif certified_count == len(CERTIFICATION_AREAS) and certification_score >= 80:
-        certification_status = "CERTIFIED_FOR_PAPER_PROTECTION"
-    elif certified_count >= 4 and certification_score >= 55:
-        certification_status = "PARTIALLY_CERTIFIED"
-    else:
-        certification_status = "NOT_CERTIFIED"
-
-    if auth_doc.get("execution_authorized") or readiness_doc.get("live_execution_permitted"):
-        if "Live execution gates must remain blocked" not in failed:
-            failed.insert(0, "Live execution gates must remain blocked")
-
-    return {
-        "generated_at": ts,
-        "certification_status": certification_status,
-        "certification_score": certification_score,
-        "certified_area_count": certified_count,
-        "total_areas": len(CERTIFICATION_AREAS),
-        "areas": areas,
-        "failed_requirements": failed,
-        "escalation_state": cpe_doc.get("escalation_state"),
-        "disclaimer": "Certification assesses paper-mode protection only. No live execution.",
     }
 
 
