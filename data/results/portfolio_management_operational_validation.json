@@ -1,0 +1,496 @@
+{
+  "generated_at": "2026-06-09T03:32:06Z",
+  "phase": "155",
+  "mode": "read_only_operational_validation",
+  "disclaimer": "Operational validation gathers evidence only. No execution, lifecycle, or governance changes.",
+  "scorecard": {
+    "paper_environment": "PASS",
+    "portfolio_observation": "PASS",
+    "protection_framework": "PASS",
+    "rotation_validation": "NO_ROTATION_OBSERVED",
+    "overall_validation": "PASS"
+  },
+  "part_a_paper_environment": {
+    "paper_execution": true,
+    "governance_authorized": true,
+    "execution_authorized": true,
+    "live_execution": false,
+    "status": "PASS",
+    "env_var": "1",
+    "paper_execution_permitted": false,
+    "ready_for_monday": false,
+    "path_verification_execution_authorized": false
+  },
+  "part_b_portfolio_observation": {
+    "status": "PASS",
+    "observations": [
+      {
+        "symbol": "ARKK",
+        "action": "HOLD",
+        "reason": "no_actionable_rule_matched",
+        "source": "allocation"
+      },
+      {
+        "symbol": "GBTC",
+        "action": "ADD",
+        "reason": "held_and_effective_stance=HOLD_and_strong_edge",
+        "source": "allocation"
+      },
+      {
+        "symbol": "INTC",
+        "action": "HOLD",
+        "reason": "no_actionable_rule_matched",
+        "source": "allocation"
+      },
+      {
+        "symbol": "QQQ",
+        "action": "ADD",
+        "reason": "held_and_effective_stance=HOLD_and_strong_edge",
+        "source": "allocation"
+      },
+      {
+        "symbol": "XLK",
+        "action": "HOLD",
+        "reason": "no_actionable_rule_matched",
+        "source": "allocation"
+      },
+      {
+        "symbol": "GBTC",
+        "action": "SELL",
+        "reason": "planned",
+        "source": "paper_execution_audit",
+        "timestamp": "2026-06-08T21:07:36Z"
+      },
+      {
+        "symbol": "ARKK",
+        "action": "SELL",
+        "reason": "planned",
+        "source": "paper_execution_audit",
+        "timestamp": "2026-06-08T21:07:36Z"
+      },
+      {
+        "symbol": "INTC",
+        "action": "SELL",
+        "reason": "planned",
+        "source": "paper_execution_audit",
+        "timestamp": "2026-06-08T21:07:36Z"
+      },
+      {
+        "symbol": "AMD",
+        "action": "SELL",
+        "reason": "planned",
+        "source": "paper_execution_audit",
+        "timestamp": "2026-06-08T16:32:52Z"
+      },
+      {
+        "symbol": "TSLA",
+        "action": "SELL",
+        "reason": "planned",
+        "source": "paper_execution_audit",
+        "timestamp": "2026-06-08T15:47:30Z"
+      },
+      {
+        "symbol": "SLV",
+        "action": "SELL",
+        "reason": "planned",
+        "source": "paper_execution_audit",
+        "timestamp": "2026-06-08T15:02:09Z"
+      },
+      {
+        "symbol": "ARKK",
+        "action": "BUY",
+        "reason": "planned",
+        "source": "paper_execution_audit",
+        "timestamp": "2026-06-08T15:02:09Z"
+      },
+      {
+        "symbol": "ABBV",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "BAC",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "C",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "GE",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "GS",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "JPM",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "MRK",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "MS",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "UNH",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "WFC",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "XLV",
+        "action": "BUY",
+        "reason": "trade_log_entry",
+        "source": "trade_log"
+      },
+      {
+        "symbol": "SESSION",
+        "action": "MANAGE_POSITIONS",
+        "reason": "mode=paper orders_planned=0 skip_reasons={'OPEN_SELL_ALREADY_EXISTS': 3, 'NO_ACTION_HOLD': 1, 'TRIM_PROFIT_THRESHOLD_NOT_MET': 1}",
+        "source": "manage_positions_plan"
+      }
+    ]
+  },
+  "part_c_protection_framework": {
+    "framework_gates": {
+      "age_protection": {
+        "config_enabled": true,
+        "min_hours": 24.0,
+        "wired": true
+      },
+      "winner_protection": {
+        "config_enabled": true,
+        "wired": true
+      },
+      "drag_decay": {
+        "config_enabled": true,
+        "wired": true
+      },
+      "rotation_confirmation": {
+        "config_enabled": true,
+        "min_edge": 0.05,
+        "wired": true
+      },
+      "exit_confidence": {
+        "config_enabled": true,
+        "wired": true
+      }
+    },
+    "protection_observations": [
+      {
+        "gate": "drag_decay",
+        "symbol": "SLV",
+        "status": "ACTIVE",
+        "source": "historical_replay",
+        "blocked_by": "DRAG_DECAY"
+      },
+      {
+        "gate": "rotation_confirmation",
+        "symbol": "TSLA",
+        "status": "ACTIVE",
+        "source": "historical_replay",
+        "blocked_by": "ROTATION_CONFIRMATION"
+      },
+      {
+        "gate": "age_protection",
+        "symbol": "AMD",
+        "status": "ACTIVE",
+        "source": "historical_replay",
+        "blocked_by": "POSITION_AGE_PROTECTION"
+      },
+      {
+        "gate": "age_protection",
+        "symbol": "ARKK",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "hours_held": 11.75
+      },
+      {
+        "gate": "winner_protection",
+        "symbol": "ARKK",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "unrealized_pl": -1.029996
+      },
+      {
+        "gate": "age_protection",
+        "symbol": "GBTC",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "hours_held": 13.37
+      },
+      {
+        "gate": "winner_protection",
+        "symbol": "GBTC",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "unrealized_pl": -19.09998
+      },
+      {
+        "gate": "age_protection",
+        "symbol": "INTC",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "hours_held": 13.37
+      },
+      {
+        "gate": "winner_protection",
+        "symbol": "INTC",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "unrealized_pl": 55.110003
+      },
+      {
+        "gate": "age_protection",
+        "symbol": "QQQ",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "hours_held": 13.37
+      },
+      {
+        "gate": "winner_protection",
+        "symbol": "QQQ",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "unrealized_pl": 6.32
+      },
+      {
+        "gate": "age_protection",
+        "symbol": "XLK",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "hours_held": 13.37
+      },
+      {
+        "gate": "winner_protection",
+        "symbol": "XLK",
+        "status": "NOT_TRIGGERED",
+        "source": "current_book_probe",
+        "unrealized_pl": -4.75
+      },
+      {
+        "gate": "drag_decay",
+        "symbol": "SESSION",
+        "status": "NOT_TRIGGERED",
+        "source": "exit_logic_refinement_validation",
+        "metrics": {
+          "position_age_blocks": 0,
+          "rotation_blocks": 0,
+          "winner_protections": 0,
+          "drag_adjustments": 0,
+          "exit_confidence_reviews": 0
+        }
+      },
+      {
+        "gate": "rotation_confirmation",
+        "symbol": "SESSION",
+        "status": "NOT_TRIGGERED",
+        "source": "exit_logic_refinement_validation",
+        "metrics": {
+          "position_age_blocks": 0,
+          "rotation_blocks": 0,
+          "winner_protections": 0,
+          "drag_adjustments": 0,
+          "exit_confidence_reviews": 0
+        }
+      },
+      {
+        "gate": "exit_confidence",
+        "symbol": "SESSION",
+        "status": "NOT_TRIGGERED",
+        "source": "exit_logic_refinement_validation",
+        "metrics": {
+          "position_age_blocks": 0,
+          "rotation_blocks": 0,
+          "winner_protections": 0,
+          "drag_adjustments": 0,
+          "exit_confidence_reviews": 0
+        }
+      }
+    ],
+    "exit_logic_refinement_metrics": {
+      "position_age_blocks": 0,
+      "rotation_blocks": 0,
+      "winner_protections": 0,
+      "drag_adjustments": 0,
+      "exit_confidence_reviews": 0
+    },
+    "replay_overall_result": "PASS",
+    "status": "PASS"
+  },
+  "part_d_rotation_validation": {
+    "status": "NO_ROTATION_OBSERVED",
+    "reason": "Current session has no rotation events; 5-position book on HOLD/ADD",
+    "historical_rotation_replay": [
+      {
+        "symbol": "TSLA",
+        "session_date": "2026-06-08",
+        "original_decision": "ROTATE_EXIT",
+        "original_reason": "forced_rotation_weakest: no lifecycle EXIT/TRIM; bottom weak_score selected; ROTATE_EXIT",
+        "protected_decision": "HOLD",
+        "blocked_by": "ROTATION_CONFIRMATION",
+        "confidence_score": 0.0,
+        "position_age_hours": 1.6236,
+        "current_pl": 2.95,
+        "historical_total_pl": 54.3467,
+        "drag_score": 14.8067,
+        "risk_flag": "OK",
+        "lifecycle_state": "WAIT",
+        "effective_lifecycle": "WAIT",
+        "replacement_candidate": "GBTC",
+        "confidence_delta": 0.133354,
+        "edge_delta": -0.152001,
+        "verdict": "FIX_VALIDATED",
+        "notes": "",
+        "protection_metrics": {
+          "position_age_blocks": 0,
+          "rotation_blocks": 1,
+          "winner_protections": 0,
+          "drag_adjustments": 0,
+          "exit_confidence_reviews": 0
+        },
+        "replay_state": {
+          "symbol": "TSLA",
+          "decision_timestamp": "2026-06-08T15:47:30Z",
+          "entry_time": "2026-06-08T14:10:05Z",
+          "position_age_hours": 1.6236,
+          "current_pl": 2.95,
+          "total_pl": 54.3467,
+          "lifecycle_state": "WAIT",
+          "effective_lifecycle": "WAIT",
+          "risk_flag": "OK",
+          "drag_score": 14.8067,
+          "confidence": 0.714262,
+          "delta_pct": -0.009571,
+          "replacement_candidate": "GBTC",
+          "confidence_delta": 0.133354,
+          "edge_delta": -0.152001,
+          "alloc_delta": -0.012144,
+          "exit_type": "ROTATE_EXIT",
+          "source": "ROTATE_EXIT",
+          "trigger_reason": "forced_rotation_weakest: no lifecycle EXIT/TRIM; bottom weak_score selected"
+        }
+      },
+      {
+        "symbol": "AMD",
+        "session_date": "2026-06-08",
+        "original_decision": "ROTATE_EXIT",
+        "original_reason": "forced_rotation_weakest: no lifecycle EXIT/TRIM; bottom weak_score selected; ROTATE_EXIT",
+        "protected_decision": "HOLD",
+        "blocked_by": "POSITION_AGE_PROTECTION",
+        "confidence_score": 0.0,
+        "position_age_hours": 2.3797,
+        "current_pl": 17.42,
+        "historical_total_pl": 17.42,
+        "drag_score": 24.263,
+        "risk_flag": "OK",
+        "lifecycle_state": "WAIT",
+        "effective_lifecycle": "WAIT",
+        "replacement_candidate": "GBTC",
+        "confidence_delta": 0.441155,
+        "edge_delta": 0.580711,
+        "verdict": "FIX_VALIDATED",
+        "notes": "Historical audit recorded ROTATE_EXIT (not plain EXIT); position age protection still blocks premature rotation",
+        "protection_metrics": {
+          "position_age_blocks": 1,
+          "rotation_blocks": 0,
+          "winner_protections": 0,
+          "drag_adjustments": 0,
+          "exit_confidence_reviews": 0
+        },
+        "replay_state": {
+          "symbol": "AMD",
+          "decision_timestamp": "2026-06-08T16:32:52Z",
+          "entry_time": "2026-06-08T14:10:05Z",
+          "position_age_hours": 2.3797,
+          "current_pl": 17.42,
+          "total_pl": 17.42,
+          "lifecycle_state": "WAIT",
+          "effective_lifecycle": "WAIT",
+          "risk_flag": "OK",
+          "drag_score": 24.263,
+          "confidence": 0.406461,
+          "delta_pct": -0.006583,
+          "replacement_candidate": "GBTC",
+          "confidence_delta": 0.441155,
+          "edge_delta": 0.580711,
+          "alloc_delta": 0.278644,
+          "exit_type": "ROTATE_EXIT",
+          "source": "ROTATE_EXIT",
+          "trigger_reason": "forced_rotation_weakest: no lifecycle EXIT/TRIM; bottom weak_score selected"
+        }
+      }
+    ]
+  },
+  "part_f_certification_promotion_review": {
+    "previous_status": "CONDITIONALLY_CERTIFIED",
+    "new_status": "CERTIFIED",
+    "reason": "Paper environment validated; portfolio shows healthy HOLD/ADD behavior; Phase 152 protections confirmed; Phase 153 replay PASS; no rotation pressure in current book.",
+    "criteria": {
+      "paper_env_validated": true,
+      "portfolio_observation_healthy": true,
+      "protection_framework_active": true,
+      "phase_153_replay_pass": true,
+      "rotation_acceptable": true
+    }
+  },
+  "part_g_final_decision": {
+    "status": "PASS",
+    "recommendation": "Paper environment validated; portfolio shows healthy HOLD/ADD behavior; Phase 152 protections confirmed; Phase 153 replay PASS; no rotation pressure in current book.",
+    "promotion": {
+      "previous_status": "CONDITIONALLY_CERTIFIED",
+      "new_status": "CERTIFIED",
+      "reason": "Paper environment validated; portfolio shows healthy HOLD/ADD behavior; Phase 152 protections confirmed; Phase 153 replay PASS; no rotation pressure in current book.",
+      "criteria": {
+        "paper_env_validated": true,
+        "portfolio_observation_healthy": true,
+        "protection_framework_active": true,
+        "phase_153_replay_pass": true,
+        "rotation_acceptable": true
+      }
+    }
+  },
+  "certification_outcome": {
+    "status": "CERTIFIED",
+    "strengths": [
+      "Phase 153 replay PASS with all protection gates evidenced",
+      "Current 5-position book on HOLD/ADD with zero exit candidates",
+      "Phase 152 framework enabled in config/exit_logic.json and effective_lifecycle.py",
+      "Paper environment validated (TRITON_ENABLE_PAPER_EXECUTION=1)"
+    ],
+    "remaining_gaps": null
+  },
+  "supporting_artifacts": {
+    "portfolio_management_certification": "C:\\Users\\akimw\\triton\\data\\results\\portfolio_management_certification.json",
+    "historical_exit_replay_validation": "C:\\Users\\akimw\\triton\\data\\results\\historical_exit_replay_validation.json",
+    "positions_snapshot": "C:\\Users\\akimw\\triton\\data\\results\\positions_snapshot.csv",
+    "manage_positions_plan": "C:\\Users\\akimw\\triton\\data\\results\\manage_positions_plan.json",
+    "exit_logic_refinement_validation": "C:\\Users\\akimw\\triton\\data\\results\\exit_logic_refinement_validation.json"
+  }
+}

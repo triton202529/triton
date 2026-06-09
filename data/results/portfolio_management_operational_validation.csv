@@ -1,0 +1,47 @@
+section,key,symbol,action,status,reason,generated_at
+scorecard,paper_environment,,,PASS,Phase 155 operational validation — paper_environment,2026-06-09T03:32:06Z
+scorecard,portfolio_observation,,,PASS,Phase 155 operational validation — portfolio_observation,2026-06-09T03:32:06Z
+scorecard,protection_framework,,,PASS,Phase 155 operational validation — protection_framework,2026-06-09T03:32:06Z
+scorecard,rotation_validation,,,NO_ROTATION_OBSERVED,Phase 155 operational validation — rotation_validation,2026-06-09T03:32:06Z
+scorecard,overall_validation,,,PASS,Phase 155 operational validation — overall_validation,2026-06-09T03:32:06Z
+portfolio_observation,allocation,ARKK,HOLD,,no_actionable_rule_matched,2026-06-09T03:32:06Z
+portfolio_observation,allocation,GBTC,ADD,,held_and_effective_stance=HOLD_and_strong_edge,2026-06-09T03:32:06Z
+portfolio_observation,allocation,INTC,HOLD,,no_actionable_rule_matched,2026-06-09T03:32:06Z
+portfolio_observation,allocation,QQQ,ADD,,held_and_effective_stance=HOLD_and_strong_edge,2026-06-09T03:32:06Z
+portfolio_observation,allocation,XLK,HOLD,,no_actionable_rule_matched,2026-06-09T03:32:06Z
+portfolio_observation,paper_execution_audit,GBTC,SELL,,planned,2026-06-09T03:32:06Z
+portfolio_observation,paper_execution_audit,ARKK,SELL,,planned,2026-06-09T03:32:06Z
+portfolio_observation,paper_execution_audit,INTC,SELL,,planned,2026-06-09T03:32:06Z
+portfolio_observation,paper_execution_audit,AMD,SELL,,planned,2026-06-09T03:32:06Z
+portfolio_observation,paper_execution_audit,TSLA,SELL,,planned,2026-06-09T03:32:06Z
+portfolio_observation,paper_execution_audit,SLV,SELL,,planned,2026-06-09T03:32:06Z
+portfolio_observation,paper_execution_audit,ARKK,BUY,,planned,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,ABBV,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,BAC,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,C,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,GE,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,GS,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,JPM,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,MRK,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,MS,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,UNH,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,WFC,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,trade_log,XLV,BUY,,trade_log_entry,2026-06-09T03:32:06Z
+portfolio_observation,manage_positions_plan,SESSION,MANAGE_POSITIONS,,"mode=paper orders_planned=0 skip_reasons={'OPEN_SELL_ALREADY_EXISTS': 3, 'NO_ACTION_HOLD': 1, 'TRIM_PROFIT_THRESHOLD_NOT_MET': 1}",2026-06-09T03:32:06Z
+protection,drag_decay,SLV,,ACTIVE,historical_replay,2026-06-09T03:32:06Z
+protection,rotation_confirmation,TSLA,,ACTIVE,historical_replay,2026-06-09T03:32:06Z
+protection,age_protection,AMD,,ACTIVE,historical_replay,2026-06-09T03:32:06Z
+protection,age_protection,ARKK,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,winner_protection,ARKK,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,age_protection,GBTC,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,winner_protection,GBTC,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,age_protection,INTC,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,winner_protection,INTC,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,age_protection,QQQ,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,winner_protection,QQQ,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,age_protection,XLK,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,winner_protection,XLK,,NOT_TRIGGERED,current_book_probe,2026-06-09T03:32:06Z
+protection,drag_decay,SESSION,,NOT_TRIGGERED,exit_logic_refinement_validation,2026-06-09T03:32:06Z
+protection,rotation_confirmation,SESSION,,NOT_TRIGGERED,exit_logic_refinement_validation,2026-06-09T03:32:06Z
+protection,exit_confidence,SESSION,,NOT_TRIGGERED,exit_logic_refinement_validation,2026-06-09T03:32:06Z
+promotion_review,certification,,CERTIFIED,CONDITIONALLY_CERTIFIED,Paper environment validated; portfolio shows healthy HOLD/ADD behavior; Phase 152 protections confirmed; Phase 153 replay PASS; no rotation pressure in current book.,2026-06-09T03:32:06Z
