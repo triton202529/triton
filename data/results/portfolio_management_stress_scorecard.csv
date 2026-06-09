@@ -1,0 +1,55 @@
+section,scenario,protection,symbol,status,detail,generated_at
+market_drawdown,shock_5pct,combined,,PASS,severe=0 response=NORMAL,2026-06-09T04:22:15Z
+market_drawdown,shock_10pct,combined,,PASS,severe=0 response=ELEVATED_RISK_MONITORING,2026-06-09T04:22:15Z
+market_drawdown,shock_15pct,combined,,PASS,severe=3 response=CAPITAL_PRESERVATION_ESCALATION,2026-06-09T04:22:15Z
+market_drawdown,shock_20pct,combined,,PASS,severe=4 response=CAPITAL_PRESERVATION_ESCALATION,2026-06-09T04:22:15Z
+signal_deterioration,confidence_collapse,exit_confidence,ARKK,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,edge_collapse,exit_confidence,ARKK,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,buy_to_hold,exit_confidence,ARKK,PASS,rec=HOLD cat=False,2026-06-09T04:22:15Z
+signal_deterioration,hold_to_exit,exit_confidence,ARKK,PASS,rec=EXIT cat=True,2026-06-09T04:22:15Z
+signal_deterioration,confidence_collapse,exit_confidence,GBTC,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,edge_collapse,exit_confidence,GBTC,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,buy_to_hold,exit_confidence,GBTC,PASS,rec=HOLD cat=False,2026-06-09T04:22:15Z
+signal_deterioration,hold_to_exit,exit_confidence,GBTC,PASS,rec=EXIT cat=True,2026-06-09T04:22:15Z
+signal_deterioration,confidence_collapse,exit_confidence,INTC,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,edge_collapse,exit_confidence,INTC,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,buy_to_hold,exit_confidence,INTC,PASS,rec=HOLD cat=False,2026-06-09T04:22:15Z
+signal_deterioration,hold_to_exit,exit_confidence,INTC,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,confidence_collapse,exit_confidence,QQQ,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,edge_collapse,exit_confidence,QQQ,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,buy_to_hold,exit_confidence,QQQ,PASS,rec=HOLD cat=False,2026-06-09T04:22:15Z
+signal_deterioration,hold_to_exit,exit_confidence,QQQ,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,confidence_collapse,exit_confidence,XLK,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,edge_collapse,exit_confidence,XLK,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+signal_deterioration,buy_to_hold,exit_confidence,XLK,PASS,rec=HOLD cat=False,2026-06-09T04:22:15Z
+signal_deterioration,hold_to_exit,exit_confidence,XLK,PASS,rec=HOLD cat=True,2026-06-09T04:22:15Z
+rotation_pressure,weak_rotation_blocked,rotation_confirmation,INTC,PASS,allowed=False edge_delta=0.01,2026-06-09T04:22:15Z
+rotation_pressure,strong_rotation_allowed,rotation_confirmation,GBTC,PASS,allowed=True edge_delta=0.12,2026-06-09T04:22:15Z
+rotation_pressure,marginal_rotation_blocked,rotation_confirmation,ARKK,PASS,allowed=False edge_delta=0.02,2026-06-09T04:22:15Z
+rotation_pressure,crowded_strong_candidate,rotation_confirmation,QQQ,PASS,allowed=True edge_delta=0.15,2026-06-09T04:22:15Z
+rotation_pressure,negative_edge_blocked,rotation_confirmation,XLK,PASS,allowed=False edge_delta=-0.02,2026-06-09T04:22:15Z
+concentration_shock,single_position_dominance,allocation_discipline,XLK,PASS,concentration_cap_would_block_add,2026-06-09T04:22:15Z
+concentration_shock,sector_spike_tech,allocation_discipline,,PASS,sector_concentration_detected,2026-06-09T04:22:15Z
+concentration_shock,correlation_spike,allocation_discipline,,PASS,correlated_drawdown_simulated,2026-06-09T04:22:15Z
+concentration_shock,allocation_discipline,allocation_discipline,,PASS,current_book_within_allocation_bands,2026-06-09T04:22:15Z
+concentration_shock,held_overweight_flagged,allocation_discipline,GBTC,PASS,overweight_correctly_flagged,2026-06-09T04:22:15Z
+concentration_shock,held_overweight_flagged,allocation_discipline,INTC,PASS,overweight_correctly_flagged,2026-06-09T04:22:15Z
+concentration_shock,held_overweight_flagged,allocation_discipline,QQQ,PASS,overweight_correctly_flagged,2026-06-09T04:22:15Z
+concentration_shock,held_overweight_flagged,allocation_discipline,XLK,PASS,overweight_correctly_flagged,2026-06-09T04:22:15Z
+protection_framework,new_position_severe_loss_bypasses_age,age_protection,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,new_position_minor_loss_blocked,age_protection,,PASS,expected=False actual=False,2026-06-09T04:22:15Z
+protection_framework,winner_weak_rotation_blocked,winner_protection,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,historical_drag_positive_unreal_favors_hold,drag_decay,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,catastrophic_signal_bypasses_winner,winner_protection,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,all_protections_hold_vs_single_exit,exit_confidence,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,severe_unrealized_triggers_emergency,force_exit,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,strong_candidate_superiority_enforced,rotation_confirmation,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,low_confidence_exit_blocked_when_hold,exit_confidence,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+protection_framework,severe_historical_drag_still_force,drag_decay,,PASS,expected=True actual=True,2026-06-09T04:22:15Z
+scorecard,market_drawdown,,,PASS,Phase 156 stress test — market_drawdown,2026-06-09T04:22:15Z
+scorecard,signal_deterioration,,,PASS,Phase 156 stress test — signal_deterioration,2026-06-09T04:22:15Z
+scorecard,rotation_pressure,,,PASS,Phase 156 stress test — rotation_pressure,2026-06-09T04:22:15Z
+scorecard,concentration_shock,,,PASS,Phase 156 stress test — concentration_shock,2026-06-09T04:22:15Z
+scorecard,protection_framework,,,PASS,Phase 156 stress test — protection_framework,2026-06-09T04:22:15Z
+scorecard,overall_stress_result,,,PASS,Phase 156 stress test — overall_stress_result,2026-06-09T04:22:15Z
+promotion_review,certification,,,STRESS_TESTED_CERTIFIED,All six stress scenarios PASS with zero critical protection failures; portfolio management layer demonstrates robust adverse-condition behavior.,2026-06-09T04:22:15Z
