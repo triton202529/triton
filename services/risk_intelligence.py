@@ -14,6 +14,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from services.executive_outlook import (
+    build_authoritative_executive_outlook,
+    write_executive_outlook_reconciliation,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 
 CONCENTRATION_CAPS = (10.0, 15.0, 20.0, 25.0)
@@ -314,13 +319,24 @@ def compute_executive_risk_artifacts(
     pred_doc: Dict[str, Any],
     sim_doc: Dict[str, Any],
     alerts_doc: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """Phase 12: executive risk summary and full report (read-only)."""
     ts = _iso_utc()
     cps = int(cpi_doc.get("capital_preservation_score") or 0)
     escalation = str(cpe_doc.get("escalation_state") or "GREEN")
     health_band = str(cpi_doc.get("health_band") or "—")
-    risk_trend = str(cpi_doc.get("risk_trend") or "STABLE")
+    reconciliation = build_authoritative_executive_outlook(
+        cpi_doc=cpi_doc,
+        cpe_doc=cpe_doc,
+        pred_doc=pred_doc,
+        verbose=False,
+    )
+    outlook = reconciliation["outlook"]
+    risk_trend = str(outlook.get("historical_trend") or cpi_doc.get("risk_trend") or "STABLE")
+    forward_outlook = str(
+        outlook.get("forward_outlook") or pred_doc.get("risk_direction") or "STABLE"
+    )
+    risk_direction = forward_outlook
 
     top_risks: List[str] = []
     for adv in cpa_doc.get("advisories") or []:
@@ -353,7 +369,10 @@ def compute_executive_risk_artifacts(
             "escalation_state": escalation,
             "governance_awareness": gov_doc.get("governance_awareness_label"),
             "top_risks": top_risks[:5],
-            "risk_direction": pred_doc.get("risk_direction"),
+            "risk_direction": risk_direction,
+            "historical_trend": outlook.get("historical_trend"),
+            "forward_outlook": outlook.get("forward_outlook"),
+            "outlook_narrative": outlook.get("outlook_narrative"),
             "projected_escalation": pred_doc.get("escalation_forecast", {}).get(
                 "projected_escalation"
             ),
@@ -364,13 +383,18 @@ def compute_executive_risk_artifacts(
         "governance_awareness_label": gov_doc.get("governance_awareness_label"),
         "top_risks": top_risks,
         "predictive_outlook": {
-            "risk_direction": pred_doc.get("risk_direction"),
+            "risk_direction": risk_direction,
+            "historical_trend": outlook.get("historical_trend"),
+            "forward_outlook": outlook.get("forward_outlook"),
             "forecast_confidence": pred_doc.get("forecast_confidence"),
             "projected_cps": pred_doc.get("portfolio_health_forecast", {}).get("projected_cps"),
             "estimated_days_to_threshold": pred_doc.get("estimated_days_to_threshold"),
         },
         "incident_intelligence": incident,
         "risk_trend": risk_trend,
+        "historical_trend": outlook.get("historical_trend"),
+        "forward_outlook": outlook.get("forward_outlook"),
+        "authoritative_outlook": outlook,
         "strategic_watchlist": watchlist,
         "advisory_count": cpa_summary.get("advisory_count", 0),
     }
@@ -393,7 +417,7 @@ def compute_executive_risk_artifacts(
         },
         "disclaimer": "Executive read-only briefing. No trading or governance actions executed.",
     }
-    return summary, report
+    return summary, report, reconciliation
 
 
 def persist_advanced_risk_intelligence(
@@ -421,7 +445,7 @@ def persist_advanced_risk_intelligence(
         cpi_history_path=results_dir / "capital_preservation_history.csv",
         cpa_history_path=results_dir / "capital_preservation_advisory_history.csv",
     )
-    exec_summary, exec_report = compute_executive_risk_artifacts(
+    exec_summary, exec_report, reconciliation = compute_executive_risk_artifacts(
         cpi_doc=cpi_doc,
         cpe_doc=cpe_doc,
         cpa_doc=cpa_doc,
@@ -430,6 +454,7 @@ def persist_advanced_risk_intelligence(
         sim_doc=sim_doc,
         alerts_doc=alerts_doc,
     )
+    write_executive_outlook_reconciliation(reconciliation, results_dir=results_dir)
 
     _atomic_write_json(sim_doc, results_dir / "defensive_simulation_results.json")
     _atomic_write_json(pred_doc, results_dir / "predictive_risk_intelligence.json")

@@ -1,8 +1,9 @@
 """
-TRITON Phase 160 — Executive Oversight Certification.
+TRITON Phase 160/161 — Executive Oversight Certification.
 
 Read-only certification of TRITON's highest decision-making layer: executive risk
 briefing, committee resolution, strategic oversight, and governance board synthesis.
+Phase 161 adds executive outlook reconciliation (historical vs forward separation).
 No execution, trading, lifecycle, or position changes.
 """
 
@@ -16,6 +17,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from services.executive_outlook import (
+    build_authoritative_executive_outlook,
+    write_executive_outlook_reconciliation,
+)
 from services.institutional_intelligence_stress_test import (
     BaselineDocs,
     _aggregate_status,
@@ -29,6 +34,7 @@ RESULTS = ROOT / "data" / "results"
 
 OUTPUT_JSON = RESULTS / "executive_oversight_certification.json"
 OUTPUT_CSV = RESULTS / "executive_oversight_scorecard.csv"
+OUTLOOK_RECONCILIATION_JSON = RESULTS / "executive_outlook_reconciliation.json"
 
 SCORECARD_COLUMNS = [
     "section",
@@ -272,15 +278,45 @@ def _audit_oversight_interpretation(
         f"weakest={weakest} aliases={alias_hits} strategic_sample={strategic_concerns[:80]}",
     )
 
-    risk_trend = str(exec_doc.get("risk_trend") or cpi.get("risk_trend") or "").upper()
-    risk_direction = str(exec_sum.get("risk_direction") or "").upper()
-    trend_ok = not (
-        risk_trend == "DETERIORATING" and risk_direction == "IMPROVING"
-    ) or risk_direction in ("STABLE", "UNCERTAIN")
+    auth_outlook = exec_doc.get("authoritative_outlook") or {}
+    if not auth_outlook:
+        pred = artifacts.get("pred") or {}
+        reconciliation = build_authoritative_executive_outlook(
+            cpi_doc=cpi,
+            cpe_doc=cpe,
+            pred_doc=pred,
+            verbose=verbose,
+        )
+        auth_outlook = reconciliation.get("outlook") or {}
+
+    historical_trend = str(
+        auth_outlook.get("historical_trend")
+        or exec_doc.get("historical_trend")
+        or exec_doc.get("risk_trend")
+        or cpi.get("risk_trend")
+        or ""
+    ).upper()
+    forward_outlook = str(
+        auth_outlook.get("forward_outlook")
+        or exec_sum.get("forward_outlook")
+        or exec_sum.get("risk_direction")
+        or ""
+    ).upper()
+    outlook_consistency = str(auth_outlook.get("outlook_consistency") or "").upper()
+    semantic_sep = bool(auth_outlook.get("semantic_separation"))
+    trend_ok = outlook_consistency == "PASS" or (
+        semantic_sep and historical_trend == "DETERIORATING" and forward_outlook == "IMPROVING"
+    )
     _check(
         "no_contradictory_outlook",
         trend_ok,
-        f"risk_trend={risk_trend} risk_direction={risk_direction}",
+        f"historical_trend={historical_trend} forward_outlook={forward_outlook} "
+        f"consistency={outlook_consistency} separated={semantic_sep}",
+    )
+    _check(
+        "authoritative_outlook_present",
+        bool(auth_outlook),
+        f"outlook_consistency={outlook_consistency} narrative={auth_outlook.get('outlook_narrative', '')[:80]}",
     )
 
     escalation = cpe_esc
@@ -715,10 +751,13 @@ def _final_decision(
     parts: Dict[str, str],
     stress: Dict[str, Any],
     artifacts: Dict[str, Dict[str, Any]],
-    gaps: List[str],
+    blockers: List[str],
+    informational_gaps: List[str],
+    previous_status: str,
     verbose: bool,
 ) -> Dict[str, Any]:
     """Part H — executive oversight certification decision."""
+    gaps = blockers + informational_gaps
     strengths: List[str] = []
     if parts.get("interpretation") == "PASS":
         strengths.append("Executive briefing aligns with CPI/CPE and committee concerns")
@@ -734,7 +773,7 @@ def _final_decision(
     fail_count = sum(1 for s in parts.values() if s == "FAIL")
     stress_fails = sum(1 for s in (stress.get("scenarios") or []) if s.get("result") == "FAIL")
 
-    if fail_count == 0 and stress_fails == 0 and not gaps:
+    if fail_count == 0 and stress_fails == 0 and not blockers:
         status = "CERTIFIED"
         recommendation = (
             "Executive oversight layer is certified — committee, board, and strategic "
@@ -744,7 +783,7 @@ def _final_decision(
         status = "CONDITIONALLY_CERTIFIED"
         recommendation = (
             "Executive oversight is conditionally certified — core logic passes but "
-            f"documented gaps remain: {'; '.join(gaps[:3])}."
+            f"documented blockers remain: {'; '.join(blockers[:3])}."
         )
     elif fail_count <= 1 and stress_fails <= 1:
         status = "CONDITIONALLY_CERTIFIED"
@@ -760,20 +799,32 @@ def _final_decision(
 
     decision = {
         "status": status,
+        "previous_status": previous_status,
         "strengths": strengths,
         "gaps": gaps,
+        "certification_blockers": blockers,
+        "informational_gaps": informational_gaps,
         "recommendation": recommendation,
         "part_results": parts,
+        "reason": (
+            "All interpretation parts pass with reconciled authoritative outlook"
+            if status == "CERTIFIED"
+            else recommendation
+        ),
     }
 
     _log_tag(
         "EXECUTIVE_OVERSIGHT_CERTIFICATION",
         {
-            "status": status,
-            "strengths": len(strengths),
-            "gaps": len(gaps),
-            "recommendation": recommendation[:100],
+            "previous_status": previous_status,
+            "new_status": status,
+            "reason": decision["reason"][:100],
         },
+        verbose,
+    )
+    _log_tag(
+        "EXECUTIVE_REVALIDATION",
+        {"before": previous_status, "after": status},
         verbose,
     )
     if status == "CERTIFIED":
@@ -804,31 +855,40 @@ def _certification_chain(
     return chain
 
 
-def _identify_gaps(artifacts: Dict[str, Dict[str, Any]]) -> List[str]:
-    """Structural gaps requiring future work."""
-    gaps: List[str] = []
+def _identify_gaps(artifacts: Dict[str, Dict[str, Any]]) -> Tuple[List[str], List[str]]:
+    """Return (certification_blockers, informational_gaps)."""
+    blockers: List[str] = []
+    informational: List[str] = []
+
     exec_path = ROOT / "services" / "executive_oversight.py"
     if not exec_path.is_file():
-        gaps.append(
+        informational.append(
             "No standalone executive_oversight.py — logic distributed across "
             "risk_intelligence.py, institutional_protection.py, institutional_operations.py"
         )
     if not (RESULTS / "executive_oversight.json").is_file():
-        gaps.append("Missing executive_oversight.json artifact — using executive_risk_summary.json")
+        informational.append(
+            "Missing executive_oversight.json artifact — using executive_risk_summary.json"
+        )
+
     exec_doc = artifacts.get("exec_summary") or {}
-    exec_sum = exec_doc.get("executive_summary") or {}
-    cpi = artifacts.get("cpi") or {}
-    if (
-        str(exec_doc.get("risk_trend") or cpi.get("risk_trend") or "").upper() == "DETERIORATING"
-        and str(exec_sum.get("risk_direction") or "").upper() == "IMPROVING"
-    ):
-        gaps.append("Executive outlook contradicts CPI risk_trend (IMPROVING vs DETERIORATING)")
+    auth_outlook = exec_doc.get("authoritative_outlook") or {}
+    outlook_ok = str(auth_outlook.get("outlook_consistency") or "").upper() == "PASS"
+    recon_doc = _read_json(OUTLOOK_RECONCILIATION_JSON)
+    if recon_doc.get("overall_result") == "PASS":
+        outlook_ok = True
+    if not outlook_ok:
+        blockers.append(
+            "Executive outlook contradiction unresolved — authoritative outlook reconciliation failed"
+        )
+
     cp_status = str((artifacts.get("cp_cert") or {}).get("certification_status") or "")
     if cp_status == "NOT_CERTIFIED":
-        gaps.append(
+        informational.append(
             f"Capital preservation certification is {cp_status} — limits full chain certification"
         )
-    return gaps
+
+    return blockers, informational
 
 
 def compute_executive_oversight_certification(
@@ -836,13 +896,32 @@ def compute_executive_oversight_certification(
     results_dir: Optional[Path] = None,
     verbose: bool = False,
 ) -> Dict[str, Any]:
-    """Run Phase 160 executive oversight certification."""
+    """Run Phase 160/161 executive oversight certification."""
     rd = Path(results_dir) if results_dir else RESULTS
     ts = _utc_iso()
     artifacts = _load_artifacts(rd)
+
+    prior_cert = _read_json(OUTPUT_JSON)
+    previous_status = str(
+        (prior_cert.get("part_h_final_decision") or {}).get("status")
+        or prior_cert.get("executive_oversight_status")
+        or "UNKNOWN"
+    )
+
+    reconciliation = build_authoritative_executive_outlook(
+        cpi_doc=artifacts.get("cpi") or {},
+        cpe_doc=artifacts.get("cpe") or {},
+        pred_doc=artifacts.get("pred") or {},
+        verbose=verbose,
+    )
+    outlook_reconciliation = write_executive_outlook_reconciliation(
+        reconciliation, results_dir=rd, verbose=verbose
+    )
+
     baseline = _load_baseline(rd)
     upstream = _resolve_upstream_certifications(artifacts)
-    gaps = _identify_gaps(artifacts)
+    blockers, informational_gaps = _identify_gaps(artifacts)
+    gaps = blockers + informational_gaps
 
     csv_rows: List[Dict[str, str]] = []
 
@@ -897,7 +976,9 @@ def compute_executive_oversight_certification(
         parts=parts,
         stress=stress_detail,
         artifacts=artifacts,
-        gaps=gaps,
+        blockers=blockers,
+        informational_gaps=informational_gaps,
+        previous_status=previous_status,
         verbose=verbose,
     )
 
@@ -915,8 +996,9 @@ def compute_executive_oversight_certification(
 
     payload: Dict[str, Any] = {
         "generated_at": ts,
-        "phase": "160",
+        "phase": "161",
         "mode": "read_only_certification",
+        "executive_outlook_reconciliation": outlook_reconciliation,
         "disclaimer": (
             "Executive oversight certification assesses read-only synthesis of committee, "
             "board, strategic, and executive risk artifacts. No execution or trading."
@@ -936,6 +1018,8 @@ def compute_executive_oversight_certification(
         "part_h_final_decision": final_decision,
         "part_i_certification_chain": cert_chain,
         "structural_gaps": gaps,
+        "certification_blockers": blockers,
+        "informational_gaps": informational_gaps,
         "upstream_certifications": upstream,
         "executive_implementation": {
             "executive_risk_summary": str(rd / "executive_risk_summary.json"),
@@ -1005,7 +1089,7 @@ def run_executive_oversight_certification(
     _write_scorecard_csv(csv_rows, OUTPUT_CSV)
 
     print(
-        f"[EXECUTIVE_OVERSIGHT_CERTIFICATION] phase=160 "
+        f"[EXECUTIVE_OVERSIGHT_CERTIFICATION] phase=161 "
         f"overall={payload.get('overall_result')} "
         f"decision={payload.get('part_h_final_decision', {}).get('status')} "
         f"json={OUTPUT_JSON} csv={OUTPUT_CSV}",
@@ -1016,7 +1100,7 @@ def run_executive_oversight_certification(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Phase 160 — Executive Oversight Certification (read-only)"
+        description="Phase 161 — Executive Oversight Certification (read-only)"
     )
     parser.add_argument("--verbose", action="store_true", help="Emit detailed audit logs")
     parser.add_argument(
