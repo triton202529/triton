@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-06-09T05:31:48Z",
+  "phase": "158",
+  "false_positive_pathways": 0,
+  "false_negative_pathways": 0,
+  "veto_rules_active": true,
+  "portfolio_health_override": true,
+  "overall_result": "WARN",
+  "embedded_tests_pass": true,
+  "institutional_revalidation": "WARN",
+  "cps_critical_threshold": 50,
+  "veto_rules": [
+    "portfolio_health_critical",
+    "preservation_status_fail",
+    "risk_trend_severely_deteriorating",
+    "escalation_state_red",
+    "cps_below_critical_threshold",
+    "mandatory_preservation_gate_failed"
+  ],
+  "certification_status": "NOT_CERTIFIED",
+  "veto_triggered": [
+    "mandatory_preservation_gate_failed"
+  ],
+  "portfolio_health": "HEALTHY"
+}

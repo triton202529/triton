@@ -1,0 +1,6 @@
+scenario,test_type,status,certification_status,detail,generated_at
+A_weak_portfolio_strong_governance,false_positive,PASS,NOT_CERTIFIED,"certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T05:31:48Z
+B_failing_preservation_strong_committees,false_positive,PASS,NOT_CERTIFIED,"certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T05:31:48Z
+C_red_escalation_perfect_evaluation,false_positive,PASS,NOT_CERTIFIED,"certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T05:31:48Z
+healthy_portfolio_temporary_governance_weakness,false_negative,PASS,CERTIFIED_FOR_PAPER_PROTECTION,certification_status=CERTIFIED_FOR_PAPER_PROTECTION vetoes=[],2026-06-09T05:31:48Z
+overall,summary,WARN,NOT_CERTIFIED,false_positive_pathways=0 false_negative_pathways=0 revalidation=WARN,2026-06-09T05:31:48Z
