@@ -489,7 +489,9 @@ def csv_usable_rows(path: Path) -> Optional[pd.DataFrame]:
 
 
 @st.cache_data(show_spinner=False)
-def _read_json_bytesafe(path_str: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def _read_json_bytesafe(
+    path_str: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Cached JSON loader with safe error return (no Streamlit side effects inside cache)."""
     path = Path(path_str)
     try:
@@ -992,7 +994,13 @@ def latest_portfolio_status() -> Dict[str, Any]:
         ph = ensure_date_col(ph)
 
         if "total_value" not in ph.columns:
-            for alt in ("equity", "portfolio_value", "portfolio_total", "value", "total"):
+            for alt in (
+                "equity",
+                "portfolio_value",
+                "portfolio_total",
+                "value",
+                "total",
+            ):
                 if alt in ph.columns:
                     ph = ph.rename(columns={alt: "total_value"})
                     break
@@ -1135,7 +1143,10 @@ def validate_contract(contract: DataContract) -> ContractResult:
             "LOAD_FAILED": f"Optional file failed to load: {contract.path}",
         }.get(err, f"Optional file issue: {contract.path}")
         res.add(
-            "WARN", err, msg, hint="Optional artifact — OK to ignore unless you need that page."
+            "WARN",
+            err,
+            msg,
+            hint="Optional artifact — OK to ignore unless you need that page.",
         )
         return res
 
@@ -1470,11 +1481,22 @@ def validate_all_contracts() -> List[ContractResult]:
             path=SIGNALS_RATIONALE_PATH,
             fmt="csv",
             required_cols=["date", "ticker"],
-            optional_cols=["signal", "pred", "confidence", "rationale", "regime", "capital_mode"],
+            optional_cols=[
+                "signal",
+                "pred",
+                "confidence",
+                "rationale",
+                "regime",
+                "capital_mode",
+            ],
             min_rows=1,
             enforce_date_col="date",
             unique_keys=["date", "ticker"],
-            coerce={"date": "datetime64[ns]", "pred": "float64", "confidence": "float64"},
+            coerce={
+                "date": "datetime64[ns]",
+                "pred": "float64",
+                "confidence": "float64",
+            },
             max_null_frac_by_col={"date": 0.0, "ticker": 0.0},
             custom_checks=[_signals_check],
             allow_empty=True,
@@ -1488,7 +1510,11 @@ def validate_all_contracts() -> List[ContractResult]:
             min_rows=1,
             enforce_date_col="date",
             unique_keys=["date", "ticker"],
-            coerce={"date": "datetime64[ns]", "pred": "float64", "confidence": "float64"},
+            coerce={
+                "date": "datetime64[ns]",
+                "pred": "float64",
+                "confidence": "float64",
+            },
             max_null_frac_by_col={"date": 0.0, "ticker": 0.0},
             custom_checks=[_signals_check],
             allow_empty=True,
@@ -1580,9 +1606,17 @@ def validate_all_contracts() -> List[ContractResult]:
             max_null_frac_by_col={"ticker": 0.0},
             allow_empty=True,
         ),
-        DataContract(name="Guard Snapshot", path=GUARD_SNAPSHOT_PATH, fmt="json", allow_empty=True),
         DataContract(
-            name="Risk Report (preferred)", path=RISK_REPORT_PATH, fmt="json", allow_empty=True
+            name="Guard Snapshot",
+            path=GUARD_SNAPSHOT_PATH,
+            fmt="json",
+            allow_empty=True,
+        ),
+        DataContract(
+            name="Risk Report (preferred)",
+            path=RISK_REPORT_PATH,
+            fmt="json",
+            allow_empty=True,
         ),
         DataContract(
             name="Adaptive Risk State (fallback)",
@@ -1796,9 +1830,27 @@ def compute_pipeline_health() -> Dict[str, Any]:
             fail_minutes * 60,
             True,
         ),
-        ("signals.csv (fallback)", SIGNALS_PATH, warn_minutes * 60, fail_minutes * 60, False),
-        ("stock_scores.csv", STOCK_SCORES_PATH, warn_minutes * 60, fail_minutes * 60, False),
-        ("target_weights.csv", TARGET_WEIGHTS_PATH, warn_minutes * 60, fail_minutes * 60, False),
+        (
+            "signals.csv (fallback)",
+            SIGNALS_PATH,
+            warn_minutes * 60,
+            fail_minutes * 60,
+            False,
+        ),
+        (
+            "stock_scores.csv",
+            STOCK_SCORES_PATH,
+            warn_minutes * 60,
+            fail_minutes * 60,
+            False,
+        ),
+        (
+            "target_weights.csv",
+            TARGET_WEIGHTS_PATH,
+            warn_minutes * 60,
+            fail_minutes * 60,
+            False,
+        ),
         (
             "model_comparison.csv",
             MODEL_COMPARISON_PATH,
@@ -1813,7 +1865,13 @@ def compute_pipeline_health() -> Dict[str, Any]:
             fail_minutes * 60,
             False,
         ),
-        ("risk_report.json", RISK_REPORT_PATH, warn_minutes * 60, fail_minutes * 60, False),
+        (
+            "risk_report.json",
+            RISK_REPORT_PATH,
+            warn_minutes * 60,
+            fail_minutes * 60,
+            False,
+        ),
         (
             "adaptive_risk_state.json (fallback)",
             RISK_STATE_PATH,
@@ -1821,8 +1879,20 @@ def compute_pipeline_health() -> Dict[str, Any]:
             fail_minutes * 60,
             False,
         ),
-        ("live_orders.csv", LIVE_ORDERS_PATH, warn_minutes * 60, fail_minutes * 60, False),
-        ("guard_snapshot.json", GUARD_SNAPSHOT_PATH, warn_minutes * 60, fail_minutes * 60, False),
+        (
+            "live_orders.csv",
+            LIVE_ORDERS_PATH,
+            warn_minutes * 60,
+            fail_minutes * 60,
+            False,
+        ),
+        (
+            "guard_snapshot.json",
+            GUARD_SNAPSHOT_PATH,
+            warn_minutes * 60,
+            fail_minutes * 60,
+            False,
+        ),
     ]
 
     rows: List[Dict[str, Any]] = []
@@ -1861,7 +1931,7 @@ def compute_pipeline_health() -> Dict[str, Any]:
             "Status": status,
             "Critical": critical,
             "Exists": bool(meta.get("exists")),
-            "Size (KB)": (meta.get("size_bytes", 0) / 1024.0) if meta.get("exists") else 0.0,
+            "Size (KB)": ((meta.get("size_bytes", 0) / 1024.0) if meta.get("exists") else 0.0),
             "Modified (ET)": dt_to_et_str(meta.get("mtime_utc")),
             "Age": fmt_age(age),
             "Path": str(path),
@@ -1934,7 +2004,11 @@ def compute_pipeline_health() -> Dict[str, Any]:
         "fail_minutes": fail_minutes,
         "counts_all": counts_all,
         "counts_critical": counts_crit,
-        "offenders": {"fail": offenders_fail, "warn": offenders_warn, "unknown": offenders_unknown},
+        "offenders": {
+            "fail": offenders_fail,
+            "warn": offenders_warn,
+            "unknown": offenders_unknown,
+        },
         "artifacts": rows,
     }
 
@@ -2384,7 +2458,14 @@ def render_global_header() -> None:
     run_contracts_if_needed(force=False)
     cs = st.session_state.get(
         "contract_summary",
-        {"total": 0, "ok": 0, "failed": 0, "error_count": 0, "warn_count": 0, "info_count": 0},
+        {
+            "total": 0,
+            "ok": 0,
+            "failed": 0,
+            "error_count": 0,
+            "warn_count": 0,
+            "info_count": 0,
+        },
     )
     badge_c, badge_detail_c = contracts_badge(cs)
 
@@ -2429,7 +2510,10 @@ def page_data_contracts() -> None:
     with c2:
         strict_mode = st.toggle("Strict mode (warnings fail)", value=False)
     with c3:
-        st.info("Run this after any pipeline changes, machine rebuild, or schema edits.", icon="💡")
+        st.info(
+            "Run this after any pipeline changes, machine rebuild, or schema edits.",
+            icon="💡",
+        )
 
     run_contracts_if_needed(force=run_now)
 
@@ -2460,7 +2544,10 @@ def page_data_contracts() -> None:
             failed = True
 
         if failed:
-            st.error("Integrity gate FAILED. Fix artifacts before trusting analytics.", icon="🛑")
+            st.error(
+                "Integrity gate FAILED. Fix artifacts before trusting analytics.",
+                icon="🛑",
+            )
         else:
             st.success("Integrity gate PASSED.", icon="✅")
 
@@ -2763,11 +2850,13 @@ def page_positions_exposure() -> None:
 
     if top1 >= 0.25:
         st.warning(
-            f"Concentration risk: largest position is {top1*100:.1f}% of invested value.", icon="⚠️"
+            f"Concentration risk: largest position is {top1*100:.1f}% of invested value.",
+            icon="⚠️",
         )
     if top3 >= 0.60:
         st.warning(
-            f"Concentration risk: top 3 positions are {top3*100:.1f}% of invested value.", icon="⚠️"
+            f"Concentration risk: top 3 positions are {top3*100:.1f}% of invested value.",
+            icon="⚠️",
         )
     if hhi >= 0.18:
         st.warning(
@@ -2842,6 +2931,16 @@ def page_positions_exposure() -> None:
 
     st.markdown("#### Raw snapshot rows (tail)")
     st.dataframe(snap.tail(200), use_container_width=True)
+
+
+def page_pnl_ledger() -> None:
+    """💰 Profit & Loss Ledger — institutional P&L and cash-flow accountability."""
+    try:
+        from dashboard.pnl_ledger import render_pnl_ledger_dashboard
+
+        render_pnl_ledger_dashboard(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Profit & Loss Ledger failed to load: {_short_err(e)}")
 
 
 def page_trade_log() -> None:
@@ -2989,7 +3088,13 @@ def page_signal_lifecycle() -> None:
         view["stance"] = view["stance"].astype(str).str.upper()
 
     # Column order: lifecycle truth first, then signal context, then remaining columns unchanged
-    primary_cols = ["ticker", "stance", "lifecycle_action", "position_state", "last_action"]
+    primary_cols = [
+        "ticker",
+        "stance",
+        "lifecycle_action",
+        "position_state",
+        "last_action",
+    ]
     secondary_cols = ["signal", "confidence", "delta_pct", "rationale"]
     ordered = [c for c in primary_cols if c in view.columns]
     ordered += [c for c in secondary_cols if c in view.columns]
@@ -3257,7 +3362,14 @@ def page_trade_rationale() -> None:
     df = ensure_date_col(df)
     cols = [
         c
-        for c in ["date", "ticker", "signal", "confidence", "position_size", "rationale"]
+        for c in [
+            "date",
+            "ticker",
+            "signal",
+            "confidence",
+            "position_size",
+            "rationale",
+        ]
         if c in df.columns
     ]
     view = df[cols] if cols else df
@@ -3450,7 +3562,9 @@ def page_defensive_simulation_lab() -> None:
 def page_executive_risk_command_center() -> None:
     """🏛 Executive Risk Command Center — leadership briefing (read-only)."""
     try:
-        from dashboard.advanced_risk_intelligence import render_executive_risk_command_center
+        from dashboard.advanced_risk_intelligence import (
+            render_executive_risk_command_center,
+        )
 
         render_executive_risk_command_center(RESULTS_DIR)
     except Exception as e:
@@ -3490,7 +3604,9 @@ def page_protective_action_policy_center() -> None:
 def page_governance_authorization_center() -> None:
     """🏛 Governance Authorization Center — four-layer authorization gate (read-only)."""
     try:
-        from dashboard.governance_execution_readiness import render_governance_authorization_center
+        from dashboard.governance_execution_readiness import (
+            render_governance_authorization_center,
+        )
 
         render_governance_authorization_center(RESULTS_DIR)
     except Exception as e:
@@ -3500,7 +3616,9 @@ def page_governance_authorization_center() -> None:
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
-        from dashboard.governance_execution_readiness import render_execution_readiness_center
+        from dashboard.governance_execution_readiness import (
+            render_execution_readiness_center,
+        )
 
         render_execution_readiness_center(RESULTS_DIR)
     except Exception as e:
@@ -3510,7 +3628,9 @@ def page_execution_readiness_center() -> None:
 def page_protective_action_trials() -> None:
     """🧪 Protective Action Trials — paper-mode simulations only."""
     try:
-        from dashboard.governance_execution_readiness import render_protective_action_trials
+        from dashboard.governance_execution_readiness import (
+            render_protective_action_trials,
+        )
 
         render_protective_action_trials(RESULTS_DIR)
     except Exception as e:
@@ -3520,7 +3640,9 @@ def page_protective_action_trials() -> None:
 def page_protective_action_evaluation() -> None:
     """📊 Protective Action Evaluation — trial effectiveness scoring (read-only)."""
     try:
-        from dashboard.capital_preservation_evaluation import render_protective_action_evaluation
+        from dashboard.capital_preservation_evaluation import (
+            render_protective_action_evaluation,
+        )
 
         render_protective_action_evaluation(RESULTS_DIR)
     except Exception as e:
@@ -3530,7 +3652,9 @@ def page_protective_action_evaluation() -> None:
 def page_adaptive_capital_preservation() -> None:
     """🧠 Adaptive Capital Preservation — learn from simulations (no actions)."""
     try:
-        from dashboard.capital_preservation_evaluation import render_adaptive_capital_preservation
+        from dashboard.capital_preservation_evaluation import (
+            render_adaptive_capital_preservation,
+        )
 
         render_adaptive_capital_preservation(RESULTS_DIR)
     except Exception as e:
@@ -3540,7 +3664,9 @@ def page_adaptive_capital_preservation() -> None:
 def page_capital_preservation_governor() -> None:
     """👑 Capital Preservation Governor — unified preservation posture (advisory)."""
     try:
-        from dashboard.capital_preservation_evaluation import render_capital_preservation_governor
+        from dashboard.capital_preservation_evaluation import (
+            render_capital_preservation_governor,
+        )
 
         render_capital_preservation_governor(RESULTS_DIR)
     except Exception as e:
@@ -3550,7 +3676,9 @@ def page_capital_preservation_governor() -> None:
 def page_capital_preservation_audit_center() -> None:
     """📋 Capital Preservation Audit Center — unified preservation audit trail."""
     try:
-        from dashboard.institutional_autonomy import render_capital_preservation_audit_center
+        from dashboard.institutional_autonomy import (
+            render_capital_preservation_audit_center,
+        )
 
         render_capital_preservation_audit_center(RESULTS_DIR)
     except Exception as e:
@@ -3570,7 +3698,9 @@ def page_preservation_stress_lab() -> None:
 def page_preservation_certification_center() -> None:
     """🏅 Preservation Certification Center — paper-mode certification scoring."""
     try:
-        from dashboard.institutional_autonomy import render_preservation_certification_center
+        from dashboard.institutional_autonomy import (
+            render_preservation_certification_center,
+        )
 
         render_preservation_certification_center(RESULTS_DIR)
     except Exception as e:
@@ -3600,7 +3730,9 @@ def page_accountability_registry() -> None:
 def page_preservation_governance_board() -> None:
     """👑 Preservation Governance Board — unified advisory authority layer."""
     try:
-        from dashboard.institutional_protection import render_preservation_governance_board
+        from dashboard.institutional_protection import (
+            render_preservation_governance_board,
+        )
 
         render_preservation_governance_board(RESULTS_DIR)
     except Exception as e:
@@ -3610,7 +3742,9 @@ def page_preservation_governance_board() -> None:
 def page_investment_committee_review() -> None:
     """🏛 Investment Committee Review — portfolio, risk, governance, certification, readiness."""
     try:
-        from dashboard.institutional_operations import render_investment_committee_review
+        from dashboard.institutional_operations import (
+            render_investment_committee_review,
+        )
 
         render_investment_committee_review(RESULTS_DIR)
     except Exception as e:
@@ -3650,7 +3784,9 @@ def page_decision_quality_center() -> None:
 def page_institutional_intelligence() -> None:
     """🏛 Institutional Intelligence — cross-layer institutional scoring."""
     try:
-        from dashboard.institutional_intelligence import render_institutional_intelligence
+        from dashboard.institutional_intelligence import (
+            render_institutional_intelligence,
+        )
 
         render_institutional_intelligence(RESULTS_DIR)
     except Exception as e:
@@ -3660,7 +3796,9 @@ def page_institutional_intelligence() -> None:
 def page_strategic_self_improvement() -> None:
     """🚀 Strategic Self-Improvement — prioritized enhancement advisory."""
     try:
-        from dashboard.institutional_intelligence import render_strategic_self_improvement
+        from dashboard.institutional_intelligence import (
+            render_strategic_self_improvement,
+        )
 
         render_strategic_self_improvement(RESULTS_DIR)
     except Exception as e:
@@ -3760,7 +3898,9 @@ def page_strategic_priorities_center() -> None:
 def page_attention_allocation_center() -> None:
     """🎯 Attention Allocation Center — institutional focus scoring."""
     try:
-        from dashboard.institutional_optimization import render_attention_allocation_center
+        from dashboard.institutional_optimization import (
+            render_attention_allocation_center,
+        )
 
         render_attention_allocation_center(RESULTS_DIR)
     except Exception as e:
@@ -3770,7 +3910,9 @@ def page_attention_allocation_center() -> None:
 def page_system_coordination_center() -> None:
     """🔗 System Coordination Center — cross-system alignment."""
     try:
-        from dashboard.institutional_optimization import render_system_coordination_center
+        from dashboard.institutional_optimization import (
+            render_system_coordination_center,
+        )
 
         render_system_coordination_center(RESULTS_DIR)
     except Exception as e:
@@ -3780,7 +3922,9 @@ def page_system_coordination_center() -> None:
 def page_institutional_optimization_center() -> None:
     """⚡ Institutional Optimization Center — optimization opportunities."""
     try:
-        from dashboard.institutional_optimization import render_institutional_optimization_center
+        from dashboard.institutional_optimization import (
+            render_institutional_optimization_center,
+        )
 
         render_institutional_optimization_center(RESULTS_DIR)
     except Exception as e:
@@ -3810,7 +3954,9 @@ def page_explainability_center() -> None:
 def page_institutional_insights_center() -> None:
     """💡 Institutional Insights — strategic observations and synthesized headlines."""
     try:
-        from dashboard.institutional_reasoning import render_institutional_insights_center
+        from dashboard.institutional_reasoning import (
+            render_institutional_insights_center,
+        )
 
         render_institutional_insights_center(RESULTS_DIR)
     except Exception as e:
@@ -3948,9 +4094,13 @@ def page_execution_dashboard() -> None:
         a0, a1, a2 = st.columns(3)
         a0.metric("Mode", str(arm_st.get("mode", "—")))
         a1.metric(
-            "Paper auto (config)", "yes" if (arm_cf or {}).get("paper_auto_allowed") else "no"
+            "Paper auto (config)",
+            "yes" if (arm_cf or {}).get("paper_auto_allowed") else "no",
         )
-        a2.metric("Live auto (config)", "yes" if (arm_cf or {}).get("live_auto_allowed") else "no")
+        a2.metric(
+            "Live auto (config)",
+            "yes" if (arm_cf or {}).get("live_auto_allowed") else "no",
+        )
         perms = arm_st.get("permissions") if isinstance(arm_st.get("permissions"), dict) else {}
         st.caption(
             "**Execute permissions:** "
@@ -3962,7 +4112,8 @@ def page_execution_dashboard() -> None:
         st.caption(f"Last snapshot: **{arm_st.get('timestamp')}**")
         if str((arm_cf or {}).get("mode", "")).upper() == "ASSISTED":
             pconf = load_json(
-                PROJECT_ROOT / "data" / "live" / "paper_arm_confirm.json", show_error=False
+                PROJECT_ROOT / "data" / "live" / "paper_arm_confirm.json",
+                show_error=False,
             )
             if isinstance(pconf, dict) and pconf.get("expires_at"):
                 st.caption(
@@ -4062,15 +4213,27 @@ def page_execution_dashboard() -> None:
             st.warning("warnings: " + "; ".join(str(x) for x in wr))
     ep_csv = csv_usable_rows(EXECUTION_PLAN_CSV_PATH)
     if ep_csv is not None and not ep_csv.empty:
-        want = ["symbol", "stance", "status", "skip_reason", "qty", "side", "planned_notional"]
+        want = [
+            "symbol",
+            "stance",
+            "status",
+            "skip_reason",
+            "qty",
+            "side",
+            "planned_notional",
+        ]
         show = [c for c in want if c in ep_csv.columns]
         if show:
             st.dataframe(
-                sanitize_df_cols(ep_csv[show].head(200)), use_container_width=True, hide_index=True
+                sanitize_df_cols(ep_csv[show].head(200)),
+                use_container_width=True,
+                hide_index=True,
             )
         else:
             st.dataframe(
-                sanitize_df_cols(ep_csv.head(100)), use_container_width=True, hide_index=True
+                sanitize_df_cols(ep_csv.head(100)),
+                use_container_width=True,
+                hide_index=True,
             )
     elif epj:
         st.caption("No **execution_plan.csv** rows (optional).")
@@ -4114,14 +4277,17 @@ def page_execution_dashboard() -> None:
         ap1.metric("Trim candidates", str(mpj.get("trim_candidates", "—")))
         ap2.metric("Exit candidates", str(mpj.get("exit_candidates", "—")))
         ap3.metric(
-            "Approved actions", str(mpj.get("approved_actions", mpj.get("orders_planned", "—")))
+            "Approved actions",
+            str(mpj.get("approved_actions", mpj.get("orders_planned", "—"))),
         )
         if isinstance(sk, dict) and sk:
             top_rc = sorted(
-                sk.items(), key=lambda kv: (-int(kv[1]) if str(kv[1]).isdigit() else 0, str(kv[0]))
+                sk.items(),
+                key=lambda kv: (-int(kv[1]) if str(kv[1]).isdigit() else 0, str(kv[0])),
             )[:8]
             ap4.metric(
-                "Top skip reasons", ", ".join(f"{k}:{v}" for k, v in top_rc[:3]) if top_rc else "—"
+                "Top skip reasons",
+                ", ".join(f"{k}:{v}" for k, v in top_rc[:3]) if top_rc else "—",
             )
         else:
             ap4.metric("Top skip reasons", "—")
@@ -4151,7 +4317,9 @@ def page_execution_dashboard() -> None:
             )
         else:
             st.dataframe(
-                sanitize_df_cols(mp_csv.head(100)), use_container_width=True, hide_index=True
+                sanitize_df_cols(mp_csv.head(100)),
+                use_container_width=True,
+                hide_index=True,
             )
         cand = mp_csv.copy()
         if "reason_code" in cand.columns:
@@ -4188,7 +4356,7 @@ def page_execution_dashboard() -> None:
         )
         cr4.metric(
             "Selected",
-            len(cr["selected_symbols"]) if isinstance(cr.get("selected_symbols"), list) else "—",
+            (len(cr["selected_symbols"]) if isinstance(cr.get("selected_symbols"), list) else "—"),
         )
         st.caption(
             f"**Session:** `{cr.get('source_session') or '—'}` · **n_exits:** {cr.get('n_exits', '—')} · "
@@ -4335,7 +4503,9 @@ def page_execution_dashboard() -> None:
             ]
             show_d = [c for c in want_d if c in filt.columns]
             st.dataframe(
-                filt[show_d] if show_d else filt, use_container_width=True, hide_index=True
+                filt[show_d] if show_d else filt,
+                use_container_width=True,
+                hide_index=True,
             )
         else:
             st.dataframe(edf.head(300), use_container_width=True, hide_index=True)
@@ -4462,7 +4632,8 @@ def page_execution_dashboard() -> None:
         if br:
             st.markdown("**Top block reason buckets** (from execution drop diagnostics)")
             top_b = sorted(
-                br.items(), key=lambda kv: (-int(kv[1]) if str(kv[1]).isdigit() else 0, str(kv[0]))
+                br.items(),
+                key=lambda kv: (-int(kv[1]) if str(kv[1]).isdigit() else 0, str(kv[0])),
             )[:12]
             st.code(", ".join(f"{k}: {v}" for k, v in top_b))
         n_ep = ep.get("notes")
@@ -4768,7 +4939,14 @@ def page_live_orders_panel() -> None:
     ts_col = next(
         (
             c
-            for c in ["submitted_at", "created_at", "updated_at", "timestamp", "date", "time"]
+            for c in [
+                "submitted_at",
+                "created_at",
+                "updated_at",
+                "timestamp",
+                "date",
+                "time",
+            ]
             if c in df.columns
         ),
         None,
@@ -4837,7 +5015,8 @@ def page_live_orders_panel() -> None:
         st.dataframe(open_view[cols_final], use_container_width=True, hide_index=True)
     else:
         st.dataframe(
-            open_view.drop(columns=["_ts", "_age"], errors="ignore"), use_container_width=True
+            open_view.drop(columns=["_ts", "_age"], errors="ignore"),
+            use_container_width=True,
         )
 
     with st.expander("Raw live_orders.csv (tail)"):
@@ -5622,7 +5801,11 @@ def _ei_safe_numeric(df: pd.DataFrame, col: str) -> Optional[pd.Series]:
 
 
 def _ei_safe_metric(
-    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.4f}", default: str = "N/A"
+    df: pd.DataFrame,
+    col: str,
+    agg: str = "mean",
+    fmt: str = "{:.4f}",
+    default: str = "N/A",
 ) -> str:
     """Compute a single aggregate metric on a numeric column with safe fallback."""
     s = _ei_safe_numeric(df, col)
@@ -5848,10 +6031,12 @@ def page_execution_intelligence() -> None:
     c5, c6, c7, c8 = st.columns(4)
     c5.metric("Stale quotes", f"{stale_count:,}" if isinstance(stale_count, int) else "N/A")
     c6.metric(
-        "DEFER+SKIP styles", f"{defer_skip_count:,}" if isinstance(defer_skip_count, int) else "N/A"
+        "DEFER+SKIP styles",
+        f"{defer_skip_count:,}" if isinstance(defer_skip_count, int) else "N/A",
     )
     c7.metric(
-        "Skip flag count", f"{skip_flag_count:,}" if isinstance(skip_flag_count, int) else "N/A"
+        "Skip flag count",
+        f"{skip_flag_count:,}" if isinstance(skip_flag_count, int) else "N/A",
     )
     c8.metric(
         "Partial-fill actions",
@@ -5957,7 +6142,11 @@ def page_execution_intelligence() -> None:
     sp_a, sp_b, sp_c = st.columns(3)
     sp_a.metric(
         "Avg spread (bps)",
-        _ei_safe_metric(primary, "spread_bps", "mean", "{:.2f}") if primary is not None else "N/A",
+        (
+            _ei_safe_metric(primary, "spread_bps", "mean", "{:.2f}")
+            if primary is not None
+            else "N/A"
+        ),
     )
     sp_b.metric(
         "Avg quote age (s)",
@@ -5967,7 +6156,10 @@ def page_execution_intelligence() -> None:
             else "N/A"
         ),
     )
-    sp_c.metric("Stale quote rows", f"{stale_count:,}" if isinstance(stale_count, int) else "N/A")
+    sp_c.metric(
+        "Stale quote rows",
+        f"{stale_count:,}" if isinstance(stale_count, int) else "N/A",
+    )
 
     sb_col, st_col = st.columns(2)
     with sb_col:
@@ -5983,7 +6175,13 @@ def page_execution_intelligence() -> None:
         _ei_value_counts_table(
             primary,
             "execution_style",
-            order=["AGGRESSIVE_LIMIT", "NORMAL_LIMIT", "PASSIVE_LIMIT", "DEFER", "SKIP"],
+            order=[
+                "AGGRESSIVE_LIMIT",
+                "NORMAL_LIMIT",
+                "PASSIVE_LIMIT",
+                "DEFER",
+                "SKIP",
+            ],
         )
         if primary is not None
         else None
@@ -6021,10 +6219,12 @@ def page_execution_intelligence() -> None:
     else:
         l1, l2, l3 = st.columns(3)
         l1.metric(
-            "Avg order_notional", _ei_safe_metric(primary, "order_notional", "mean", "{:,.0f}")
+            "Avg order_notional",
+            _ei_safe_metric(primary, "order_notional", "mean", "{:,.0f}"),
         )
         l2.metric(
-            "Avg liquidity_proxy", _ei_safe_metric(primary, "liquidity_proxy", "mean", "{:,.0f}")
+            "Avg liquidity_proxy",
+            _ei_safe_metric(primary, "liquidity_proxy", "mean", "{:,.0f}"),
         )
         l3.metric(
             "Avg notional / liquidity",
@@ -6054,7 +6254,9 @@ def page_execution_intelligence() -> None:
                 if cols_top:
                     st.markdown("**Top notional vs liquidity**")
                     _ei_render_table(
-                        worst[cols_top].head(10), height=320, empty_msg="No rows to rank."
+                        worst[cols_top].head(10),
+                        height=320,
+                        empty_msg="No rows to rank.",
                     )
             except Exception as e:
                 st.caption(f"Liquidity ranking unavailable: {_short_err(e)}")
@@ -6155,7 +6357,9 @@ def page_execution_intelligence() -> None:
                 if cols_slip and not w.empty:
                     st.markdown("Top realized slippage rows")
                     _ei_render_table(
-                        w[cols_slip].head(10), height=320, empty_msg="No realized slippage rows."
+                        w[cols_slip].head(10),
+                        height=320,
+                        empty_msg="No realized slippage rows.",
                     )
                     try:
                         rs_series = pd.to_numeric(
@@ -6346,7 +6550,11 @@ def _fb_value_counts_table(
 
 
 def _fb_safe_metric(
-    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.3f}", default: str = "N/A"
+    df: pd.DataFrame,
+    col: str,
+    agg: str = "mean",
+    fmt: str = "{:.3f}",
+    default: str = "N/A",
 ) -> str:
     return _ei_safe_metric(df, col, agg=agg, fmt=fmt, default=default)
 
@@ -6510,7 +6718,10 @@ def page_feedback_intelligence() -> None:
             high_evid_count = 0
 
     avg_conf = _fb_safe_metric(
-        rec_df if not no_recs else pd.DataFrame(), "recommendation_confidence", "mean", "{:.2f}"
+        rec_df if not no_recs else pd.DataFrame(),
+        "recommendation_confidence",
+        "mean",
+        "{:.2f}",
     )
 
     sources_avail = "N/A"
@@ -6694,9 +6905,19 @@ def page_feedback_intelligence() -> None:
 
             try:
                 bins = [0.0, 0.20, 0.40, 0.60, 0.80, 1.000001]
-                labels = ["0.00–0.20", "0.20–0.40", "0.40–0.60", "0.60–0.80", "0.80–1.00"]
+                labels = [
+                    "0.00–0.20",
+                    "0.20–0.40",
+                    "0.40–0.60",
+                    "0.60–0.80",
+                    "0.80–1.00",
+                ]
                 binned = pd.cut(
-                    conf_series, bins=bins, labels=labels, include_lowest=True, right=False
+                    conf_series,
+                    bins=bins,
+                    labels=labels,
+                    include_lowest=True,
+                    right=False,
                 )
                 hist_df = (
                     binned.value_counts()
@@ -7002,7 +7223,11 @@ def _ad_value_counts_table(
 
 
 def _ad_safe_metric(
-    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.3f}", default: str = "N/A"
+    df: pd.DataFrame,
+    col: str,
+    agg: str = "mean",
+    fmt: str = "{:.3f}",
+    default: str = "N/A",
 ) -> str:
     return _ei_safe_metric(df, col, agg=agg, fmt=fmt, default=default)
 
@@ -7222,7 +7447,10 @@ def page_adaptation_intelligence() -> None:
     c4.metric("Avg confidence", avg_conf)
 
     c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Thin-data proposals", f"{thin_count:,}" if isinstance(thin_count, int) else "N/A")
+    c5.metric(
+        "Thin-data proposals",
+        f"{thin_count:,}" if isinstance(thin_count, int) else "N/A",
+    )
     c6.metric("Advisory-only", advisory_only)
     c7.metric("Auto-apply allowed", auto_apply)
     c8.metric("Sources available", sources_avail)
@@ -7333,7 +7561,12 @@ def page_adaptation_intelligence() -> None:
                     .agg(["mean", "median", "count"])
                     .round(3)
                     .reset_index()
-                    .rename(columns={"mean": "avg_confidence", "median": "median_confidence"})
+                    .rename(
+                        columns={
+                            "mean": "avg_confidence",
+                            "median": "median_confidence",
+                        }
+                    )
                     .sort_values("avg_confidence", ascending=False)
                     .reset_index(drop=True)
                 )
@@ -7374,9 +7607,19 @@ def page_adaptation_intelligence() -> None:
 
             try:
                 bins = [0.0, 0.20, 0.40, 0.60, 0.80, 1.000001]
-                labels = ["0.00–0.20", "0.20–0.40", "0.40–0.60", "0.60–0.80", "0.80–1.00"]
+                labels = [
+                    "0.00–0.20",
+                    "0.20–0.40",
+                    "0.40–0.60",
+                    "0.60–0.80",
+                    "0.80–1.00",
+                ]
                 binned = pd.cut(
-                    conf_series, bins=bins, labels=labels, include_lowest=True, right=False
+                    conf_series,
+                    bins=bins,
+                    labels=labels,
+                    include_lowest=True,
+                    right=False,
                 )
                 hist_df = (
                     binned.value_counts()
@@ -7433,8 +7676,14 @@ def page_adaptation_intelligence() -> None:
         autoapply_n = _ad_truthy_count(proposals, "auto_apply_allowed")
         gm1, gm2, gm3 = st.columns(3)
         gm1.metric("Bounded changes", f"{bounded_n:,}" if isinstance(bounded_n, int) else "N/A")
-        gm2.metric("Require manual review", f"{review_n:,}" if isinstance(review_n, int) else "N/A")
-        gm3.metric("Auto-apply rows", f"{autoapply_n:,}" if isinstance(autoapply_n, int) else "N/A")
+        gm2.metric(
+            "Require manual review",
+            f"{review_n:,}" if isinstance(review_n, int) else "N/A",
+        )
+        gm3.metric(
+            "Auto-apply rows",
+            f"{autoapply_n:,}" if isinstance(autoapply_n, int) else "N/A",
+        )
 
         st.markdown("**Curated guardrail view**")
         guard_cols = _ad_select_existing_columns(
@@ -7748,7 +7997,11 @@ def _ap_value_counts_table(
 
 
 def _ap_safe_metric(
-    df: pd.DataFrame, col: str, agg: str = "mean", fmt: str = "{:.3f}", default: str = "N/A"
+    df: pd.DataFrame,
+    col: str,
+    agg: str = "mean",
+    fmt: str = "{:.3f}",
+    default: str = "N/A",
 ) -> str:
     return _ei_safe_metric(df, col, agg=agg, fmt=fmt, default=default)
 
@@ -7763,7 +8016,10 @@ def _ap_safe_json_table(obj: Optional[Dict[str, Any]], key: str) -> Optional[pd.
 
 
 def _ap_top_rows(
-    df: pd.DataFrame, by_cols: List[str], top_n: int = 10, ascending: Optional[List[bool]] = None
+    df: pd.DataFrame,
+    by_cols: List[str],
+    top_n: int = 10,
+    ascending: Optional[List[bool]] = None,
 ) -> Optional[pd.DataFrame]:
     """Sort by the given columns (desc by default) and return the top N rows."""
     if df is None or df.empty or not by_cols:
@@ -7887,7 +8143,7 @@ def page_applied_adjustments() -> None:
     c2.metric("Inactive adjustments", f"{inactive_count:,}")
     c3.metric(
         "Proposals applied",
-        f"{int(proposals_applied):,}" if isinstance(proposals_applied, (int, float)) else "N/A",
+        (f"{int(proposals_applied):,}" if isinstance(proposals_applied, (int, float)) else "N/A"),
     )
     c4.metric(
         "Rolled back",
@@ -7901,7 +8157,7 @@ def page_applied_adjustments() -> None:
     c5, c6, c7, c8 = st.columns(4)
     c5.metric(
         "Skipped",
-        f"{int(proposals_skipped):,}" if isinstance(proposals_skipped, (int, float)) else "N/A",
+        (f"{int(proposals_skipped):,}" if isinstance(proposals_skipped, (int, float)) else "N/A"),
     )
     c6.metric(
         "Supersessions",
@@ -8077,7 +8333,12 @@ def page_applied_adjustments() -> None:
                     .agg(["mean", "median", "count"])
                     .round(3)
                     .reset_index()
-                    .rename(columns={"mean": "avg_confidence", "median": "median_confidence"})
+                    .rename(
+                        columns={
+                            "mean": "avg_confidence",
+                            "median": "median_confidence",
+                        }
+                    )
                     .sort_values("avg_confidence", ascending=False)
                     .reset_index(drop=True)
                 )
@@ -8646,7 +8907,10 @@ def page_adaptation_simulation() -> None:
                             "newly_accepted_exposure_proxy",
                             exposure.get("newly_accepted_exposure_proxy"),
                         ),
-                        ("net_exposure_change_proxy", exposure.get("net_exposure_change_proxy")),
+                        (
+                            "net_exposure_change_proxy",
+                            exposure.get("net_exposure_change_proxy"),
+                        ),
                     ],
                     columns=["metric", "value"],
                 )
@@ -8783,7 +9047,8 @@ def page_adaptation_simulation() -> None:
         rc = summary.get("risk_impact_counts") or {}
         rc1, rc2, rc3 = st.columns(3)
         rc1.metric(
-            "Wide / too-wide spread rows", _int_or_na(rc.get("wide_or_too_wide_spread_rows"))
+            "Wide / too-wide spread rows",
+            _int_or_na(rc.get("wide_or_too_wide_spread_rows")),
         )
         rc2.metric("Stale-quote rows", _int_or_na(rc.get("stale_quote_rows")))
         rc3.metric("HIGH exec-risk rows", _int_or_na(rc.get("high_execution_risk_rows")))
@@ -9077,8 +9342,14 @@ def page_performance_intelligence() -> None:
 
         with st.expander("Realized vs unrealized split", expanded=False):
             r1, r2 = st.columns(2)
-            r1.metric("Total realized P/L", _pi_format_money(sys_view.get("total_realized_pl")))
-            r2.metric("Total unrealized P/L", _pi_format_money(sys_view.get("total_unrealized_pl")))
+            r1.metric(
+                "Total realized P/L",
+                _pi_format_money(sys_view.get("total_realized_pl")),
+            )
+            r2.metric(
+                "Total unrealized P/L",
+                _pi_format_money(sys_view.get("total_unrealized_pl")),
+            )
 
         if isinstance(summary, dict):
             with st.expander("Full summary JSON", expanded=False):
@@ -9415,8 +9686,18 @@ _GCC_MATURITY_TOKENS: Tuple[str, ...] = (
 )
 
 _GCC_LADDER_STAGES: List[Tuple[str, str, str, str]] = [
-    ("Readiness", "readiness_state", "runtime_readiness_classification", "readiness_confidence"),
-    ("Admission", "admission_state", "runtime_admission_classification", "admission_confidence"),
+    (
+        "Readiness",
+        "readiness_state",
+        "runtime_readiness_classification",
+        "readiness_confidence",
+    ),
+    (
+        "Admission",
+        "admission_state",
+        "runtime_admission_classification",
+        "admission_confidence",
+    ),
     (
         "Constitutional Eligibility",
         "constitutional_eligibility_state",
@@ -9476,7 +9757,12 @@ _GCC_HIST_SERIES: List[Tuple[str, Path, str, str]] = [
     ),
     ("Review", GCC_REVIEW_MEM_PATH, "review_state", "review_confidence"),
     ("Verdict", GCC_VERDICT_MEM_PATH, "verdict_state", "verdict_confidence"),
-    ("Human Escalation", GCC_DOSSIER_MEM_PATH, "dossier_state", "escalation_confidence"),
+    (
+        "Human Escalation",
+        GCC_DOSSIER_MEM_PATH,
+        "dossier_state",
+        "escalation_confidence",
+    ),
 ]
 
 
@@ -9676,7 +9962,10 @@ def _gcc_collect_blocked_reason_groups(
             if "governance maturity remains insufficient" in low:
                 _add("Governance maturity", "Governance maturity remains insufficient.")
             elif "shadow governance reliability remains immature" in low:
-                _add("Governance maturity", "Shadow governance reliability remains immature.")
+                _add(
+                    "Governance maturity",
+                    "Shadow governance reliability remains immature.",
+                )
             else:
                 _add("Governance maturity", exec_sum)
 
@@ -10033,7 +10322,11 @@ def _gcc_analyze_governance_history(
             "Human escalation remains inactive because governance confidence does not justify "
             "operator intervention."
         )
-    elif esc_cls in ("OBSERVE_ONLY_ESCALATION", "LIMITED_ESCALATION", "FULL_OPERATOR_ESCALATION"):
+    elif esc_cls in (
+        "OBSERVE_ONLY_ESCALATION",
+        "LIMITED_ESCALATION",
+        "FULL_OPERATOR_ESCALATION",
+    ):
         _expl_add(f"Human escalation posture is active ({esc_cls.replace('_', ' ').title()}).")
 
     exec_sum = str(_gcc_get(dossier, "executive_summary") or "").strip()
@@ -10281,7 +10574,9 @@ def _gcc_collect_governance_snapshot(
     )
     constitutional_safe = _gcc_get(dossier, "constitutional_safe")
     future_candidate = _gcc_get(
-        dossier, "future_runtime_candidate", _gcc_get(dossier_summary, "future_runtime_candidate")
+        dossier,
+        "future_runtime_candidate",
+        _gcc_get(dossier_summary, "future_runtime_candidate"),
     )
 
     classifications = {
@@ -10478,7 +10773,11 @@ def _gcc_detect_governance_regime(
             return True
         if any(
             "LIMITED" in str(v or "").upper() and "NOT_" not in str(v or "").upper()
-            for v in (cls.get("readiness"), cls.get("admission"), cls.get("eligibility"))
+            for v in (
+                cls.get("readiness"),
+                cls.get("admission"),
+                cls.get("eligibility"),
+            )
         ):
             return True
         return False
@@ -11504,7 +11803,11 @@ def _gcc_detect_governance_consensus(
     def _match_pre_runtime_convergence() -> bool:
         return (
             trajectory
-            in ("GOVERNANCE_IMPROVING", "GOVERNANCE_ACCELERATING", "PRE_RUNTIME_TRAJECTORY")
+            in (
+                "GOVERNANCE_IMPROVING",
+                "GOVERNANCE_ACCELERATING",
+                "PRE_RUNTIME_TRAJECTORY",
+            )
             and hist.get("institutional_momentum") in ("LOW", "MODERATE", "HIGH")
             and hist.get("confidence_direction") in ("improving", "stable")
         )
@@ -11788,7 +12091,10 @@ def _gcc_confidence_discount(
         discount += 0.25
     elif level == "CRITICAL_TENSION":
         discount += 0.35
-    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+    if consensus.get("consensus_state") in (
+        "FRAGMENTED_GOVERNANCE",
+        "CONFLICTED_GOVERNANCE",
+    ):
         discount += 0.20
     if integrity_state == "GOVERNANCE_OVERCONFIDENT":
         discount += 0.25
@@ -11868,7 +12174,11 @@ def _gcc_detect_confidence_integrity(
     regime_conf = float(regime.get("regime_confidence", 0.0) or 0.0)
     forecast_conf = float(forecast.get("forecast_confidence", 0.0) or 0.0)
     high_conf = (
-        max(regime_conf, forecast_conf, float(consensus.get("consensus_confidence", 0.0) or 0.0))
+        max(
+            regime_conf,
+            forecast_conf,
+            float(consensus.get("consensus_confidence", 0.0) or 0.0),
+        )
         >= 0.75
     )
     readiness_cls = str(cls.get("readiness") or "").upper()
@@ -11878,9 +12188,10 @@ def _gcc_detect_confidence_integrity(
     contradiction_count = int(tension.get("contradiction_count", 0) or 0)
 
     def _match_undercut() -> bool:
-        return consensus_state in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE") or (
-            contradiction_count >= 2 and tension_level != "NO_TENSION"
-        )
+        return consensus_state in (
+            "FRAGMENTED_GOVERNANCE",
+            "CONFLICTED_GOVERNANCE",
+        ) or (contradiction_count >= 2 and tension_level != "NO_TENSION")
 
     def _match_overconfident() -> bool:
         return high_conf and readiness_cls == "NOT_RUNTIME_READY" and readiness_conf <= 0.05
@@ -12127,7 +12438,10 @@ def _gcc_governance_maturity_score(
 
     if snap["constitutional_safe"] is False or snap["constitutional_review_required"]:
         score -= 0.10
-    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+    if consensus.get("consensus_state") in (
+        "FRAGMENTED_GOVERNANCE",
+        "CONFLICTED_GOVERNANCE",
+    ):
         score -= 0.12
     if integrity.get("integrity_state") == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
         score -= 0.15
@@ -12150,7 +12464,10 @@ def _gcc_next_governance_gate(
         return "Prepare Committee Review"
     if readiness_state == "GOVERNANCE_REVIEW_ELIGIBLE":
         return "Prepare Governance Review"
-    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+    if consensus.get("consensus_state") in (
+        "FRAGMENTED_GOVERNANCE",
+        "CONFLICTED_GOVERNANCE",
+    ):
         return "Reduce Contradictions"
     if integrity.get("integrity_state") in (
         "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
@@ -12404,7 +12721,10 @@ def _gcc_render_decision_readiness(
     c1.metric("Decision Readiness", decision["readiness_display"])
     c2.metric("Escalation Readiness", decision["escalation_readiness"])
     c3.metric("Discussability", decision["discussability"])
-    c4.metric("Governance Maturity Score", _gcc_fmt_conf(decision["governance_maturity_score"]))
+    c4.metric(
+        "Governance Maturity Score",
+        _gcc_fmt_conf(decision["governance_maturity_score"]),
+    )
 
     state = decision["readiness_state"]
     if state == "NOT_INSTITUTIONALLY_DISCUSSABLE":
@@ -12531,7 +12851,10 @@ def _gcc_fragility_score(
     elif level == "CRITICAL_TENSION":
         score += 0.32
 
-    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+    if consensus.get("consensus_state") in (
+        "FRAGMENTED_GOVERNANCE",
+        "CONFLICTED_GOVERNANCE",
+    ):
         score += 0.18
     if integrity.get("integrity_state") in (
         "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS",
@@ -12630,7 +12953,10 @@ def _gcc_dominant_failure_modes(
 
     if integrity.get("integrity_state") == "GOVERNANCE_OVERCONFIDENT":
         modes.append("Confidence stronger than institutional maturity")
-    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+    if consensus.get("consensus_state") in (
+        "FRAGMENTED_GOVERNANCE",
+        "CONFLICTED_GOVERNANCE",
+    ):
         modes.append("Governance cohesion deteriorating")
     if int(tension.get("contradiction_count", 0) or 0) >= 2:
         modes.append("Contradictions elevated across governance layers")
@@ -12671,7 +12997,10 @@ def _gcc_failure_drivers(
     cls = snap["classifications"]
     if str(cls.get("readiness") or "").upper().startswith("NOT"):
         drivers.append(f"Runtime readiness: {cls.get('readiness') or '—'}")
-    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+    if consensus.get("consensus_state") in (
+        "FRAGMENTED_GOVERNANCE",
+        "CONFLICTED_GOVERNANCE",
+    ):
         drivers.append("Consensus fragmented")
     if decision.get("escalation_readiness") in ("NONE", "VERY_LOW"):
         drivers.append("Escalation inappropriate at current maturity")
@@ -13261,7 +13590,11 @@ def _gcc_render_auditability_intelligence(
     c4.metric("Explainability Quality", audit["explainability_quality"])
 
     state = audit["audit_state"]
-    if state in ("CONFIDENCE_UNSUPPORTED_BY_EVIDENCE", "EVIDENCE_FRAGMENTED", "LOW_AUDITABILITY"):
+    if state in (
+        "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+        "EVIDENCE_FRAGMENTED",
+        "LOW_AUDITABILITY",
+    ):
         st.warning(audit["interpretation"])
     elif state == "HIGH_AUDITABILITY":
         st.success(audit["interpretation"])
@@ -13366,7 +13699,10 @@ def _gcc_regime_trajectory_aligned(regime: Dict[str, Any], forecast: Dict[str, A
     trajectory = forecast.get("trajectory", "")
     if (regime_key, trajectory) in _GCC_REGIME_TRAJECTORY_ALIGNED:
         return True
-    if regime_key in ("CONSTITUTIONAL_STRESS", "GOVERNANCE_REGRESSION") and trajectory in (
+    if regime_key in (
+        "CONSTITUTIONAL_STRESS",
+        "GOVERNANCE_REGRESSION",
+    ) and trajectory in (
         "CONSTITUTIONALLY_CONSTRAINED",
         "GOVERNANCE_STALLED",
         "GOVERNANCE_DETERIORATING",
@@ -13398,14 +13734,20 @@ def _gcc_institutional_logic_score(
         score += 0.08
     discussable = decision.get("discussability", "NOT_DISCUSSABLE")
     escalation = decision.get("escalation_readiness", "NONE")
-    if discussable in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY") and escalation in (
+    if discussable in (
+        "NOT_DISCUSSABLE",
+        "INTERNAL_OBSERVATION_ONLY",
+    ) and escalation in (
         "NONE",
         "VERY_LOW",
     ):
         score += 0.06
 
     score -= 0.08 * min(count, 5)
-    if consensus.get("consensus_state") in ("FRAGMENTED_GOVERNANCE", "CONFLICTED_GOVERNANCE"):
+    if consensus.get("consensus_state") in (
+        "FRAGMENTED_GOVERNANCE",
+        "CONFLICTED_GOVERNANCE",
+    ):
         score -= 0.18
     if integrity.get("integrity_state") == "GOVERNANCE_CONFIDENCE_UNDERCUT_BY_CONTRADICTIONS":
         score -= 0.14
@@ -13452,7 +13794,10 @@ def _gcc_cross_section_agreement(
     checks += 1
     maturity = float(decision.get("governance_maturity_score", 0.0) or 0.0)
     discussable = decision.get("discussability", "NOT_DISCUSSABLE")
-    if maturity < 0.25 and discussable in ("NOT_DISCUSSABLE", "INTERNAL_OBSERVATION_ONLY"):
+    if maturity < 0.25 and discussable in (
+        "NOT_DISCUSSABLE",
+        "INTERNAL_OBSERVATION_ONLY",
+    ):
         aligned += 1
     elif maturity >= 0.40 and discussable not in ("NOT_DISCUSSABLE",):
         aligned += 1
@@ -13473,7 +13818,10 @@ def _gcc_cross_section_agreement(
 
     checks += 1
     failure_risk = failure.get("risk_state", "")
-    if failure_risk in ("FALSE_CONFIDENCE_ESCALATION_RISK", "ESCALATION_WITHOUT_MATURITY_RISK"):
+    if failure_risk in (
+        "FALSE_CONFIDENCE_ESCALATION_RISK",
+        "ESCALATION_WITHOUT_MATURITY_RISK",
+    ):
         if decision.get("escalation_readiness") not in ("NONE", "VERY_LOW"):
             aligned += 1
     elif failure_risk == "GOVERNANCE_FRAGMENTATION_RISK":
@@ -13530,7 +13878,10 @@ def _gcc_reasoning_chain_status(
 ) -> str:
     if coherence_state == "HIGHLY_COHERENT_GOVERNANCE":
         return "HIGHLY_COHERENT"
-    if coherence_state in ("INTERNALLY_INCONSISTENT_GOVERNANCE", "FRAGMENTED_REASONING_CHAIN"):
+    if coherence_state in (
+        "INTERNALLY_INCONSISTENT_GOVERNANCE",
+        "FRAGMENTED_REASONING_CHAIN",
+    ):
         return "BROKEN" if narrative == "BROKEN" else "FRAGMENTED"
     if coherence_state == "ESCALATION_LOGIC_MISMATCH":
         return "FRAGMENTED"
@@ -13699,7 +14050,11 @@ def _gcc_detect_governance_coherence(
         return (
             (
                 regime_key
-                in ("CONSTITUTIONAL_STRESS", "GOVERNANCE_REGRESSION", "INSTITUTIONAL_INSTABILITY")
+                in (
+                    "CONSTITUTIONAL_STRESS",
+                    "GOVERNANCE_REGRESSION",
+                    "INSTITUTIONAL_INSTABILITY",
+                )
                 or snap["constitutional_safe"] is False
                 or snap["constitutional_review_required"]
             )
@@ -13747,7 +14102,15 @@ def _gcc_detect_governance_coherence(
     narrative = _gcc_narrative_integrity(coherence_state, logic_score)
     reasoning_chain = _gcc_reasoning_chain_status(coherence_state, narrative, cross_section)
     drivers = _gcc_coherence_drivers(
-        coherence_state, snap, regime, forecast, tension, consensus, integrity, decision, audit
+        coherence_state,
+        snap,
+        regime,
+        forecast,
+        tension,
+        consensus,
+        integrity,
+        decision,
+        audit,
     )
 
     return {
@@ -14153,7 +14516,11 @@ def _gcc_detect_governance_stability(
             )
             or (
                 audit_state
-                in ("CONFIDENCE_UNSUPPORTED_BY_EVIDENCE", "EVIDENCE_FRAGMENTED", "LOW_AUDITABILITY")
+                in (
+                    "CONFIDENCE_UNSUPPORTED_BY_EVIDENCE",
+                    "EVIDENCE_FRAGMENTED",
+                    "LOW_AUDITABILITY",
+                )
                 and coherence_state != "LOGICALLY_CONSTRAINED_BUT_COHERENT"
             )
         )
@@ -14238,7 +14605,15 @@ def _gcc_detect_governance_stability(
             break
 
     drivers = _gcc_stability_drivers(
-        stability_state, snap, hist, regime, tension, integrity, coherence, audit, failure
+        stability_state,
+        snap,
+        hist,
+        regime,
+        tension,
+        integrity,
+        coherence,
+        audit,
+        failure,
     )
 
     return {
@@ -14431,11 +14806,17 @@ def _gcc_recovery_probability(
     audit: Dict[str, Any],
     decision: Dict[str, Any],
 ) -> str:
-    if resilience_state in ("GOVERNANCE_RECOVERY_BLOCKED", "CONSTITUTIONAL_RECOVERY_UNLIKELY"):
+    if resilience_state in (
+        "GOVERNANCE_RECOVERY_BLOCKED",
+        "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+    ):
         return "VERY_LOW"
     if resilience_state == "LOW_GOVERNANCE_RESILIENCE":
         return "LOW"
-    if resilience_state in ("RECOVERABLE_FRAGMENTATION", "REVERSIBLE_GOVERNANCE_DETERIORATION"):
+    if resilience_state in (
+        "RECOVERABLE_FRAGMENTATION",
+        "REVERSIBLE_GOVERNANCE_DETERIORATION",
+    ):
         return "MODERATE"
     if resilience_state in (
         "GOVERNANCE_SELF_STABILIZATION_EMERGING",
@@ -14469,7 +14850,10 @@ def _gcc_recovery_severity(
 ) -> str:
     if resilience_state == "GOVERNANCE_RECOVERY_BLOCKED":
         return "CRITICAL"
-    if resilience_state in ("CONSTITUTIONAL_RECOVERY_UNLIKELY", "LOW_GOVERNANCE_RESILIENCE"):
+    if resilience_state in (
+        "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+        "LOW_GOVERNANCE_RESILIENCE",
+    ):
         return "SEVERE"
     if resilience_state == "REVERSIBLE_GOVERNANCE_DETERIORATION":
         return "MATERIAL"
@@ -14495,7 +14879,10 @@ def _gcc_self_stabilization_potential(
     tension: Dict[str, Any],
     resilience_state: str,
 ) -> str:
-    if resilience_state in ("GOVERNANCE_RECOVERY_BLOCKED", "CONSTITUTIONAL_RECOVERY_UNLIKELY"):
+    if resilience_state in (
+        "GOVERNANCE_RECOVERY_BLOCKED",
+        "CONSTITUTIONAL_RECOVERY_UNLIKELY",
+    ):
         return "NONE"
     direction = hist.get("confidence_direction", "stable")
     count = int(tension.get("contradiction_count", 0) or 0)
@@ -14506,7 +14893,10 @@ def _gcc_self_stabilization_potential(
         return "HIGH"
     if direction == "improving" and count <= 1:
         return "MODERATE"
-    if resilience_state in ("RECOVERABLE_FRAGMENTATION", "REVERSIBLE_GOVERNANCE_DETERIORATION"):
+    if resilience_state in (
+        "RECOVERABLE_FRAGMENTATION",
+        "REVERSIBLE_GOVERNANCE_DETERIORATION",
+    ):
         return "MODERATE"
     if float(stability.get("stability_score", 0.0) or 0.0) >= 0.50 and count <= 1:
         return "MODERATE"
@@ -14817,7 +15207,10 @@ def _gcc_render_resilience_intelligence(
         "LOW_GOVERNANCE_RESILIENCE",
     ) or severity in ("SEVERE", "MATERIAL"):
         st.warning(resilience["interpretation"])
-    elif state in ("HIGH_GOVERNANCE_RESILIENCE", "GOVERNANCE_SELF_STABILIZATION_EMERGING"):
+    elif state in (
+        "HIGH_GOVERNANCE_RESILIENCE",
+        "GOVERNANCE_SELF_STABILIZATION_EMERGING",
+    ):
         st.success(resilience["interpretation"])
     else:
         st.info(resilience["interpretation"])
@@ -14942,9 +15335,15 @@ def _gcc_improvement_probability(
         return "LOW"
     if improvement_state == "INSTITUTIONAL_IMPROVEMENT_POSSIBLE":
         return "MODERATE"
-    if improvement_state in ("GOVERNANCE_ADAPTATION_EMERGING", "CONTRADICTIONS_DECLINING"):
+    if improvement_state in (
+        "GOVERNANCE_ADAPTATION_EMERGING",
+        "CONTRADICTIONS_DECLINING",
+    ):
         return "HIGH"
-    if improvement_state in ("GOVERNANCE_MATURITY_IMPROVING", "GOVERNANCE_EVOLUTION_STRENGTHENING"):
+    if improvement_state in (
+        "GOVERNANCE_MATURITY_IMPROVING",
+        "GOVERNANCE_EVOLUTION_STRENGTHENING",
+    ):
         return "VERY_HIGH"
     base = prob_map.get(recovery_prob, "LOW")
     if (
@@ -14970,9 +15369,15 @@ def _gcc_adaptation_quality(
         return "POOR"
     if improvement_state == "INSTITUTIONAL_IMPROVEMENT_POSSIBLE":
         return "LIMITED"
-    if improvement_state in ("GOVERNANCE_ADAPTATION_EMERGING", "CONTRADICTIONS_DECLINING"):
+    if improvement_state in (
+        "GOVERNANCE_ADAPTATION_EMERGING",
+        "CONTRADICTIONS_DECLINING",
+    ):
         return "MODERATE"
-    if improvement_state in ("GOVERNANCE_MATURITY_IMPROVING", "GOVERNANCE_EVOLUTION_STRENGTHENING"):
+    if improvement_state in (
+        "GOVERNANCE_MATURITY_IMPROVING",
+        "GOVERNANCE_EVOLUTION_STRENGTHENING",
+    ):
         return "STRONG"
     if direction == "improving":
         return "MODERATE"
@@ -14993,7 +15398,10 @@ def _gcc_improvement_velocity(
         return "NONE"
     if improvement_state == "GOVERNANCE_EVOLUTION_STRENGTHENING":
         return "FAST"
-    if improvement_state in ("GOVERNANCE_MATURITY_IMPROVING", "CONTRADICTIONS_DECLINING"):
+    if improvement_state in (
+        "GOVERNANCE_MATURITY_IMPROVING",
+        "CONTRADICTIONS_DECLINING",
+    ):
         return "MODERATE"
     if improvement_state == "GOVERNANCE_ADAPTATION_EMERGING" or direction == "improving":
         return "SLOW"
@@ -15041,7 +15449,10 @@ def _gcc_improvement_drivers(
         drivers.append(
             f"Maturity score: {_gcc_fmt_conf(decision.get('governance_maturity_score'))}"
         )
-    elif improvement_state in ("GOVERNANCE_ADAPTATION_EMERGING", "CONTRADICTIONS_DECLINING"):
+    elif improvement_state in (
+        "GOVERNANCE_ADAPTATION_EMERGING",
+        "CONTRADICTIONS_DECLINING",
+    ):
         drivers.append(f"Confidence direction: {hist.get('confidence_direction', '—')}")
         drivers.append(f"Contradiction count: {tension.get('contradiction_count', 0)}")
         drivers.append(f"Coherence: {coherence.get('coherence_display', '—')}")
@@ -15268,11 +15679,17 @@ def _gcc_render_improvement_intelligence(
     c4.metric("Improvement Velocity", improvement["improvement_velocity"])
 
     state = improvement["improvement_state"]
-    if state in ("IMPROVEMENT_TRAJECTORY_BLOCKED", "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP"):
+    if state in (
+        "IMPROVEMENT_TRAJECTORY_BLOCKED",
+        "GOVERNANCE_TRAPPED_IN_LOW_QUALITY_LOOP",
+    ):
         st.error(improvement["interpretation"])
     elif state == "GOVERNANCE_LEARNING_STALLED":
         st.warning(improvement["interpretation"])
-    elif state in ("GOVERNANCE_EVOLUTION_STRENGTHENING", "GOVERNANCE_MATURITY_IMPROVING"):
+    elif state in (
+        "GOVERNANCE_EVOLUTION_STRENGTHENING",
+        "GOVERNANCE_MATURITY_IMPROVING",
+    ):
         st.success(improvement["interpretation"])
     else:
         st.info(improvement["interpretation"])
@@ -15371,9 +15788,15 @@ def _gcc_failure_probability(
     improvement: Dict[str, Any],
     stability: Dict[str, Any],
 ) -> str:
-    if scenario_state in ("SYSTEMIC_GOVERNANCE_FAILURE_RISK", "CONSTITUTIONAL_BREAKDOWN_RISK"):
+    if scenario_state in (
+        "SYSTEMIC_GOVERNANCE_FAILURE_RISK",
+        "CONSTITUTIONAL_BREAKDOWN_RISK",
+    ):
         return "VERY_HIGH"
-    if scenario_state in ("GOVERNANCE_DECISION_PARALYSIS", "TRUSTWORTHINESS_COLLAPSE_RISK"):
+    if scenario_state in (
+        "GOVERNANCE_DECISION_PARALYSIS",
+        "TRUSTWORTHINESS_COLLAPSE_RISK",
+    ):
         return "HIGH"
     if scenario_state in ("AUDITABILITY_FAILURE_RISK", "FRAGMENTATION_RISK_ELEVATED"):
         return "MODERATE"
@@ -15396,7 +15819,10 @@ def _gcc_failure_severity(
 ) -> str:
     if scenario_state == "SYSTEMIC_GOVERNANCE_FAILURE_RISK":
         return "CRITICAL"
-    if scenario_state in ("CONSTITUTIONAL_BREAKDOWN_RISK", "GOVERNANCE_DECISION_PARALYSIS"):
+    if scenario_state in (
+        "CONSTITUTIONAL_BREAKDOWN_RISK",
+        "GOVERNANCE_DECISION_PARALYSIS",
+    ):
         return "SEVERE"
     if scenario_state in ("TRUSTWORTHINESS_COLLAPSE_RISK", "AUDITABILITY_FAILURE_RISK"):
         return "MATERIAL"
@@ -15707,7 +16133,14 @@ def _gcc_detect_governance_failure_scenario(
     failure_severity = _gcc_failure_severity(scenario_state, failure)
     containment = _gcc_containment_strength(scenario_state, audit, stability, resilience, decision)
     drivers = _gcc_failure_scenario_drivers(
-        scenario_state, regime, tension, integrity, audit, coherence, resilience, failure
+        scenario_state,
+        regime,
+        tension,
+        integrity,
+        audit,
+        coherence,
+        resilience,
+        failure,
     )
     pathway, warnings = _gcc_failure_pathway_warnings(
         scenario_state, hist, tension, integrity, audit, coherence, regime, decision
@@ -15816,7 +16249,10 @@ def _gcc_render_failure_scenario_intelligence(
 
     st.markdown("**Early Warning Signals**")
     for warning in scenario["early_warnings"]:
-        if state in ("SYSTEMIC_GOVERNANCE_FAILURE_RISK", "CONSTITUTIONAL_BREAKDOWN_RISK"):
+        if state in (
+            "SYSTEMIC_GOVERNANCE_FAILURE_RISK",
+            "CONSTITUTIONAL_BREAKDOWN_RISK",
+        ):
             st.warning(f"• {warning}")
         else:
             st.markdown(f'<div class="gcc-block-item">• {warning}</div>', unsafe_allow_html=True)
@@ -16394,9 +16830,15 @@ _GCC_INST_EVIDENCE_PROTOCOL: Dict[str, List[str]] = {
 def _gcc_confidence_reliability(evidence_state: str, trust: float) -> str:
     if evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED":
         return "VERY_LOW"
-    if evidence_state in ("TRUSTWORTHINESS_MATERIALLY_IMPAIRED", "CONFIDENCE_OVEREXTENDED"):
+    if evidence_state in (
+        "TRUSTWORTHINESS_MATERIALLY_IMPAIRED",
+        "CONFIDENCE_OVEREXTENDED",
+    ):
         return "LOW"
-    if evidence_state in ("EVIDENCE_QUALITY_DEGRADING", "PARTIALLY_SUPPORTED_CONFIDENCE"):
+    if evidence_state in (
+        "EVIDENCE_QUALITY_DEGRADING",
+        "PARTIALLY_SUPPORTED_CONFIDENCE",
+    ):
         return "MODERATE"
     if evidence_state == "CONFIDENCE_SUPPORTED":
         return "HIGH"
@@ -16873,7 +17315,10 @@ def _gcc_escalation_disagreement(
     posture = intervention.get("intervention_posture", "")
     discussable = decision.get("discussability", "NOT_DISCUSSABLE")
 
-    if posture in ("CONSTITUTIONAL_LOCK_REQUIRED", "ESCALATION_REQUIRED") and escalation in (
+    if posture in (
+        "CONSTITUTIONAL_LOCK_REQUIRED",
+        "ESCALATION_REQUIRED",
+    ) and escalation in (
         "NONE",
         "VERY_LOW",
     ):
@@ -17256,7 +17701,10 @@ def _gcc_reasoning_integrity_label(
     reasoning = coherence.get("reasoning_chain_status", "")
     if quality_state == "INSTITUTIONAL_REASONING_BROKEN" or reasoning == "BROKEN":
         return "BROKEN"
-    if quality_state in ("DECISION_QUALITY_MATERIALLY_IMPAIRED", "REASONING_INCONSISTENT"):
+    if quality_state in (
+        "DECISION_QUALITY_MATERIALLY_IMPAIRED",
+        "REASONING_INCONSISTENT",
+    ):
         return "WEAK"
     if (
         quality_state == "DECISION_QUALITY_RECOVERABLE"
@@ -17295,7 +17743,10 @@ def _gcc_stability_under_scrutiny(
 ) -> str:
     if quality_state == "INSTITUTIONAL_REASONING_BROKEN":
         return "UNSTABLE"
-    if quality_state in ("DECISION_QUALITY_MATERIALLY_IMPAIRED", "REASONING_INCONSISTENT"):
+    if quality_state in (
+        "DECISION_QUALITY_MATERIALLY_IMPAIRED",
+        "REASONING_INCONSISTENT",
+    ):
         return "FRAGILE"
     if quality_state == "DECISION_QUALITY_RECOVERABLE":
         return "CONDITIONAL"
@@ -17460,7 +17911,14 @@ def _gcc_detect_governance_decision_quality(
     defensibility = _gcc_decision_defensibility(quality_state, evidence, decision)
     scrutiny = _gcc_stability_under_scrutiny(quality_state, evidence, stability, alignment)
     drivers = _gcc_decision_quality_drivers(
-        quality_state, coherence, tension, integrity, evidence, alignment, decision, stability
+        quality_state,
+        coherence,
+        tension,
+        integrity,
+        evidence,
+        alignment,
+        decision,
+        stability,
     )
     protocol = _GCC_DECISION_QUALITY_PROTOCOL.get(quality_state, ["Monitor reasoning quality"])
 
@@ -17541,7 +17999,10 @@ def _gcc_render_decision_quality_intelligence(
 
     st.markdown("**Institutional Decision Integrity Protocol**")
     for step in quality["decision_protocol"]:
-        if state in ("INSTITUTIONAL_REASONING_BROKEN", "DECISION_QUALITY_MATERIALLY_IMPAIRED"):
+        if state in (
+            "INSTITUTIONAL_REASONING_BROKEN",
+            "DECISION_QUALITY_MATERIALLY_IMPAIRED",
+        ):
             st.warning(f"• {step}")
         else:
             st.markdown(f'<div class="gcc-block-item">• {step}</div>', unsafe_allow_html=True)
@@ -18042,7 +18503,12 @@ def _gcc_build_governance_intelligence_stack(
         **common, hist=hist, regime=regime, forecast=forecast, tension=tension
     )
     integrity = _gcc_detect_confidence_integrity(
-        **common, hist=hist, regime=regime, forecast=forecast, tension=tension, consensus=consensus
+        **common,
+        hist=hist,
+        regime=regime,
+        forecast=forecast,
+        tension=tension,
+        consensus=consensus,
     )
     decision = _gcc_detect_decision_readiness(
         **common,
@@ -18545,7 +19011,10 @@ def _gcc_detect_governance_attention(
     review_cadence = cadence_map.get(severity, "DAILY")
     if intervention_posture == "ESCALATION_REQUIRED":
         review_cadence = "IMMEDIATE_REVIEW"
-    elif severity == "HIGH_RISK" and scenario.get("failure_probability") in ("HIGH", "VERY_HIGH"):
+    elif severity == "HIGH_RISK" and scenario.get("failure_probability") in (
+        "HIGH",
+        "VERY_HIGH",
+    ):
         review_cadence = "CONTINUOUS_MONITORING"
 
     escalation_threshold = intervention.get("escalation_threshold", "NONE")
@@ -18559,7 +19028,10 @@ def _gcc_detect_governance_attention(
         or alignment.get("alignment_state") == "INSTITUTIONAL_CONSENSUS_BROKEN"
     ):
         escalation_urgency = "MATERIAL"
-    elif escalation_threshold in ("HEIGHTENED", "WATCH") or trust_summary in ("BROKEN", "WEAK"):
+    elif escalation_threshold in ("HEIGHTENED", "WATCH") or trust_summary in (
+        "BROKEN",
+        "WEAK",
+    ):
         escalation_urgency = "GUARDED"
     elif esc_cls == "NO_ESCALATION" and severity in ("NORMAL", "WATCH"):
         escalation_urgency = "NONE"
@@ -19641,13 +20113,19 @@ def _gcc_detect_governance_delta(
 
     if improvement_state == "CONTRADICTIONS_DECLINING":
         positive_scores["CONTRADICTION_REDUCTION"] += 3
-    if gov_direction in ("STABILIZING", "STRESSED_BUT_STABLE") and velocity in ("MINIMAL", "SLOW"):
+    if gov_direction in ("STABILIZING", "STRESSED_BUT_STABLE") and velocity in (
+        "MINIMAL",
+        "SLOW",
+    ):
         positive_scores["GOVERNANCE_STABILIZATION"] += 2
     if hist_direction == "improving":
         positive_scores["TRUST_IMPROVEMENT"] += 2
     if alignment_state == "GOVERNANCE_CONSENSUS_FORMING":
         positive_scores["ALIGNMENT_IMPROVEMENT"] += 2
-    if coherence_state in ("HIGHLY_COHERENT_GOVERNANCE", "MODERATELY_COHERENT_GOVERNANCE"):
+    if coherence_state in (
+        "HIGHLY_COHERENT_GOVERNANCE",
+        "MODERATELY_COHERENT_GOVERNANCE",
+    ):
         positive_scores["COHERENCE_STABILIZATION"] += 2
     if evidence_state in ("CONFIDENCE_SUPPORTED", "EVIDENCE_INTEGRITY_STRONG"):
         positive_scores["EVIDENCE_STRENGTHENING"] += 2
@@ -19717,18 +20195,27 @@ def _gcc_detect_governance_delta(
             ]
         )
     elif delta_state == "REGIME_SHIFT_EMERGING":
-        if coherence_state in ("FRAGMENTED_REASONING_CHAIN", "LOW_COHERENCE_GOVERNANCE"):
+        if coherence_state in (
+            "FRAGMENTED_REASONING_CHAIN",
+            "LOW_COHERENCE_GOVERNANCE",
+        ):
             drivers.append("Governance coherence deteriorating")
         if trust_summary in ("BROKEN", "WEAK"):
             drivers.append("Trust weakening")
         if contradiction_count >= 2 and velocity not in ("MINIMAL", "SLOW"):
             drivers.append("Contradictions accelerating")
-        if alignment_state in ("FRAGMENTATION_ELEVATED", "GOVERNANCE_INTERNAL_CONFLICT"):
+        if alignment_state in (
+            "FRAGMENTATION_ELEVATED",
+            "GOVERNANCE_INTERNAL_CONFLICT",
+        ):
             drivers.append("Alignment fragmenting")
     elif delta_state == "MATERIAL_DETERIORATION":
         if trust_summary in ("BROKEN", "WEAK"):
             drivers.append("Trustworthiness deteriorating")
-        if coherence_state in ("FRAGMENTED_REASONING_CHAIN", "INTERNALLY_INCONSISTENT_GOVERNANCE"):
+        if coherence_state in (
+            "FRAGMENTED_REASONING_CHAIN",
+            "INTERNALLY_INCONSISTENT_GOVERNANCE",
+        ):
             drivers.append("Governance coherence weakening")
         if evidence_state == "INSTITUTIONAL_CONFIDENCE_UNSUPPORTED":
             drivers.append("Evidence integrity constrained")
@@ -19739,7 +20226,10 @@ def _gcc_detect_governance_delta(
             drivers.append("Contradictions declining")
         if hist_direction == "improving":
             drivers.append("Trust stabilizing")
-        if coherence_state not in ("FRAGMENTED_REASONING_CHAIN", "LOW_COHERENCE_GOVERNANCE"):
+        if coherence_state not in (
+            "FRAGMENTED_REASONING_CHAIN",
+            "LOW_COHERENCE_GOVERNANCE",
+        ):
             drivers.append("Governance coherence improving")
         if evidence_state in ("CONFIDENCE_SUPPORTED", "PARTIALLY_SUPPORTED_CONFIDENCE"):
             drivers.append("Confidence integrity strengthening")
@@ -20401,7 +20891,11 @@ def _gcc_detect_governance_decision_brief(
         primary_watch = "Alignment fragmentation"
     elif "Coherence weakening" in det_triggers:
         primary_watch = "Governance coherence weakening"
-    elif forward.get("regime_transition_probability") in ("GUARDED", "MATERIAL", "HIGH"):
+    elif forward.get("regime_transition_probability") in (
+        "GUARDED",
+        "MATERIAL",
+        "HIGH",
+    ):
         primary_watch = "Regime transition signals"
     elif monitoring:
         primary_watch = monitoring[0]
@@ -20694,7 +21188,10 @@ def _gcc_render_executive_summary_intelligence(
         for action in playbook["blocked_actions"]:
             st.markdown(f"- {action}")
 
-    if playbook["priority_action"] in ("PREPARE_ESCALATION_REVIEW", "REDUCE_FRAGMENTATION"):
+    if playbook["priority_action"] in (
+        "PREPARE_ESCALATION_REVIEW",
+        "REDUCE_FRAGMENTATION",
+    ):
         st.warning(playbook["discipline_memo"])
     elif playbook["priority_action"] == "MAINTAIN_CONSTITUTIONAL_LOCK":
         st.info(playbook["discipline_memo"])
@@ -20788,7 +21285,10 @@ def _gcc_render_executive_summary_intelligence(
         st.info(scenario_matrix["scenario_memo"])
 
     state = executive["verdict_state"]
-    if state in ("CONSTITUTIONALLY_LOCKED_GOVERNANCE", "SYSTEMIC_GOVERNANCE_INSTABILITY"):
+    if state in (
+        "CONSTITUTIONALLY_LOCKED_GOVERNANCE",
+        "SYSTEMIC_GOVERNANCE_INSTABILITY",
+    ):
         st.error(executive["executive_memo"])
     elif state == "GOVERNANCE_UNDER_INSTITUTIONAL_STRESS":
         st.warning(executive["executive_memo"])
@@ -20799,7 +21299,10 @@ def _gcc_render_executive_summary_intelligence(
 
     st.markdown("**Top Governance Risks**")
     for risk in executive["top_risks"]:
-        if state in ("CONSTITUTIONALLY_LOCKED_GOVERNANCE", "SYSTEMIC_GOVERNANCE_INSTABILITY"):
+        if state in (
+            "CONSTITUTIONALLY_LOCKED_GOVERNANCE",
+            "SYSTEMIC_GOVERNANCE_INSTABILITY",
+        ):
             st.warning(f"• {risk}")
         else:
             st.markdown(f'<div class="gcc-hist-metric">• {risk}</div>', unsafe_allow_html=True)
@@ -20993,7 +21496,9 @@ def page_governance_command_center() -> None:
         or "—"
     )
     future_candidate = _gcc_get(
-        dossier, "future_runtime_candidate", _gcc_get(dossier_summary, "future_runtime_candidate")
+        dossier,
+        "future_runtime_candidate",
+        _gcc_get(dossier_summary, "future_runtime_candidate"),
     )
     constitutional_safe = _gcc_get(dossier, "constitutional_safe")
     mutation_allowed = _gcc_get(dossier_summary, "runtime_mutation_allowed", False)
@@ -21464,17 +21969,37 @@ _GLC_IMPORTANT_SPECS: Tuple[Tuple[int, str, str], ...] = (
         "Governance Codex",
         "Unified system map, priority order, and framework interoperability.",
     ),
-    (130, "Governance Operating System", "GOS capstone architecture integrating Steps 90–129."),
+    (
+        130,
+        "Governance Operating System",
+        "GOS capstone architecture integrating Steps 90–129.",
+    ),
     (132, "Master Glossary", "Terminology authority and canonical definitions."),
-    (133, "Dependency Matrix", "Framework dependencies, change impact, and relationship map."),
-    (134, "Traceability Framework", "Evidence chains and audit/decision/change lineage."),
-    (135, "Final Certification", "GOS release certification and recertification requirements."),
+    (
+        133,
+        "Dependency Matrix",
+        "Framework dependencies, change impact, and relationship map.",
+    ),
+    (
+        134,
+        "Traceability Framework",
+        "Evidence chains and audit/decision/change lineage.",
+    ),
+    (
+        135,
+        "Final Certification",
+        "GOS release certification and recertification requirements.",
+    ),
     (
         136,
         "Committee Operating Pack",
         "Committee session templates and decision/escalation registers.",
     ),
-    (137, "Audit Pack", "Operational audit toolkit and evidence collection procedures."),
+    (
+        137,
+        "Audit Pack",
+        "Operational audit toolkit and evidence collection procedures.",
+    ),
 )
 
 _GLC_WHERE_TO_GO: Tuple[Tuple[str, str], ...] = (
@@ -21540,9 +22065,10 @@ def _glc_extract_purpose_snippet(content: str) -> str:
     lines = content.splitlines()
     for i, line in enumerate(lines[:120]):
         low = line.strip().lower()
-        if low in ("## purpose", "## purpose of the operator handbook") or low.startswith(
-            "## purpose "
-        ):
+        if low in (
+            "## purpose",
+            "## purpose of the operator handbook",
+        ) or low.startswith("## purpose "):
             parts: List[str] = []
             for j in range(i + 1, min(i + 12, len(lines))):
                 nxt = lines[j].strip()
@@ -21564,17 +22090,35 @@ def _glc_infer_category(step: Optional[int], filename: str, title: str) -> str:
     blob = f"{filename} {title}".lower()
     if step in (100, 101, 113, 128, 130) or any(
         k in blob
-        for k in ("constitution", "codex", "operating_system", "meta_governance", "readme")
+        for k in (
+            "constitution",
+            "codex",
+            "operating_system",
+            "meta_governance",
+            "readme",
+        )
     ):
         return "Constitution & Foundations"
     if step in (106, 136, 127, 121, 120, 93) or any(
         k in blob
-        for k in ("committee", "delegation", "precedent", "decision_quality", "roles_authority")
+        for k in (
+            "committee",
+            "delegation",
+            "precedent",
+            "decision_quality",
+            "roles_authority",
+        )
     ):
         return "Committee & Decision Records"
     if step in (107, 131, 137, 96) or any(
         k in blob
-        for k in ("audit", "regulatory", "reporting_audit", "consolidation", "traceability")
+        for k in (
+            "audit",
+            "regulatory",
+            "reporting_audit",
+            "consolidation",
+            "traceability",
+        )
     ):
         if step == 134:
             return "Glossary, Dependencies & Traceability"
@@ -21589,7 +22133,14 @@ def _glc_infer_category(step: Optional[int], filename: str, title: str) -> str:
         return "Intelligence & Health"
     if step in (108, 109, 111, 123, 119) or any(
         k in blob
-        for k in ("crisis", "wargaming", "resilience", "succession", "postmortem", "survivability")
+        for k in (
+            "crisis",
+            "wargaming",
+            "resilience",
+            "succession",
+            "postmortem",
+            "survivability",
+        )
     ):
         return "Continuity & Resilience"
     if step in (116, 117, 129, 118) or any(
@@ -21996,6 +22547,7 @@ def page_governance_library_center() -> None:
 # ──────────────────────────────
 PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Portfolio", "Portfolio History"): page_portfolio_history,
+    ("Portfolio", "💰 Profit & Loss Ledger"): page_pnl_ledger,
     ("Portfolio", "Positions & Exposure"): page_positions_exposure,
     ("Portfolio", "Trade Log"): page_trade_log,
     ("Signals", "🧭 Signal Lifecycle"): page_signal_lifecycle,
@@ -22011,8 +22563,14 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Risk & Guardrails", "Risk Report"): page_risk_report,
     ("Risk & Guardrails", "🛡️ Risk Office"): page_risk_office,
     ("Risk & Guardrails", "🧪 Defensive Simulation Lab"): page_defensive_simulation_lab,
-    ("Risk & Guardrails", "🏛 Executive Risk Command Center"): page_executive_risk_command_center,
-    ("Risk & Guardrails", "🧱 Defensive Automation Sandbox"): page_defensive_automation_sandbox,
+    (
+        "Risk & Guardrails",
+        "🏛 Executive Risk Command Center",
+    ): page_executive_risk_command_center,
+    (
+        "Risk & Guardrails",
+        "🧱 Defensive Automation Sandbox",
+    ): page_defensive_automation_sandbox,
     ("Risk & Guardrails", "👤 Human Approval Center"): page_human_approval_center,
     (
         "Risk & Guardrails",
@@ -22022,11 +22580,23 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🏛 Governance Authorization Center",
     ): page_governance_authorization_center,
-    ("Risk & Guardrails", "⚙️ Execution Readiness Center"): page_execution_readiness_center,
+    (
+        "Risk & Guardrails",
+        "⚙️ Execution Readiness Center",
+    ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
-    ("Risk & Guardrails", "📊 Protective Action Evaluation"): page_protective_action_evaluation,
-    ("Risk & Guardrails", "🧠 Adaptive Capital Preservation"): page_adaptive_capital_preservation,
-    ("Risk & Guardrails", "👑 Capital Preservation Governor"): page_capital_preservation_governor,
+    (
+        "Risk & Guardrails",
+        "📊 Protective Action Evaluation",
+    ): page_protective_action_evaluation,
+    (
+        "Risk & Guardrails",
+        "🧠 Adaptive Capital Preservation",
+    ): page_adaptive_capital_preservation,
+    (
+        "Risk & Guardrails",
+        "👑 Capital Preservation Governor",
+    ): page_capital_preservation_governor,
     (
         "Risk & Guardrails",
         "📋 Capital Preservation Audit Center",
@@ -22038,27 +22608,72 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_preservation_certification_center,
     ("Risk & Guardrails", "🏛 Risk Committee Oversight"): page_risk_committee_oversight,
     ("Risk & Guardrails", "📑 Accountability Registry"): page_accountability_registry,
-    ("Risk & Guardrails", "👑 Preservation Governance Board"): page_preservation_governance_board,
-    ("Risk & Guardrails", "🏛 Investment Committee Review"): page_investment_committee_review,
-    ("Risk & Guardrails", "📈 Triton Maturity Assessment"): page_triton_maturity_assessment,
-    ("Risk & Guardrails", "🎯 Strategic Oversight Center"): page_strategic_oversight_center,
+    (
+        "Risk & Guardrails",
+        "👑 Preservation Governance Board",
+    ): page_preservation_governance_board,
+    (
+        "Risk & Guardrails",
+        "🏛 Investment Committee Review",
+    ): page_investment_committee_review,
+    (
+        "Risk & Guardrails",
+        "📈 Triton Maturity Assessment",
+    ): page_triton_maturity_assessment,
+    (
+        "Risk & Guardrails",
+        "🎯 Strategic Oversight Center",
+    ): page_strategic_oversight_center,
     ("Risk & Guardrails", "🧩 Decision Quality Center"): page_decision_quality_center,
-    ("Risk & Guardrails", "🏛 Institutional Intelligence"): page_institutional_intelligence,
-    ("Risk & Guardrails", "🚀 Strategic Self-Improvement"): page_strategic_self_improvement,
+    (
+        "Risk & Guardrails",
+        "🏛 Institutional Intelligence",
+    ): page_institutional_intelligence,
+    (
+        "Risk & Guardrails",
+        "🚀 Strategic Self-Improvement",
+    ): page_strategic_self_improvement,
     ("Risk & Guardrails", "🧠 Institutional Memory"): page_institutional_memory,
-    ("Risk & Guardrails", "🕸 Institutional Knowledge Graph"): page_institutional_knowledge_graph,
-    ("Risk & Guardrails", "📚 Organizational Learning Center"): page_organizational_learning_center,
+    (
+        "Risk & Guardrails",
+        "🕸 Institutional Knowledge Graph",
+    ): page_institutional_knowledge_graph,
+    (
+        "Risk & Guardrails",
+        "📚 Organizational Learning Center",
+    ): page_organizational_learning_center,
     ("Risk & Guardrails", "🔍 Causal Reasoning Center"): page_causal_reasoning_center,
     ("Risk & Guardrails", "📖 Explainability Center"): page_explainability_center,
-    ("Risk & Guardrails", "💡 Institutional Insights"): page_institutional_insights_center,
-    ("Risk & Guardrails", "♟ Strategic Reasoning Center"): page_strategic_reasoning_center,
-    ("Risk & Guardrails", "🔮 Consequence Forecast Center"): page_consequence_forecast_center,
-    ("Risk & Guardrails", "📜 Institutional Wisdom Center"): page_institutional_wisdom_center,
+    (
+        "Risk & Guardrails",
+        "💡 Institutional Insights",
+    ): page_institutional_insights_center,
+    (
+        "Risk & Guardrails",
+        "♟ Strategic Reasoning Center",
+    ): page_strategic_reasoning_center,
+    (
+        "Risk & Guardrails",
+        "🔮 Consequence Forecast Center",
+    ): page_consequence_forecast_center,
+    (
+        "Risk & Guardrails",
+        "📜 Institutional Wisdom Center",
+    ): page_institutional_wisdom_center,
     ("Risk & Guardrails", "🗺 Scenario Planning Center"): page_scenario_planning_center,
     ("Risk & Guardrails", "🛣 Future Path Analysis"): page_future_path_analysis_center,
-    ("Risk & Guardrails", "🎯 Strategic Priorities Center"): page_strategic_priorities_center,
-    ("Risk & Guardrails", "🎯 Attention Allocation Center"): page_attention_allocation_center,
-    ("Risk & Guardrails", "🔗 System Coordination Center"): page_system_coordination_center,
+    (
+        "Risk & Guardrails",
+        "🎯 Strategic Priorities Center",
+    ): page_strategic_priorities_center,
+    (
+        "Risk & Guardrails",
+        "🎯 Attention Allocation Center",
+    ): page_attention_allocation_center,
+    (
+        "Risk & Guardrails",
+        "🔗 System Coordination Center",
+    ): page_system_coordination_center,
     (
         "Risk & Guardrails",
         "⚡ Institutional Optimization Center",
@@ -22081,9 +22696,18 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("System", "🗂 Governance Evidence Registry"): page_governance_evidence_registry,
     ("System", "🧾 Governance Audit Center"): page_governance_audit_center,
     ("System", "⚖️ Governance Decision Registry"): page_governance_decision_registry,
-    ("System", "🚨 Governance Escalation Registry"): page_governance_escalation_registry,
-    ("System", "🔗 Governance Traceability Explorer"): page_governance_traceability_explorer,
-    ("System", "🕵️ Governance Investigation Center"): page_governance_investigation_center,
+    (
+        "System",
+        "🚨 Governance Escalation Registry",
+    ): page_governance_escalation_registry,
+    (
+        "System",
+        "🔗 Governance Traceability Explorer",
+    ): page_governance_traceability_explorer,
+    (
+        "System",
+        "🕵️ Governance Investigation Center",
+    ): page_governance_investigation_center,
     ("System", "🧠 Governance Intelligence Lab"): page_governance_intelligence_lab,
     ("System", "🕰 Governance Timeline Center"): page_governance_timeline_center,
     ("System", "Execution / Health"): page_execution_health,
@@ -22100,7 +22724,12 @@ if HAS_MANUAL_ORDER_DESK:
     PAGE_REGISTRY[("System", "🧾 Manual Order Desk")] = page_manual_order_desk
 
 SECTIONS: Dict[str, List[str]] = {
-    "Portfolio": ["Portfolio History", "Positions & Exposure", "Trade Log"],
+    "Portfolio": [
+        "Portfolio History",
+        "💰 Profit & Loss Ledger",
+        "Positions & Exposure",
+        "Trade Log",
+    ],
     "Signals": [
         "🧭 Signal Lifecycle",
         "📜 Ticker Decision Timeline",
