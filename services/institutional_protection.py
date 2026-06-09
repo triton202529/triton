@@ -174,10 +174,40 @@ def _safe_float(x: Any, default: Optional[float] = None) -> Optional[float]:
         return default
 
 
+def _is_escalation_green_healthy(
+    cpi_doc: Dict[str, Any],
+    cpe_doc: Dict[str, Any],
+) -> bool:
+    """Phase 159: healthy portfolio at GREEN escalation — domain-only concerns apply."""
+    escalation = str(cpe_doc.get("escalation_state") or "GREEN").upper()
+    cps = int(cpi_doc.get("capital_preservation_score") or 0)
+    health_band = str(cpi_doc.get("health_band") or "").upper()
+    return escalation == "GREEN" and cps >= 70 and health_band in ("HEALTHY", "EXCELLENT")
+
+
+def _apply_escalation_bounded_status(
+    base_status: str,
+    *,
+    cpi_doc: Dict[str, Any],
+    cpe_doc: Dict[str, Any],
+    gov_doc: Dict[str, Any],
+) -> str:
+    """Phase 159: cap committee posture when escalation is GREEN and CPS is healthy."""
+    if not _is_escalation_green_healthy(cpi_doc, cpe_doc):
+        return base_status
+    gov_level = str(gov_doc.get("governance_awareness_level") or "").upper()
+    if gov_level in GOVERNANCE_BLOCK_LEVELS:
+        return base_status
+    if base_status in ("REVIEW_REQUIRED", "ESCALATE"):
+        return "MONITOR"
+    return base_status
+
+
 def _derive_committee_status(
     domains: List[Dict[str, Any]],
     cpe_doc: Dict[str, Any],
     gov_doc: Dict[str, Any],
+    cpi_doc: Optional[Dict[str, Any]] = None,
 ) -> str:
     statuses = [str(d.get("status") or "MONITOR") for d in domains]
     escalation = str(cpe_doc.get("escalation_state") or "GREEN").upper()
@@ -188,17 +218,24 @@ def _derive_committee_status(
         or gov_level == "CRITICAL_INTERVENTION"
         or statuses.count("CRITICAL") >= 2
     ):
-        return "ESCALATE"
-    if (
+        base = "ESCALATE"
+    elif (
         gov_level in GOVERNANCE_BLOCK_LEVELS
         or escalation in ("RED", "ORANGE")
         or "CRITICAL" in statuses
         or statuses.count("CONCERN") >= 2
     ):
-        return "REVIEW_REQUIRED"
-    if "CONCERN" in statuses or "MONITOR" in statuses:
-        return "MONITOR"
-    return "CLEAR"
+        base = "REVIEW_REQUIRED"
+    elif "CONCERN" in statuses or "MONITOR" in statuses:
+        base = "MONITOR"
+    else:
+        base = "CLEAR"
+
+    if cpi_doc is not None:
+        return _apply_escalation_bounded_status(
+            base, cpi_doc=cpi_doc, cpe_doc=cpe_doc, gov_doc=gov_doc
+        )
+    return base
 
 
 def _derive_overall_assessment(
@@ -266,7 +303,7 @@ def compute_risk_committee_oversight(
             if c and c not in all_concerns:
                 all_concerns.append(str(c))
 
-    committee_status = _derive_committee_status(domains, cpe_doc, gov_doc)
+    committee_status = _derive_committee_status(domains, cpe_doc, gov_doc, cpi_doc=cpi_doc)
     overall_assessment = _derive_overall_assessment(cpi_doc, domains)
     avg_score = round(sum(d["score"] for d in domains) / len(domains), 1) if domains else 0.0
 

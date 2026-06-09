@@ -616,6 +616,57 @@ def _escalation_state_from_cps(cps: int) -> str:
     return "CRITICAL"
 
 
+ESCALATION_LADDER: Tuple[str, ...] = ("GREEN", "YELLOW", "ORANGE", "RED", "CRITICAL")
+ESCALATION_LADDER_RANK: Dict[str, int] = {state: idx for idx, state in enumerate(ESCALATION_LADDER)}
+
+
+def validate_escalation_transition(
+    from_state: str,
+    to_state: str,
+    *,
+    verbose: bool = False,
+) -> Tuple[str, str]:
+    """Phase 159: verify orderly escalation/de-escalation transitions."""
+    from_norm = str(from_state or "GREEN").upper()
+    to_norm = str(to_state or "GREEN").upper()
+    if from_norm not in ESCALATION_LADDER_RANK or to_norm not in ESCALATION_LADDER_RANK:
+        status, reason = "FAIL", "invalid_state"
+    elif from_norm == to_norm:
+        status, reason = "PASS", "unchanged"
+    else:
+        delta = ESCALATION_LADDER_RANK[to_norm] - ESCALATION_LADDER_RANK[from_norm]
+        if abs(delta) > 1:
+            status = "FAIL"
+            reason = "skipped_level" if delta > 0 else "skipped_deescalation"
+        elif delta < -2 and from_norm == "RED" and to_norm == "GREEN":
+            status, reason = "FAIL", "direct_red_to_green"
+        else:
+            status, reason = "PASS", "orderly_transition"
+
+    line = (
+        f"[ESCALATION_TRANSITION_AUDIT] from_state={from_norm} "
+        f"to_state={to_norm} status={status} reason={reason}"
+    )
+    if verbose:
+        print(line, flush=True)
+    return status, reason
+
+
+def validate_deescalation_path(states: List[str]) -> Tuple[str, str]:
+    """Phase 159: no direct RED→GREEN; require stepwise de-escalation."""
+    if len(states) < 2:
+        return "PASS", "single_state"
+    normalized = [str(s or "GREEN").upper() for s in states]
+    for idx in range(1, len(normalized)):
+        prev_rank = ESCALATION_LADDER_RANK.get(normalized[idx - 1], 0)
+        curr_rank = ESCALATION_LADDER_RANK.get(normalized[idx], 0)
+        if curr_rank < prev_rank and prev_rank - curr_rank > 1:
+            return "FAIL", f"skip_at_{normalized[idx - 1]}_to_{normalized[idx]}"
+        if normalized[idx - 1] == "RED" and normalized[idx] == "GREEN":
+            return "FAIL", "direct_red_to_green"
+    return "PASS", "orderly_path"
+
+
 def _escalation_reasons_from_alerts(active_alerts: List[Dict[str, Any]]) -> List[str]:
     seen: set[str] = set()
     reasons: List[str] = []

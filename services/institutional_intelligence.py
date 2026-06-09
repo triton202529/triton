@@ -59,6 +59,19 @@ ESCALATION_CPS_RANGES: Dict[str, Tuple[int, int]] = {
     "CRITICAL": (0, 35),
 }
 
+GOVERNANCE_AWARENESS_SEVERITY: Dict[str, int] = {
+    "GREEN": 0,
+    "ROUTINE_OVERSIGHT": 0,
+    "YELLOW": 1,
+    "INCREASED_MONITORING": 1,
+    "ORANGE": 2,
+    "MANAGEMENT_REVIEW_REQUIRED": 2,
+    "RED": 3,
+    "BOARD_REVIEW_REQUIRED": 3,
+    "CRITICAL_INTERVENTION": 4,
+    "GOVERNANCE_ESCALATION_REQUIRED": 4,
+}
+
 
 def _quality_band(score: float) -> str:
     s = int(round(score))
@@ -120,6 +133,9 @@ def _advisory_accuracy(
 def _escalation_consistency(
     cpi_doc: Dict[str, Any],
     cpe_doc: Dict[str, Any],
+    *,
+    governor_doc: Optional[Dict[str, Any]] = None,
+    gov_doc: Optional[Dict[str, Any]] = None,
 ) -> int:
     score = 82
     cpi_alerts = int(cpi_doc.get("active_alerts") or 0)
@@ -129,6 +145,7 @@ def _escalation_consistency(
 
     cps = int(cpi_doc.get("capital_preservation_score") or 0)
     esc = str(cpe_doc.get("escalation_state") or "GREEN").upper()
+    esc_sev = ESCALATION_SEVERITY.get(esc, 0)
     lo, hi = ESCALATION_CPS_RANGES.get(esc, (0, 100))
     if lo <= cps <= hi:
         score += 8
@@ -151,6 +168,27 @@ def _escalation_consistency(
     expected_reasons = {component_map[k] for k in weak_components if k in component_map}
     reason_score = _jaccard_score(cpe_reasons, expected_reasons, default=80)
     raw = score * 0.6 + reason_score * 0.4
+
+    if governor_doc is not None:
+        posture = str(governor_doc.get("preservation_posture") or "UNKNOWN").upper()
+        post_sev = ESCALATION_SEVERITY.get(posture, 2)
+        gap = esc_sev - post_sev
+        if gap >= 2:
+            raw -= min(40, gap * 14)
+
+    if gov_doc is not None:
+        gov_level = str(gov_doc.get("governance_awareness_level") or "").upper()
+        gov_sev = GOVERNANCE_AWARENESS_SEVERITY.get(gov_level, 1)
+        gap = esc_sev - gov_sev
+        if gap >= 2:
+            raw -= min(30, gap * 12)
+
+    health_band = str(cpi_doc.get("health_band") or "").upper()
+    if health_band in ("CRITICAL", "HIGH_RISK") and esc_sev <= 1 and governor_doc is not None:
+        posture = str(governor_doc.get("preservation_posture") or "UNKNOWN").upper()
+        if ESCALATION_SEVERITY.get(posture, 2) <= 1:
+            raw -= 20
+
     return int(max(0, min(100, round(raw))))
 
 
@@ -267,7 +305,9 @@ def compute_decision_quality_assessment(
 
     metrics = {
         "Advisory Accuracy": _advisory_accuracy(cpa_doc, cpe_doc, alerts_doc),
-        "Escalation Consistency": _escalation_consistency(cpi_doc, cpe_doc),
+        "Escalation Consistency": _escalation_consistency(
+            cpi_doc, cpe_doc, governor_doc=governor_doc, gov_doc=gov_doc
+        ),
         "Preservation Logic Consistency": _preservation_logic_consistency(
             governor_doc, cpe_doc, evaluation_doc, adaptive_doc
         ),
@@ -370,6 +410,10 @@ def compute_institutional_intelligence(
 
     scores_list = [a["score"] for a in areas]
     overall = round(sum(scores_list) / len(scores_list), 1) if scores_list else 0.0
+    if maturity_doc:
+        overall_maturity = int(maturity_doc.get("overall_maturity") or 0)
+        if overall_maturity > 0:
+            overall = min(overall, overall_maturity + 8)
     coordination = _coordination_score(scores_list)
 
     return {

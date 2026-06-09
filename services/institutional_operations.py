@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from services.institutional_protection import (
     ESCALATION_SEVERITY,
     GOVERNANCE_BLOCK_LEVELS,
+    _apply_escalation_bounded_status,
     _atomic_write_json,
     _certification_health_score,
     _domain_status,
@@ -90,6 +91,7 @@ def _derive_committee_recommendation(
     areas: List[Dict[str, Any]],
     cpe_doc: Dict[str, Any],
     gov_doc: Dict[str, Any],
+    cpi_doc: Optional[Dict[str, Any]] = None,
 ) -> str:
     statuses = [str(a.get("status") or "MONITOR") for a in areas]
     escalation = str(cpe_doc.get("escalation_state") or "GREEN").upper()
@@ -100,17 +102,24 @@ def _derive_committee_recommendation(
         or gov_level == "CRITICAL_INTERVENTION"
         or statuses.count("CRITICAL") >= 2
     ):
-        return "ESCALATE"
-    if (
+        base = "ESCALATE"
+    elif (
         gov_level in GOVERNANCE_BLOCK_LEVELS
         or escalation in ("RED", "ORANGE")
         or "CRITICAL" in statuses
         or statuses.count("CONCERN") >= 2
     ):
-        return "REVIEW_REQUIRED"
-    if "CONCERN" in statuses or "MONITOR" in statuses:
-        return "MONITOR"
-    return "CLEAR"
+        base = "REVIEW_REQUIRED"
+    elif "CONCERN" in statuses or "MONITOR" in statuses:
+        base = "MONITOR"
+    else:
+        base = "CLEAR"
+
+    if cpi_doc is not None:
+        return _apply_escalation_bounded_status(
+            base, cpi_doc=cpi_doc, cpe_doc=cpe_doc, gov_doc=gov_doc
+        )
+    return base
 
 
 def _review_confidence(areas: List[Dict[str, Any]]) -> int:
@@ -169,7 +178,9 @@ def compute_investment_committee_review(
             if c and c not in all_concerns:
                 all_concerns.append(str(c))
 
-    committee_recommendation = _derive_committee_recommendation(areas, cpe_doc, gov_doc)
+    committee_recommendation = _derive_committee_recommendation(
+        areas, cpe_doc, gov_doc, cpi_doc=cpi_doc
+    )
     confidence = _review_confidence(areas)
     avg_score = round(sum(a["score"] for a in areas) / len(areas), 1) if areas else 0.0
 
