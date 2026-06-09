@@ -1,0 +1,14 @@
+section,area,scenario,status,detail,generated_at
+summary,interpretation,,FAIL,Phase 160 executive oversight — interpretation,2026-06-09T12:39:37Z
+summary,prioritization,,PASS,Phase 160 executive oversight — prioritization,2026-06-09T12:39:37Z
+summary,committee_resolution,,PASS,Phase 160 executive oversight — committee_resolution,2026-06-09T12:39:37Z
+summary,strategic_consistency,,PASS,Phase 160 executive oversight — strategic_consistency,2026-06-09T12:39:37Z
+summary,stress_review,,PASS,Phase 160 executive oversight — stress_review,2026-06-09T12:39:37Z
+summary,overall_result,,FAIL,Phase 160 executive oversight — overall_result,2026-06-09T12:39:37Z
+oversight_stress,strong_portfolio_weak_governance,strong_portfolio_weak_governance,PASS,committee=REVIEW_REQUIRED assessment=HIGH_RISK,2026-06-09T12:39:37Z
+oversight_stress,weak_portfolio_strong_governance,weak_portfolio_strong_governance,PASS,committee=REVIEW_REQUIRED,2026-06-09T12:39:37Z
+oversight_stress,committee_disagreement,committee_disagreement,PASS,strategic=SUSPENDED committee=ESCALATE,2026-06-09T12:39:37Z
+oversight_stress,false_crisis,false_crisis,PASS,committee=MONITOR (no panic escalation on healthy inputs),2026-06-09T12:39:37Z
+oversight_stress,true_crisis,true_crisis,PASS,committee=ESCALATE board=SUSPENDED,2026-06-09T12:39:37Z
+oversight_stress,rapid_recovery,rapid_recovery,PASS,deescalation_path=PASS reason=orderly_path,2026-06-09T12:39:37Z
+oversight_stress,escalation_transition,escalation_transition,PASS,GREEN->YELLOW:committee=REVIEW_REQUIRED; YELLOW->ORANGE:committee=ESCALATE; ORANGE->RED:committee=ESCALATE; RED->CRITICAL:committee=ESCALATE,2026-06-09T12:39:37Z
