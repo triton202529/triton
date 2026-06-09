@@ -517,6 +517,185 @@ def _render_scorecard_tab(bundle: PnlLedgerBundle) -> None:
     st.metric("Portfolio Health", str(sc.get("portfolio_health", "—")))
 
 
+def _read_csv_safe(path: Path) -> pd.DataFrame:
+    if not path.is_file() or path.stat().st_size == 0:
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path, low_memory=False)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _read_json_safe(path: Path) -> Dict[str, Any]:
+    import json
+
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def render_ledger_reconciliation_center(results_dir: Path) -> None:
+    """💳 Ledger Reconciliation Center — Phase 165B broker truth vs local records."""
+    st.markdown("### 💳 Ledger Reconciliation Center")
+    st.caption(
+        "Broker history recovery and ledger healing (Phase 165B). Read-only audit — "
+        "no records are rewritten. Refresh artifacts with "
+        "`python -m services.broker_history_recovery`."
+    )
+
+    integrity = _read_json_safe(results_dir / "ledger_integrity_report.json")
+    healing = _read_csv_safe(results_dir / "ledger_healing_report.csv")
+    residual = _read_csv_safe(results_dir / "residual_breakdown.csv")
+    pos_recon = _read_json_safe(results_dir / "position_reconciliation_summary.json")
+    recovered = _read_csv_safe(results_dir / "recovered_fills.csv")
+    recovered_pos = _read_csv_safe(results_dir / "recovered_positions.csv")
+
+    if not integrity and healing.empty and recovered.empty:
+        st.info(
+            "No reconciliation artifacts yet. Run "
+            "`python -m services.broker_history_recovery` to recover broker history.",
+            icon="ℹ️",
+        )
+        return
+
+    # ── Headline metrics ──
+    status = str(integrity.get("status") or "—")
+    badge = {"CERTIFIED": "🟢", "PARTIALLY_CERTIFIED": "🟡", "NOT_CERTIFIED": "🔴"}.get(
+        status, "⚪"
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Integrity Score", _num(integrity.get("ledger_integrity_score")))
+    c2.metric("Certification", f"{badge} {status}")
+    c3.metric("Residual Difference", _money(integrity.get("residual_difference")))
+    c4.metric(
+        "Identity",
+        "✅ HOLDS" if integrity.get("identity_ok") else "⚠️ OPEN",
+    )
+
+    c5, c6, c7, c8, c9 = st.columns(5)
+    c5.metric("Fill Match", _pct(integrity.get("fill_match")))
+    c6.metric("Position Match", _pct(integrity.get("position_match")))
+    c7.metric("Cash Match", _pct(integrity.get("cash_match")))
+    c8.metric("P&L Match", _pct(integrity.get("pnl_match")))
+    c9.metric("Trade Match", _pct(integrity.get("trade_match")))
+
+    prev_epoch = _safe_float(integrity.get("previous_epoch_net_flow"))
+    if np.isfinite(prev_epoch) and abs(prev_epoch) > 1:
+        st.warning(
+            f"**Previous account epoch detected** — the current paper account was created "
+            f"{str(integrity.get('account_created') or '')[:10]}. Net "
+            f"**{_money(prev_epoch)}** of local fill flow predates it and cannot be "
+            f"certified against current broker history.",
+            icon="🕰️",
+        )
+
+    reasons = integrity.get("reasons") or []
+    if reasons:
+        with st.expander("Certification reasons", expanded=False):
+            for r in reasons:
+                st.markdown(f"- {r}")
+
+    # ── Residual sources ──
+    st.markdown("#### Residual Sources")
+    if residual.empty:
+        st.info("No residual breakdown available.", icon="ℹ️")
+    else:
+        res = residual.copy()
+        res["dollar_impact"] = pd.to_numeric(res["dollar_impact"], errors="coerce")
+        if "is_root_cause" in res.columns:
+            causes = res[res["is_root_cause"] == True]  # noqa: E712
+            st.caption(
+                f"Root-cause dollars: **{_money(causes['dollar_impact'].sum())}** "
+                f"(phantom-lot rows are downstream symptoms of the same dollars and are "
+                f"excluded from the sum)."
+            )
+        st.markdown("**Top 10 discrepancy sources**")
+        top10 = res.reindex(res["dollar_impact"].abs().sort_values(ascending=False).index).head(10)
+        st.dataframe(top10, use_container_width=True, hide_index=True)
+
+        col_l, col_r = st.columns(2)
+        with col_l:
+            by_sym = res.groupby("symbol", as_index=False)["dollar_impact"].sum()
+            by_sym = by_sym.reindex(
+                by_sym["dollar_impact"].abs().sort_values(ascending=False).index
+            ).head(15)
+            if not by_sym.empty:
+                st.caption("Residual by Symbol")
+                if not _plotly_bar(by_sym, "symbol", "dollar_impact", "Residual by Symbol"):
+                    st.bar_chart(by_sym.set_index("symbol"))
+        with col_r:
+            if "date" in res.columns and res["date"].astype(str).str.len().gt(0).any():
+                by_date = res.groupby("date", as_index=False)["dollar_impact"].sum()
+                st.caption("Residual by Date")
+                if not _plotly_bar(by_date, "date", "dollar_impact", "Residual by Date"):
+                    st.bar_chart(by_date.set_index("date"))
+        if "session" in res.columns and res["session"].astype(str).str.len().gt(0).any():
+            by_sess = res.groupby("session", as_index=False)["dollar_impact"].sum()
+            by_sess = by_sess.reindex(
+                by_sess["dollar_impact"].abs().sort_values(ascending=False).index
+            ).head(15)
+            st.caption("Residual by Session")
+            if not _plotly_bar(by_sess, "session", "dollar_impact", "Residual by Session"):
+                st.bar_chart(by_sess.set_index("session"))
+
+    # ── Discrepancies & healing recommendations ──
+    st.markdown("#### Discrepancy Table & Healing Recommendations")
+    if healing.empty:
+        st.info("No discrepancies recorded — ledger healing report is empty.", icon="ℹ️")
+    else:
+        sev_opts = [
+            s for s in ("CRITICAL", "HIGH", "WARNING", "INFO") if s in set(healing["severity"])
+        ]
+        pick = st.multiselect(
+            "Severity filter", options=sev_opts, default=sev_opts, key="lrc_severity"
+        )
+        view = healing[healing["severity"].isin(pick)] if pick else healing
+        st.caption(f"{len(view):,} issues shown")
+        st.dataframe(view, use_container_width=True, hide_index=True)
+        fix_counts = healing.groupby("recommended_fix", as_index=False).agg(
+            issues=("recommended_fix", "count"),
+            dollars=("dollar_impact", "sum"),
+        )
+        st.markdown("**Recommended fixes summary**")
+        st.dataframe(fix_counts, use_container_width=True, hide_index=True)
+
+    # ── Position reconciliation ──
+    st.markdown("#### Position Reconciliation")
+    if not pos_recon:
+        st.info("No position reconciliation summary available.", icon="ℹ️")
+    else:
+        p1, p2, p3, p4, p5, p6 = st.columns(6)
+        p1.metric("Checked", str(pos_recon.get("symbols_checked", 0)))
+        p2.metric("Perfect", str(pos_recon.get("perfect_matches", 0)))
+        p3.metric("Qty Mismatch", str(pos_recon.get("quantity_mismatches", 0)))
+        p4.metric("Cost Mismatch", str(pos_recon.get("cost_basis_mismatches", 0)))
+        p5.metric("Missing", str(pos_recon.get("missing_positions", 0)))
+        p6.metric("Phantom", str(pos_recon.get("phantom_positions", 0)))
+        details = pos_recon.get("details") or []
+        if details:
+            with st.expander("Position differences", expanded=False):
+                st.dataframe(pd.DataFrame(details), use_container_width=True, hide_index=True)
+
+    if not recovered_pos.empty:
+        with st.expander("Recovered positions (reconstructed from broker fills)", expanded=False):
+            st.dataframe(recovered_pos, use_container_width=True, hide_index=True)
+
+    # ── Recovered fills preview ──
+    st.markdown("#### Recovered Fills Preview")
+    if recovered.empty:
+        st.info("No recovered fills available.", icon="ℹ️")
+    else:
+        st.caption(
+            f"{len(recovered):,} canonical fills · source: "
+            f"{recovered['source'].iloc[0] if 'source' in recovered.columns else '—'}"
+        )
+        st.dataframe(recovered.tail(200), use_container_width=True, hide_index=True)
+
+
 def render_pnl_ledger_dashboard(results_dir: Path) -> None:
     st.markdown("### 💰 Profit & Loss Ledger")
     st.caption(

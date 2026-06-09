@@ -2943,6 +2943,16 @@ def page_pnl_ledger() -> None:
         st.error(f"Profit & Loss Ledger failed to load: {_short_err(e)}")
 
 
+def page_ledger_reconciliation_center() -> None:
+    """💳 Ledger Reconciliation Center — broker history recovery & ledger healing."""
+    try:
+        from dashboard.pnl_ledger import render_ledger_reconciliation_center
+
+        render_ledger_reconciliation_center(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Ledger Reconciliation Center failed to load: {_short_err(e)}")
+
+
 def page_trade_log() -> None:
     st.markdown("### 📜 Trade Log")
     df, csv_err = read_csv_dashboard(TRADE_LOG_PATH)
@@ -22548,6 +22558,7 @@ def page_governance_library_center() -> None:
 PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Portfolio", "Portfolio History"): page_portfolio_history,
     ("Portfolio", "💰 Profit & Loss Ledger"): page_pnl_ledger,
+    ("Portfolio", "💳 Ledger Reconciliation Center"): page_ledger_reconciliation_center,
     ("Portfolio", "Positions & Exposure"): page_positions_exposure,
     ("Portfolio", "Trade Log"): page_trade_log,
     ("Signals", "🧭 Signal Lifecycle"): page_signal_lifecycle,
@@ -22727,6 +22738,7 @@ SECTIONS: Dict[str, List[str]] = {
     "Portfolio": [
         "Portfolio History",
         "💰 Profit & Loss Ledger",
+        "💳 Ledger Reconciliation Center",
         "Positions & Exposure",
         "Trade Log",
     ],
