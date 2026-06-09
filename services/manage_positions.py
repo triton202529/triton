@@ -1108,6 +1108,37 @@ def build_management_plan(
     hd_strong_buy_stances = {"BUY", "ADD"}
     forced_high_drag_count = 0
 
+    from services.effective_lifecycle import (
+        ExitLogicMetrics,
+        apply_drag_decay,
+        check_rotation_confirmation,
+        compute_current_position_pl,
+        compute_hours_held,
+        evaluate_protected_exit,
+        find_rotation_replacement,
+        is_force_exit_flag,
+        load_exit_logic_config,
+        load_position_entry_times,
+        write_validation_json,
+    )
+
+    exit_logic_cfg = load_exit_logic_config()
+    exit_metrics = ExitLogicMetrics()
+    entry_times = load_position_entry_times(RESULTS)
+    alloc_rows_map: Dict[str, Dict[str, Any]] = {}
+    alloc_summary_json: Dict[str, Any] = (
+        _load_json(RESULTS / "portfolio_allocation_summary.json") or {}
+    )
+    try:
+        if PORTFOLIO_ALLOCATION_RECS_CSV.is_file():
+            _adf = pd.read_csv(PORTFOLIO_ALLOCATION_RECS_CSV, low_memory=False)
+            for _, ar in _adf.iterrows():
+                _asym = _norm_sym(ar.get("ticker") or ar.get("symbol"))
+                if _asym:
+                    alloc_rows_map[_asym] = ar.to_dict()
+    except Exception:
+        pass
+
     batch_median: Optional[float] = None
     _batch_confs: List[float] = []
     if lc_index is not None:
@@ -1518,8 +1549,56 @@ def build_management_plan(
                 # not exited by mistake.
                 sev_trigger = bool(hd_sev_set) and (hd_severity in hd_sev_set) and (_tpl < 0.0)
                 pl_trigger = _tpl < hd_threshold
-                if (sev_trigger or pl_trigger) and (mgmt_stance not in hd_strong_buy_stances):
-                    high_drag_forced = True
+                raw_hd_trigger = (sev_trigger or pl_trigger) and (
+                    mgmt_stance not in hd_strong_buy_stances
+                )
+                if raw_hd_trigger:
+                    _hd_hours = compute_hours_held(sym, entry_times)
+                    _hd_unreal = compute_current_position_pl(
+                        qty=qty_pos,
+                        avg_entry_price=avg_e,
+                        current_price=cur_p,
+                        unrealized_pl=(
+                            _safe_float(met.get("unrealized_pl"), None)
+                            if met.get("unrealized_pl") is not None
+                            else None
+                        ),
+                    )
+                    _hd_perf_flag = (
+                        str(_perf_overlay_map.get(sym) or "").strip().upper()
+                        if _use_perf_overlay
+                        else ""
+                    )
+                    _hd_hist_w, _hd_curr_w, _hd_adj, _hd_still = apply_drag_decay(
+                        historical_total_pl=_tpl,
+                        current_unrealized_pl=_hd_unreal,
+                        hours_held=_hd_hours,
+                        confidence=conf,
+                        config=exit_logic_cfg,
+                    )
+                    exit_metrics.drag_adjustments += 1
+                    print(
+                        f"[DRAG_DECAY] symbol={sym} historical_weight={_hd_hist_w} "
+                        f"current_weight={_hd_curr_w} adjusted_score={_hd_adj}",
+                        flush=True,
+                    )
+                    if _hd_still and evaluate_protected_exit(
+                        symbol=sym,
+                        exit_kind="HIGH_DRAG",
+                        hours_held=_hd_hours,
+                        current_pl=_hd_unreal,
+                        total_pl=_tpl,
+                        unrealized_pl=_hd_unreal,
+                        risk_flag=_hd_perf_flag,
+                        delta_pct=d_pct,
+                        confidence=conf,
+                        replacement_edge_delta=0.0,
+                        drag_score=_hd_adj,
+                        config=exit_logic_cfg,
+                        metrics=exit_metrics,
+                        force_exit_active=is_force_exit_flag(_hd_perf_flag),
+                    ):
+                        high_drag_forced = True
 
         exit_stance = mgmt_stance == "EXIT"
         trim_stance = mgmt_stance == "TRIM"
@@ -1544,6 +1623,45 @@ def build_management_plan(
         want_exit = exit_immediate or stale_exit
         want_trim = False
         trim_reason = ""
+
+        if want_exit and (high_drag_forced or (force_exit and not exit_stance and not stale_exit)):
+            _prot_hours = compute_hours_held(sym, entry_times)
+            _prot_pl = compute_current_position_pl(
+                qty=qty_pos,
+                avg_entry_price=avg_e,
+                current_price=cur_p,
+                unrealized_pl=(
+                    _safe_float(met.get("unrealized_pl"), None)
+                    if met.get("unrealized_pl") is not None
+                    else None
+                ),
+            )
+            _prot_flag = (
+                str(_perf_overlay_map.get(sym) or "").strip().upper() if _use_perf_overlay else ""
+            )
+            _prot_kind = "HIGH_DRAG" if high_drag_forced else "EXIT"
+            if high_drag_forced:
+                pass  # already gated above
+            elif force_exit and not is_force_exit_flag(_prot_flag) and not perf_force_exit_active:
+                if not evaluate_protected_exit(
+                    symbol=sym,
+                    exit_kind=_prot_kind,
+                    hours_held=_prot_hours,
+                    current_pl=_prot_pl,
+                    total_pl=_safe_float((high_drag_map.get(sym) or {}).get("total_pl"), _prot_pl),
+                    unrealized_pl=_prot_pl,
+                    risk_flag=_prot_flag,
+                    delta_pct=d_pct,
+                    confidence=conf,
+                    replacement_edge_delta=0.0,
+                    drag_score=_safe_float((high_drag_map.get(sym) or {}).get("total_pl"), 0.0),
+                    config=exit_logic_cfg,
+                    metrics=exit_metrics,
+                    force_exit_active=bool(perf_force_exit_active),
+                ):
+                    want_exit = False
+                    exit_immediate = False
+                    bump("EXIT_REFINEMENT_BLOCKED")
 
         if want_exit:
             exit_candidates += 1
@@ -1610,6 +1728,39 @@ def build_management_plan(
             continue
         weak_trim_sig = (mgmt_stance in ("HOLD", "WAIT") and d_pct <= weak_trim) or force_trim
         want_trim = trim_stance or weak_trim_sig
+        if want_trim and force_trim:
+            _trim_flag = (
+                str(_perf_overlay_map.get(sym) or "").strip().upper() if _use_perf_overlay else ""
+            )
+            if "TRIM_PRIORITY" in _trim_flag and not is_force_exit_flag(_trim_flag):
+                _trim_hours = compute_hours_held(sym, entry_times)
+                _trim_pl = compute_current_position_pl(
+                    qty=qty_pos,
+                    avg_entry_price=avg_e,
+                    current_price=cur_p,
+                    unrealized_pl=(
+                        _safe_float(met.get("unrealized_pl"), None)
+                        if met.get("unrealized_pl") is not None
+                        else None
+                    ),
+                )
+                if not evaluate_protected_exit(
+                    symbol=sym,
+                    exit_kind="TRIM_PRIORITY",
+                    hours_held=_trim_hours,
+                    current_pl=_trim_pl,
+                    total_pl=_safe_float((high_drag_map.get(sym) or {}).get("total_pl"), _trim_pl),
+                    unrealized_pl=_trim_pl,
+                    risk_flag=_trim_flag,
+                    delta_pct=d_pct,
+                    confidence=conf,
+                    replacement_edge_delta=0.0,
+                    drag_score=_safe_float((high_drag_map.get(sym) or {}).get("total_pl"), 0.0),
+                    config=exit_logic_cfg,
+                    metrics=exit_metrics,
+                ):
+                    want_trim = False
+                    bump("TRIM_REFINEMENT_BLOCKED")
         if want_trim:
             if trim_stance:
                 trim_reason = "TRIM_STANCE"
@@ -1954,12 +2105,61 @@ def build_management_plan(
                 exit_candidates += len(take)
                 for tc in take:
                     sym = tc["sym"]
+                    _rot_hours = compute_hours_held(sym, entry_times)
+                    _rot_pl = compute_current_position_pl(
+                        qty=float(tc["qty_pos"]),
+                        avg_entry_price=tc.get("avg_e"),
+                        current_price=tc.get("cur_p"),
+                    )
+                    _rot_flag = (
+                        str(_perf_overlay_map.get(sym) or "").strip().upper()
+                        if _use_perf_overlay
+                        else ""
+                    )
+                    _rot_cand, _rot_conf_d, _rot_edge_d, _rot_alloc_d, _ = (
+                        find_rotation_replacement(
+                            sym,
+                            alloc_rows_map,
+                            alloc_summary_json,
+                            set(pos_map.keys()),
+                        )
+                    )
+                    if not check_rotation_confirmation(
+                        symbol=sym,
+                        candidate=_rot_cand,
+                        edge_delta=_rot_edge_d,
+                        conf_delta=_rot_conf_d,
+                        alloc_delta=_rot_alloc_d,
+                        config=exit_logic_cfg,
+                        metrics=exit_metrics,
+                    ):
+                        continue
+                    if not evaluate_protected_exit(
+                        symbol=sym,
+                        exit_kind="ROTATE_EXIT",
+                        hours_held=_rot_hours,
+                        current_pl=_rot_pl,
+                        total_pl=_safe_float(
+                            (high_drag_map.get(sym) or {}).get("total_pl"), _rot_pl
+                        ),
+                        unrealized_pl=_rot_pl,
+                        risk_flag=_rot_flag,
+                        delta_pct=float(tc["d_pct"]),
+                        confidence=float(tc["conf"]),
+                        replacement_edge_delta=_rot_edge_d,
+                        drag_score=_safe_float((high_drag_map.get(sym) or {}).get("total_pl"), 0.0),
+                        config=exit_logic_cfg,
+                        metrics=exit_metrics,
+                        force_exit_active=is_force_exit_flag(_rot_flag),
+                    ):
+                        continue
                     sym_state = get_symbol_state(state, sym)
                     sym_state["last_management_action"] = "ROTATE_EXIT"
                     detail = (
                         f"decision_reason={FORCED_ROTATION_CAND_REASON} "
                         f"weak_score={float(tc['weak_score']):.6f} "
-                        f"delta_pct={float(tc['d_pct']):.6f} conf={float(tc['conf']):.4f}"
+                        f"delta_pct={float(tc['d_pct']):.6f} conf={float(tc['conf']):.4f} "
+                        f"rotation_candidate={_rot_cand or 'NONE'} edge_delta={_rot_edge_d}"
                     )
                     exit_pool.append(
                         {
@@ -2850,6 +3050,14 @@ def build_management_plan(
             flush=True,
         )
 
+    if exit_logic_cfg.enabled:
+        _val_path = write_validation_json(exit_metrics)
+        print(
+            f"[EXIT_LOGIC_REFINEMENT] validation={_val_path.as_posix()} "
+            f"metrics={exit_metrics.to_dict()}",
+            flush=True,
+        )
+
     return planned, lines, skip_reasons, state, trim_candidates, exit_candidates, rotation_applied
 
 
@@ -3691,6 +3899,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         write_manage_artifacts([], [], summary, cfg, orders_path)
         append_manage_log(summary)
+        try:
+            from services.effective_lifecycle import ExitLogicMetrics, write_validation_json
+
+            write_validation_json(ExitLogicMetrics())
+        except Exception:
+            pass
         if lifecycle_gate_blocked:
             print("[manage_positions] lifecycle gate BLOCKED; plan written (no lifecycle actions).")
         else:

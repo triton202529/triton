@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "min_holding_hours_before_exit": 24,
+  "rotation_min_edge_delta": 0.05,
+  "drag_decay": {
+    "enabled": true,
+    "decay_hours": 168,
+    "historical_weight_max": 1.0,
+    "historical_weight_min": 0.2,
+    "current_unrealized_boost": 0.4,
+    "force_exit_adjusted_threshold": -50.0
+  },
+  "winner_protection_enabled": true,
+  "exit_confidence_enabled": true,
+  "exit_confidence_trim_threshold": 0.45,
+  "exit_confidence_exit_threshold": 0.65,
+  "catastrophic_signal_delta_pct": -0.015,
+  "catastrophic_exit_confidence_max": 0.35,
+  "severe_force_exit_unrealized_pl_lt": -200.0,
+  "severe_force_exit_total_pl_lt": -300.0
+}

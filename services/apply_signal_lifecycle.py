@@ -13,6 +13,10 @@ from services.signal_lifecycle import (
     apply_lifecycle,
     lifecycle_logic_from_dict,
 )
+from services.effective_lifecycle import (
+    is_catastrophic_signal_deterioration,
+    load_exit_logic_config,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -689,6 +693,30 @@ def _rebuild_lifecycle(src: Path) -> int:
         cfg=engine_cfg,
         lifecycle_logic=lifecycle_logic,
     )
+
+    exit_logic_cfg = load_exit_logic_config()
+    if exit_logic_cfg.enabled and not out_df.empty:
+        for _, row in out_df.iterrows():
+            pos = str(row.get("position_state") or "").upper()
+            if pos != "LONG":
+                continue
+            sym = str(row.get("ticker") or row.get("symbol") or "").upper()
+            try:
+                d_pct = float(row.get("delta_pct"))
+            except (TypeError, ValueError):
+                d_pct = 0.0
+            try:
+                conf = float(row.get("confidence"))
+            except (TypeError, ValueError):
+                conf = 0.5
+            if is_catastrophic_signal_deterioration(
+                delta_pct=d_pct, confidence=conf, config=exit_logic_cfg
+            ):
+                print(
+                    f"[CATASTROPHIC_SIGNAL] symbol={sym} delta_pct={d_pct} "
+                    f"confidence={conf} bypasses_position_age_protection=true",
+                    flush=True,
+                )
 
     # Important: preserve new-entry BUY rows before pair normalization.
     # Without this, apply_lifecycle() may output LONG + BUY for a fresh

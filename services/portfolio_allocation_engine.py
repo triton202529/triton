@@ -70,6 +70,8 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd
 
+from services.effective_lifecycle import load_exit_logic_config
+
 # -----------------------------------------------------------
 # Paths
 # -----------------------------------------------------------
@@ -1017,6 +1019,8 @@ def build_recommendations(
         },
         # Opportunity ranking
         "top_5_opportunities": top_opps,
+        # Phase 152 rotation confirmation threshold (used by manage_positions)
+        "rotation_min_edge_delta": float(load_exit_logic_config().rotation_min_edge_delta),
     }
 
     return df, summary

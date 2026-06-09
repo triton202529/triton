@@ -45,6 +45,13 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd
 
+from services.effective_lifecycle import (
+    apply_drag_decay,
+    compute_hours_held,
+    load_exit_logic_config,
+    load_position_entry_times,
+)
+
 # -----------------------------------------------------------
 # Paths
 # -----------------------------------------------------------
@@ -208,6 +215,7 @@ def _classify_row(
     drag_flag: bool,
     win_rate: Optional[float],
     has_win_rate: bool,
+    drag_trim_from_decay: bool = False,
 ) -> str:
     """Return a pipe-joined union of triggered rules, or 'OK'."""
     triggers: List[str] = []
@@ -218,9 +226,9 @@ def _classify_row(
     if cond_force_unreal or cond_force_total:
         triggers.append("FORCE_EXIT")
 
-    # B. TRIM_PRIORITY
+    # B. TRIM_PRIORITY — drag path may be suppressed by Phase 152 drag decay upstream
     cond_trim_unreal = unrealized_pl is not None and unrealized_pl < TRIM_PRIORITY_UNREALIZED_PL_LT
-    if cond_trim_unreal or drag_flag:
+    if cond_trim_unreal or drag_trim_from_decay:
         triggers.append("TRIM_PRIORITY")
 
     # C. BLOCK_NEW_BUY
@@ -259,6 +267,8 @@ def build_overlay(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
     has_winrate = "win_rate" in df.columns
 
     drag_series = _derive_drag_flag_series(df)
+    exit_logic_cfg = load_exit_logic_config()
+    entry_times = load_position_entry_times(RESULTS_DIR)
 
     rows: List[dict] = []
     for i, r in df.iterrows():
@@ -269,6 +279,32 @@ def build_overlay(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
         unreal_pl = _to_float(r.get("unrealized_pl")) if has_unreal else None
         win_rate = _to_float(r.get("win_rate")) if has_winrate else None
         drag = bool(drag_series.iloc[i]) if i in drag_series.index else False
+        hours_held = compute_hours_held(sym, entry_times)
+
+        drag_hist_w = 1.0
+        drag_curr_w = 0.0
+        drag_adj_score = float(total_pl or 0.0)
+        drag_trim_from_decay = bool(drag)
+        if drag and exit_logic_cfg.enabled:
+            drag_hist_w, drag_curr_w, drag_adj_score, still_force = apply_drag_decay(
+                historical_total_pl=float(total_pl or 0.0),
+                current_unrealized_pl=float(unreal_pl or 0.0),
+                hours_held=hours_held,
+                confidence=0.5,
+                config=exit_logic_cfg,
+            )
+            curr_pl = float(unreal_pl or 0.0)
+            drag_trim_from_decay = still_force and (
+                (unreal_pl is not None and unreal_pl < TRIM_PRIORITY_UNREALIZED_PL_LT)
+                or curr_pl < 0
+            )
+            print(
+                f"[DRAG_DECAY] symbol={sym} historical_weight={drag_hist_w} "
+                f"current_weight={drag_curr_w} adjusted_score={drag_adj_score}",
+                flush=True,
+            )
+        elif drag:
+            drag_trim_from_decay = True
 
         flag = _classify_row(
             total_pl=total_pl,
@@ -276,6 +312,7 @@ def build_overlay(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
             drag_flag=drag,
             win_rate=win_rate,
             has_win_rate=has_winrate,
+            drag_trim_from_decay=drag_trim_from_decay,
         )
 
         rows.append(
@@ -285,11 +322,26 @@ def build_overlay(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
                 "unrealized_pl": unreal_pl,
                 "drag_flag": bool(drag),
                 "risk_flag": flag,
+                "drag_historical_weight": drag_hist_w,
+                "drag_current_weight": drag_curr_w,
+                "drag_adjusted_score": drag_adj_score,
+                "hours_held": hours_held,
             }
         )
 
     out = pd.DataFrame(
-        rows, columns=["ticker", "total_pl", "unrealized_pl", "drag_flag", "risk_flag"]
+        rows,
+        columns=[
+            "ticker",
+            "total_pl",
+            "unrealized_pl",
+            "drag_flag",
+            "risk_flag",
+            "drag_historical_weight",
+            "drag_current_weight",
+            "drag_adjusted_score",
+            "hours_held",
+        ],
     )
     counts["total_symbols"] = int(len(out))
     if not out.empty:
