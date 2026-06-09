@@ -1,0 +1,31 @@
+section,scenario,subsystem,status,detail,generated_at
+conflicting_signal_stress,excellent_cps_poor_eval,decision_quality+certification,PASS,eval_certified=False committee=REVIEW_REQUIRED preservation_logic=80,2026-06-09T05:14:13Z
+conflicting_signal_stress,strong_gov_weak_cert,certification,PASS,gov_certified=True overall_cert=PARTIALLY_CERTIFIED,2026-06-09T05:14:13Z
+conflicting_signal_stress,strong_decision_weak_maturity,maturity+intelligence,WARN,decision_quality=73 maturity=73 intelligence=80,2026-06-09T05:14:13Z
+conflicting_signal_stress,conflicting_subsystem_conclusions,escalation+oversight,PASS,escalation_consistency=37 committee=REVIEW_REQUIRED strategic=REVIEW,2026-06-09T05:14:13Z
+false_negative_stress,healthy_portfolio_weak_metrics,committee+certification+intelligence,PASS,committee=REVIEW_REQUIRED cert=PARTIALLY_CERTIFIED weakest=Governance coordination=64,2026-06-09T05:14:13Z
+false_negative_stress,certification_withheld_on_weak_eval,certification,PASS,evaluation_certified=False,2026-06-09T05:14:13Z
+false_negative_stress,intelligence_no_panic_floor,institutional_intelligence,PASS,institutional_intelligence_score=68,2026-06-09T05:14:13Z
+false_positive_stress,deteriorating_portfolio_strong_metrics,committee+strategic,PASS,committee=REVIEW_REQUIRED assessment=CRITICAL strategic_rec=REVIEW_REQUIRED,2026-06-09T05:14:13Z
+false_positive_stress,certification_refuses_false_optimism,certification,FAIL,certification_status=CERTIFIED_FOR_PAPER_PROTECTION,2026-06-09T05:14:13Z
+false_positive_stress,decision_quality_flags_mismatch,decision_quality,WARN,escalation_consistency=74,2026-06-09T05:14:13Z
+committee_stress,risk_critical_exec_calm,risk_committee+executive,PASS,risk=ESCALATE board=SUSPENDED investment=ESCALATE strategic=SUSPENDED,2026-06-09T05:14:13Z
+committee_stress,explainable_recommendations,strategic_oversight,PASS,recommendation_count=8,2026-06-09T05:14:13Z
+committee_stress,preservation_governance_divergence,governance_board+decision_quality,PASS,governance_consistency=44 board=REVIEW,2026-06-09T05:14:13Z
+escalation_stress,escalation_green,escalation,WARN,"cps=85 committee=REVIEW_REQUIRED allowed=('CLEAR', 'MONITOR')",2026-06-09T05:14:13Z
+escalation_stress,escalation_yellow,escalation,PASS,"cps=65 committee=REVIEW_REQUIRED allowed=('MONITOR', 'REVIEW_REQUIRED')",2026-06-09T05:14:13Z
+escalation_stress,escalation_orange,escalation,PASS,"cps=48 committee=ESCALATE allowed=('REVIEW_REQUIRED', 'ESCALATE')",2026-06-09T05:14:13Z
+escalation_stress,escalation_red,escalation,PASS,"cps=28 committee=ESCALATE allowed=('REVIEW_REQUIRED', 'ESCALATE')",2026-06-09T05:14:13Z
+escalation_stress,deescalation_path,escalation,PASS,path=ESCALATE->ESCALATE->REVIEW_REQUIRED->REVIEW_REQUIRED,2026-06-09T05:14:13Z
+certification_stress,strong_inputs_paper_certification,certification,PASS,status=CERTIFIED_FOR_PAPER_PROTECTION certified_areas=8,2026-06-09T05:14:13Z
+certification_stress,live_gate_blocks_certification,certification,PASS,status=NOT_CERTIFIED,2026-06-09T05:14:13Z
+certification_stress,evaluation_minimum_enforced,certification,PASS,0 trials evaluated (minimum 2 required),2026-06-09T05:14:13Z
+certification_stress,governor_critical_blocks_full_cert,certification,PASS,governor_certified=False status=PARTIALLY_CERTIFIED,2026-06-09T05:14:13Z
+scorecard,conflicting_signal_stress,,WARN,Phase 157 institutional intelligence stress — conflicting_signal_stress,2026-06-09T05:14:13Z
+scorecard,false_negative_stress,,PASS,Phase 157 institutional intelligence stress — false_negative_stress,2026-06-09T05:14:13Z
+scorecard,false_positive_stress,,FAIL,Phase 157 institutional intelligence stress — false_positive_stress,2026-06-09T05:14:13Z
+scorecard,committee_stress,,PASS,Phase 157 institutional intelligence stress — committee_stress,2026-06-09T05:14:13Z
+scorecard,escalation_stress,,WARN,Phase 157 institutional intelligence stress — escalation_stress,2026-06-09T05:14:13Z
+scorecard,certification_stress,,PASS,Phase 157 institutional intelligence stress — certification_stress,2026-06-09T05:14:13Z
+scorecard,overall_result,,FAIL,Phase 157 institutional intelligence stress — overall_result,2026-06-09T05:14:13Z
+final_decision,institutional_intelligence_stress_test,,FAIL,Do not promote — institutional intelligence shows material stress failures under conflicting or adversarial conditions.,2026-06-09T05:14:13Z

@@ -1,0 +1,250 @@
+{
+  "generated_at": "2026-06-09T05:14:13Z",
+  "phase": "157",
+  "mode": "simulation_only_stress_test",
+  "disclaimer": "Institutional intelligence stress testing simulates adversarial conditions only. No execution, governance rule, certification rule, or position modifications.",
+  "conflicting_signal_stress": "WARN",
+  "false_negative_stress": "PASS",
+  "false_positive_stress": "FAIL",
+  "committee_stress": "PASS",
+  "escalation_stress": "WARN",
+  "certification_stress": "PASS",
+  "overall_result": "FAIL",
+  "scorecard": {
+    "conflicting_signal_stress": "WARN",
+    "false_negative_stress": "PASS",
+    "false_positive_stress": "FAIL",
+    "committee_stress": "PASS",
+    "escalation_stress": "WARN",
+    "certification_stress": "PASS",
+    "overall_result": "FAIL"
+  },
+  "scenario_counts": {
+    "conflicting_signal_cases": 4,
+    "false_negative_cases": 3,
+    "false_positive_cases": 3,
+    "committee_cases": 3,
+    "escalation_cases": 5,
+    "certification_cases": 4,
+    "total_scenarios": 22
+  },
+  "part_a_conflicting_signal_stress": {
+    "cases_tested": 4,
+    "case_results": [
+      {
+        "name": "excellent_cps_poor_eval",
+        "status": "PASS",
+        "detail": "eval_certified=False committee=REVIEW_REQUIRED preservation_logic=80",
+        "subsystem": "decision_quality+certification"
+      },
+      {
+        "name": "strong_gov_weak_cert",
+        "status": "PASS",
+        "detail": "gov_certified=True overall_cert=PARTIALLY_CERTIFIED",
+        "subsystem": "certification"
+      },
+      {
+        "name": "strong_decision_weak_maturity",
+        "status": "WARN",
+        "detail": "decision_quality=73 maturity=73 intelligence=80",
+        "subsystem": "maturity+intelligence"
+      },
+      {
+        "name": "conflicting_subsystem_conclusions",
+        "status": "PASS",
+        "detail": "escalation_consistency=37 committee=REVIEW_REQUIRED strategic=REVIEW",
+        "subsystem": "escalation+oversight"
+      }
+    ],
+    "status": "WARN"
+  },
+  "part_b_false_negative_stress": {
+    "cases_tested": 3,
+    "case_results": [
+      {
+        "name": "healthy_portfolio_weak_metrics",
+        "status": "PASS",
+        "detail": "committee=REVIEW_REQUIRED cert=PARTIALLY_CERTIFIED weakest=Governance coordination=64",
+        "subsystem": "committee+certification+intelligence"
+      },
+      {
+        "name": "certification_withheld_on_weak_eval",
+        "status": "PASS",
+        "detail": "evaluation_certified=False",
+        "subsystem": "certification"
+      },
+      {
+        "name": "intelligence_no_panic_floor",
+        "status": "PASS",
+        "detail": "institutional_intelligence_score=68",
+        "subsystem": "institutional_intelligence"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_c_false_positive_stress": {
+    "cases_tested": 3,
+    "case_results": [
+      {
+        "name": "deteriorating_portfolio_strong_metrics",
+        "status": "PASS",
+        "detail": "committee=REVIEW_REQUIRED assessment=CRITICAL strategic_rec=REVIEW_REQUIRED",
+        "subsystem": "committee+strategic"
+      },
+      {
+        "name": "certification_refuses_false_optimism",
+        "status": "FAIL",
+        "detail": "certification_status=CERTIFIED_FOR_PAPER_PROTECTION",
+        "subsystem": "certification"
+      },
+      {
+        "name": "decision_quality_flags_mismatch",
+        "status": "WARN",
+        "detail": "escalation_consistency=74",
+        "subsystem": "decision_quality"
+      }
+    ],
+    "status": "FAIL"
+  },
+  "part_d_committee_stress": {
+    "cases_tested": 3,
+    "case_results": [
+      {
+        "name": "risk_critical_exec_calm",
+        "status": "PASS",
+        "detail": "risk=ESCALATE board=SUSPENDED investment=ESCALATE strategic=SUSPENDED",
+        "subsystem": "risk_committee+executive"
+      },
+      {
+        "name": "explainable_recommendations",
+        "status": "PASS",
+        "detail": "recommendation_count=8",
+        "subsystem": "strategic_oversight"
+      },
+      {
+        "name": "preservation_governance_divergence",
+        "status": "PASS",
+        "detail": "governance_consistency=44 board=REVIEW",
+        "subsystem": "governance_board+decision_quality"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_e_escalation_stress": {
+    "cases_tested": 5,
+    "case_results": [
+      {
+        "name": "escalation_green",
+        "status": "WARN",
+        "detail": "cps=85 committee=REVIEW_REQUIRED allowed=('CLEAR', 'MONITOR')",
+        "subsystem": "escalation"
+      },
+      {
+        "name": "escalation_yellow",
+        "status": "PASS",
+        "detail": "cps=65 committee=REVIEW_REQUIRED allowed=('MONITOR', 'REVIEW_REQUIRED')",
+        "subsystem": "escalation"
+      },
+      {
+        "name": "escalation_orange",
+        "status": "PASS",
+        "detail": "cps=48 committee=ESCALATE allowed=('REVIEW_REQUIRED', 'ESCALATE')",
+        "subsystem": "escalation"
+      },
+      {
+        "name": "escalation_red",
+        "status": "PASS",
+        "detail": "cps=28 committee=ESCALATE allowed=('REVIEW_REQUIRED', 'ESCALATE')",
+        "subsystem": "escalation"
+      },
+      {
+        "name": "deescalation_path",
+        "status": "PASS",
+        "detail": "path=ESCALATE->ESCALATE->REVIEW_REQUIRED->REVIEW_REQUIRED",
+        "subsystem": "escalation"
+      }
+    ],
+    "status": "WARN"
+  },
+  "part_f_certification_stress": {
+    "cases_tested": 4,
+    "case_results": [
+      {
+        "name": "strong_inputs_paper_certification",
+        "status": "PASS",
+        "detail": "status=CERTIFIED_FOR_PAPER_PROTECTION certified_areas=8",
+        "subsystem": "certification"
+      },
+      {
+        "name": "live_gate_blocks_certification",
+        "status": "PASS",
+        "detail": "status=NOT_CERTIFIED",
+        "subsystem": "certification"
+      },
+      {
+        "name": "evaluation_minimum_enforced",
+        "status": "PASS",
+        "detail": "0 trials evaluated (minimum 2 required)",
+        "subsystem": "certification"
+      },
+      {
+        "name": "governor_critical_blocks_full_cert",
+        "status": "PASS",
+        "detail": "governor_certified=False status=PARTIALLY_CERTIFIED",
+        "subsystem": "certification"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_h_maturity_review": {
+    "before": {
+      "institutional_intelligence_score": 66,
+      "institutional_band": "ADVANCED",
+      "overall_maturity": 58,
+      "maturity_band": "DEVELOPING",
+      "decision_quality_score": 70,
+      "certification_status": "PARTIALLY_CERTIFIED",
+      "coordination_score": 67
+    },
+    "after": {
+      "institutional_intelligence_score": 66,
+      "institutional_band": "ADVANCED",
+      "overall_maturity": 58,
+      "maturity_band": "DEVELOPING",
+      "decision_quality_score": 70,
+      "certification_status": "PARTIALLY_CERTIFIED",
+      "coordination_score": 67,
+      "stress_validation_pass_count": 3,
+      "stress_validation_warn_count": 2,
+      "stress_validation_fail_count": 1
+    },
+    "impact": {
+      "institutional_intelligence": "Stress exposure reveals cross-layer alignment gaps under synthetic conflict.",
+      "governance": "Governance may over-trust optimistic authorization signals.",
+      "maturity": "Maturity scoring remains stable; weakest-area signal (Governance) unchanged.",
+      "certification": "Certification gates resist false earn/deny under synthetic metric challenges.",
+      "strategic_reasoning": "Strategic oversight aggregates committee disagreement into explainable REVIEW posture."
+    }
+  },
+  "part_i_final_decision": {
+    "status": "FAIL",
+    "strengths": [
+      "Healthy conditions do not trigger certification collapse",
+      "Committee disagreement produces coherent advisory escalation",
+      "Certification gates resist false earn/deny"
+    ],
+    "weaknesses": [
+      "false_positive_stress: Deteriorating conditions resist false optimism",
+      "strong_decision_weak_maturity: decision_quality=73 maturity=73 intelligence=80",
+      "decision_quality_flags_mismatch: escalation_consistency=74",
+      "escalation_green: cps=85 committee=REVIEW_REQUIRED allowed=('CLEAR', 'MONITOR')"
+    ],
+    "recommendation": "Do not promote \u2014 institutional intelligence shows material stress failures under conflicting or adversarial conditions.",
+    "institutional_intelligence_certification_status": "PARTIALLY_CERTIFIED",
+    "promotion_recommended": false
+  },
+  "institutional_intelligence_certification": {
+    "status": "PARTIALLY_CERTIFIED",
+    "promotion_recommended": false
+  }
+}
