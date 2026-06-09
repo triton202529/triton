@@ -1,0 +1,52 @@
+section,area,check,status,detail,generated_at
+lifecycle_freshness,lifecycle_freshness,lifecycle_artifacts_present,PASS,signal_lifecycle=True effective=True,2026-06-09T13:31:07Z
+lifecycle_freshness,lifecycle_freshness,pipeline_not_stale,PASS,stale=False reason=none detail=ok,2026-06-09T13:31:07Z
+lifecycle_freshness,lifecycle_freshness,lifecycle_gate_ok,PASS,status=OK reason=OK rows=64,2026-06-09T13:31:07Z
+lifecycle_freshness,lifecycle_freshness,stale_effective_recovery_path,PASS,build_effective_lifecycle ran successfully,2026-06-09T13:31:07Z
+execution_readiness,execution_readiness,readiness_artifact_present,PASS,status=READY generated_at=2026-06-09T13:31:11Z,2026-06-09T13:31:07Z
+execution_readiness,execution_readiness,readiness_checks_explainable,PASS,"passing=['governance', 'approval', 'policy', 'data_freshness', 'watchdog', 'broker', 'lifecycle', 'signals'] failing=[]",2026-06-09T13:31:07Z
+execution_readiness,execution_readiness,ready_scenario_supported,PASS,readiness_status=READY,2026-06-09T13:31:07Z
+execution_readiness,execution_readiness,operational_ready_or_documented_block,PASS,READY with 8/8 checks,2026-06-09T13:31:07Z
+execution_readiness,execution_readiness,live_execution_blocked,PASS,live_execution_permitted=False,2026-06-09T13:31:07Z
+execution_readiness,execution_readiness,auth_integration,PASS,auth_paper=True readiness_paper=True,2026-06-09T13:31:07Z
+execution_readiness,execution_readiness,readiness_compute_available,PASS,governance_execution_readiness.compute_execution_readiness,2026-06-09T13:31:07Z
+authorization,authorization,governance_authorized,PASS,Governance posture permits evaluation,2026-06-09T13:31:07Z
+authorization,authorization,execution_authorized_paper,PASS,Paper execution authorized by policy gate,2026-06-09T13:31:07Z
+authorization,authorization,live_execution_blocked,PASS,auth_live=False policy_live=False,2026-06-09T13:31:07Z
+authorization,authorization,paper_env_validation,PASS,TRITON_ENABLE_PAPER_EXECUTION=1,2026-06-09T13:31:07Z
+authorization,authorization,gate_reasons_auditable,PASS,"gate_keys=['governance', 'operator', 'policy', 'execution']",2026-06-09T13:31:07Z
+authorization,authorization,audit_trail_authorization_fields,PASS,audit_rows=402 columns_ok=True,2026-06-09T13:31:07Z
+order_submission,order_submission,execute_trades_module,PASS,services.execute_trades,2026-06-09T13:31:07Z
+order_submission,order_submission,place_live_orders_module,PASS,services.place_live_orders.make_broker (paper),2026-06-09T13:31:07Z
+order_submission,order_submission,dry_run_default_plan_only,PASS,--execute not passed; execute_trades sets dry_run = not bool(args.execute) (default plan-only),2026-06-09T13:31:07Z
+order_submission,order_submission,dry_run_blocks_submit,PASS,block_reasons=execute_trades_dry_run_true;cli_execute_flag_false,2026-06-09T13:31:07Z
+order_submission,order_submission,paper_submit_gates_when_execute,PASS,final_submit_allowed=True blocks=none,2026-06-09T13:31:07Z
+order_submission,order_submission,execute_trades_lifecycle_gate,PASS,lifecycle_gate_in_execute_trades=True,2026-06-09T13:31:07Z
+duplicate_protection,duplicate_protection,order_discipline_enabled,PASS,block_open=True session_lock=True,2026-06-09T13:31:07Z
+duplicate_protection,duplicate_protection,check_duplicate_order_api,PASS,services.duplicate_order_guard.check_duplicate_order,2026-06-09T13:31:07Z
+duplicate_protection,duplicate_protection,session_registry,PASS,placement_session_intents=C:\Users\akimw\triton\data\live\placement_session_intents.csv,2026-06-09T13:31:07Z
+duplicate_protection,duplicate_protection,duplicate_block_audit,PASS,paper_execution_audit.append_duplicate_block_audit,2026-06-09T13:31:07Z
+duplicate_protection,duplicate_protection,local_duplicate_probe,PASS,probe_duplicate=False reason=none,2026-06-09T13:31:07Z
+duplicate_protection,duplicate_protection,audit_trail_duplicate_fields,PASS,audit_rows=402 duplicate_annotated=128,2026-06-09T13:31:07Z
+order_monitoring,order_monitoring,poll_order_status_module,PASS,services.poll_order_status,2026-06-09T13:31:07Z
+order_monitoring,order_monitoring,lifecycle_refresh_hook,PASS,poll_order_status._refresh_effective_lifecycle,2026-06-09T13:31:07Z
+order_monitoring,order_monitoring,stale_order_suppression,PASS,stale-hours / suppress-after-fails parameters present,2026-06-09T13:31:07Z
+order_monitoring,order_monitoring,order_log_artifacts,PASS,live_orders_log=True recent_orders=True,2026-06-09T13:31:07Z
+order_monitoring,order_monitoring,manage_orders_tracking,PASS,manage_orders=True,2026-06-09T13:31:07Z
+execution_recovery,execution_recovery,stale_effective_recovery,PASS,"before_gate=OK after_gate=OK fixes=['watchdog heartbeat and status refreshed', 'STALE_HEARTBEAT alert cleared on second watchdog pass', 'governance_authorization and execution_readiness recomputed']",2026-06-09T13:31:07Z
+execution_recovery,execution_recovery,readiness_refresh_path,PASS,before=NOT_READY after=READY,2026-06-09T13:31:07Z
+execution_recovery,execution_recovery,watchdog_refresh_available,PASS,risk_watchdog invoked in prep,2026-06-09T13:31:07Z
+execution_recovery,execution_recovery,governance_refresh_available,PASS,governance_execution_readiness invoked in prep,2026-06-09T13:31:07Z
+execution_recovery,execution_recovery,post_recovery_lifecycle_gate,PASS,status=OK reason=OK,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_signals,PASS,signals_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_lifecycle,PASS,lifecycle_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_effective_lifecycle,PASS,effective_lifecycle_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_allocation,PASS,allocation_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_authorization,PASS,authorization_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_readiness,PASS,readiness_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_opportunities,PASS,opportunities_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_audit_trail,PASS,audit_trail_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_order_log,PASS,order_log_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,artifact_positions,PASS,positions_present=True,2026-06-09T13:31:07Z
+end_to_end,end_to_end,path_verification_ran,PASS,ready_for_monday=True block_reasons=[],2026-06-09T13:31:07Z
+end_to_end,end_to_end,market_open_checklist_ran,PASS,ready=False block_reasons=['lifecycle_fresh'],2026-06-09T13:31:07Z

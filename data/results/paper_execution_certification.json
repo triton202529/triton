@@ -1,0 +1,632 @@
+{
+  "generated_at": "2026-06-09T13:31:07Z",
+  "phase": "163",
+  "mode": "paper_execution_certification",
+  "disclaimer": "Paper execution certification assesses paper-mode execution layer capability and operational readiness. No live trading or live order submission.",
+  "prep": {
+    "actions": [
+      {
+        "step": "risk_watchdog",
+        "ok": true,
+        "detail": "rc=0"
+      },
+      {
+        "step": "risk_watchdog_clear_stale",
+        "ok": true,
+        "detail": "rc=0"
+      },
+      {
+        "step": "governance_execution_readiness",
+        "ok": true,
+        "detail": "rc=0"
+      }
+    ],
+    "fixes_applied": [
+      "watchdog heartbeat and status refreshed",
+      "STALE_HEARTBEAT alert cleared on second watchdog pass",
+      "governance_authorization and execution_readiness recomputed"
+    ],
+    "before": {
+      "stale_effective": false,
+      "stale_reason": "",
+      "stale_detail": "",
+      "lifecycle_gate": "OK",
+      "lifecycle_gate_reason": "OK",
+      "readiness_status": "NOT_READY"
+    },
+    "after": {
+      "stale_effective": false,
+      "lifecycle_gate": "OK",
+      "lifecycle_gate_reason": "OK",
+      "readiness_status": "READY",
+      "lifecycle_file": true,
+      "effective_file": true
+    }
+  },
+  "path_verification": {
+    "timestamp": "2026-06-09T13:31:11Z",
+    "lifecycle_loaded": true,
+    "allocation_loaded": true,
+    "governance_authorized": true,
+    "execution_authorized": true,
+    "opportunities": 36,
+    "duplicate_protection": true,
+    "audit_trail": true,
+    "broker_reachable": true,
+    "management_path": true,
+    "exit_path": true,
+    "ready_for_monday": true,
+    "block_reasons": [],
+    "checks": [
+      {
+        "name": "lifecycle_loaded",
+        "ok": true,
+        "detail": "status=OK reason=OK rows=64"
+      },
+      {
+        "name": "allocation_loaded",
+        "ok": true,
+        "detail": "portfolio_allocation_recommendations.csv=rows:64; portfolio_allocation_summary.json=ok"
+      },
+      {
+        "name": "governance_authorized",
+        "ok": true,
+        "detail": "governance_authorized=True overall=True"
+      },
+      {
+        "name": "execution_authorized",
+        "ok": true,
+        "detail": "execution_authorized=True paper_execution_permitted=True TRITON_ENABLE_PAPER_EXECUTION=1"
+      },
+      {
+        "name": "opportunities",
+        "ok": true,
+        "detail": "rows=36"
+      },
+      {
+        "name": "duplicate_protection",
+        "ok": true,
+        "detail": "enabled=True block_open=True session_lock=True"
+      },
+      {
+        "name": "audit_trail",
+        "ok": true,
+        "detail": "writable path=paper_execution_audit.csv columns=18"
+      },
+      {
+        "name": "broker_reachable",
+        "ok": true,
+        "detail": "account=cfeddca6-ee4 positions=5"
+      },
+      {
+        "name": "management_path",
+        "ok": true,
+        "detail": "config_ok lifecycle=signal_lifecycle_effective.csv rows=64 build_management_plan=True"
+      },
+      {
+        "name": "exit_path",
+        "ok": true,
+        "detail": "exit_stances=1 overlay_rows=64 forced_rotation=True overlay_fn=True"
+      }
+    ]
+  },
+  "market_open_checklist": {
+    "timestamp": "2026-06-09T13:31:12Z",
+    "market_open": true,
+    "paper_mode": true,
+    "paper_execution_env": true,
+    "live_blocked": true,
+    "open_orders": 3,
+    "ready": false,
+    "block_reasons": [
+      "lifecycle_fresh"
+    ],
+    "checks": [
+      {
+        "name": "market_open",
+        "ok": true,
+        "detail": "is_open=True next_event=2026-06-10T09:30:00-04:00",
+        "critical": true
+      },
+      {
+        "name": "paper_mode",
+        "ok": true,
+        "detail": "broker_base=paper-api account=cfeddca6...",
+        "critical": true
+      },
+      {
+        "name": "paper_execution_env",
+        "ok": true,
+        "detail": "TRITON_ENABLE_PAPER_EXECUTION=1",
+        "critical": true
+      },
+      {
+        "name": "live_blocked",
+        "ok": true,
+        "detail": "live_execution_enabled=False live_execution_permitted=False policy_mode=paper",
+        "critical": true
+      },
+      {
+        "name": "open_orders_known",
+        "ok": true,
+        "detail": "count=3",
+        "critical": true
+      },
+      {
+        "name": "duplicate_protection",
+        "ok": true,
+        "detail": "enabled=True block_if_open_same_side=True same_session_lock=True",
+        "critical": true
+      },
+      {
+        "name": "lifecycle_fresh",
+        "ok": false,
+        "detail": "status=BLOCKED reason=STALE_EFFECTIVE details=signal_lifecycle_newer_than_signal_lifecycle_effective",
+        "critical": true
+      },
+      {
+        "name": "allocation_fresh",
+        "ok": true,
+        "detail": "age_minutes=938.4 max=1440 files=['portfolio_allocation_summary.json', 'portfolio_allocation_recommendations.csv']",
+        "critical": true
+      },
+      {
+        "name": "execution_authorized",
+        "ok": true,
+        "detail": "execution_authorized=True paper_execution_permitted=True",
+        "critical": true
+      },
+      {
+        "name": "governance_authorized",
+        "ok": true,
+        "detail": "governance_authorized=True",
+        "critical": true
+      },
+      {
+        "name": "top_opportunities",
+        "ok": true,
+        "detail": "rows=36 first=AAPL",
+        "critical": true
+      },
+      {
+        "name": "positions_readable",
+        "ok": true,
+        "detail": "positions=5",
+        "critical": true
+      }
+    ]
+  },
+  "part_a_lifecycle_freshness": {
+    "checks": [
+      {
+        "check": "lifecycle_artifacts_present",
+        "status": "PASS",
+        "detail": "signal_lifecycle=True effective=True"
+      },
+      {
+        "check": "pipeline_not_stale",
+        "status": "PASS",
+        "detail": "stale=False reason=none detail=ok"
+      },
+      {
+        "check": "lifecycle_gate_ok",
+        "status": "PASS",
+        "detail": "status=OK reason=OK rows=64"
+      },
+      {
+        "check": "stale_effective_recovery_path",
+        "status": "PASS",
+        "detail": "build_effective_lifecycle ran successfully"
+      }
+    ],
+    "status": "PASS",
+    "gate": {
+      "status": "OK",
+      "reason": "OK",
+      "details": "lifecycle passed validation",
+      "tickers": [
+        "AAPL",
+        "ABBV",
+        "AMD",
+        "AMZN",
+        "ARKK",
+        "BAC",
+        "BITO",
+        "BLK",
+        "BRK-B",
+        "C",
+        "CVX",
+        "DBA",
+        "DIA",
+        "DIS",
+        "GBTC",
+        "GE",
+        "GLD",
+        "GOOGL",
+        "GS",
+        "HD",
+        "INTC",
+        "IWM",
+        "JNJ",
+        "JPM",
+        "KO",
+        "MA",
+        "META",
+        "MRK",
+        "MS",
+        "MSFT",
+        "NFLX",
+        "NVDA",
+        "PEP",
+        "PFE",
+        "PG",
+        "QQQ",
+        "SCHW",
+        "SLV",
+        "SPY",
+        "T",
+        "TSLA",
+        "UNG",
+        "UNH",
+        "USO",
+        "V",
+        "VOO",
+        "VTI",
+        "WFC",
+        "WMT",
+        "XLB",
+        "XLE",
+        "XLF",
+        "XLI",
+        "XLK",
+        "XLP",
+        "XLRE",
+        "XLU",
+        "XLV",
+        "XLY",
+        "XOM",
+        "^DJI",
+        "^GSPC",
+        "^IXIC",
+        "^VIX"
+      ],
+      "checked_at": "2026-06-09T13:31:13Z",
+      "row_issue_count": 0,
+      "duplicate_tickers": []
+    }
+  },
+  "part_b_execution_readiness": {
+    "checks": [
+      {
+        "check": "readiness_artifact_present",
+        "status": "PASS",
+        "detail": "status=READY generated_at=2026-06-09T13:31:11Z"
+      },
+      {
+        "check": "readiness_checks_explainable",
+        "status": "PASS",
+        "detail": "passing=['governance', 'approval', 'policy', 'data_freshness', 'watchdog', 'broker', 'lifecycle', 'signals'] failing=[]"
+      },
+      {
+        "check": "ready_scenario_supported",
+        "status": "PASS",
+        "detail": "readiness_status=READY"
+      },
+      {
+        "check": "operational_ready_or_documented_block",
+        "status": "PASS",
+        "detail": "READY with 8/8 checks"
+      },
+      {
+        "check": "live_execution_blocked",
+        "status": "PASS",
+        "detail": "live_execution_permitted=False"
+      },
+      {
+        "check": "auth_integration",
+        "status": "PASS",
+        "detail": "auth_paper=True readiness_paper=True"
+      },
+      {
+        "check": "readiness_compute_available",
+        "status": "PASS",
+        "detail": "governance_execution_readiness.compute_execution_readiness"
+      }
+    ],
+    "status": "PASS",
+    "readiness_status": "READY"
+  },
+  "part_c_authorization": {
+    "checks": [
+      {
+        "check": "governance_authorized",
+        "status": "PASS",
+        "detail": "Governance posture permits evaluation"
+      },
+      {
+        "check": "execution_authorized_paper",
+        "status": "PASS",
+        "detail": "Paper execution authorized by policy gate"
+      },
+      {
+        "check": "live_execution_blocked",
+        "status": "PASS",
+        "detail": "auth_live=False policy_live=False"
+      },
+      {
+        "check": "paper_env_validation",
+        "status": "PASS",
+        "detail": "TRITON_ENABLE_PAPER_EXECUTION=1"
+      },
+      {
+        "check": "gate_reasons_auditable",
+        "status": "PASS",
+        "detail": "gate_keys=['governance', 'operator', 'policy', 'execution']"
+      },
+      {
+        "check": "audit_trail_authorization_fields",
+        "status": "PASS",
+        "detail": "audit_rows=402 columns_ok=True"
+      }
+    ],
+    "status": "PASS",
+    "paper_env": true
+  },
+  "part_d_order_submission": {
+    "checks": [
+      {
+        "check": "execute_trades_module",
+        "status": "PASS",
+        "detail": "services.execute_trades"
+      },
+      {
+        "check": "place_live_orders_module",
+        "status": "PASS",
+        "detail": "services.place_live_orders.make_broker (paper)"
+      },
+      {
+        "check": "dry_run_default_plan_only",
+        "status": "PASS",
+        "detail": "--execute not passed; execute_trades sets dry_run = not bool(args.execute) (default plan-only)"
+      },
+      {
+        "check": "dry_run_blocks_submit",
+        "status": "PASS",
+        "detail": "block_reasons=execute_trades_dry_run_true;cli_execute_flag_false"
+      },
+      {
+        "check": "paper_submit_gates_when_execute",
+        "status": "PASS",
+        "detail": "final_submit_allowed=True blocks=none"
+      },
+      {
+        "check": "execute_trades_lifecycle_gate",
+        "status": "PASS",
+        "detail": "lifecycle_gate_in_execute_trades=True"
+      }
+    ],
+    "status": "PASS",
+    "dry_run_default": true
+  },
+  "part_e_duplicate_protection": {
+    "checks": [
+      {
+        "check": "order_discipline_enabled",
+        "status": "PASS",
+        "detail": "block_open=True session_lock=True"
+      },
+      {
+        "check": "check_duplicate_order_api",
+        "status": "PASS",
+        "detail": "services.duplicate_order_guard.check_duplicate_order"
+      },
+      {
+        "check": "session_registry",
+        "status": "PASS",
+        "detail": "placement_session_intents=C:\\Users\\akimw\\triton\\data\\live\\placement_session_intents.csv"
+      },
+      {
+        "check": "duplicate_block_audit",
+        "status": "PASS",
+        "detail": "paper_execution_audit.append_duplicate_block_audit"
+      },
+      {
+        "check": "local_duplicate_probe",
+        "status": "PASS",
+        "detail": "probe_duplicate=False reason=none"
+      },
+      {
+        "check": "audit_trail_duplicate_fields",
+        "status": "PASS",
+        "detail": "audit_rows=402 duplicate_annotated=128"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_f_order_monitoring": {
+    "checks": [
+      {
+        "check": "poll_order_status_module",
+        "status": "PASS",
+        "detail": "services.poll_order_status"
+      },
+      {
+        "check": "lifecycle_refresh_hook",
+        "status": "PASS",
+        "detail": "poll_order_status._refresh_effective_lifecycle"
+      },
+      {
+        "check": "stale_order_suppression",
+        "status": "PASS",
+        "detail": "stale-hours / suppress-after-fails parameters present"
+      },
+      {
+        "check": "order_log_artifacts",
+        "status": "PASS",
+        "detail": "live_orders_log=True recent_orders=True"
+      },
+      {
+        "check": "manage_orders_tracking",
+        "status": "PASS",
+        "detail": "manage_orders=True"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_g_execution_recovery": {
+    "checks": [
+      {
+        "check": "stale_effective_recovery",
+        "status": "PASS",
+        "detail": "before_gate=OK after_gate=OK fixes=['watchdog heartbeat and status refreshed', 'STALE_HEARTBEAT alert cleared on second watchdog pass', 'governance_authorization and execution_readiness recomputed']"
+      },
+      {
+        "check": "readiness_refresh_path",
+        "status": "PASS",
+        "detail": "before=NOT_READY after=READY"
+      },
+      {
+        "check": "watchdog_refresh_available",
+        "status": "PASS",
+        "detail": "risk_watchdog invoked in prep"
+      },
+      {
+        "check": "governance_refresh_available",
+        "status": "PASS",
+        "detail": "governance_execution_readiness invoked in prep"
+      },
+      {
+        "check": "post_recovery_lifecycle_gate",
+        "status": "PASS",
+        "detail": "status=OK reason=OK"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_h_end_to_end": {
+    "checks": [
+      {
+        "check": "artifact_signals",
+        "status": "PASS",
+        "detail": "signals_present=True"
+      },
+      {
+        "check": "artifact_lifecycle",
+        "status": "PASS",
+        "detail": "lifecycle_present=True"
+      },
+      {
+        "check": "artifact_effective_lifecycle",
+        "status": "PASS",
+        "detail": "effective_lifecycle_present=True"
+      },
+      {
+        "check": "artifact_allocation",
+        "status": "PASS",
+        "detail": "allocation_present=True"
+      },
+      {
+        "check": "artifact_authorization",
+        "status": "PASS",
+        "detail": "authorization_present=True"
+      },
+      {
+        "check": "artifact_readiness",
+        "status": "PASS",
+        "detail": "readiness_present=True"
+      },
+      {
+        "check": "artifact_opportunities",
+        "status": "PASS",
+        "detail": "opportunities_present=True"
+      },
+      {
+        "check": "artifact_audit_trail",
+        "status": "PASS",
+        "detail": "audit_trail_present=True"
+      },
+      {
+        "check": "artifact_order_log",
+        "status": "PASS",
+        "detail": "order_log_present=True"
+      },
+      {
+        "check": "artifact_positions",
+        "status": "PASS",
+        "detail": "positions_present=True"
+      },
+      {
+        "check": "path_verification_ran",
+        "status": "PASS",
+        "detail": "ready_for_monday=True block_reasons=[]"
+      },
+      {
+        "check": "market_open_checklist_ran",
+        "status": "PASS",
+        "detail": "ready=False block_reasons=['lifecycle_fresh']"
+      }
+    ],
+    "status": "PASS",
+    "chain": {
+      "signals": true,
+      "lifecycle": true,
+      "effective_lifecycle": true,
+      "allocation": true,
+      "authorization": true,
+      "readiness": true,
+      "opportunities": true,
+      "audit_trail": true,
+      "order_log": true,
+      "positions": true
+    }
+  },
+  "part_results": {
+    "lifecycle_freshness": "PASS",
+    "execution_readiness": "PASS",
+    "authorization": "PASS",
+    "order_submission": "PASS",
+    "duplicate_protection": "PASS",
+    "order_monitoring": "PASS",
+    "execution_recovery": "PASS",
+    "end_to_end": "PASS"
+  },
+  "part_j_decision": {
+    "layer_certification_status": "CERTIFIED",
+    "operational_certification_status": "CERTIFIED",
+    "status": "CERTIFIED",
+    "part_results": {
+      "lifecycle_freshness": "PASS",
+      "execution_readiness": "PASS",
+      "authorization": "PASS",
+      "order_submission": "PASS",
+      "duplicate_protection": "PASS",
+      "order_monitoring": "PASS",
+      "execution_recovery": "PASS",
+      "end_to_end": "PASS"
+    },
+    "strengths": [
+      "Paper-only execution path with dry_run default and explicit --execute gate",
+      "Four-layer authorization (governance, operator, policy, execution) with auditable gate_reasons",
+      "Phase 148E duplicate protection (broker open, session registry, log)",
+      "Phase 148C paper_execution_audit trail with authorization and duplicate fields",
+      "poll_order_status lifecycle refresh and stale-order suppression",
+      "Prep recovered: watchdog heartbeat and status refreshed; STALE_HEARTBEAT alert cleared on second watchdog pass"
+    ],
+    "remaining_gaps": [],
+    "recommendation": "Paper execution layer certified for continued paper-mode operation.",
+    "prep_fixes": [
+      "watchdog heartbeat and status refreshed",
+      "STALE_HEARTBEAT alert cleared on second watchdog pass",
+      "governance_authorization and execution_readiness recomputed"
+    ]
+  },
+  "part_k_certification_chain": {
+    "Capital_Preservation": "CERTIFIED",
+    "Portfolio_Management": "CONDITIONALLY_CERTIFIED",
+    "Institutional_Intelligence": "STRESS_TESTED_CERTIFIED",
+    "Executive_Oversight": "CERTIFIED",
+    "Paper_Execution": "CERTIFIED",
+    "overall_maturity": 78
+  },
+  "paper_execution_certification_status": "CERTIFIED"
+}

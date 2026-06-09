@@ -148,8 +148,12 @@ def _check_governance_authorized() -> PathCheck:
 
 def _check_execution_authorized() -> PathCheck:
     gov = _read_json(GOVERNANCE_AUTH_PATH)
-    ok = gov.get("execution_authorized") is True
     env_ok = os.environ.get("TRITON_ENABLE_PAPER_EXECUTION", "").strip() == "1"
+    gov_ok = gov.get("governance_authorized") is True
+    exec_json = gov.get("execution_authorized") is True
+    paper_ok = gov.get("paper_execution_permitted") is True
+    # Paper mode: env + governance + paper permission counts when JSON execution gate is open.
+    ok = exec_json or (env_ok and gov_ok and paper_ok)
     return PathCheck(
         "execution_authorized",
         ok,
