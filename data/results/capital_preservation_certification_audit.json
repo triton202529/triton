@@ -1,0 +1,307 @@
+{
+  "generated_at": "2026-06-09T13:17:17Z",
+  "phase": "162",
+  "mode": "read_only_layer_certification",
+  "cps_certification": "PASS",
+  "escalation_certification": "PASS",
+  "veto_certification": "PASS",
+  "protective_action_certification": "PASS",
+  "stress_review": "PASS",
+  "overall_result": "PASS",
+  "part_a_cps": {
+    "checks": [
+      {
+        "check": "cpi_artifact_present",
+        "status": "PASS",
+        "detail": "generated_at=2026-06-09T05:54:09Z cps=84"
+      },
+      {
+        "check": "component_scores_explainable",
+        "status": "PASS",
+        "detail": "components=['drawdown', 'concentration', 'exposure', 'operational', 'execution']"
+      },
+      {
+        "check": "health_band_reflects_cps",
+        "status": "PASS",
+        "detail": "cps=84 band=HEALTHY"
+      },
+      {
+        "check": "history_tracks_cps",
+        "status": "PASS",
+        "detail": "history_rows=979 score_range=(84, 96)"
+      },
+      {
+        "check": "trend_response_recorded",
+        "status": "PASS",
+        "detail": "trends=['DETERIORATING', 'STABLE']"
+      },
+      {
+        "check": "current_trend_declared",
+        "status": "PASS",
+        "detail": "risk_trend=DETERIORATING"
+      },
+      {
+        "check": "cps_escalation_coherence",
+        "status": "PASS",
+        "detail": "cps=84 expected~=YELLOW actual=YELLOW"
+      }
+    ],
+    "status": "PASS",
+    "history": {
+      "rows": 979,
+      "trends": [
+        "DETERIORATING",
+        "STABLE"
+      ],
+      "score_range": [
+        84,
+        96
+      ],
+      "latest_score": 84
+    }
+  },
+  "part_b_escalation": {
+    "checks": [
+      {
+        "check": "escalation_state_present",
+        "status": "PASS",
+        "detail": "escalation_state=YELLOW"
+      },
+      {
+        "check": "orderly_ladder_transitions",
+        "status": "PASS",
+        "detail": "forward=['PASS', 'PASS', 'PASS', 'PASS']"
+      },
+      {
+        "check": "skip_transitions_rejected",
+        "status": "PASS",
+        "detail": "GREEN\u2192RED/ORANGE and RED\u2192GREEN blocked"
+      },
+      {
+        "check": "disciplined_deescalation",
+        "status": "PASS",
+        "detail": "path_status=PASS reason=orderly_path"
+      },
+      {
+        "check": "phase_159_hardening",
+        "status": "PASS",
+        "detail": "escalation_consistency_hardening=PASS"
+      },
+      {
+        "check": "escalation_aligns_with_cps",
+        "status": "PASS",
+        "detail": "cps=84 expected~=YELLOW actual=YELLOW"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_c_veto": {
+    "checks": [
+      {
+        "check": "veto_rules_active",
+        "status": "PASS",
+        "detail": "rules=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']"
+      },
+      {
+        "check": "portfolio_health_override",
+        "status": "PASS",
+        "detail": "portfolio health override mechanism documented"
+      },
+      {
+        "check": "cps_critical_threshold",
+        "status": "PASS",
+        "detail": "threshold=50"
+      },
+      {
+        "check": "scenarios_abc_pass",
+        "status": "PASS",
+        "detail": "false_positive_pathways=0"
+      },
+      {
+        "check": "false_negative_protection",
+        "status": "PASS",
+        "detail": "scenario=healthy_portfolio_temporary_governance_weakness status=PASS"
+      },
+      {
+        "check": "embedded_tests_artifact",
+        "status": "PASS",
+        "detail": "embedded_tests_pass=True live_rerun=True"
+      }
+    ],
+    "status": "PASS",
+    "fp_rows": [
+      {
+        "scenario": "A_weak_portfolio_strong_governance",
+        "test_type": "false_positive",
+        "status": "PASS",
+        "certification_status": "NOT_CERTIFIED",
+        "detail": "certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",
+        "generated_at": "2026-06-09T13:17:17Z"
+      },
+      {
+        "scenario": "B_failing_preservation_strong_committees",
+        "test_type": "false_positive",
+        "status": "PASS",
+        "certification_status": "NOT_CERTIFIED",
+        "detail": "certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",
+        "generated_at": "2026-06-09T13:17:17Z"
+      },
+      {
+        "scenario": "C_red_escalation_perfect_evaluation",
+        "test_type": "false_positive",
+        "status": "PASS",
+        "certification_status": "NOT_CERTIFIED",
+        "detail": "certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",
+        "generated_at": "2026-06-09T13:17:17Z"
+      },
+      {
+        "scenario": "healthy_portfolio_temporary_governance_weakness",
+        "test_type": "false_negative",
+        "status": "PASS",
+        "certification_status": "CERTIFIED_FOR_PAPER_PROTECTION",
+        "detail": "certification_status=CERTIFIED_FOR_PAPER_PROTECTION vetoes=[]",
+        "generated_at": "2026-06-09T13:17:17Z"
+      }
+    ]
+  },
+  "part_d_protective_action": {
+    "checks": [
+      {
+        "check": "policy_artifact",
+        "status": "PASS",
+        "detail": "policies=6 mode=simulation"
+      },
+      {
+        "check": "execution_blocked",
+        "status": "PASS",
+        "detail": "live=False auto=False"
+      },
+      {
+        "check": "trials_artifact",
+        "status": "PASS",
+        "detail": "trial_count=4 baseline_cps=84"
+      },
+      {
+        "check": "baseline_context_field",
+        "status": "PASS",
+        "detail": "baseline_context=MODERATE_CPS_IMPROVEMENT"
+      },
+      {
+        "check": "high_cps_adjustment_field",
+        "status": "PASS",
+        "detail": "high_cps_adjustment_applied=False"
+      },
+      {
+        "check": "evaluation_reason_fields",
+        "status": "PASS",
+        "detail": "evaluations_with_reason=4/4"
+      },
+      {
+        "check": "scoring_model_version",
+        "status": "PASS",
+        "detail": "model=2.0-baseline-aware expected=2.0-baseline-aware"
+      },
+      {
+        "check": "evaluation_reproducible",
+        "status": "PASS",
+        "detail": "recomputed_count=4 baseline=MODERATE_CPS_IMPROVEMENT"
+      },
+      {
+        "check": "per_trial_baseline_context",
+        "status": "PASS",
+        "detail": "all trials carry baseline_context"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_e_stress": {
+    "scenarios": [
+      {
+        "scenario": "strong_portfolio",
+        "result": "WARN",
+        "detail": "preservation_status=PASS vetoes=['mandatory_preservation_gate_failed']"
+      },
+      {
+        "scenario": "weak_portfolio",
+        "result": "PASS",
+        "detail": "preservation_status=FAIL vetoes=['preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']"
+      },
+      {
+        "scenario": "critical_portfolio",
+        "result": "PASS",
+        "detail": "cert=NOT_CERTIFIED portfolio_health=CRITICAL"
+      },
+      {
+        "scenario": "improving_recovery",
+        "result": "PASS",
+        "detail": "preservation_status=PASS cps=72 trend=IMPROVING"
+      },
+      {
+        "scenario": "false_positive_governance",
+        "result": "PASS",
+        "detail": "false_positive_pathways=0 (scenarios A/B/C must block certification)"
+      },
+      {
+        "scenario": "false_negative_governance",
+        "result": "PASS",
+        "detail": "certification_status=CERTIFIED_FOR_PAPER_PROTECTION vetoes=[]"
+      },
+      {
+        "scenario": "escalation_transition",
+        "result": "PASS",
+        "detail": "GREEN->YELLOW:PASS; YELLOW->ORANGE:PASS; ORANGE->RED:PASS; deesc=PASS"
+      }
+    ],
+    "status": "PASS"
+  },
+  "part_g_maturity_impact": {
+    "before": 52,
+    "after": 55,
+    "preservation_category_score": 79,
+    "maturity_band_before": "DEVELOPING",
+    "maturity_band_after": "DEVELOPING",
+    "impact_summary": "Preservation layer certification passes; preservation category 79, overall +3."
+  },
+  "part_h_final_decision": {
+    "layer_certification_status": "CERTIFIED",
+    "operational_certification_status": "NOT_CERTIFIED",
+    "status": "CERTIFIED",
+    "strengths": [
+      "CPS is explainable with component scores and history trends",
+      "Escalation ladder enforces orderly transitions aligned with CPS",
+      "Phase 158 veto framework blocks false-positive certification pathways",
+      "Protective action evaluation uses baseline-aware scoring with reasons",
+      "Seven preservation stress scenarios pass without governance false positives"
+    ],
+    "gaps": [
+      "Operational certification artifact is NOT_CERTIFIED (gates: Authorization, Readiness, Evaluation, veto:mandatory_preservation_gate_failed) \u2014 requires env/auth/readiness, not layer doctrine failure"
+    ],
+    "layer_vs_operational": "Layer certification validates CPS, escalation, veto, and protective evaluation doctrine. Operational certification (capital_preservation_certification.json) additionally requires Authorization, Readiness, and Evaluation area gates which may remain blocked in dev env.",
+    "part_results": {
+      "cps": "PASS",
+      "escalation": "PASS",
+      "veto": "PASS",
+      "protective_action": "PASS",
+      "stress": "PASS"
+    },
+    "recommendation": "Capital Preservation layer is certified \u2014 promote to CERTIFIED in TRITON chain."
+  },
+  "part_i_certification_chain": {
+    "Capital_Preservation": "CERTIFIED",
+    "Portfolio_Management": "STRESS_TESTED_CERTIFIED",
+    "Institutional_Intelligence": "STRESS_TESTED_CERTIFIED",
+    "Executive_Oversight": "CERTIFIED",
+    "overall_maturity": 55
+  },
+  "operational_certification_artifact": {
+    "status": "NOT_CERTIFIED",
+    "failed_requirements": [
+      "Authorization",
+      "Readiness",
+      "Evaluation",
+      "veto:mandatory_preservation_gate_failed"
+    ],
+    "note": "Operational gates (Authorization/Readiness/Evaluation) are separate from layer doctrine certification audited in Phase 162."
+  },
+  "disclaimer": "Phase 162 certifies Capital Preservation layer doctrine only. No execution, trading, or portfolio changes."
+}

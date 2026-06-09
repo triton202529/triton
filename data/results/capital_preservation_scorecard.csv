@@ -1,0 +1,41 @@
+section,area,scenario,status,detail,generated_at
+cps_certification,cpi_artifact_present,cpi_artifact_present,PASS,generated_at=2026-06-09T05:54:09Z cps=84,2026-06-09T13:17:17Z
+cps_certification,component_scores_explainable,component_scores_explainable,PASS,"components=['drawdown', 'concentration', 'exposure', 'operational', 'execution']",2026-06-09T13:17:17Z
+cps_certification,health_band_reflects_cps,health_band_reflects_cps,PASS,cps=84 band=HEALTHY,2026-06-09T13:17:17Z
+cps_certification,history_tracks_cps,history_tracks_cps,PASS,"history_rows=979 score_range=(84, 96)",2026-06-09T13:17:17Z
+cps_certification,trend_response_recorded,trend_response_recorded,PASS,"trends=['DETERIORATING', 'STABLE']",2026-06-09T13:17:17Z
+cps_certification,current_trend_declared,current_trend_declared,PASS,risk_trend=DETERIORATING,2026-06-09T13:17:17Z
+cps_certification,cps_escalation_coherence,cps_escalation_coherence,PASS,cps=84 expected~=YELLOW actual=YELLOW,2026-06-09T13:17:17Z
+escalation_certification,escalation_state_present,escalation_state_present,PASS,escalation_state=YELLOW,2026-06-09T13:17:17Z
+escalation_certification,orderly_ladder_transitions,orderly_ladder_transitions,PASS,"forward=['PASS', 'PASS', 'PASS', 'PASS']",2026-06-09T13:17:17Z
+escalation_certification,skip_transitions_rejected,skip_transitions_rejected,PASS,GREEN→RED/ORANGE and RED→GREEN blocked,2026-06-09T13:17:17Z
+escalation_certification,disciplined_deescalation,disciplined_deescalation,PASS,path_status=PASS reason=orderly_path,2026-06-09T13:17:17Z
+escalation_certification,phase_159_hardening,phase_159_hardening,PASS,escalation_consistency_hardening=PASS,2026-06-09T13:17:17Z
+escalation_certification,escalation_aligns_with_cps,escalation_aligns_with_cps,PASS,cps=84 expected~=YELLOW actual=YELLOW,2026-06-09T13:17:17Z
+veto_certification,veto_rules_active,veto_rules_active,PASS,"rules=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T13:17:17Z
+veto_certification,portfolio_health_override,portfolio_health_override,PASS,portfolio health override mechanism documented,2026-06-09T13:17:17Z
+veto_certification,cps_critical_threshold,cps_critical_threshold,PASS,threshold=50,2026-06-09T13:17:17Z
+veto_certification,false_positive_test,A_weak_portfolio_strong_governance,PASS,"certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T13:17:17Z
+veto_certification,false_positive_test,B_failing_preservation_strong_committees,PASS,"certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T13:17:17Z
+veto_certification,false_positive_test,C_red_escalation_perfect_evaluation,PASS,"certification_status=NOT_CERTIFIED vetoes=['portfolio_health_critical', 'preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T13:17:17Z
+veto_certification,false_positive_test,healthy_portfolio_temporary_governance_weakness,PASS,certification_status=CERTIFIED_FOR_PAPER_PROTECTION vetoes=[],2026-06-09T13:17:17Z
+veto_certification,scenarios_abc_pass,scenarios_abc_pass,PASS,false_positive_pathways=0,2026-06-09T13:17:17Z
+veto_certification,false_negative_protection,false_negative_protection,PASS,scenario=healthy_portfolio_temporary_governance_weakness status=PASS,2026-06-09T13:17:17Z
+veto_certification,embedded_tests_artifact,embedded_tests_artifact,PASS,embedded_tests_pass=True live_rerun=True,2026-06-09T13:17:17Z
+protective_action_certification,policy_artifact,policy_artifact,PASS,policies=6 mode=simulation,2026-06-09T13:17:17Z
+protective_action_certification,execution_blocked,execution_blocked,PASS,live=False auto=False,2026-06-09T13:17:17Z
+protective_action_certification,trials_artifact,trials_artifact,PASS,trial_count=4 baseline_cps=84,2026-06-09T13:17:17Z
+protective_action_certification,baseline_context_field,baseline_context_field,PASS,baseline_context=MODERATE_CPS_IMPROVEMENT,2026-06-09T13:17:17Z
+protective_action_certification,high_cps_adjustment_field,high_cps_adjustment_field,PASS,high_cps_adjustment_applied=False,2026-06-09T13:17:17Z
+protective_action_certification,evaluation_reason_fields,evaluation_reason_fields,PASS,evaluations_with_reason=4/4,2026-06-09T13:17:17Z
+protective_action_certification,scoring_model_version,scoring_model_version,PASS,model=2.0-baseline-aware expected=2.0-baseline-aware,2026-06-09T13:17:17Z
+protective_action_certification,evaluation_reproducible,evaluation_reproducible,PASS,recomputed_count=4 baseline=MODERATE_CPS_IMPROVEMENT,2026-06-09T13:17:17Z
+protective_action_certification,per_trial_baseline_context,per_trial_baseline_context,PASS,all trials carry baseline_context,2026-06-09T13:17:17Z
+preservation_stress,strong_portfolio,strong_portfolio,WARN,preservation_status=PASS vetoes=['mandatory_preservation_gate_failed'],2026-06-09T13:17:17Z
+preservation_stress,weak_portfolio,weak_portfolio,PASS,"preservation_status=FAIL vetoes=['preservation_status_fail', 'risk_trend_severely_deteriorating', 'escalation_state_red', 'cps_below_critical_threshold', 'mandatory_preservation_gate_failed']",2026-06-09T13:17:17Z
+preservation_stress,critical_portfolio,critical_portfolio,PASS,cert=NOT_CERTIFIED portfolio_health=CRITICAL,2026-06-09T13:17:17Z
+preservation_stress,improving_recovery,improving_recovery,PASS,preservation_status=PASS cps=72 trend=IMPROVING,2026-06-09T13:17:17Z
+preservation_stress,false_positive_governance,false_positive_governance,PASS,false_positive_pathways=0 (scenarios A/B/C must block certification),2026-06-09T13:17:17Z
+preservation_stress,false_negative_governance,false_negative_governance,PASS,certification_status=CERTIFIED_FOR_PAPER_PROTECTION vetoes=[],2026-06-09T13:17:17Z
+preservation_stress,escalation_transition,escalation_transition,PASS,GREEN->YELLOW:PASS; YELLOW->ORANGE:PASS; ORANGE->RED:PASS; deesc=PASS,2026-06-09T13:17:17Z
+summary,overall,phase_162,PASS,cps=PASS escalation=PASS veto=PASS protective=PASS stress=PASS layer=CERTIFIED,2026-06-09T13:17:17Z
