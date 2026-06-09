@@ -95,6 +95,13 @@ class PathVerificationResult:
 def _check_lifecycle_loaded() -> PathCheck:
     try:
         from services.lifecycle_truth import evaluate_lifecycle_gate
+        from services.lifecycle_readiness_diagnostics import (
+            evaluate_lifecycle_health,
+            persist_lifecycle_diagnostics,
+        )
+
+        diagnostics = evaluate_lifecycle_health()
+        persist_lifecycle_diagnostics(diagnostics)
 
         gate = evaluate_lifecycle_gate(path=DEFAULT_LIFECYCLE)
         ok = gate.status == "OK" and DEFAULT_LIFECYCLE.is_file()

@@ -498,7 +498,7 @@ def compute_execution_readiness(
         },
     )
 
-    return {
+    doc = {
         "generated_at": ts,
         "readiness_status": status,
         "checks": checks,
@@ -515,6 +515,9 @@ def compute_execution_readiness(
             "and all operational checks. Live execution remains blocked."
         ),
     }
+    from services.execution_readiness import finalize_readiness_with_lifecycle_diagnostics
+
+    return finalize_readiness_with_lifecycle_diagnostics(doc, results_dir)
 
 
 def _safe_float(x: Any, default: Optional[float] = None) -> Optional[float]:
