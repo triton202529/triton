@@ -82,7 +82,8 @@ def _safe_read_json(path: Path) -> Dict[str, Any]:
 
 
 def _norm_sym(x: Any) -> str:
-    return str(x or "").strip().upper()
+    # Normalize share-class variants (BRK.B -> BRK-B) to match price files / lifecycle.
+    return str(x or "").strip().upper().replace(".", "-")
 
 
 def _to_float(x: Any, default: float = np.nan) -> float:
@@ -243,6 +244,130 @@ def _holding_days(opened: pd.Timestamp, closed: pd.Timestamp) -> float:
     return max((c - o).total_seconds() / 86400.0, 0.0)
 
 
+def _load_fill_ledger() -> pd.DataFrame:
+    """
+    Combined, deduplicated fill ledger from live_orders_log.csv + recent_orders.csv.
+    One row per order_id (latest poll state), only rows with actual fills.
+    Columns: ts, symbol, side, qty, price, notional, session, client_order_id, source.
+    """
+    frames: List[pd.DataFrame] = []
+
+    lo = _safe_read_csv(RESULTS / "live_orders_log.csv")
+    if not lo.empty:
+        lo.columns = [str(c).strip().lower() for c in lo.columns]
+        if {"symbol", "side", "filled_qty", "filled_avg_price"}.issubset(lo.columns):
+            df = pd.DataFrame(
+                {
+                    "ts": pd.to_datetime(lo.get("timestamp"), errors="coerce", utc=True),
+                    "symbol": lo["symbol"].map(_norm_sym),
+                    "side": lo["side"].astype(str).str.strip().str.lower(),
+                    "qty": pd.to_numeric(lo["filled_qty"], errors="coerce"),
+                    "price": pd.to_numeric(lo["filled_avg_price"], errors="coerce"),
+                    "session": lo.get("session", "").astype(str).str.strip(),
+                    "client_order_id": lo.get("client_order_id", "").astype(str).str.strip(),
+                    "order_id": lo.get("order_id", "").astype(str).str.strip(),
+                    "source": "live_orders_log",
+                }
+            )
+            frames.append(df)
+
+    ro = _safe_read_csv(RESULTS / "recent_orders.csv")
+    if not ro.empty:
+        ro.columns = [str(c).strip().lower() for c in ro.columns]
+        if {"symbol", "side", "filled_qty", "filled_avg_price"}.issubset(ro.columns):
+            ts = pd.to_datetime(
+                ro.get("filled_at").where(ro.get("filled_at").notna(), ro.get("updated_at")),
+                errors="coerce",
+                utc=True,
+            )
+            df = pd.DataFrame(
+                {
+                    "ts": ts,
+                    "symbol": ro["symbol"].map(_norm_sym),
+                    "side": ro["side"].astype(str).str.strip().str.lower(),
+                    "qty": pd.to_numeric(ro["filled_qty"], errors="coerce"),
+                    "price": pd.to_numeric(ro["filled_avg_price"], errors="coerce"),
+                    "session": ro.get("subtag", "").astype(str).str.strip(),
+                    "client_order_id": ro.get("client_order_id", "").astype(str).str.strip(),
+                    "order_id": ro.get("id", "").astype(str).str.strip(),
+                    "source": "recent_orders",
+                }
+            )
+            frames.append(df)
+
+    if not frames:
+        return pd.DataFrame(
+            columns=[
+                "ts",
+                "symbol",
+                "side",
+                "qty",
+                "price",
+                "notional",
+                "session",
+                "client_order_id",
+                "order_id",
+                "source",
+            ]
+        )
+
+    fills = pd.concat(frames, ignore_index=True)
+    fills = fills[
+        fills["side"].isin(["buy", "sell"])
+        & (fills["qty"] > 0)
+        & fills["price"].notna()
+        & (fills["price"] > 0)
+        & fills["symbol"].astype(bool)
+    ].copy()
+    if fills.empty:
+        return fills
+
+    # One row per order: latest poll state carries the cumulative filled qty.
+    fills = fills.sort_values(["ts", "qty"], na_position="first")
+    with_id = fills[fills["order_id"].astype(bool)]
+    no_id = fills[~fills["order_id"].astype(bool)]
+    with_id = with_id.drop_duplicates(subset=["order_id"], keep="last")
+    fills = pd.concat([with_id, no_id], ignore_index=True).sort_values("ts")
+    fills["notional"] = fills["qty"] * fills["price"]
+    return fills.reset_index(drop=True)
+
+
+def _classify_exit_reason(session: str, client_order_id: str = "") -> str:
+    s = str(session or "").strip()
+    if not s:
+        return "UNTAGGED_EXIT"
+    su = s.upper()
+    if su.startswith("MANAGE_POS"):
+        return "MANAGED_EXIT (manage_positions)"
+    if su.endswith("_EOD"):
+        return "EOD_SESSION_EXIT"
+    if "TEST" in su:
+        return "TEST_SESSION_EXIT"
+    if "PAPER" in su:
+        return "PAPER_SESSION_EXIT"
+    if any(tag in su for tag in ("_OPEN", "_AM", "_PM")):
+        return "SCHEDULED_SESSION_EXIT"
+    return "SESSION_EXIT"
+
+
+def _build_sell_fill_map(fills: pd.DataFrame) -> Dict[Tuple[str, str], Dict[str, str]]:
+    """Map (symbol, ts_to_second) -> sell-fill metadata for per-trade exit attribution."""
+    out: Dict[Tuple[str, str], Dict[str, str]] = {}
+    if fills.empty:
+        return out
+    sells = fills[fills["side"] == "sell"]
+    for _, r in sells.iterrows():
+        ts = r["ts"]
+        if pd.isna(ts):
+            continue
+        key = (str(r["symbol"]), ts.floor("s").isoformat())
+        out[key] = {
+            "session": str(r.get("session") or ""),
+            "client_order_id": str(r.get("client_order_id") or ""),
+        }
+    return out
+
+
 def _build_exit_reason_map() -> Dict[Tuple[str, str], str]:
     out: Dict[Tuple[str, str], str] = {}
     tl = _safe_read_csv(RESULTS / "trade_log.csv")
@@ -340,6 +465,8 @@ def _build_completed_ledger() -> pd.DataFrame:
     exit_map = _build_exit_reason_map()
     session_map = _build_session_map()
     lifecycle_map = _build_lifecycle_map()
+    fills = _load_fill_ledger()
+    sell_fill_map = _build_sell_fill_map(fills)
 
     rows: List[Dict[str, Any]] = []
 
@@ -362,7 +489,18 @@ def _build_completed_ledger() -> pd.DataFrame:
             fees = 0.0
             net = gross - fees if np.isfinite(gross) else np.nan
             exit_day = closed.strftime("%Y-%m-%d") if not pd.isna(closed) else ""
+
+            # Per-trade exit attribution: match the actual sell fill (symbol + timestamp).
+            fill_meta: Dict[str, str] = {}
+            if not pd.isna(closed):
+                fill_meta = sell_fill_map.get((sym, closed.floor("s").isoformat()), {})
+            trade_session = fill_meta.get("session", "")
+
             exit_reason = exit_map.get((sym, exit_day), exit_map.get((sym, ""), ""))
+            if not exit_reason and trade_session:
+                exit_reason = _classify_exit_reason(
+                    trade_session, fill_meta.get("client_order_id", "")
+                )
             if not exit_reason:
                 notes = str(r.get("notes") or "")
                 if "exit" in notes.lower():
@@ -386,7 +524,7 @@ def _build_completed_ledger() -> pd.DataFrame:
                     "outcome": ("WIN" if gross > 0 else ("LOSS" if gross < 0 else "FLAT")),
                     "exit_reason": exit_reason or "—",
                     "lifecycle_action": lifecycle_map.get(sym, "—"),
-                    "execution_session": session_map.get(sym, "—"),
+                    "execution_session": trade_session or session_map.get(sym, "—"),
                 }
             )
 
@@ -679,14 +817,22 @@ def _load_portfolio_daily() -> pd.DataFrame:
         frames.append(daily)
     if not frames:
         return pd.DataFrame(columns=["date", "cash", "market_value", "total_value"])
+    # Files are listed in priority order (portfolio_history first); keep='first'
+    # so enhanced/backtest variants never override the primary record for a date.
     out = pd.concat(frames, ignore_index=True)
-    out = out.sort_values("date").drop_duplicates(subset=["date"], keep="last")
+    out = out.drop_duplicates(subset=["date"], keep="first").sort_values("date")
     return out.reset_index(drop=True)
 
 
 def _cash_flow(
-    ledger: pd.DataFrame, portfolio: pd.DataFrame
+    ledger: pd.DataFrame, portfolio: pd.DataFrame, fills: pd.DataFrame
 ) -> Tuple[Dict[str, float], pd.DataFrame]:
+    """
+    Capital deployed/returned come from the actual fill ledger
+    (live_orders_log + recent_orders, deduplicated per order) — NOT the
+    simulation trade_log. Daily cash curve is reconstructed from fills and
+    anchored to the latest portfolio snapshot when available.
+    """
     summary = {
         "opening_cash": np.nan,
         "capital_deployed": 0.0,
@@ -704,23 +850,33 @@ def _cash_flow(
         "capital_returned_cum",
         "equity",
     ]
-    if portfolio.empty and ledger.empty:
+    if portfolio.empty and ledger.empty and fills.empty:
         return summary, pd.DataFrame(columns=series_cols)
 
-    tl = _safe_read_csv(RESULTS / "trade_log.csv")
     deployed = 0.0
     returned = 0.0
-    if not tl.empty:
-        tl.columns = [str(c).strip().lower() for c in tl.columns]
-        for _, r in tl.iterrows():
-            act = str(r.get("action", "")).upper()
-            px = _to_float(r.get("price"))
-            qty = _to_float(r.get("quantity") or r.get("qty"))
-            notional = px * qty if np.isfinite(px) and np.isfinite(qty) else np.nan
-            if act == "BUY" and np.isfinite(notional):
-                deployed += notional
-            elif act in ("SELL", "EXIT") and np.isfinite(notional):
-                returned += notional
+    daily_flows = pd.DataFrame()
+    if not fills.empty:
+        buys = fills[fills["side"] == "buy"]
+        sells = fills[fills["side"] == "sell"]
+        deployed = float(buys["notional"].sum())
+        returned = float(sells["notional"].sum())
+
+        flows = fills.copy()
+        flows["date"] = flows["ts"].dt.tz_convert(None).dt.normalize()
+        flows = flows.dropna(subset=["date"])
+        daily_flows = flows.pivot_table(
+            index="date", columns="side", values="notional", aggfunc="sum"
+        ).fillna(0.0)
+        for c in ("buy", "sell"):
+            if c not in daily_flows.columns:
+                daily_flows[c] = 0.0
+        daily_flows = daily_flows.sort_index()
+        daily_flows["capital_deployed_cum"] = daily_flows["buy"].cumsum()
+        daily_flows["capital_returned_cum"] = daily_flows["sell"].cumsum()
+        daily_flows["net_flow_cum"] = (
+            daily_flows["capital_returned_cum"] - daily_flows["capital_deployed_cum"]
+        )
 
     if not ledger.empty:
         pnl = pd.to_numeric(ledger["net_pnl"], errors="coerce")
@@ -730,24 +886,52 @@ def _cash_flow(
     summary["capital_deployed"] = deployed
     summary["capital_returned"] = returned
 
+    initial_equity = np.nan
     if not portfolio.empty:
         first = portfolio.iloc[0]
         last = portfolio.iloc[-1]
-        summary["opening_cash"] = _to_float(first.get("cash"))
         summary["cash_available"] = _to_float(last.get("cash"))
         summary["current_equity"] = _to_float(last.get("total_value"))
-        if np.isfinite(summary["opening_cash"]) and np.isfinite(summary["current_equity"]):
-            summary["net_account_change"] = summary["current_equity"] - _to_float(
-                first.get("total_value", summary["opening_cash"])
-            )
+        initial_equity = _to_float(first.get("total_value"))
+        if np.isfinite(summary["current_equity"]) and np.isfinite(initial_equity):
+            summary["net_account_change"] = summary["current_equity"] - initial_equity
 
-    cf = portfolio.copy() if not portfolio.empty else pd.DataFrame({"date": [pd.Timestamp.today()]})
-    if "cash" not in cf.columns:
-        cf["cash"] = np.nan
-    cf["equity"] = pd.to_numeric(cf.get("total_value"), errors="coerce")
-    cf["capital_deployed_cum"] = deployed
-    cf["capital_returned_cum"] = returned
-    return summary, cf[series_cols] if all(c in cf.columns for c in series_cols) else cf
+    if not daily_flows.empty:
+        # Start-anchored cash reconstruction: assume the account began fully in
+        # cash at the initial equity level (paper account default), then apply
+        # net fill flows forward. Residual vs the official snapshot is disclosed
+        # in the reconciliation panel — do NOT silently mix sim and broker data.
+        anchor = initial_equity if np.isfinite(initial_equity) else 100000.0
+        daily_flows["cash"] = anchor + daily_flows["net_flow_cum"]
+        summary["opening_cash"] = float(anchor)
+        summary["cash_reconstructed"] = float(daily_flows["cash"].iloc[-1])
+    elif not portfolio.empty:
+        summary["opening_cash"] = _to_float(portfolio.iloc[0].get("cash"))
+
+    if daily_flows.empty:
+        cf = portfolio.copy() if not portfolio.empty else pd.DataFrame()
+        if cf.empty:
+            return summary, pd.DataFrame(columns=series_cols)
+        if "cash" not in cf.columns:
+            cf["cash"] = np.nan
+        cf["equity"] = pd.to_numeric(cf.get("total_value"), errors="coerce")
+        cf["capital_deployed_cum"] = deployed
+        cf["capital_returned_cum"] = returned
+        return summary, cf[[c for c in series_cols if c in cf.columns]]
+
+    cf = daily_flows.reset_index()[
+        ["date", "cash", "capital_deployed_cum", "capital_returned_cum"]
+    ].copy()
+    # Equity column: merge official portfolio totals where dates overlap.
+    if not portfolio.empty and "total_value" in portfolio.columns:
+        cf = cf.merge(
+            portfolio[["date", "total_value"]].rename(columns={"total_value": "equity"}),
+            on="date",
+            how="left",
+        )
+    else:
+        cf["equity"] = np.nan
+    return summary, cf
 
 
 def _attribution(ledger: pd.DataFrame) -> Dict[str, Any]:
@@ -893,8 +1077,110 @@ def _exit_analysis(ledger: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     return df, metrics
 
 
+def _build_reconciliation(
+    ledger: pd.DataFrame,
+    open_positions: pd.DataFrame,
+    fills: pd.DataFrame,
+    cash_flow_summary: Dict[str, float],
+) -> Dict[str, Any]:
+    """
+    Audit panel: every-dollar identity check plus cross-artifact P&L agreement.
+    Identity: (deployed − returned) should equal (open cost basis − realized P&L).
+    Residual exposes fills missing from the local order log.
+    """
+    realized_ledger = (
+        float(pd.to_numeric(ledger["net_pnl"], errors="coerce").sum()) if not ledger.empty else 0.0
+    )
+    open_cost = (
+        float(pd.to_numeric(open_positions.get("cost_basis"), errors="coerce").sum())
+        if not open_positions.empty
+        else 0.0
+    )
+    deployed = _to_float(cash_flow_summary.get("capital_deployed"), 0.0)
+    returned = _to_float(cash_flow_summary.get("capital_returned"), 0.0)
+    net_invested = deployed - returned
+    expected_net = open_cost - realized_ledger
+    residual = net_invested - expected_net
+
+    # Cross-artifact realized P&L comparison.
+    sources: List[Dict[str, Any]] = [
+        {"source": "P&L Ledger (this page)", "realized_pl": realized_ledger}
+    ]
+    to = _safe_read_csv(RESULTS / "trade_outcomes.csv")
+    if not to.empty and "realized_pl" in to.columns:
+        sources.append(
+            {
+                "source": "trade_outcomes.csv",
+                "realized_pl": float(pd.to_numeric(to["realized_pl"], errors="coerce").sum()),
+            }
+        )
+    diag = _safe_read_json(RESULTS / "pnl_diagnostics.json")
+    if diag:
+        sources.append(
+            {
+                "source": "pnl_diagnostics.json",
+                "realized_pl": _to_float(diag.get("total_realized_pl"), np.nan),
+            }
+        )
+    pi = _safe_read_csv(RESULTS / "performance_intelligence.csv")
+    if not pi.empty and "total_realized_pl" in pi.columns:
+        sources.append(
+            {
+                "source": "performance_intelligence.csv",
+                "realized_pl": _to_float(pi["total_realized_pl"].iloc[-1], np.nan),
+            }
+        )
+    vals = [s["realized_pl"] for s in sources if np.isfinite(_to_float(s["realized_pl"], np.nan))]
+    realized_match = bool(vals and (max(vals) - min(vals)) < 1.0)
+
+    # Fill-ledger coverage: realized exits matched to an actual sell fill.
+    matched_exits = 0
+    total_exits = 0
+    if not ledger.empty and not fills.empty:
+        sell_keys = set()
+        sells = fills[fills["side"] == "sell"]
+        for _, r in sells.iterrows():
+            if pd.isna(r["ts"]):
+                continue
+            sell_keys.add((str(r["symbol"]), r["ts"].floor("s").isoformat()))
+        for _, r in ledger.iterrows():
+            closed = _parse_ts(r.get("exit_date"))
+            if pd.isna(closed):
+                continue
+            total_exits += 1
+            if (str(r["ticker"]), closed.floor("s").isoformat()) in sell_keys:
+                matched_exits += 1
+
+    n_buys = int((fills["side"] == "buy").sum()) if not fills.empty else 0
+    n_sells = int((fills["side"] == "sell").sum()) if not fills.empty else 0
+
+    return {
+        "capital_deployed": deployed,
+        "capital_returned": returned,
+        "net_invested": net_invested,
+        "open_cost_basis": open_cost,
+        "realized_pnl": realized_ledger,
+        "expected_net_invested": expected_net,
+        "residual": residual,
+        "residual_explanation": (
+            "Residual ≈ buys recorded in the local order log whose closing sells were "
+            "never captured (poll gaps / replaced orders). These dollars left positions "
+            "at the broker but the local ledger cannot prove where they went."
+        ),
+        "identity_ok": bool(abs(residual) < max(50.0, 0.01 * max(deployed, 1.0))),
+        "realized_sources": sources,
+        "realized_match": realized_match,
+        "fill_rows_buy": n_buys,
+        "fill_rows_sell": n_sells,
+        "exits_matched_to_fills": matched_exits,
+        "exits_total": total_exits,
+        "exit_match_pct": ((matched_exits / total_exits * 100.0) if total_exits else np.nan),
+    }
+
+
 def _equity_curve(
-    portfolio: pd.DataFrame, daily_realized: pd.DataFrame
+    portfolio: pd.DataFrame,
+    daily_realized: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     metrics = {
         "current_equity": np.nan,
@@ -902,6 +1188,7 @@ def _equity_curve(
         "current_drawdown_pct": np.nan,
         "max_drawdown_pct": np.nan,
         "recovery_factor": np.nan,
+        "equity_source": "none",
     }
     if portfolio.empty and daily_realized.empty:
         return (
@@ -909,12 +1196,29 @@ def _equity_curve(
             metrics,
         )
 
-    if not portfolio.empty and "total_value" in portfolio.columns:
+    n_portfolio_days = int(portfolio["date"].nunique()) if not portfolio.empty else 0
+
+    if n_portfolio_days >= 5 and "total_value" in portfolio.columns:
         eq = portfolio[["date", "total_value"]].copy()
         eq = eq.rename(columns={"total_value": "equity"})
+        metrics["equity_source"] = "portfolio_history"
     elif not daily_realized.empty:
+        # Realized-anchored curve: initial equity + cumulative realized P&L.
+        # Fully reconciled with trade_outcomes / pnl_diagnostics, immune to the
+        # fill-ledger coverage gaps that distort a holdings reconstruction.
+        anchor = np.nan
+        if not portfolio.empty and "total_value" in portfolio.columns:
+            anchor = _to_float(portfolio.iloc[0].get("total_value"))
+        if not np.isfinite(anchor):
+            anchor = 100000.0
         eq = daily_realized[["date", "cumulative_pnl"]].copy()
-        eq = eq.rename(columns={"cumulative_pnl": "equity"})
+        eq["equity"] = anchor + pd.to_numeric(eq["cumulative_pnl"], errors="coerce")
+        eq = eq[["date", "equity"]]
+        metrics["equity_source"] = "realized_pnl_anchored"
+    elif not portfolio.empty and "total_value" in portfolio.columns:
+        eq = portfolio[["date", "total_value"]].copy()
+        eq = eq.rename(columns={"total_value": "equity"})
+        metrics["equity_source"] = "portfolio_history"
     else:
         return (
             pd.DataFrame(columns=["date", "equity", "drawdown_pct", "rolling_return_30d"]),
@@ -948,6 +1252,7 @@ def _operator_scorecard(
     open_df: pd.DataFrame,
     ledger_metrics: Dict[str, Any],
     pi_summary: Dict[str, Any],
+    cash_flow_summary: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     realized = (
         float(pd.to_numeric(ledger.get("net_pnl"), errors="coerce").sum())
@@ -977,8 +1282,14 @@ def _operator_scorecard(
 
     cert = _safe_read_json(RESULTS / "capital_preservation_certification.json")
     cps = _to_float(cert.get("certification_score"), np.nan)
+    cert_status = str(cert.get("certification_status") or "")
+    cert_areas = cert.get("certified_area_count")
+    cert_total = cert.get("total_areas")
+    health = str(pi_summary.get("portfolio_health") or cert_status or "—")
+    if cert_status and cert_areas is not None and cert_total:
+        health = f"{cert_status} ({cps:.1f}/100 · {cert_areas}/{cert_total} areas certified)"
 
-    deployed = _to_float(pi_summary.get("capital_deployed"), np.nan)
+    deployed = _to_float((cash_flow_summary or {}).get("capital_deployed"), np.nan)
     combined = realized + unrealized
     cap_eff = combined / deployed if np.isfinite(deployed) and deployed > 0 else np.nan
 
@@ -994,9 +1305,7 @@ def _operator_scorecard(
         "most_profitable_symbol": most_prof,
         "least_profitable_symbol": least_prof,
         "capital_efficiency": cap_eff,
-        "portfolio_health": str(
-            pi_summary.get("portfolio_health") or cert.get("certification_status") or "—"
-        ),
+        "portfolio_health": health,
         "current_cps": cps,
     }
 
@@ -1019,6 +1328,7 @@ class PnlLedgerBundle:
     equity_curve: pd.DataFrame = field(default_factory=pd.DataFrame)
     equity_metrics: Dict[str, Any] = field(default_factory=dict)
     scorecard: Dict[str, Any] = field(default_factory=dict)
+    reconciliation: Dict[str, Any] = field(default_factory=dict)
     has_realized_trades: bool = False
     has_open_positions: bool = False
     has_pnl_history: bool = False
@@ -1041,10 +1351,12 @@ def build_pnl_ledger(*, results_dir: Optional[Path] = None, force: bool = False)
     realized_summary, daily_realized = _realized_performance(ledger)
     open_positions, open_metrics = _open_positions()
     portfolio = _load_portfolio_daily()
-    cash_flow_summary, cash_flow_series = _cash_flow(ledger, portfolio)
+    fills = _load_fill_ledger()
+    cash_flow_summary, cash_flow_series = _cash_flow(ledger, portfolio, fills)
     attribution = _attribution(ledger)
     exit_analysis, exit_metrics = _exit_analysis(ledger)
     equity_curve, equity_metrics = _equity_curve(portfolio, daily_realized)
+    reconciliation = _build_reconciliation(ledger, open_positions, fills, cash_flow_summary)
     pi_summary = _safe_read_json(RESULTS / "performance_intelligence_summary.json")
     if not pi_summary:
         pi_csv = _safe_read_csv(RESULTS / "performance_intelligence.csv")
@@ -1052,7 +1364,9 @@ def build_pnl_ledger(*, results_dir: Optional[Path] = None, force: bool = False)
             pi_summary = pi_csv.iloc[-1].to_dict()
     pnl_diag = _safe_read_json(RESULTS / "pnl_diagnostics.json")
     pi_summary = {**pnl_diag, **pi_summary}
-    scorecard = _operator_scorecard(ledger, open_positions, ledger_metrics, pi_summary)
+    scorecard = _operator_scorecard(
+        ledger, open_positions, ledger_metrics, pi_summary, cash_flow_summary
+    )
 
     bundle = PnlLedgerBundle(
         fingerprint=fp,
@@ -1071,6 +1385,7 @@ def build_pnl_ledger(*, results_dir: Optional[Path] = None, force: bool = False)
         equity_curve=equity_curve,
         equity_metrics=equity_metrics,
         scorecard=scorecard,
+        reconciliation=reconciliation,
         has_realized_trades=not ledger.empty,
         has_open_positions=not open_positions.empty,
         has_pnl_history=not daily_realized.empty or not portfolio.empty,

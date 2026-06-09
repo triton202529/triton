@@ -44,6 +44,13 @@ def _num(v: Any) -> str:
         return str(v) if v not in (None, "") else "—"
 
 
+def _safe_float(v: Any) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return float("nan")
+
+
 def _color_pl(val: Any) -> str:
     try:
         x = float(val)
@@ -76,6 +83,7 @@ def _cached_ledger(results_dir_str: str, fingerprint_seed: str) -> Dict[str, Any
         "equity_curve": bundle.equity_curve,
         "equity_metrics": bundle.equity_metrics,
         "scorecard": bundle.scorecard,
+        "reconciliation": bundle.reconciliation,
         "has_realized_trades": bundle.has_realized_trades,
         "has_open_positions": bundle.has_open_positions,
         "has_pnl_history": bundle.has_pnl_history,
@@ -267,6 +275,16 @@ def _render_cash_flow_tab(bundle: PnlLedgerBundle) -> None:
     c7.metric("Current Equity", _money(cf.get("current_equity")))
     c8.metric("Net Account Change", _money(cf.get("net_account_change")))
 
+    recon_cash = cf.get("cash_reconstructed")
+    if recon_cash is not None and np.isfinite(_safe_float(recon_cash)):
+        st.caption(
+            f"Capital Deployed / Returned come from the actual fill ledger "
+            f"(live_orders_log + recent_orders, deduplicated per order). "
+            f"Reconstructed end cash from fills: **{_money(recon_cash)}** vs official snapshot "
+            f"**{_money(cf.get('cash_available'))}** — any gap is quantified in the "
+            f"🧾 Reconciliation section."
+        )
+
     series = bundle.cash_flow_series.copy()
     if series.empty:
         st.caption("Cash balance timeline unavailable.")
@@ -371,6 +389,16 @@ def _render_equity_tab(bundle: PnlLedgerBundle) -> None:
         return
 
     em = bundle.equity_metrics
+    src = str(em.get("equity_source") or "")
+    if src == "realized_pnl_anchored":
+        st.caption(
+            "Source: **initial equity + cumulative realized P&L** (reconciled with "
+            "`trade_outcomes.csv`). `portfolio_history.csv` has too few snapshot days "
+            "to chart directly; this curve excludes intraday unrealized swings."
+        )
+    elif src == "portfolio_history":
+        st.caption("Source: `portfolio_history.csv` daily totals.")
+
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Current Equity", _money(em.get("current_equity")))
     c2.metric("Peak Equity", _money(em.get("peak_equity")))
@@ -398,6 +426,71 @@ def _render_equity_tab(bundle: PnlLedgerBundle) -> None:
     if not dd.empty:
         st.markdown("**Peak-to-Trough Drawdowns (sample)**")
         st.dataframe(dd.tail(20), use_container_width=True, hide_index=True)
+
+
+def _render_reconciliation_tab(bundle: PnlLedgerBundle) -> None:
+    st.markdown("#### 🧾 Reconciliation")
+    st.caption(
+        "Every-dollar audit: fill-ledger flows vs realized P&L vs broker positions. "
+        "Identity: **Deployed − Returned = Open Cost Basis − Realized P&L**."
+    )
+    r = bundle.reconciliation
+    if not r:
+        st.info("No reconciliation data available.", icon="ℹ️")
+        return
+
+    # 1) Cross-artifact realized P&L agreement
+    st.markdown("**Realized P&L — cross-artifact agreement**")
+    sources = r.get("realized_sources") or []
+    if sources:
+        src_df = pd.DataFrame(sources)
+        src_df["realized_pl"] = pd.to_numeric(src_df["realized_pl"], errors="coerce").map(
+            lambda x: f"{x:,.2f}" if np.isfinite(x) else "—"
+        )
+        st.dataframe(src_df, use_container_width=True, hide_index=True)
+    if r.get("realized_match"):
+        st.success("All P&L artifacts agree on total realized P&L (within $1).", icon="✅")
+    else:
+        st.error(
+            "P&L artifacts DISAGREE on realized P&L — investigate before trusting totals.",
+            icon="🚨",
+        )
+
+    # 2) Cash identity check
+    st.markdown("**Cash identity check (fill ledger)**")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Capital Deployed", _money(r.get("capital_deployed")))
+    c2.metric("Capital Returned", _money(r.get("capital_returned")))
+    c3.metric("Net Invested", _money(r.get("net_invested")))
+    c4.metric("Expected (Open − Realized)", _money(r.get("expected_net_invested")))
+
+    residual = _safe_float(r.get("residual"))
+    if r.get("identity_ok"):
+        st.success(f"Identity holds — residual {_money(residual)}.", icon="✅")
+    else:
+        st.warning(
+            f"Identity residual: **{_money(residual)}** unaccounted. "
+            + str(r.get("residual_explanation") or ""),
+            icon="⚠️",
+        )
+
+    # 3) Coverage
+    st.markdown("**Fill-ledger coverage**")
+    c5, c6, c7 = st.columns(3)
+    c5.metric("Buy fills", f"{int(r.get('fill_rows_buy', 0)):,}")
+    c6.metric("Sell fills", f"{int(r.get('fill_rows_sell', 0)):,}")
+    match_pct = _safe_float(r.get("exit_match_pct"))
+    c7.metric(
+        "Exits matched to fills",
+        f"{int(r.get('exits_matched_to_fills', 0)):,} / {int(r.get('exits_total', 0)):,}"
+        + (f" ({match_pct:.0f}%)" if np.isfinite(match_pct) else ""),
+    )
+    st.caption(
+        "Sources: `live_orders_log.csv`, `recent_orders.csv`, `trade_outcomes.csv`, "
+        "`positions_snapshot.csv`, `pnl_diagnostics.json`, `performance_intelligence.csv`. "
+        "Note: `portfolio_history.csv` currently holds a single snapshot day and "
+        "`trade_log.csv` contains simulation BUY rows only — neither is used for dollar flows."
+    )
 
 
 def _render_scorecard_tab(bundle: PnlLedgerBundle) -> None:
@@ -448,6 +541,7 @@ def render_pnl_ledger_dashboard(results_dir: Path) -> None:
         "🚪 Exit Analysis",
         "📉 Equity Curve",
         "🏆 Operator Scorecard",
+        "🧾 Reconciliation",
     ]
     choice = st.radio(
         "Section",
@@ -471,5 +565,7 @@ def render_pnl_ledger_dashboard(results_dir: Path) -> None:
         _render_exit_tab(bundle)
     elif choice == sections[6]:
         _render_equity_tab(bundle)
-    else:
+    elif choice == sections[7]:
         _render_scorecard_tab(bundle)
+    else:
+        _render_reconciliation_tab(bundle)
