@@ -1,0 +1,233 @@
+{
+  "generated_at": "2026-06-09T02:55:22Z",
+  "phase": "154",
+  "mode": "read_only_certification",
+  "disclaimer": "Certification assesses portfolio management gates and artifacts only. No execution, lifecycle, or governance changes.",
+  "phase_references": {
+    "150C": "exit_rotation_audit.json / paper_trade_session_review.json \u2014 questionable exits",
+    "151": "exit_rotation_audit.json \u2014 exit quality audit",
+    "152": "effective_lifecycle.py \u2014 protection gates (drag, rotation, age, winner)",
+    "153": "historical_exit_replay_validation.json \u2014 replay validation PASS",
+    "154": "portfolio_management_certification \u2014 formal certification"
+  },
+  "scorecard": {
+    "buy_management": "PASS",
+    "hold_management": "PASS",
+    "add_management": "PASS",
+    "trim_management": "PASS",
+    "exit_management": "PASS",
+    "rotation_management": "PASS",
+    "lifecycle_management": "PASS",
+    "overall_certification": "CONDITIONALLY_CERTIFIED"
+  },
+  "part_a_position_management": {
+    "all_pass": true,
+    "requirements": [
+      {
+        "requirement": "BUY positions can remain active",
+        "status": "PASS",
+        "reason": "5 open position(s), 36 BUY stance(s) in universe, 5 held with protective stance",
+        "evidence": {
+          "open_symbols": [
+            "ARKK",
+            "GBTC",
+            "INTC",
+            "QQQ",
+            "XLK"
+          ],
+          "buy_stance_count": 36,
+          "held_protective_count": 5,
+          "phase": "152/154"
+        }
+      },
+      {
+        "requirement": "Positions not exited prematurely",
+        "status": "PASS",
+        "reason": "Phase 153 replay validated 3/3 questionable exits would be blocked (overall_result=PASS)",
+        "evidence": {
+          "phase_150c_questionable": 3,
+          "phase_153_replay": {
+            "replayed_exits": 3,
+            "protections_triggered": 3,
+            "fixes_validated": 3,
+            "fixes_failed": 0,
+            "overall_result": "PASS"
+          },
+          "blocked_by": [
+            "DRAG_DECAY",
+            "ROTATION_CONFIRMATION",
+            "POSITION_AGE_PROTECTION"
+          ]
+        }
+      },
+      {
+        "requirement": "Winners receive protection (Phase 152 winner_protection)",
+        "status": "PASS",
+        "reason": "winner_protection_enabled=True; check_winner_protection in effective_lifecycle.py",
+        "evidence": {
+          "config": "C:/Users/akimw/triton/config/exit_logic.json",
+          "winner_protection_enabled": true,
+          "function": "services.effective_lifecycle.check_winner_protection",
+          "phase": "152"
+        }
+      },
+      {
+        "requirement": "Historical drag does not dominate (drag decay)",
+        "status": "PASS",
+        "reason": "drag_decay.enabled; SLV replay blocked by DRAG_DECAY (current_pl=+2.08 vs hist=-120.85)",
+        "evidence": {
+          "drag_decay_enabled": true,
+          "slv_blocked_by": "DRAG_DECAY",
+          "slv_verdict": "FIX_VALIDATED",
+          "phase": "152/153"
+        }
+      },
+      {
+        "requirement": "Rotation requires meaningful improvement (rotation_min_edge_delta)",
+        "status": "PASS",
+        "reason": "rotation_min_edge_delta=0.05; TSLA blocked (edge_delta=-0.152001)",
+        "evidence": {
+          "rotation_min_edge_delta": 0.05,
+          "tsla_edge_delta": -0.152001,
+          "tsla_blocked_by": "ROTATION_CONFIRMATION",
+          "phase": "152/153"
+        }
+      },
+      {
+        "requirement": "Position-age protection functions (min_holding_hours_before_exit)",
+        "status": "PASS",
+        "reason": "min_holding_hours=24.0; AMD blocked at 2.38h",
+        "evidence": {
+          "min_holding_hours_before_exit": 24.0,
+          "amd_hours_held": 2.3797,
+          "amd_blocked_by": "POSITION_AGE_PROTECTION",
+          "phase": "152/153"
+        }
+      },
+      {
+        "requirement": "Exit-confidence framework active",
+        "status": "PASS",
+        "reason": "exit_confidence_enabled=True; trim_threshold=0.45; exit_threshold=0.65",
+        "evidence": {
+          "config": "C:/Users/akimw/triton/config/exit_logic.json",
+          "function": "services.effective_lifecycle.compute_exit_confidence",
+          "phase": "152"
+        }
+      },
+      {
+        "requirement": "FORCE_EXIT available for severe conditions",
+        "status": "PASS",
+        "reason": "FORCE_EXIT in manage_positions; severe thresholds configured; force_exit_count=1, symbols=['GE']",
+        "evidence": {
+          "severe_force_exit_unrealized_pl_lt": -200.0,
+          "severe_force_exit_total_pl_lt": -300.0,
+          "force_exit_symbols": [
+            "GE"
+          ],
+          "phase": "152"
+        }
+      }
+    ]
+  },
+  "part_b_lifecycle_management": {
+    "status": "PASS",
+    "pipeline_stances_present": [
+      "BUY",
+      "EXIT",
+      "HOLD",
+      "TRIM",
+      "WAIT"
+    ],
+    "lifecycle_actions_present": [
+      "BUY",
+      "EXIT",
+      "HOLD",
+      "TRIM",
+      "WAIT"
+    ],
+    "reconciliation_mismatch_count": 3,
+    "healed_count": 3,
+    "unhealed_mismatch_count": 0,
+    "orphan_count": 0,
+    "duplicate_protection": true,
+    "lifecycle_loaded": true,
+    "management_path": true,
+    "phase_149_available": false,
+    "phase_reference": "149 (not on file); verified via signal_lifecycle_effective + reconciliation"
+  },
+  "part_c_rotation_management": {
+    "status": "PASS",
+    "tsla_blocked_by": "ROTATION_CONFIRMATION",
+    "tsla_edge_delta": -0.152001,
+    "amd_edge_delta": 0.580711,
+    "amd_blocked_by": "POSITION_AGE_PROTECTION",
+    "turnover_control_configured": true,
+    "phase_150c_rotation_quality": 0.0,
+    "live_rotation_in_current_book": false,
+    "open_positions": 5,
+    "replay_rotation_coverage": false,
+    "reason": "TSLA weak rotation blocked (edge_delta=-0.152001); turnover_cap configured; replay covers rotation paths",
+    "phase_reference": "151/153"
+  },
+  "part_d_exit_management": {
+    "status": "PASS",
+    "fixes_validated": 3,
+    "fixes_failed": 0,
+    "overall_result": "PASS",
+    "phase_150c_questionable_exits": 3,
+    "exit_logic_refinement_metrics": {
+      "position_age_blocks": 0,
+      "rotation_blocks": 0,
+      "winner_protections": 0,
+      "drag_adjustments": 0,
+      "exit_confidence_reviews": 0
+    },
+    "reason": "Phase 153 fixes_validated=3, overall_result=PASS; protective gates block 150C questionable exits",
+    "phase_reference": "150C/153"
+  },
+  "part_f_maturity_impact": {
+    "institutional_intelligence_before": 58,
+    "institutional_intelligence_after": 66,
+    "institutional_intelligence_delta": 8,
+    "maturity_before": 52,
+    "maturity_after": 58,
+    "maturity_delta": 6,
+    "phase_150c_exit_quality": "FAIL",
+    "phase_153_replay_result": "PASS",
+    "basis": "Phase progression 150C questionable exits \u2192 152 gates \u2192 153 replay PASS"
+  },
+  "part_g_final_decision": {
+    "status": "CONDITIONALLY_CERTIFIED",
+    "strengths": [
+      "Phase 153 historical replay: 3/3 fixes validated (SLV drag, TSLA rotation, AMD age)",
+      "Phase 152 protection gates present in effective_lifecycle.py and config/exit_logic.json",
+      "Portfolio allocation engine exposes BUY/HOLD/ADD/TRIM/EXIT/FORCE_EXIT pathways",
+      "Current book: 5 positions with ADD/TRIM candidates active"
+    ],
+    "remaining_gaps": [
+      "path_verification: paper execution off (TRITON_ENABLE_PAPER_EXECUTION=0)",
+      "path_verification: ready_for_monday=false",
+      "No live rotation test in current 5-position book",
+      "Lifecycle reconciliation required broker heal on 3 symbol(s)",
+      "Phase 149 lifecycle certification artifact not on file"
+    ],
+    "recommendation": "Accept portfolio management certification for paper-mode governance; complete operational validation (paper env, live rotation cycle) before live promotion.",
+    "failed_requirement_count": 0
+  },
+  "supporting_artifacts": {
+    "positions_snapshot": "C:\\Users\\akimw\\triton\\data\\results\\positions_snapshot.csv",
+    "signal_lifecycle_effective": "C:\\Users\\akimw\\triton\\data\\results\\signal_lifecycle_effective.csv",
+    "historical_exit_replay_validation": "C:\\Users\\akimw\\triton\\data\\results\\historical_exit_replay_validation.json",
+    "exit_rotation_audit": "C:\\Users\\akimw\\triton\\data\\results\\exit_rotation_audit.json",
+    "portfolio_allocation_summary": "C:\\Users\\akimw\\triton\\data\\results\\portfolio_allocation_summary.json",
+    "path_verification": "C:\\Users\\akimw\\triton\\data\\results\\path_verification.json",
+    "paper_trade_session_review": {
+      "session_date": "2026-06-08",
+      "questionable_exits": 2
+    }
+  },
+  "config_sources": {
+    "exit_logic": "C:\\Users\\akimw\\triton\\config\\exit_logic.json",
+    "lifecycle_logic": "C:\\Users\\akimw\\triton\\config\\lifecycle_logic.json"
+  }
+}

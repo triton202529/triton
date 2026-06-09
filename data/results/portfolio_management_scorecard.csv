@@ -1,0 +1,9 @@
+area,status,phase_reference,evidence_summary,generated_at
+buy_management,PASS,154,Phase 154 portfolio management certification — buy_management,2026-06-09T02:55:22Z
+hold_management,PASS,154,Phase 154 portfolio management certification — hold_management,2026-06-09T02:55:22Z
+add_management,PASS,154,Phase 154 portfolio management certification — add_management,2026-06-09T02:55:22Z
+trim_management,PASS,154,Phase 154 portfolio management certification — trim_management,2026-06-09T02:55:22Z
+exit_management,PASS,154,Phase 154 portfolio management certification — exit_management,2026-06-09T02:55:22Z
+rotation_management,PASS,154,Phase 154 portfolio management certification — rotation_management,2026-06-09T02:55:22Z
+lifecycle_management,PASS,154,Phase 154 portfolio management certification — lifecycle_management,2026-06-09T02:55:22Z
+overall_certification,CONDITIONALLY_CERTIFIED,154,Phase 154 portfolio management certification — overall_certification,2026-06-09T02:55:22Z
