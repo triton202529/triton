@@ -3723,6 +3723,18 @@ def page_concentration_governance_analysis() -> None:
         st.error(f"Concentration Governance Analysis failed to load: {_short_err(e)}")
 
 
+def page_diversification_recovery_basket() -> None:
+    """🟢 Diversification Recovery Basket — ORANGE→GREEN recovery design."""
+    try:
+        from dashboard.diversification_recovery_basket import (
+            render_diversification_recovery_basket,
+        )
+
+        render_diversification_recovery_basket(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Diversification Recovery Basket failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22714,6 +22726,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_concentration_governance_analysis,
     (
         "Risk & Guardrails",
+        "🟢 Diversification Recovery Basket",
+    ): page_diversification_recovery_basket,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -22893,6 +22909,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🏛 Governance Authorization Center",
         "🔍 Governance Authorization Trace",
         "⚖️ Concentration Governance Analysis",
+        "🟢 Diversification Recovery Basket",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
