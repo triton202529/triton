@@ -3019,6 +3019,16 @@ def page_exit_timing_governance() -> None:
         st.error(f"Exit Timing Governance failed to load: {_short_err(e)}")
 
 
+def page_late_exit_detector() -> None:
+    """🚨 Late Exit Detector — observe-only scoring and tracking."""
+    try:
+        from dashboard.late_exit_detector import render_late_exit_detector
+
+        render_late_exit_detector(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Late Exit Detector failed to load: {_short_err(e)}")
+
+
 def page_trade_log() -> None:
     st.markdown("### 📜 Trade Log")
     df, csv_err = read_csv_dashboard(TRADE_LOG_PATH)
@@ -22637,6 +22647,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Signals", "🧪 Lifecycle Rule Simulation Lab"): page_lifecycle_rule_simulation_lab,
     ("Signals", "🚪 Exit Timing Framework"): page_exit_timing_framework,
     ("Signals", "⚖️ Exit Timing Governance"): page_exit_timing_governance,
+    ("Signals", "🚨 Late Exit Detector"): page_late_exit_detector,
     ("Portfolio", "Positions & Exposure"): page_positions_exposure,
     ("Portfolio", "Trade Log"): page_trade_log,
     ("Signals", "🧭 Signal Lifecycle"): page_signal_lifecycle,
@@ -22828,6 +22839,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🧪 Lifecycle Rule Simulation Lab",
         "🚪 Exit Timing Framework",
         "⚖️ Exit Timing Governance",
+        "🚨 Late Exit Detector",
         "📜 Ticker Decision Timeline",
         "🚀 Trade Opportunities",
         "🔍 Reconciliation",
