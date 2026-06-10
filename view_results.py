@@ -2963,6 +2963,18 @@ def page_ticker_lifecycle_tracker() -> None:
         st.error(f"Ticker Lifecycle Tracker failed to load: {_short_err(e)}")
 
 
+def page_lifecycle_decision_intelligence() -> None:
+    """🧠 Lifecycle Decision Intelligence — which decisions create or destroy alpha."""
+    try:
+        from dashboard.lifecycle_decision_intelligence import (
+            render_lifecycle_decision_intelligence,
+        )
+
+        render_lifecycle_decision_intelligence(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Lifecycle Decision Intelligence failed to load: {_short_err(e)}")
+
+
 def page_trade_log() -> None:
     st.markdown("### 📜 Trade Log")
     df, csv_err = read_csv_dashboard(TRADE_LOG_PATH)
@@ -22570,6 +22582,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Portfolio", "💰 Profit & Loss Ledger"): page_pnl_ledger,
     ("Portfolio", "💳 Ledger Reconciliation Center"): page_ledger_reconciliation_center,
     ("Signals", "🧬 Ticker Lifecycle Tracker"): page_ticker_lifecycle_tracker,
+    ("Signals", "🧠 Lifecycle Decision Intelligence"): page_lifecycle_decision_intelligence,
     ("Portfolio", "Positions & Exposure"): page_positions_exposure,
     ("Portfolio", "Trade Log"): page_trade_log,
     ("Signals", "🧭 Signal Lifecycle"): page_signal_lifecycle,
@@ -22756,6 +22769,7 @@ SECTIONS: Dict[str, List[str]] = {
     "Signals": [
         "🧭 Signal Lifecycle",
         "🧬 Ticker Lifecycle Tracker",
+        "🧠 Lifecycle Decision Intelligence",
         "📜 Ticker Decision Timeline",
         "🚀 Trade Opportunities",
         "🔍 Reconciliation",
