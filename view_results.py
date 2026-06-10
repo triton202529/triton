@@ -2999,6 +2999,16 @@ def page_lifecycle_rule_simulation_lab() -> None:
         st.error(f"Lifecycle Rule Simulation Lab failed to load: {_short_err(e)}")
 
 
+def page_exit_timing_framework() -> None:
+    """🚪 Exit Timing Framework — certified late-exit detection design."""
+    try:
+        from dashboard.exit_timing_framework import render_exit_timing_framework
+
+        render_exit_timing_framework(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Exit Timing Framework failed to load: {_short_err(e)}")
+
+
 def page_trade_log() -> None:
     st.markdown("### 📜 Trade Log")
     df, csv_err = read_csv_dashboard(TRADE_LOG_PATH)
@@ -22606,9 +22616,16 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Portfolio", "💰 Profit & Loss Ledger"): page_pnl_ledger,
     ("Portfolio", "💳 Ledger Reconciliation Center"): page_ledger_reconciliation_center,
     ("Signals", "🧬 Ticker Lifecycle Tracker"): page_ticker_lifecycle_tracker,
-    ("Signals", "🧠 Lifecycle Decision Intelligence"): page_lifecycle_decision_intelligence,
-    ("Signals", "⚙️ Adaptive Lifecycle Optimization"): page_adaptive_lifecycle_optimization,
+    (
+        "Signals",
+        "🧠 Lifecycle Decision Intelligence",
+    ): page_lifecycle_decision_intelligence,
+    (
+        "Signals",
+        "⚙️ Adaptive Lifecycle Optimization",
+    ): page_adaptive_lifecycle_optimization,
     ("Signals", "🧪 Lifecycle Rule Simulation Lab"): page_lifecycle_rule_simulation_lab,
+    ("Signals", "🚪 Exit Timing Framework"): page_exit_timing_framework,
     ("Portfolio", "Positions & Exposure"): page_positions_exposure,
     ("Portfolio", "Trade Log"): page_trade_log,
     ("Signals", "🧭 Signal Lifecycle"): page_signal_lifecycle,
@@ -22798,6 +22815,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🧠 Lifecycle Decision Intelligence",
         "⚙️ Adaptive Lifecycle Optimization",
         "🧪 Lifecycle Rule Simulation Lab",
+        "🚪 Exit Timing Framework",
         "📜 Ticker Decision Timeline",
         "🚀 Trade Opportunities",
         "🔍 Reconciliation",
