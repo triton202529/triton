@@ -3711,6 +3711,18 @@ def page_governance_authorization_trace() -> None:
         st.error(f"Governance Authorization Trace failed to load: {_short_err(e)}")
 
 
+def page_concentration_governance_analysis() -> None:
+    """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
+    try:
+        from dashboard.concentration_governance_analysis import (
+            render_concentration_governance_analysis,
+        )
+
+        render_concentration_governance_analysis(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Concentration Governance Analysis failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22698,6 +22710,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_governance_authorization_trace,
     (
         "Risk & Guardrails",
+        "⚖️ Concentration Governance Analysis",
+    ): page_concentration_governance_analysis,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -22876,6 +22892,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🛡️ Protective Action Policy Center",
         "🏛 Governance Authorization Center",
         "🔍 Governance Authorization Trace",
+        "⚖️ Concentration Governance Analysis",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
