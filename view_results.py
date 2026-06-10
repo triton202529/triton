@@ -2987,6 +2987,18 @@ def page_adaptive_lifecycle_optimization() -> None:
         st.error(f"Adaptive Lifecycle Optimization failed to load: {_short_err(e)}")
 
 
+def page_lifecycle_rule_simulation_lab() -> None:
+    """🧪 Lifecycle Rule Simulation Lab — what-if replay of proposed rules."""
+    try:
+        from dashboard.lifecycle_rule_simulation_lab import (
+            render_lifecycle_rule_simulation_lab,
+        )
+
+        render_lifecycle_rule_simulation_lab(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Lifecycle Rule Simulation Lab failed to load: {_short_err(e)}")
+
+
 def page_trade_log() -> None:
     st.markdown("### 📜 Trade Log")
     df, csv_err = read_csv_dashboard(TRADE_LOG_PATH)
@@ -22596,6 +22608,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Signals", "🧬 Ticker Lifecycle Tracker"): page_ticker_lifecycle_tracker,
     ("Signals", "🧠 Lifecycle Decision Intelligence"): page_lifecycle_decision_intelligence,
     ("Signals", "⚙️ Adaptive Lifecycle Optimization"): page_adaptive_lifecycle_optimization,
+    ("Signals", "🧪 Lifecycle Rule Simulation Lab"): page_lifecycle_rule_simulation_lab,
     ("Portfolio", "Positions & Exposure"): page_positions_exposure,
     ("Portfolio", "Trade Log"): page_trade_log,
     ("Signals", "🧭 Signal Lifecycle"): page_signal_lifecycle,
@@ -22784,6 +22797,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🧬 Ticker Lifecycle Tracker",
         "🧠 Lifecycle Decision Intelligence",
         "⚙️ Adaptive Lifecycle Optimization",
+        "🧪 Lifecycle Rule Simulation Lab",
         "📜 Ticker Decision Timeline",
         "🚀 Trade Opportunities",
         "🔍 Reconciliation",
