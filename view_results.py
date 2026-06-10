@@ -3699,6 +3699,18 @@ def page_governance_authorization_center() -> None:
         st.error(f"Governance Authorization Center failed to load: {_short_err(e)}")
 
 
+def page_governance_authorization_trace() -> None:
+    """🔍 Governance Authorization Trace — explain authorization blocks."""
+    try:
+        from dashboard.governance_authorization_trace import (
+            render_governance_authorization_trace,
+        )
+
+        render_governance_authorization_trace(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Authorization Trace failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22682,6 +22694,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_governance_authorization_center,
     (
         "Risk & Guardrails",
+        "🔍 Governance Authorization Trace",
+    ): page_governance_authorization_trace,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -22859,6 +22875,7 @@ SECTIONS: Dict[str, List[str]] = {
         "👤 Human Approval Center",
         "🛡️ Protective Action Policy Center",
         "🏛 Governance Authorization Center",
+        "🔍 Governance Authorization Trace",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
