@@ -3735,6 +3735,18 @@ def page_diversification_recovery_basket() -> None:
         st.error(f"Diversification Recovery Basket failed to load: {_short_err(e)}")
 
 
+def page_diversification_feasibility_analysis() -> None:
+    """✅ Diversification Feasibility — lifecycle compatibility for recovery basket."""
+    try:
+        from dashboard.diversification_feasibility_analysis import (
+            render_diversification_feasibility_analysis,
+        )
+
+        render_diversification_feasibility_analysis(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Diversification Feasibility Analysis failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22730,6 +22742,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_diversification_recovery_basket,
     (
         "Risk & Guardrails",
+        "✅ Diversification Feasibility",
+    ): page_diversification_feasibility_analysis,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -22910,6 +22926,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🔍 Governance Authorization Trace",
         "⚖️ Concentration Governance Analysis",
         "🟢 Diversification Recovery Basket",
+        "✅ Diversification Feasibility",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
