@@ -3853,6 +3853,18 @@ def page_recovery_basket_implementation_readiness() -> None:
         st.error(f"Recovery Basket Implementation Readiness failed to load: {_short_err(e)}")
 
 
+def page_lifecycle_drift_root_cause_analysis() -> None:
+    """🔄 Lifecycle Drift Root Cause — allocation vs effective lifecycle analysis."""
+    try:
+        from dashboard.lifecycle_drift_root_cause_analysis import (
+            render_lifecycle_drift_root_cause_analysis,
+        )
+
+        render_lifecycle_drift_root_cause_analysis(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Lifecycle Drift Root Cause Analysis failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -22960,6 +22972,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_recovery_basket_implementation_readiness,
     (
         "Risk & Guardrails",
+        "🔄 Lifecycle Drift Root Cause Analysis",
+    ): page_lifecycle_drift_root_cause_analysis,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23174,6 +23190,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🧺 Recovery Basket Exception Governance",
         "🧪 Recovery Basket Exception Simulation",
         "📋 Recovery Basket Implementation Readiness",
+        "🔄 Lifecycle Drift Root Cause Analysis",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
