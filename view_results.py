@@ -3769,6 +3769,18 @@ def page_concentration_recovery_simulator() -> None:
         st.error(f"Concentration Recovery Simulation failed to load: {_short_err(e)}")
 
 
+def page_governance_recovery_threshold_optimizer() -> None:
+    """🎯 Governance Recovery Threshold Optimizer — minimum diversification thresholds."""
+    try:
+        from dashboard.governance_recovery_threshold_optimizer import (
+            render_governance_recovery_threshold_optimizer,
+        )
+
+        render_governance_recovery_threshold_optimizer(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Recovery Threshold Optimizer failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22776,6 +22788,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_concentration_recovery_simulator,
     (
         "Risk & Guardrails",
+        "🎯 Governance Recovery Threshold Optimizer",
+    ): page_governance_recovery_threshold_optimizer,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -22959,6 +22975,7 @@ SECTIONS: Dict[str, List[str]] = {
         "✅ Diversification Feasibility",
         "📈 Recovery Basket Monitor",
         "📊 Concentration Recovery Simulation",
+        "🎯 Governance Recovery Threshold Optimizer",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
