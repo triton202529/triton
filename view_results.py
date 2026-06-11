@@ -3853,6 +3853,18 @@ def page_governance_outcome_prediction_engine() -> None:
         st.error(f"Governance Outcome Prediction Engine failed to load: {_short_err(e)}")
 
 
+def page_governance_risk_prediction_engine() -> None:
+    """⚠️ Governance Risk Prediction Engine — forward-looking risk forecasts."""
+    try:
+        from dashboard.governance_risk_prediction_engine import (
+            render_governance_risk_prediction_engine,
+        )
+
+        render_governance_risk_prediction_engine(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Risk Prediction Engine failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22888,6 +22900,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_governance_outcome_prediction_engine,
     (
         "Risk & Guardrails",
+        "⚠️ Governance Risk Prediction Engine",
+    ): page_governance_risk_prediction_engine,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -23078,6 +23094,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🔮 Promotion Probability Forecast",
         "🧭 Recovery Path Scenario Forecasting",
         "🎯 Governance Outcome Prediction Engine",
+        "⚠️ Governance Risk Prediction Engine",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
