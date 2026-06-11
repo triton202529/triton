@@ -3805,6 +3805,18 @@ def page_allocation_execution_path_audit() -> None:
         st.error(f"Allocation Execution Path Audit failed to load: {_short_err(e)}")
 
 
+def page_governance_recovery_exception_analysis() -> None:
+    """🧩 Governance Recovery Exception Analysis — ORANGE deadlock exception design."""
+    try:
+        from dashboard.governance_recovery_exception_analysis import (
+            render_governance_recovery_exception_analysis,
+        )
+
+        render_governance_recovery_exception_analysis(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Recovery Exception Analysis failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -22896,6 +22908,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_allocation_execution_path_audit,
     (
         "Risk & Guardrails",
+        "🧩 Governance Recovery Exception Analysis",
+    ): page_governance_recovery_exception_analysis,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23106,6 +23122,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🎯 Governance Recovery Threshold Optimizer",
         "🚦 Diversification Execution Readiness",
         "🔬 Allocation Execution Path Audit",
+        "🧩 Governance Recovery Exception Analysis",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
