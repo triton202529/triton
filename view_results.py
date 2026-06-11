@@ -3757,6 +3757,18 @@ def page_recovery_basket_monitor() -> None:
         st.error(f"Recovery Basket Monitor failed to load: {_short_err(e)}")
 
 
+def page_concentration_recovery_simulator() -> None:
+    """📊 Concentration Recovery Simulation — governance recovery forecasting."""
+    try:
+        from dashboard.concentration_recovery_simulator import (
+            render_concentration_recovery_simulator,
+        )
+
+        render_concentration_recovery_simulator(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Concentration Recovery Simulation failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22760,6 +22772,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_recovery_basket_monitor,
     (
         "Risk & Guardrails",
+        "📊 Concentration Recovery Simulation",
+    ): page_concentration_recovery_simulator,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -22942,6 +22958,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🟢 Diversification Recovery Basket",
         "✅ Diversification Feasibility",
         "📈 Recovery Basket Monitor",
+        "📊 Concentration Recovery Simulation",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
