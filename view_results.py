@@ -3805,6 +3805,18 @@ def page_concentration_exit_strategy_planner() -> None:
         st.error(f"Concentration Exit Strategy Planner failed to load: {_short_err(e)}")
 
 
+def page_governance_recovery_timeline_forecaster() -> None:
+    """🗓️ Governance Recovery Timeline — ORANGE→YELLOW→GREEN forecast."""
+    try:
+        from dashboard.governance_recovery_timeline_forecaster import (
+            render_governance_recovery_timeline_forecaster,
+        )
+
+        render_governance_recovery_timeline_forecaster(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Recovery Timeline failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22824,6 +22836,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_concentration_exit_strategy_planner,
     (
         "Risk & Guardrails",
+        "🗓️ Governance Recovery Timeline",
+    ): page_governance_recovery_timeline_forecaster,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -23010,6 +23026,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🎯 Governance Recovery Threshold Optimizer",
         "🚦 Diversification Execution Readiness",
         "📉 Concentration Exit Strategy Planner",
+        "🗓️ Governance Recovery Timeline",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
