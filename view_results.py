@@ -3817,6 +3817,18 @@ def page_governance_recovery_timeline_forecaster() -> None:
         st.error(f"Governance Recovery Timeline failed to load: {_short_err(e)}")
 
 
+def page_promotion_probability_forecast_engine() -> None:
+    """🔮 Promotion Probability Forecast — lifecycle promotion forecasting."""
+    try:
+        from dashboard.promotion_probability_forecast_engine import (
+            render_promotion_probability_forecast_engine,
+        )
+
+        render_promotion_probability_forecast_engine(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Promotion Probability Forecast failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22840,6 +22852,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_governance_recovery_timeline_forecaster,
     (
         "Risk & Guardrails",
+        "🔮 Promotion Probability Forecast",
+    ): page_promotion_probability_forecast_engine,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -23027,6 +23043,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🚦 Diversification Execution Readiness",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
+        "🔮 Promotion Probability Forecast",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
