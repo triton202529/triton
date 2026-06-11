@@ -3841,6 +3841,18 @@ def page_recovery_basket_exception_simulator() -> None:
         st.error(f"Recovery Basket Exception Simulation failed to load: {_short_err(e)}")
 
 
+def page_recovery_basket_implementation_readiness() -> None:
+    """📋 Recovery Basket Implementation Readiness — implementation gate assessment."""
+    try:
+        from dashboard.recovery_basket_implementation_readiness import (
+            render_recovery_basket_implementation_readiness,
+        )
+
+        render_recovery_basket_implementation_readiness(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Recovery Basket Implementation Readiness failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -22944,6 +22956,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_recovery_basket_exception_simulator,
     (
         "Risk & Guardrails",
+        "📋 Recovery Basket Implementation Readiness",
+    ): page_recovery_basket_implementation_readiness,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23157,6 +23173,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🧩 Governance Recovery Exception Analysis",
         "🧺 Recovery Basket Exception Governance",
         "🧪 Recovery Basket Exception Simulation",
+        "📋 Recovery Basket Implementation Readiness",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
