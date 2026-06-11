@@ -3781,6 +3781,18 @@ def page_governance_recovery_threshold_optimizer() -> None:
         st.error(f"Governance Recovery Threshold Optimizer failed to load: {_short_err(e)}")
 
 
+def page_diversification_execution_readiness_gate() -> None:
+    """🚦 Diversification Execution Readiness — recovery plan execution gate."""
+    try:
+        from dashboard.diversification_execution_readiness_gate import (
+            render_diversification_execution_readiness_gate,
+        )
+
+        render_diversification_execution_readiness_gate(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Diversification Execution Readiness failed to load: {_short_err(e)}")
+
+
 def page_execution_readiness_center() -> None:
     """⚙️ Execution Readiness Center — eligibility assessment (paper mode only)."""
     try:
@@ -22792,6 +22804,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_governance_recovery_threshold_optimizer,
     (
         "Risk & Guardrails",
+        "🚦 Diversification Execution Readiness",
+    ): page_diversification_execution_readiness_gate,
+    (
+        "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
@@ -22976,6 +22992,7 @@ SECTIONS: Dict[str, List[str]] = {
         "📈 Recovery Basket Monitor",
         "📊 Concentration Recovery Simulation",
         "🎯 Governance Recovery Threshold Optimizer",
+        "🚦 Diversification Execution Readiness",
         "⚙️ Execution Readiness Center",
         "🧪 Protective Action Trials",
         "📊 Protective Action Evaluation",
