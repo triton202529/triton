@@ -3793,6 +3793,18 @@ def page_diversification_execution_readiness_gate() -> None:
         st.error(f"Diversification Execution Readiness failed to load: {_short_err(e)}")
 
 
+def page_allocation_execution_path_audit() -> None:
+    """🔬 Allocation Execution Path Audit — allocation-to-order pipeline trace."""
+    try:
+        from dashboard.allocation_execution_path_audit import (
+            render_allocation_execution_path_audit,
+        )
+
+        render_allocation_execution_path_audit(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Allocation Execution Path Audit failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -22880,6 +22892,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_diversification_execution_readiness_gate,
     (
         "Risk & Guardrails",
+        "🔬 Allocation Execution Path Audit",
+    ): page_allocation_execution_path_audit,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23089,6 +23105,7 @@ SECTIONS: Dict[str, List[str]] = {
         "📊 Concentration Recovery Simulation",
         "🎯 Governance Recovery Threshold Optimizer",
         "🚦 Diversification Execution Readiness",
+        "🔬 Allocation Execution Path Audit",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
