@@ -3925,6 +3925,18 @@ def page_recovery_transition_authorization_assessment() -> None:
         st.error(f"Recovery Transition Authorization Assessment failed to load: {_short_err(e)}")
 
 
+def page_recovery_exception_approval_package() -> None:
+    """📋 Recovery Exception Approval Package — registry migration & DUAL_APPROVAL prep."""
+    try:
+        from dashboard.recovery_exception_approval_package import (
+            render_recovery_exception_approval_package,
+        )
+
+        render_recovery_exception_approval_package(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Recovery Exception Approval Package failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23056,6 +23068,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_recovery_transition_authorization_assessment,
     (
         "Risk & Guardrails",
+        "📋 Recovery Exception Approval Package",
+    ): page_recovery_exception_approval_package,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23276,6 +23292,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🎯 Final Governance Recovery Optimization Engine",
         "🚀 Autonomous Portfolio Transition Planner",
         "🛂 Recovery Transition Authorization Assessment",
+        "📋 Recovery Exception Approval Package",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
