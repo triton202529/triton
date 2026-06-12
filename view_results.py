@@ -3961,6 +3961,18 @@ def page_recovery_transition_final_authorization_simulator() -> None:
         st.error(f"Final Recovery Authorization Simulation failed to load: {_short_err(e)}")
 
 
+def page_recovery_transition_readiness_monitor() -> None:
+    """🟢 Recovery Transition Live Authorization Monitor — real-time Stage 1 gate sentinel."""
+    try:
+        from dashboard.recovery_transition_readiness_monitor import (
+            render_recovery_transition_readiness_monitor,
+        )
+
+        render_recovery_transition_readiness_monitor(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Recovery Transition Readiness Monitor failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23104,6 +23116,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_recovery_transition_final_authorization_simulator,
     (
         "Risk & Guardrails",
+        "🟢 Recovery Transition Live Authorization Monitor",
+    ): page_recovery_transition_readiness_monitor,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23327,6 +23343,7 @@ SECTIONS: Dict[str, List[str]] = {
         "📋 Recovery Exception Approval Package",
         "🛡️ Stage 1 Recovery Execution Governance Playbook",
         "🎬 Final Recovery Authorization Simulation",
+        "🟢 Recovery Transition Live Authorization Monitor",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
