@@ -439,21 +439,16 @@ def _restart_loop(interval_minutes: int, dry_run: bool) -> Dict[str, Any]:
         return {"action": "error", "started": False, "detail": str(e)}
 
 
-def _verify_recovery(before_refresh: Optional[str]) -> Dict[str, Any]:
-    time.sleep(2)
-    running, pids = _is_loop_process_running()
-    lock = _parse_lock(LOCK_PATH)
-    state = _read_json(WATCHDOG_STATE)
-    new_refresh = state.get("heartbeat_refresh_ts")
-    hb_confirmed = bool(new_refresh and new_refresh != before_refresh)
-    return {
-        "process_running": running,
-        "pids": pids,
-        "lock_exists": lock.get("exists"),
-        "heartbeat_refresh_confirmed": hb_confirmed,
-        "heartbeat_refresh_ts": new_refresh,
-        "recovery_successful": running and lock.get("exists"),
-    }
+def _verify_recovery(
+    before_refresh: Optional[str],
+    interval_minutes: int = DEFAULT_INTERVAL_MINUTES,
+) -> Dict[str, Any]:
+    from services.recovery_stabilization_monitor import adaptive_verify_recovery
+
+    return adaptive_verify_recovery(
+        before_refresh,
+        interval_minutes=interval_minutes,
+    )
 
 
 def _attempt_recovery(
@@ -483,8 +478,8 @@ def _attempt_recovery(
 
     verify = {}
     if not dry_run and restart_step.get("started"):
-        verify = _verify_recovery(refresh_before)
-        steps.append({"step": "verify_recovery", **verify})
+        verify = _verify_recovery(refresh_before, interval_minutes=interval_minutes)
+        steps.append({"step": "verify_stabilization", **verify})
 
     success = verify.get("recovery_successful") if verify else dry_run
     return {

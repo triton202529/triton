@@ -187,8 +187,8 @@ def run_recovery(
         verify = {}
         if not dry_run and restart.get("started"):
             refresh_before = _read_json(WATCHDOG_STATE).get("heartbeat_refresh_ts")
-            verify = _verify_recovery(refresh_before)
-            steps.append({"step": "verify_heartbeat", **verify})
+            verify = _verify_recovery(refresh_before, interval_minutes=interval_minutes)
+            steps.append({"step": "verify_stabilization", **verify})
 
         success = dry_run or (
             term.get("all_cleared") and restart.get("started") and verify.get("recovery_successful")

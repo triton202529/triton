@@ -4003,6 +4003,16 @@ def page_recovery_restart_diagnostics() -> None:
         st.error(f"Recovery Restart Diagnostics failed to load: {_short_err(e)}")
 
 
+def page_recovery_stabilization_monitor() -> None:
+    """🟢 Recovery Stabilization Intelligence — adaptive recovery readiness."""
+    try:
+        from dashboard.recovery_stabilization_monitor import render_recovery_stabilization_monitor
+
+        render_recovery_stabilization_monitor(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Recovery Stabilization Monitor failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23279,6 +23289,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("System", "🔄 Continuous Loop Health Monitor"): page_continuous_loop_health_monitor,
     ("System", "🧠 Hung Loop Recovery Intelligence"): page_hung_loop_recovery_monitor,
     ("System", "🔧 Recovery Restart Diagnostics"): page_recovery_restart_diagnostics,
+    ("System", "🟢 Recovery Stabilization Intelligence"): page_recovery_stabilization_monitor,
     ("System", "⚙️ Execution Dashboard"): page_execution_dashboard,
     ("System", "⚙️ Execution Intelligence"): page_execution_intelligence,
     ("System", "🧠 Feedback Intelligence"): page_feedback_intelligence,
