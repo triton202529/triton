@@ -3937,6 +3937,18 @@ def page_recovery_exception_approval_package() -> None:
         st.error(f"Recovery Exception Approval Package failed to load: {_short_err(e)}")
 
 
+def page_stage1_recovery_execution_playbook() -> None:
+    """🛡️ Stage 1 Recovery Execution Governance Playbook — pre-execution operational guide."""
+    try:
+        from dashboard.stage1_recovery_execution_playbook import (
+            render_stage1_recovery_execution_playbook,
+        )
+
+        render_stage1_recovery_execution_playbook(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Stage 1 Recovery Execution Playbook failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23072,6 +23084,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_recovery_exception_approval_package,
     (
         "Risk & Guardrails",
+        "🛡️ Stage 1 Recovery Execution Governance Playbook",
+    ): page_stage1_recovery_execution_playbook,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23293,6 +23309,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🚀 Autonomous Portfolio Transition Planner",
         "🛂 Recovery Transition Authorization Assessment",
         "📋 Recovery Exception Approval Package",
+        "🛡️ Stage 1 Recovery Execution Governance Playbook",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
