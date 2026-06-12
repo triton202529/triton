@@ -3901,6 +3901,18 @@ def page_final_governance_recovery_optimization() -> None:
         st.error(f"Final Governance Recovery Optimization failed to load: {_short_err(e)}")
 
 
+def page_autonomous_portfolio_transition_planner() -> None:
+    """🚀 Autonomous Portfolio Transition — governance-safe GREEN transition roadmap."""
+    try:
+        from dashboard.autonomous_portfolio_transition_planner import (
+            render_autonomous_portfolio_transition_planner,
+        )
+
+        render_autonomous_portfolio_transition_planner(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Autonomous Portfolio Transition Planner failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23024,6 +23036,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_final_governance_recovery_optimization,
     (
         "Risk & Guardrails",
+        "🚀 Autonomous Portfolio Transition Planner",
+    ): page_autonomous_portfolio_transition_planner,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23242,6 +23258,7 @@ SECTIONS: Dict[str, List[str]] = {
         "📉 Recovery Candidate Deterioration Analysis",
         "🧺 Recovery Basket Reconstruction Engine",
         "🎯 Final Governance Recovery Optimization Engine",
+        "🚀 Autonomous Portfolio Transition Planner",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
