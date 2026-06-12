@@ -3973,6 +3973,16 @@ def page_recovery_transition_readiness_monitor() -> None:
         st.error(f"Recovery Transition Readiness Monitor failed to load: {_short_err(e)}")
 
 
+def page_continuous_loop_health_monitor() -> None:
+    """🔄 Continuous Loop Health Monitor — loop health & self-healing status."""
+    try:
+        from dashboard.continuous_loop_health_monitor import render_continuous_loop_health_monitor
+
+        render_continuous_loop_health_monitor(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Continuous Loop Health Monitor failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23246,6 +23256,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Research / Intel", "Economic Calendar"): page_econ_calendar,
     ("System", "🧾 Data Contracts"): page_data_contracts,
     ("System", "🫀 Pipeline Health / Heartbeat"): page_pipeline_health,
+    ("System", "🔄 Continuous Loop Health Monitor"): page_continuous_loop_health_monitor,
     ("System", "⚙️ Execution Dashboard"): page_execution_dashboard,
     ("System", "⚙️ Execution Intelligence"): page_execution_intelligence,
     ("System", "🧠 Feedback Intelligence"): page_feedback_intelligence,
@@ -23388,6 +23399,7 @@ SECTIONS: Dict[str, List[str]] = {
     "System": [
         "🧾 Data Contracts",
         "🫀 Pipeline Health / Heartbeat",
+        "🔄 Continuous Loop Health Monitor",
         "⚙️ Execution Dashboard",
         "⚙️ Execution Intelligence",
         "🧠 Feedback Intelligence",
