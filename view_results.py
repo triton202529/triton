@@ -3877,6 +3877,18 @@ def page_recovery_candidate_deterioration_analysis() -> None:
         st.error(f"Recovery Candidate Deterioration Analysis failed to load: {_short_err(e)}")
 
 
+def page_recovery_basket_reconstruction_engine() -> None:
+    """🧺 Recovery Basket Reconstruction — lifecycle-authoritative basket design."""
+    try:
+        from dashboard.recovery_basket_reconstruction_engine import (
+            render_recovery_basket_reconstruction_engine,
+        )
+
+        render_recovery_basket_reconstruction_engine(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Recovery Basket Reconstruction Engine failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -22992,6 +23004,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_recovery_candidate_deterioration_analysis,
     (
         "Risk & Guardrails",
+        "🧺 Recovery Basket Reconstruction Engine",
+    ): page_recovery_basket_reconstruction_engine,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23208,6 +23224,7 @@ SECTIONS: Dict[str, List[str]] = {
         "📋 Recovery Basket Implementation Readiness",
         "🔄 Lifecycle Drift Root Cause Analysis",
         "📉 Recovery Candidate Deterioration Analysis",
+        "🧺 Recovery Basket Reconstruction Engine",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
