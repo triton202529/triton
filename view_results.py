@@ -3993,6 +3993,16 @@ def page_hung_loop_recovery_monitor() -> None:
         st.error(f"Hung Loop Recovery Monitor failed to load: {_short_err(e)}")
 
 
+def page_recovery_restart_diagnostics() -> None:
+    """🔧 Recovery Restart Diagnostics — restart failure root cause analysis."""
+    try:
+        from dashboard.recovery_restart_diagnostics import render_recovery_restart_diagnostics
+
+        render_recovery_restart_diagnostics(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Recovery Restart Diagnostics failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23268,6 +23278,7 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("System", "🫀 Pipeline Health / Heartbeat"): page_pipeline_health,
     ("System", "🔄 Continuous Loop Health Monitor"): page_continuous_loop_health_monitor,
     ("System", "🧠 Hung Loop Recovery Intelligence"): page_hung_loop_recovery_monitor,
+    ("System", "🔧 Recovery Restart Diagnostics"): page_recovery_restart_diagnostics,
     ("System", "⚙️ Execution Dashboard"): page_execution_dashboard,
     ("System", "⚙️ Execution Intelligence"): page_execution_intelligence,
     ("System", "🧠 Feedback Intelligence"): page_feedback_intelligence,
@@ -23412,6 +23423,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🫀 Pipeline Health / Heartbeat",
         "🔄 Continuous Loop Health Monitor",
         "🧠 Hung Loop Recovery Intelligence",
+        "🔧 Recovery Restart Diagnostics",
         "⚙️ Execution Dashboard",
         "⚙️ Execution Intelligence",
         "🧠 Feedback Intelligence",
