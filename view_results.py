@@ -3913,6 +3913,18 @@ def page_autonomous_portfolio_transition_planner() -> None:
         st.error(f"Autonomous Portfolio Transition Planner failed to load: {_short_err(e)}")
 
 
+def page_recovery_transition_authorization_assessment() -> None:
+    """🛂 Recovery Transition Authorization — Stage 1 readiness gate assessment."""
+    try:
+        from dashboard.recovery_transition_authorization_assessment import (
+            render_recovery_transition_authorization_assessment,
+        )
+
+        render_recovery_transition_authorization_assessment(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Recovery Transition Authorization Assessment failed to load: {_short_err(e)}")
+
+
 def page_concentration_exit_strategy_planner() -> None:
     """📉 Concentration Exit Strategy Planner — governance-safe QQQ exit planning."""
     try:
@@ -23040,6 +23052,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ): page_autonomous_portfolio_transition_planner,
     (
         "Risk & Guardrails",
+        "🛂 Recovery Transition Authorization Assessment",
+    ): page_recovery_transition_authorization_assessment,
+    (
+        "Risk & Guardrails",
         "📉 Concentration Exit Strategy Planner",
     ): page_concentration_exit_strategy_planner,
     (
@@ -23259,6 +23275,7 @@ SECTIONS: Dict[str, List[str]] = {
         "🧺 Recovery Basket Reconstruction Engine",
         "🎯 Final Governance Recovery Optimization Engine",
         "🚀 Autonomous Portfolio Transition Planner",
+        "🛂 Recovery Transition Authorization Assessment",
         "📉 Concentration Exit Strategy Planner",
         "🗓️ Governance Recovery Timeline",
         "🔮 Promotion Probability Forecast",
