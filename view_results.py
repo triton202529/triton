@@ -3759,6 +3759,18 @@ def page_governance_recovery_acceleration_engine() -> None:
         st.error(f"Governance Recovery Acceleration failed to load: {_short_err(e)}")
 
 
+def page_governance_recovery_execution_feasibility() -> None:
+    """⚙️ Governance Recovery Action Readiness & Execution Feasibility."""
+    try:
+        from dashboard.governance_recovery_execution_feasibility import (
+            render_governance_recovery_execution_feasibility,
+        )
+
+        render_governance_recovery_execution_feasibility(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Recovery Execution Feasibility failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23144,6 +23156,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🚀 Governance Recovery Acceleration & Bottleneck Intelligence",
     ): page_governance_recovery_acceleration_engine,
+    (
+        "Risk & Guardrails",
+        "⚙️ Governance Recovery Action Readiness & Execution Feasibility Intelligence",
+    ): page_governance_recovery_execution_feasibility,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
