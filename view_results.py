@@ -3735,6 +3735,18 @@ def page_governance_recovery_roadmap_tracker() -> None:
         st.error(f"Governance Recovery Roadmap Tracker failed to load: {_short_err(e)}")
 
 
+def page_governance_daily_evidence_monitor() -> None:
+    """📈 Governance Daily Evidence Monitor — continuous recovery tracking."""
+    try:
+        from dashboard.governance_daily_evidence_monitor import (
+            render_governance_daily_evidence_monitor,
+        )
+
+        render_governance_daily_evidence_monitor(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Daily Evidence Monitor failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23112,6 +23124,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🛣 Governance Recovery Roadmap & Evidence Tracker",
     ): page_governance_recovery_roadmap_tracker,
+    (
+        "Risk & Guardrails",
+        "📈 Governance Recovery Daily Evidence Monitor",
+    ): page_governance_daily_evidence_monitor,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
