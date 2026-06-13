@@ -4097,6 +4097,16 @@ def page_execution_readiness_center() -> None:
         st.error(f"Execution Readiness Center failed to load: {_short_err(e)}")
 
 
+def page_execution_readiness_stability() -> None:
+    """🔎 Execution Readiness Stability — certification integrity intelligence."""
+    try:
+        from dashboard.execution_readiness_stability import render_execution_readiness_stability
+
+        render_execution_readiness_stability(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Execution Readiness Stability failed to load: {_short_err(e)}")
+
+
 def page_protective_action_trials() -> None:
     """🧪 Protective Action Trials — paper-mode simulations only."""
     try:
@@ -23186,6 +23196,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "⚙️ Execution Readiness Center",
     ): page_execution_readiness_center,
+    (
+        "Risk & Guardrails",
+        "🔎 Execution Readiness Stability & Certification Integrity",
+    ): page_execution_readiness_stability,
     ("Risk & Guardrails", "🧪 Protective Action Trials"): page_protective_action_trials,
     (
         "Risk & Guardrails",
