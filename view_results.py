@@ -3795,6 +3795,18 @@ def page_green_authorization_strategy_engine() -> None:
         st.error(f"GREEN Authorization Strategy failed to load: {_short_err(e)}")
 
 
+def page_post_green_certification_monitor() -> None:
+    """🏛 Post-GREEN Institutional Stability & Continuous Certification."""
+    try:
+        from dashboard.post_green_certification_monitor import (
+            render_post_green_certification_monitor,
+        )
+
+        render_post_green_certification_monitor(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Post-GREEN Certification Monitor failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23192,6 +23204,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🟢 GREEN Authorization Strategy & Long-Term Portfolio Certification Intelligence",
     ): page_green_authorization_strategy_engine,
+    (
+        "Risk & Guardrails",
+        "🏛 Post-GREEN Institutional Stability & Continuous Certification Intelligence",
+    ): page_post_green_certification_monitor,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
