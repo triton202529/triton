@@ -3747,6 +3747,18 @@ def page_governance_daily_evidence_monitor() -> None:
         st.error(f"Governance Daily Evidence Monitor failed to load: {_short_err(e)}")
 
 
+def page_governance_recovery_acceleration_engine() -> None:
+    """🚀 Governance Recovery Acceleration — bottleneck & leverage intelligence."""
+    try:
+        from dashboard.governance_recovery_acceleration_engine import (
+            render_governance_recovery_acceleration_engine,
+        )
+
+        render_governance_recovery_acceleration_engine(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Recovery Acceleration failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23128,6 +23140,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "📈 Governance Recovery Daily Evidence Monitor",
     ): page_governance_daily_evidence_monitor,
+    (
+        "Risk & Guardrails",
+        "🚀 Governance Recovery Acceleration & Bottleneck Intelligence",
+    ): page_governance_recovery_acceleration_engine,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
