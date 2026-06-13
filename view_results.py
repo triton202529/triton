@@ -3783,6 +3783,18 @@ def page_governance_recovery_execution_simulator() -> None:
         st.error(f"Governance Recovery Execution Simulator failed to load: {_short_err(e)}")
 
 
+def page_green_authorization_strategy_engine() -> None:
+    """🟢 GREEN Authorization Strategy & Long-Term Portfolio Certification."""
+    try:
+        from dashboard.green_authorization_strategy_engine import (
+            render_green_authorization_strategy_engine,
+        )
+
+        render_green_authorization_strategy_engine(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"GREEN Authorization Strategy failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23176,6 +23188,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🎯 Governance Recovery Execution Simulation & Certification Rehearsal",
     ): page_governance_recovery_execution_simulator,
+    (
+        "Risk & Guardrails",
+        "🟢 GREEN Authorization Strategy & Long-Term Portfolio Certification Intelligence",
+    ): page_green_authorization_strategy_engine,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
