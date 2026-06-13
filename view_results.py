@@ -3723,6 +3723,18 @@ def page_governance_authorization_intelligence() -> None:
         st.error(f"Governance Authorization Intelligence failed to load: {_short_err(e)}")
 
 
+def page_governance_recovery_roadmap_tracker() -> None:
+    """🛣 Governance Recovery Roadmap — evidence tracker & recovery milestones."""
+    try:
+        from dashboard.governance_recovery_roadmap_tracker import (
+            render_governance_recovery_roadmap_tracker,
+        )
+
+        render_governance_recovery_roadmap_tracker(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Recovery Roadmap Tracker failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23096,6 +23108,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🧠 Governance Authorization Intelligence & Alignment",
     ): page_governance_authorization_intelligence,
+    (
+        "Risk & Guardrails",
+        "🛣 Governance Recovery Roadmap & Evidence Tracker",
+    ): page_governance_recovery_roadmap_tracker,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
