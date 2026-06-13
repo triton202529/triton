@@ -3771,6 +3771,18 @@ def page_governance_recovery_execution_feasibility() -> None:
         st.error(f"Governance Recovery Execution Feasibility failed to load: {_short_err(e)}")
 
 
+def page_governance_recovery_execution_simulator() -> None:
+    """🎯 Governance Recovery Execution Simulation & Certification Rehearsal."""
+    try:
+        from dashboard.governance_recovery_execution_simulator import (
+            render_governance_recovery_execution_simulator,
+        )
+
+        render_governance_recovery_execution_simulator(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Recovery Execution Simulator failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23160,6 +23172,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "⚙️ Governance Recovery Action Readiness & Execution Feasibility Intelligence",
     ): page_governance_recovery_execution_feasibility,
+    (
+        "Risk & Guardrails",
+        "🎯 Governance Recovery Execution Simulation & Certification Rehearsal",
+    ): page_governance_recovery_execution_simulator,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
