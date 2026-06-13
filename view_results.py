@@ -3711,6 +3711,18 @@ def page_governance_authorization_trace() -> None:
         st.error(f"Governance Authorization Trace failed to load: {_short_err(e)}")
 
 
+def page_governance_authorization_intelligence() -> None:
+    """🧠 Governance Authorization Intelligence — blocking analysis & recovery path."""
+    try:
+        from dashboard.governance_authorization_intelligence import (
+            render_governance_authorization_intelligence,
+        )
+
+        render_governance_authorization_intelligence(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Governance Authorization Intelligence failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23080,6 +23092,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🔍 Governance Authorization Trace",
     ): page_governance_authorization_trace,
+    (
+        "Risk & Guardrails",
+        "🧠 Governance Authorization Intelligence & Alignment",
+    ): page_governance_authorization_intelligence,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
