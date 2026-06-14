@@ -3524,6 +3524,39 @@ def maybe_execute_management(
         except Exception as e:
             return 1, 0, [str(e)], "", meta
 
+    if cfg.get("require_execution_gate_for_execute", True):
+        try:
+            from services.triton_execution_gate import (
+                ExecutionGateBlocked,
+                enforce_pipeline_gate,
+                map_management_action_to_path,
+            )
+
+            mgmt_paths = {
+                map_management_action_to_path(
+                    p.management_action,
+                    force_exit=bool(getattr(p, "force_exit_override", False)),
+                    forced_rotation=bool(getattr(p, "forced_rotation", False)),
+                )
+                for p in planned
+            }
+            stage_path = (
+                "risk_emergency_action"
+                if "risk_emergency_action" in mgmt_paths
+                else "forced_rotation" if "forced_rotation" in mgmt_paths else "position_exit"
+            )
+            enforce_pipeline_gate(
+                broker=broker,
+                mode=mode,
+                execution_path=stage_path,
+                source="manage_positions",
+                symbols=[p.symbol for p in planned],
+            )
+        except ExecutionGateBlocked as eg:
+            rs = [str(eg)]
+            print(f"[MANAGE_BLOCK] execution blocked by execution gate: {rs[0]}")
+            return 2, 0, rs, "", meta
+
     allowed, blocked_rows, global_abort = _partition_planned_by_guard(planned, broker, cfg)
     if global_abort is not None:
         meta["blocked_rows"] = list(blocked_rows)

@@ -661,6 +661,35 @@ def place_order(o: OrderRow, dry_run: bool) -> Tuple[str, str, Any, Dict[str, An
     if dry_run:
         return "DRY_RUN", "", payload, payload
 
+    from services.triton_execution_gate import (
+        ExecutionGateBlocked,
+        enforce_broker_submission_gate,
+    )
+
+    class _CsvBrokerShim:
+        def __init__(self, broker_mode: str, account_getter):
+            self.mode = broker_mode
+            self._account_getter = account_getter
+
+        def get_account(self):
+            return self._account_getter()
+
+    mode = mode_from_base(base)
+
+    def _account_getter():
+        return _req_json("GET", f"{base}/v2/account", H, timeout=15)
+
+    try:
+        enforce_broker_submission_gate(
+            broker=_CsvBrokerShim(mode, _account_getter),
+            symbol=o.symbol,
+            side=o.side,
+            client_order_id=o.client_order_id,
+            source="place_orders_from_csv",
+        )
+    except ExecutionGateBlocked as exc:
+        raise RuntimeError(f"EXEC_GATE_BLOCK: {exc}") from exc
+
     raw = _req_json("POST", f"{base}/v2/orders", H, json_body=payload, timeout=30)
     oid = str(raw.get("id", "")) if isinstance(raw, dict) else ""
     status = str(raw.get("status", "")) if isinstance(raw, dict) else "unknown"
@@ -865,6 +894,23 @@ def main() -> int:
             print(f"[MASTER_GATE] evaluation error: {e}", flush=True)
             _append_event(session, "master-gate", "ERROR", str(e))
             return 1
+
+        try:
+            from services.triton_execution_gate import (
+                ExecutionGateBlocked,
+                enforce_pipeline_gate,
+            )
+
+            enforce_pipeline_gate(
+                broker=broker,
+                mode=mode,
+                execution_path="broker_submission",
+                source="place_orders_from_csv",
+            )
+        except ExecutionGateBlocked as eg:
+            print(f"[EXEC_GATE_BLOCK] {eg}", flush=True)
+            _append_event(session, "exec-gate", "BLOCKED", str(eg))
+            return 2
 
     # Risk Gate (REAL placement only) — kept as an additional layer
     decision = None

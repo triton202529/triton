@@ -446,12 +446,27 @@ class AlpacaBroker:
         take_profit: Optional[Dict[str, Any]] = None,
         stop_loss: Optional[Dict[str, Any]] = None,
         extended_hours: bool = False,
+        execution_path: Optional[str] = None,
+        force_exit_override: bool = False,
+        execution_gate_extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Generic submit_order. For fractional qty, pass a float (if your acct supports it).
 
         Alpaca expects either qty OR notional (not both). This method is qty-based.
         """
+        from services.triton_execution_gate import enforce_broker_submission_gate
+
+        enforce_broker_submission_gate(
+            broker=self,
+            symbol=symbol,
+            side=side,
+            execution_path=execution_path,
+            client_order_id=client_order_id,
+            source="broker_alpaca.submit_order",
+            force_exit=force_exit_override,
+            gate_extra=execution_gate_extra,
+        )
         payload: Dict[str, Any] = {
             "symbol": symbol.upper().strip(),
             "qty": qty,
@@ -525,10 +540,25 @@ class AlpacaBroker:
         time_in_force: str = "day",
         client_order_id: Optional[str] = None,
         extended_hours: bool = False,
+        execution_path: Optional[str] = None,
+        force_exit_override: bool = False,
+        execution_gate_extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Generic notional market order. Alpaca supports 'notional' instead of 'qty'.
         """
+        from services.triton_execution_gate import enforce_broker_submission_gate
+
+        enforce_broker_submission_gate(
+            broker=self,
+            symbol=symbol,
+            side=side,
+            execution_path=execution_path or "capital_deployment",
+            client_order_id=client_order_id,
+            source="broker_alpaca.submit_order_notional",
+            force_exit=force_exit_override,
+            gate_extra=execution_gate_extra,
+        )
         payload: Dict[str, Any] = {
             "symbol": symbol.upper().strip(),
             "notional": round(float(abs(notional)), 2),

@@ -1678,6 +1678,26 @@ def main() -> None:
                 )
             die("[MASTER_GATE] Execution blocked.", 2)
 
+        try:
+            from services.triton_execution_gate import (
+                ExecutionGateBlocked,
+                enforce_pipeline_gate,
+            )
+
+            enforce_pipeline_gate(
+                broker=broker,
+                mode=mode,
+                execution_path="broker_submission",
+                source="place_live_orders",
+            )
+        except ExecutionGateBlocked as eg:
+            print(f"[EXEC_GATE_BLOCK] {eg}")
+            if eg.evaluation:
+                print(
+                    f"  decision={eg.evaluation.get('decision')} path={eg.evaluation.get('path')}"
+                )
+            die("[EXEC_GATE] Execution blocked.", 2)
+
     # Merge planning rows from execute_trades (same run_id) before placement pipeline
     _rid = os.environ.get("TRITON_EXEC_TRADES_RUN_ID")
     _prior = read_drop_json()
@@ -2271,6 +2291,7 @@ def main() -> None:
                 limit_price=p.limit_price,
                 client_order_id=p.client_order_id,
                 extended_hours=bool(args.extended_hours),
+                force_exit_override=bool(getattr(p, "force_exit_override", False)),
             )
 
             # CRITICAL: pull broker UUID into order_id for poller compatibility

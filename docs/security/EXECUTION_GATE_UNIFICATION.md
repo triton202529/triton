@@ -215,6 +215,48 @@ Defaults to `development` when unset.
 
 Optional status page: `pages/admin/execution-gates.jsx`
 
+## THP-003 Pipeline Integration (Enforced)
+
+The execution gate is actively enforced in the TRITON pipeline via `services/triton_execution_gate.py`, which delegates to `scripts/evaluate-execution-gate.mjs` (single source of truth in `lib/executionGate.js`).
+
+### Enforcement Points
+
+| Layer | File | Function | Gate Action |
+|-------|------|----------|-------------|
+| Entry planner | `services/execute_trades.py` | `maybe_execute_plan` | `capital_deployment` + paper/live |
+| Management planner | `services/manage_positions.py` | `maybe_execute_management` | position exit/rotation/emergency + paper/live |
+| Order placement | `services/place_live_orders.py` | `main` | `broker_submission` + paper/live |
+| CSV executor | `place_orders_from_csv.py` | `main`, `place_order` | pipeline + per-order broker gate |
+| Broker choke point | `services/broker_alpaca.py` | `submit_order`, `submit_order_notional` | position path + `broker_submission` |
+
+### Audit Trail
+
+Every gate evaluation appends to `data/results/execution_gate_audit.csv` with:
+
+- `execution_path`, `decision`, `allowed`, `reason`, `environment`
+- `operator_source`, `broker_mode`, `symbols`, `execution_identifier`, `timestamp`
+
+### Authorization Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `TRITON_ENABLE_PAPER_EXECUTION` | Required for paper execution authorization |
+| `TRITON_ENABLE_LIVE_EXECUTION` | Explicit live execution authorization |
+| `TRITON_LIVE_GOVERNANCE_APPROVED` | Governance approval for live capital deployment |
+| `TRITON_DISABLE_EXECUTION_GATE` | Emergency bypass (audit only; not for production) |
+
+### Python Interface
+
+```python
+from services.triton_execution_gate import (
+    evaluate_execution_gate,
+    assert_execution_allowed,
+    enforce_broker_submission_gate,
+    enforce_pipeline_gate,
+    ExecutionGateBlocked,
+)
+```
+
 ## Validation
 
 ```bash

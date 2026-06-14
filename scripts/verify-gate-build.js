@@ -1,7 +1,10 @@
 /**
  * verify-gate-build.js
- * THP-002 build verification — ensures TRITON execution gate exports and rules work.
+ * THP-002/THP-003 build verification — ensures TRITON execution gate exports, rules, and CLI bridge work.
  */
+
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   evaluateExecutionGate,
@@ -118,6 +121,18 @@ assert('explainExecutionDecision returns string', typeof explanation === 'string
 
 const pathStatus = getExecutionPathStatus(EXECUTION_PATHS.SIGNAL_GENERATION);
 assert('getExecutionPathStatus returns path metadata', pathStatus.path === EXECUTION_PATHS.SIGNAL_GENERATION);
+
+const cliScript = fileURLToPath(new URL('evaluate-execution-gate.mjs', import.meta.url));
+const cliPayload = JSON.stringify({
+  path: EXECUTION_PATHS.PAPER_EXECUTION,
+  context: { paperMode: true, lifecycleApproved: true, riskConstraintsSatisfied: true },
+});
+const cli = spawnSync('node', [cliScript, cliPayload], { encoding: 'utf8' });
+assert('THP-003 CLI bridge runs', cli.status === 0, cli.stderr || cli.stdout);
+if (cli.status === 0) {
+  const cliResult = JSON.parse(cli.stdout);
+  assert('THP-003 CLI returns evaluation', Boolean(cliResult.evaluation?.path));
+}
 
 const failed = checks.filter((c) => !c.ok);
 

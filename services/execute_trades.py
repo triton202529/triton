@@ -3941,6 +3941,39 @@ def maybe_execute_plan(
         except Exception as e:
             return 1, 0, [str(e)]
 
+    if cfg.get("require_execution_gate_for_execute", True):
+        try:
+            from services.triton_execution_gate import (
+                ExecutionGateBlocked,
+                enforce_pipeline_gate,
+            )
+
+            enforce_pipeline_gate(
+                broker=broker,
+                mode=mode,
+                execution_path="capital_deployment",
+                source="execute_trades",
+                symbols=[p.symbol for p in planned],
+            )
+        except ExecutionGateBlocked as eg:
+            reason = str(eg)
+            if drop_rows is not None:
+                drop_rows.append(
+                    make_row(
+                        run_mode=mode,
+                        symbol="",
+                        stance="",
+                        phase="placement_validation",
+                        status="blocked",
+                        reason_code=map_to_diagnostic_reason("EXEC_GATE_BLOCKED"),
+                        reason_detail=f"internal=EXEC_GATE_BLOCKED; {reason}",
+                        source="execute_trades",
+                        session=sess,
+                    )
+                )
+                _emit_execution_drop_payload(drop_rows, mode, blocked=True, extra=plan_extra)
+            return 2, 0, [reason]
+
     eligible, guard_failures, has_hard = _validate_guard_orders(
         planned, broker, cfg, verbose=verbose
     )
