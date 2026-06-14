@@ -367,3 +367,47 @@ Broker Safety, Governance Integrity, Risk Protection, Environment Isolation, Aut
 ```bash
 python -m services.execution_gate_resilience_certification
 ```
+
+## THP-007 Continuous Monitoring, Health Scoring & Degradation Detection
+
+Read-only institutional supervision — monitors gate health during real operation without
+modifying authorization logic or trading behavior.
+
+| Module | Purpose |
+|--------|---------|
+| `services/execution_gate_health_monitor.py` | Continuous 0–100 health score across 10 components |
+| `services/execution_gate_anomaly_detector.py` | Execution, governance, and operational anomaly detection |
+| `services/execution_gate_degradation_manager.py` | Autonomous MONITOR/WARNING/RESTRICT/LOCKDOWN classification |
+| `dashboard/execution_gate_health_dashboard.py` | Streamlit health supervision UI |
+
+### Artifacts
+
+- `execution_gate_health_report.json`
+- `execution_gate_health_history.csv`
+- `execution_gate_anomalies.json`
+- `execution_gate_degradation_events.json`
+- `execution_gate_operational_status.json`
+
+### Health Classifications
+
+| Score | Level |
+|-------|-------|
+| 95–100 | GREEN — Institutional Grade |
+| 85–94 | YELLOW — Warning |
+| 70–84 | ORANGE — Degraded |
+| &lt;70 | RED — Critical |
+
+### Degradation States
+
+| State | Behavior |
+|-------|----------|
+| MONITOR | Normal supervision cadence |
+| WARNING | Enhanced monitoring; stale evidence alerts |
+| RESTRICT | New capital deployment restricted; drift or missing artifacts |
+| LOCKDOWN | Capital deployment blocked; emergency risk actions preserved |
+
+### Run Supervision
+
+```bash
+python -m services.execution_gate_degradation_manager
+```

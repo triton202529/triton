@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-06-14T20:30:33.531450+00:00",
+  "framework": "THP-007",
+  "operational_state": "MONITOR",
+  "health_score": 100.0,
+  "health_classification": "GREEN",
+  "certification_level": "INSTITUTIONAL_GRADE",
+  "resilience_score": 100.0,
+  "gate_available": true,
+  "last_successful_validation": "2026-06-14T20:22:19.744662+00:00",
+  "anomaly_count": 0,
+  "drift_count": 0,
+  "paper_live_boundary_intact": true,
+  "restrictions": {
+    "capital_deployment_blocked": false,
+    "emergency_risk_actions_enabled": true,
+    "governance_escalation_required": false
+  },
+  "active_anomalies": []
+}

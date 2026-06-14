@@ -1,0 +1,119 @@
+{
+  "generated_at": "2026-06-14T20:30:33.516915+00:00",
+  "framework": "THP-007",
+  "health_score": 100.0,
+  "health_classification": "GREEN",
+  "gate_available": true,
+  "gate_probe": {
+    "available": true,
+    "decision": "ALLOW",
+    "allowed": true,
+    "reason": "Execution path \"signal_generation\" permitted."
+  },
+  "components": [
+    {
+      "component": "authorization_reliability",
+      "score": 100.0,
+      "weight": 0.12,
+      "weighted_score": 12.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "decision_consistency",
+      "score": 100.0,
+      "weight": 0.1,
+      "weighted_score": 10.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "failure_rate",
+      "score": 100.0,
+      "weight": 0.1,
+      "weighted_score": 10.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "replay_consistency",
+      "score": 100.0,
+      "weight": 0.1,
+      "weighted_score": 10.0,
+      "notes": "Replay 1/1 consistent"
+    },
+    {
+      "component": "drift_status",
+      "score": 100.0,
+      "weight": 0.1,
+      "weighted_score": 10.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "governance_evidence_freshness",
+      "score": 100.0,
+      "weight": 0.12,
+      "weighted_score": 12.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "audit_integrity",
+      "score": 100.0,
+      "weight": 0.1,
+      "weighted_score": 10.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "paper_live_isolation",
+      "score": 100.0,
+      "weight": 0.12,
+      "weighted_score": 12.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "certification_status",
+      "score": 100.0,
+      "weight": 0.08,
+      "weighted_score": 8.0,
+      "notes": "Nominal"
+    },
+    {
+      "component": "environment_integrity",
+      "score": 100.0,
+      "weight": 0.06,
+      "weighted_score": 6.0,
+      "notes": "Nominal"
+    }
+  ],
+  "decision_analytics": {
+    "recent_allow_count": 5,
+    "recent_block_count": 0,
+    "recent_total": 5,
+    "most_active_paths": [
+      [
+        "position_entry",
+        2
+      ],
+      [
+        "broker_submission",
+        2
+      ],
+      [
+        "paper_execution",
+        1
+      ]
+    ]
+  },
+  "governance_health": {
+    "decision_count": 1,
+    "evidence_count": 1,
+    "evidence_age_hours": 0.8319068519444444,
+    "drift_count": 0,
+    "certification_level": "INSTITUTIONAL_GRADE",
+    "certification_age_days": 0.005714270891203704,
+    "resilience_score": 100.0
+  },
+  "snapshot_summary": {
+    "duplicate_decision_ids": 0,
+    "decisions_missing_evidence": 0,
+    "unknown_paths": [],
+    "paper_live_boundary_intact": true
+  }
+}
