@@ -1,0 +1,17 @@
+{
+  "name": "tropicash",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tropicash execution gate and money path protection (THP-001)",
+  "scripts": {
+    "lint": "eslint lib pages --ext .js,.jsx",
+    "build": "node scripts/verify-gate-build.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "eslint": "^9.28.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.2.0"
+  }
+}
