@@ -216,24 +216,50 @@ def _invoke_node_gate(
     return result
 
 
-def evaluate_execution_gate(path: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    result = _invoke_node_gate(path, context or {}, assert_allowed=False)
+def evaluate_execution_gate(
+    path: str,
+    context: Optional[Dict[str, Any]] = None,
+    *,
+    record_evidence: bool = True,
+    source: str = "evaluate_execution_gate",
+    broker_mode: str = "",
+    symbols: Optional[Sequence[str]] = None,
+    execution_identifier: Optional[str] = None,
+    side: str = "",
+    quantity: Optional[Any] = None,
+    capital_exposure: Optional[Any] = None,
+    operator_identity: Optional[str] = None,
+    action_requested: Optional[str] = None,
+) -> Dict[str, Any]:
+    ctx = context or {}
+    result = _invoke_node_gate(path, ctx, assert_allowed=False)
     evaluation = result.get("evaluation") or {}
+    if record_evidence:
+        _emit_gate_evidence(
+            evaluation,
+            source=source,
+            broker_mode=broker_mode,
+            symbols=symbols,
+            execution_identifier=execution_identifier,
+            context=ctx,
+            side=side,
+            quantity=quantity,
+            capital_exposure=capital_exposure,
+            operator_identity=operator_identity,
+            action_requested=action_requested,
+        )
     return evaluation
 
 
-def assert_execution_allowed(path: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    result = _invoke_node_gate(path, context or {}, assert_allowed=True)
-    if not result.get("ok"):
-        evaluation = result.get("evaluation") or {
-            "allowed": False,
-            "decision": "BLOCK",
-            "reason": result.get("error", "Execution gate blocked"),
-            "path": path,
-            "timestamp": _utc_now_iso(),
-        }
+def assert_execution_allowed(
+    path: str,
+    context: Optional[Dict[str, Any]] = None,
+    **record_kw: Any,
+) -> Dict[str, Any]:
+    evaluation = evaluate_execution_gate(path, context, **record_kw)
+    if not evaluation.get("allowed"):
         raise ExecutionGateBlocked(evaluation)
-    return result.get("evaluation") or {}
+    return evaluation
 
 
 def get_execution_path_status(path: str) -> Dict[str, Any]:
@@ -293,6 +319,48 @@ def append_execution_gate_audit(
         writer.writerow(row)
 
 
+def _emit_gate_evidence(
+    evaluation: Dict[str, Any],
+    *,
+    source: str,
+    broker_mode: str = "",
+    symbols: Optional[Sequence[str]] = None,
+    execution_identifier: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None,
+    side: str = "",
+    quantity: Optional[Any] = None,
+    capital_exposure: Optional[Any] = None,
+    operator_identity: Optional[str] = None,
+    action_requested: Optional[str] = None,
+) -> None:
+    """Write operational audit row and institutional governance evidence (THP-004)."""
+    append_execution_gate_audit(
+        evaluation=evaluation,
+        source=source,
+        broker_mode=broker_mode,
+        symbols=symbols,
+        execution_identifier=execution_identifier,
+    )
+    try:
+        from services.execution_gate_evidence_registry import record_execution_gate_decision
+
+        record_execution_gate_decision(
+            evaluation=evaluation,
+            source=source,
+            broker_mode=broker_mode,
+            symbols=symbols,
+            execution_identifier=execution_identifier,
+            context=context,
+            side=side,
+            quantity=quantity,
+            capital_exposure=capital_exposure,
+            operator_identity=operator_identity,
+            action_requested=action_requested,
+        )
+    except Exception:
+        pass
+
+
 def _audit_and_block(
     evaluation: Dict[str, Any],
     *,
@@ -301,8 +369,8 @@ def _audit_and_block(
     symbols: Optional[Sequence[str]] = None,
     execution_identifier: Optional[str] = None,
 ) -> None:
-    append_execution_gate_audit(
-        evaluation=evaluation,
+    _emit_gate_evidence(
+        evaluation,
         source=source,
         broker_mode=broker_mode,
         symbols=symbols,
@@ -369,23 +437,25 @@ def enforce_pipeline_gate(
         risk_constraints_satisfied=risk_constraints_satisfied,
         execution_guard_approved=execution_guard_approved,
     )
-    mode_eval = evaluate_execution_gate(pipeline_path, ctx)
-    append_execution_gate_audit(
-        evaluation=mode_eval,
-        source=source,
+    mode_eval = evaluate_execution_gate(
+        pipeline_path,
+        ctx,
+        source=f"{source}:mode",
         broker_mode=mode_l,
         symbols=symbols,
     )
-    _audit_and_block(mode_eval, source=f"{source}:mode", broker_mode=mode_l, symbols=symbols)
+    if not mode_eval.get("allowed"):
+        raise ExecutionGateBlocked(mode_eval)
 
-    stage_eval = evaluate_execution_gate(execution_path, ctx)
-    append_execution_gate_audit(
-        evaluation=stage_eval,
+    stage_eval = evaluate_execution_gate(
+        execution_path,
+        ctx,
         source=source,
         broker_mode=mode_l,
         symbols=symbols,
     )
-    _audit_and_block(stage_eval, source=source, broker_mode=mode_l, symbols=symbols)
+    if not stage_eval.get("allowed"):
+        raise ExecutionGateBlocked(stage_eval)
     return stage_eval
 
 
@@ -416,38 +486,28 @@ def enforce_broker_submission_gate(
         ctx["riskEmergencyTriggered"] = True
         ctx["emergencyAction"] = ctx.get("emergencyAction") or "FORCE_EXIT"
 
-    if position_path == EXECUTION_PATHS["RISK_EMERGENCY_ACTION"]:
-        pos_eval = evaluate_execution_gate(position_path, ctx)
-    else:
-        pos_eval = evaluate_execution_gate(position_path, ctx)
-    append_execution_gate_audit(
-        evaluation=pos_eval,
+    pos_eval = evaluate_execution_gate(
+        position_path,
+        ctx,
         source=f"{source}:position",
         broker_mode=mode,
         symbols=[symbol],
         execution_identifier=client_order_id,
+        side=side,
     )
-    _audit_and_block(
-        pos_eval,
-        source=f"{source}:position",
-        broker_mode=mode,
-        symbols=[symbol],
-        execution_identifier=client_order_id,
-    )
+    if not pos_eval.get("allowed"):
+        raise ExecutionGateBlocked(pos_eval)
 
-    broker_eval = evaluate_execution_gate(EXECUTION_PATHS["BROKER_SUBMISSION"], ctx)
-    append_execution_gate_audit(
-        evaluation=broker_eval,
+    broker_eval = evaluate_execution_gate(
+        EXECUTION_PATHS["BROKER_SUBMISSION"],
+        ctx,
         source=f"{source}:broker",
         broker_mode=mode,
         symbols=[symbol],
         execution_identifier=client_order_id,
+        side=side,
+        action_requested="BROKER_SUBMIT",
     )
-    _audit_and_block(
-        broker_eval,
-        source=f"{source}:broker",
-        broker_mode=mode,
-        symbols=[symbol],
-        execution_identifier=client_order_id,
-    )
+    if not broker_eval.get("allowed"):
+        raise ExecutionGateBlocked(broker_eval)
     return broker_eval

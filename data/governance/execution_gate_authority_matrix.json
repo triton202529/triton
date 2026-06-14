@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-06-14T19:40:38.634443+00:00",
+  "framework": "THP-004",
+  "decision_types": [
+    "ALLOW",
+    "BLOCK",
+    "REVIEW_REQUIRED",
+    "SANDBOX_ONLY",
+    "DISABLED"
+  ],
+  "authority_types": [
+    "automatic_approval",
+    "governance_approval",
+    "operator_override",
+    "risk_emergency_action",
+    "system_rejection",
+    "review_required",
+    "disabled",
+    "sandbox_only"
+  ],
+  "authorization_chain_steps": [
+    "signal",
+    "lifecycle",
+    "allocation",
+    "risk_protection",
+    "execution_gate",
+    "broker_authorization",
+    "execution_outcome"
+  ],
+  "statistics": {
+    "total_decisions": 1,
+    "approved": 1,
+    "blocked": 0,
+    "by_decision": {
+      "ALLOW": 1
+    },
+    "by_authority": {
+      "automatic_approval": 1
+    },
+    "by_path": {
+      "paper_execution": 1
+    },
+    "by_service": {
+      "thp004_validation": 1
+    },
+    "top_block_reasons": {}
+  }
+}

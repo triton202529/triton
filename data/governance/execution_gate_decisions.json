@@ -1,0 +1,69 @@
+{
+  "records": [
+    {
+      "decision_id": "egd-8ba958c222004319",
+      "timestamp": "2026-06-14T19:40:38.593Z",
+      "execution_identifier": "",
+      "execution_path": "paper_execution",
+      "symbol(s)": "",
+      "action_requested": "PAPER_EXECUTE",
+      "quantity": "",
+      "capital_exposure": "",
+      "environment": "development",
+      "paper_or_live": "paper",
+      "requesting_service": "thp004_validation",
+      "operator_identity": "",
+      "execution_gate_decision": "ALLOW",
+      "decision_reason": "Paper execution permitted with environment authorization satisfied.",
+      "risk_state": "Bull",
+      "lifecycle_state": "unknown",
+      "allocation_state": "unknown",
+      "governance_status": "not_authorized",
+      "authorization_chain": [
+        {
+          "step": "signal",
+          "status": "observed",
+          "detail": "signal_generation upstream"
+        },
+        {
+          "step": "lifecycle",
+          "status": "approved",
+          "detail": "lifecycle authorization"
+        },
+        {
+          "step": "allocation",
+          "status": "approved",
+          "detail": "portfolio allocation"
+        },
+        {
+          "step": "risk_protection",
+          "status": "satisfied",
+          "detail": "risk validation"
+        },
+        {
+          "step": "execution_gate",
+          "status": "allow",
+          "detail": "Paper execution permitted with environment authorization satisfied."
+        },
+        {
+          "step": "broker_authorization",
+          "status": "pending",
+          "detail": "broker connectivity and guard"
+        },
+        {
+          "step": "execution_outcome",
+          "status": "authorized",
+          "detail": "final execution disposition"
+        }
+      ],
+      "evidence_links": [
+        "decision:egd-8ba958c222004319",
+        "audit:C:/Users/akimw/triton/data/results/execution_gate_audit.csv"
+      ],
+      "authority_classification": "automatic_approval",
+      "allowed": true
+    }
+  ],
+  "generated_at": "2026-06-14T19:40:38.612781+00:00",
+  "record_count": 1
+}

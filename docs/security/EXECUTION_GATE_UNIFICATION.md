@@ -274,3 +274,33 @@ npm run build
 - Governance system changes
 - Database schema changes
 - Production environment configuration changes
+
+## THP-004 Governance Evidence & Decision Registry
+
+Every `evaluate_execution_gate()` and `assert_execution_allowed()` call produces:
+
+1. Operational row in `data/results/execution_gate_audit.csv` (preserved)
+2. Institutional decision in `data/governance/execution_gate_decisions.json`
+3. Linked evidence in `data/governance/execution_gate_evidence.json`
+4. CSV mirrors and `execution_gate_authority_matrix.json`
+
+### Decision Record Fields
+
+`decision_id`, `timestamp`, `execution_identifier`, `execution_path`, `symbol(s)`,
+`action_requested`, `quantity`, `capital_exposure`, `environment`, `paper_or_live`,
+`requesting_service`, `operator_identity`, `execution_gate_decision`, `decision_reason`,
+`risk_state`, `lifecycle_state`, `allocation_state`, `governance_status`,
+`authorization_chain`, `evidence_links`, `authority_classification`, `allowed`
+
+### Authorization Chain
+
+Signal → Lifecycle → Allocation → Risk Protection → Execution Gate →
+Broker Authorization → Execution Outcome
+
+### Dashboard
+
+`dashboard/execution_gate_governance_dashboard.py` — read-only Streamlit governance view.
+
+### Registry Module
+
+`services/execution_gate_evidence_registry.py` — deduplicated decision and evidence persistence.

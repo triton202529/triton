@@ -1,0 +1,23 @@
+{
+  "records": [
+    {
+      "evidence_id": "ege-8ba958c222004319",
+      "decision_id": "egd-8ba958c222004319",
+      "category": "EXECUTION_GATE",
+      "severity": "INFO",
+      "title": "Execution gate ALLOW \u2014 paper_execution",
+      "description": "Paper execution permitted with environment authorization satisfied.",
+      "created_at": "2026-06-14T19:40:38.593Z",
+      "source": "thp004_validation",
+      "status": "VERIFIED",
+      "linked_audit_path": "C:/Users/akimw/triton/data/results/execution_gate_audit.csv",
+      "execution_path": "paper_execution",
+      "decision": "ALLOW",
+      "allowed": true,
+      "framework": "THP-004",
+      "tags": "automatic_approval,paper,paper_execution"
+    }
+  ],
+  "generated_at": "2026-06-14T19:40:38.615223+00:00",
+  "record_count": 1
+}
