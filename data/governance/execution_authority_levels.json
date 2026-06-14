@@ -1,0 +1,91 @@
+{
+  "generated_at": "2026-06-14T00:00:00+00:00",
+  "framework": "THP-008",
+  "levels": [
+    {
+      "level": 0,
+      "name": "FULL_AUTOMATION",
+      "description": "Execution Gate may authorize automatically for routine approved actions.",
+      "examples": [
+        "Normal paper execution",
+        "Approved lifecycle actions",
+        "Routine position management",
+        "Risk-approved portfolio adjustments"
+      ],
+      "automated_paths": [
+        "signal_generation",
+        "lifecycle_authorization",
+        "portfolio_allocation",
+        "position_trim",
+        "position_exit",
+        "paper_execution"
+      ]
+    },
+    {
+      "level": 1,
+      "name": "OPERATOR_REVIEW_REQUIRED",
+      "description": "Execution pauses pending operator governance review.",
+      "triggers": [
+        "unusual_capital_exposure",
+        "new_execution_path",
+        "elevated_risk_environment",
+        "increased_anomaly_rate",
+        "portfolio_concentration_breach"
+      ],
+      "required_fields": ["operator_identity", "review_rationale"]
+    },
+    {
+      "level": 2,
+      "name": "GOVERNANCE_COUNCIL_APPROVAL",
+      "description": "Named institutional authority must approve before capital deployment.",
+      "triggers": [
+        "live_capital_deployment",
+        "production_authorization_change",
+        "new_broker_environment",
+        "major_strategy_change",
+        "safeguard_override"
+      ],
+      "required_fields": [
+        "approving_authority",
+        "approval_timestamp",
+        "approval_rationale",
+        "evidence_links"
+      ],
+      "mandatory_paths": [
+        "live_execution",
+        "capital_deployment",
+        "governance_override",
+        "manual_operator_override",
+        "forced_rotation"
+      ]
+    },
+    {
+      "level": 3,
+      "name": "EMERGENCY_AUTHORITY",
+      "description": "Emergency risk actions remain available during lockdown.",
+      "triggers": [
+        "risk_lockdown",
+        "market_disruption",
+        "broker_failure",
+        "system_integrity_compromise"
+      ],
+      "emergency_actions": [
+        "FORCE_EXIT",
+        "FORCE_TRIM",
+        "RISK_LOCKDOWN"
+      ],
+      "emergency_paths": [
+        "risk_emergency_action",
+        "position_exit"
+      ]
+    }
+  ],
+  "thresholds": {
+    "capital_exposure_review_usd": 25000,
+    "capital_exposure_council_usd": 100000,
+    "concentration_review_pct": 35,
+    "anomaly_rate_review": 3,
+    "health_yellow_min": 85,
+    "approval_expiry_hours": 24
+  }
+}

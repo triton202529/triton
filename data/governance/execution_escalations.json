@@ -1,0 +1,98 @@
+{
+  "generated_at": "2026-06-14T21:35:35.111453+00:00",
+  "framework": "THP-008",
+  "summary": {
+    "total": 6,
+    "open": 6,
+    "resolved": 0,
+    "by_severity": {
+      "HIGH": 6
+    }
+  },
+  "records": [
+    {
+      "escalation_id": "eg-esc-8153e30d54ff",
+      "timestamp": "2026-06-14T21:35:26.353653+00:00",
+      "severity": "HIGH",
+      "triggering_event": "mandatory_council_path",
+      "execution_path": "live_execution",
+      "execution_identifier": "thp008-live",
+      "required_authority": "GOVERNANCE_COUNCIL_APPROVAL",
+      "authority_level": 2,
+      "recommended_action": "Route to Governance Council for institutional approval before execution.",
+      "resolution_status": "OPEN",
+      "operational_state": "MONITOR",
+      "health_classification": "GREEN"
+    },
+    {
+      "escalation_id": "eg-esc-fdb70f4df35f",
+      "timestamp": "2026-06-14T21:35:26.353695+00:00",
+      "severity": "HIGH",
+      "triggering_event": "live_capital_deployment",
+      "execution_path": "live_execution",
+      "execution_identifier": "thp008-live",
+      "required_authority": "GOVERNANCE_COUNCIL_APPROVAL",
+      "authority_level": 2,
+      "recommended_action": "Route to Governance Council for institutional approval before execution.",
+      "resolution_status": "OPEN",
+      "operational_state": "MONITOR",
+      "health_classification": "GREEN"
+    },
+    {
+      "escalation_id": "eg-esc-dcb4f8925006",
+      "timestamp": "2026-06-14T21:35:26.353705+00:00",
+      "severity": "HIGH",
+      "triggering_event": "new_execution_path",
+      "execution_path": "live_execution",
+      "execution_identifier": "thp008-live",
+      "required_authority": "GOVERNANCE_COUNCIL_APPROVAL",
+      "authority_level": 2,
+      "recommended_action": "Route to Governance Council for institutional approval before execution.",
+      "resolution_status": "OPEN",
+      "operational_state": "MONITOR",
+      "health_classification": "GREEN"
+    },
+    {
+      "escalation_id": "eg-esc-e54d55e903f6",
+      "timestamp": "2026-06-14T21:35:35.102090+00:00",
+      "severity": "HIGH",
+      "triggering_event": "mandatory_council_path",
+      "execution_path": "capital_deployment",
+      "execution_identifier": "thp008-cap",
+      "required_authority": "GOVERNANCE_COUNCIL_APPROVAL",
+      "authority_level": 2,
+      "recommended_action": "Route to Governance Council for institutional approval before execution.",
+      "resolution_status": "OPEN",
+      "operational_state": "MONITOR",
+      "health_classification": "GREEN"
+    },
+    {
+      "escalation_id": "eg-esc-3086f3b6a4c2",
+      "timestamp": "2026-06-14T21:35:35.102115+00:00",
+      "severity": "HIGH",
+      "triggering_event": "unusual_capital_exposure",
+      "execution_path": "capital_deployment",
+      "execution_identifier": "thp008-cap",
+      "required_authority": "GOVERNANCE_COUNCIL_APPROVAL",
+      "authority_level": 2,
+      "recommended_action": "Route to Governance Council for institutional approval before execution.",
+      "resolution_status": "OPEN",
+      "operational_state": "MONITOR",
+      "health_classification": "GREEN"
+    },
+    {
+      "escalation_id": "eg-esc-82aea86ce2c4",
+      "timestamp": "2026-06-14T21:35:35.102123+00:00",
+      "severity": "HIGH",
+      "triggering_event": "new_execution_path",
+      "execution_path": "capital_deployment",
+      "execution_identifier": "thp008-cap",
+      "required_authority": "GOVERNANCE_COUNCIL_APPROVAL",
+      "authority_level": 2,
+      "recommended_action": "Route to Governance Council for institutional approval before execution.",
+      "resolution_status": "OPEN",
+      "operational_state": "MONITOR",
+      "health_classification": "GREEN"
+    }
+  ]
+}

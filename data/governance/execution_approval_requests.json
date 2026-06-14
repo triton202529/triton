@@ -1,0 +1,154 @@
+{
+  "generated_at": "2026-06-14T21:35:35.086829+00:00",
+  "framework": "THP-008",
+  "summary": {
+    "total": 2,
+    "pending": 2,
+    "approved": 0,
+    "rejected": 0,
+    "expired": 0
+  },
+  "records": [
+    {
+      "approval_id": "eg-apr-7cd064b9f7a1",
+      "timestamp": "2026-06-14T21:35:26.345986+00:00",
+      "execution_identifier": "thp008-live",
+      "execution_path": "live_execution",
+      "requested_action": "live_execution",
+      "symbol(s)": "",
+      "estimated_capital_exposure": null,
+      "authority_level_required": 2,
+      "authority_level_name": "GOVERNANCE_COUNCIL_APPROVAL",
+      "triggering_condition": "mandatory_council_path; live_capital_deployment; new_execution_path",
+      "execution_gate_decision": "BLOCK",
+      "current_risk_state": {
+        "timestamp": "2026-06-14T21:27:05.866077+00:00",
+        "source": {
+          "portfolio_history": "enhanced_portfolio_history.csv",
+          "has_enhanced": true,
+          "has_regimes": true,
+          "has_guard_snapshot": true,
+          "has_risk_report": true,
+          "has_kill_switch": false
+        },
+        "regime": "Bull",
+        "mode": "NORMAL",
+        "reason": "All systems nominal",
+        "portfolio": {
+          "latest_equity": 100000.0,
+          "peak_equity": 100000.0,
+          "drawdown_pct": 0.0
+        },
+        "risk_report_headlines": {
+          "expected_volatility": null,
+          "risk_adjusted_return": null,
+          "diversification_ratio": null
+        },
+        "broker": {
+          "buying_power": null,
+          "reserve_pct": 0.2
+        },
+        "controls": {
+          "global_kill_switch": false,
+          "risk_on": true,
+          "allow_new_orders": true,
+          "max_gross_exposure": 1.0,
+          "max_position_weight": 0.1,
+          "block_reason": ""
+        },
+        "diagnostics": {
+          "errors": {
+            "portfolio_history": null,
+            "regimes": null,
+            "guard_snapshot": null,
+            "risk_report": null,
+            "kill_switch": null
+          }
+        }
+      },
+      "governance_context": {
+        "operational_state": "MONITOR",
+        "context_summary": {
+          "liveMode": true,
+          "governanceApproved": false
+        }
+      },
+      "evidence_links": [
+        "ege-8ba958c222004319"
+      ],
+      "approval_status": "PENDING",
+      "expires_at": "2026-06-15T21:35:26.345900+00:00"
+    },
+    {
+      "approval_id": "eg-apr-b03354dad528",
+      "timestamp": "2026-06-14T21:35:35.085707+00:00",
+      "execution_identifier": "thp008-cap",
+      "execution_path": "capital_deployment",
+      "requested_action": "capital_deployment",
+      "symbol(s)": "",
+      "estimated_capital_exposure": 50000,
+      "authority_level_required": 2,
+      "authority_level_name": "GOVERNANCE_COUNCIL_APPROVAL",
+      "triggering_condition": "mandatory_council_path; unusual_capital_exposure; new_execution_path",
+      "execution_gate_decision": "ALLOW",
+      "current_risk_state": {
+        "timestamp": "2026-06-14T21:27:05.866077+00:00",
+        "source": {
+          "portfolio_history": "enhanced_portfolio_history.csv",
+          "has_enhanced": true,
+          "has_regimes": true,
+          "has_guard_snapshot": true,
+          "has_risk_report": true,
+          "has_kill_switch": false
+        },
+        "regime": "Bull",
+        "mode": "NORMAL",
+        "reason": "All systems nominal",
+        "portfolio": {
+          "latest_equity": 100000.0,
+          "peak_equity": 100000.0,
+          "drawdown_pct": 0.0
+        },
+        "risk_report_headlines": {
+          "expected_volatility": null,
+          "risk_adjusted_return": null,
+          "diversification_ratio": null
+        },
+        "broker": {
+          "buying_power": null,
+          "reserve_pct": 0.2
+        },
+        "controls": {
+          "global_kill_switch": false,
+          "risk_on": true,
+          "allow_new_orders": true,
+          "max_gross_exposure": 1.0,
+          "max_position_weight": 0.1,
+          "block_reason": ""
+        },
+        "diagnostics": {
+          "errors": {
+            "portfolio_history": null,
+            "regimes": null,
+            "guard_snapshot": null,
+            "risk_report": null,
+            "kill_switch": null
+          }
+        }
+      },
+      "governance_context": {
+        "operational_state": "MONITOR",
+        "context_summary": {
+          "paperMode": true,
+          "lifecycleApproved": true,
+          "riskConstraintsSatisfied": true
+        }
+      },
+      "evidence_links": [
+        "ege-8ba958c222004319"
+      ],
+      "approval_status": "PENDING",
+      "expires_at": "2026-06-15T21:35:35.085607+00:00"
+    }
+  ]
+}

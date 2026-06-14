@@ -1,0 +1,105 @@
+{
+  "generated_at": "2026-06-14T21:35:25.908697+00:00",
+  "framework": "THP-008",
+  "current_authority_mode": "NORMAL_AUTOMATION",
+  "operational_state": "MONITOR",
+  "health_score": 100.0,
+  "health_classification": "GREEN",
+  "certification_level": "INSTITUTIONAL_GRADE",
+  "resilience_score": 100.0,
+  "active_restrictions": {
+    "capital_deployment_blocked": false,
+    "emergency_risk_actions_enabled": true,
+    "governance_escalation_required": false
+  },
+  "paper_live_boundary_intact": true,
+  "authority_levels": [
+    {
+      "level": 0,
+      "name": "FULL_AUTOMATION",
+      "description": "Execution Gate may authorize automatically for routine approved actions.",
+      "examples": [
+        "Normal paper execution",
+        "Approved lifecycle actions",
+        "Routine position management",
+        "Risk-approved portfolio adjustments"
+      ],
+      "automated_paths": [
+        "signal_generation",
+        "lifecycle_authorization",
+        "portfolio_allocation",
+        "position_trim",
+        "position_exit",
+        "paper_execution"
+      ]
+    },
+    {
+      "level": 1,
+      "name": "OPERATOR_REVIEW_REQUIRED",
+      "description": "Execution pauses pending operator governance review.",
+      "triggers": [
+        "unusual_capital_exposure",
+        "new_execution_path",
+        "elevated_risk_environment",
+        "increased_anomaly_rate",
+        "portfolio_concentration_breach"
+      ],
+      "required_fields": [
+        "operator_identity",
+        "review_rationale"
+      ]
+    },
+    {
+      "level": 2,
+      "name": "GOVERNANCE_COUNCIL_APPROVAL",
+      "description": "Named institutional authority must approve before capital deployment.",
+      "triggers": [
+        "live_capital_deployment",
+        "production_authorization_change",
+        "new_broker_environment",
+        "major_strategy_change",
+        "safeguard_override"
+      ],
+      "required_fields": [
+        "approving_authority",
+        "approval_timestamp",
+        "approval_rationale",
+        "evidence_links"
+      ],
+      "mandatory_paths": [
+        "live_execution",
+        "capital_deployment",
+        "governance_override",
+        "manual_operator_override",
+        "forced_rotation"
+      ]
+    },
+    {
+      "level": 3,
+      "name": "EMERGENCY_AUTHORITY",
+      "description": "Emergency risk actions remain available during lockdown.",
+      "triggers": [
+        "risk_lockdown",
+        "market_disruption",
+        "broker_failure",
+        "system_integrity_compromise"
+      ],
+      "emergency_actions": [
+        "FORCE_EXIT",
+        "FORCE_TRIM",
+        "RISK_LOCKDOWN"
+      ],
+      "emergency_paths": [
+        "risk_emergency_action",
+        "position_exit"
+      ]
+    }
+  ],
+  "analytics": {
+    "total_decisions": 1,
+    "automation_rate_pct": 100.0,
+    "human_intervention_rate_pct": 0.0,
+    "review_required_count": 0
+  },
+  "council_ready": true
+}

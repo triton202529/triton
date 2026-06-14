@@ -411,3 +411,43 @@ modifying authorization logic or trading behavior.
 ```bash
 python -m services.execution_gate_degradation_manager
 ```
+
+## THP-008 Governance Council, Escalation & Human Approval
+
+Investment committee-grade human governance layer — wraps execution gate evaluation with
+authority levels, approval workflows, and escalation without modifying core gate logic.
+
+| Module | Purpose |
+|--------|---------|
+| `services/execution_governance_council.py` | Authority levels 0–3 and council status |
+| `services/execution_escalation_engine.py` | Automatic escalation on execution/operational/risk conditions |
+| `services/execution_approval_workflow.py` | Approval requests and `evaluate_governed_execution()` wrapper |
+| `dashboard/execution_governance_council_dashboard.py` | Council UI with approval queue and escalation center |
+
+### Authority Levels
+
+| Level | Name | Authority |
+|-------|------|-----------|
+| 0 | FULL_AUTOMATION | Gate may authorize routine paper/lifecycle actions |
+| 1 | OPERATOR_REVIEW_REQUIRED | Pause for operator review |
+| 2 | GOVERNANCE_COUNCIL_APPROVAL | Named institutional approval required |
+| 3 | EMERGENCY_AUTHORITY | Emergency risk actions during lockdown |
+
+### Artifacts
+
+- `execution_authority_levels.json`
+- `execution_approval_requests.json`
+- `execution_approval_history.csv`
+- `execution_escalations.json`
+- `execution_governance_council_status.json`
+
+### Governed Evaluation
+
+```python
+from services.execution_approval_workflow import evaluate_governed_execution
+
+evaluation = evaluate_governed_execution(path, context, record_evidence=True)
+```
+
+Live deployment and high-risk actions downgrade ALLOW → REVIEW_REQUIRED until approved.
+LOCKDOWN blocks non-emergency capital deployment; emergency paths remain available.
