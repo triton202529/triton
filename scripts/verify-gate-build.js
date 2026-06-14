@@ -1,96 +1,123 @@
 /**
  * verify-gate-build.js
- * THP-001 build verification — ensures execution gate exports and rules work.
+ * THP-002 build verification — ensures TRITON execution gate exports and rules work.
  */
 
 import {
   evaluateExecutionGate,
-  assertMoneyPathAllowed,
-  getMoneyPathStatus,
-  explainGateDecision,
-  listAllMoneyPathStatuses,
-  MONEY_PATHS,
+  assertExecutionAllowed,
+  getExecutionPathStatus,
+  explainExecutionDecision,
+  listAllExecutionPathStatuses,
+  EXECUTION_PATHS,
 } from '../lib/executionGate.js';
 
-const REQUIRED_PATHS = Object.values(MONEY_PATHS);
+const REQUIRED_PATHS = Object.values(EXECUTION_PATHS);
 const checks = [];
 
 function assert(name, condition, detail = '') {
   checks.push({ name, ok: Boolean(condition), detail });
 }
 
-// Export surface
 assert('evaluateExecutionGate is function', typeof evaluateExecutionGate === 'function');
-assert('assertMoneyPathAllowed is function', typeof assertMoneyPathAllowed === 'function');
-assert('getMoneyPathStatus is function', typeof getMoneyPathStatus === 'function');
-assert('explainGateDecision is function', typeof explainGateDecision === 'function');
+assert('assertExecutionAllowed is function', typeof assertExecutionAllowed === 'function');
+assert('getExecutionPathStatus is function', typeof getExecutionPathStatus === 'function');
+assert('explainExecutionDecision is function', typeof explainExecutionDecision === 'function');
 
-// All paths classified
-const statuses = listAllMoneyPathStatuses();
-assert('all money paths registered', statuses.length === REQUIRED_PATHS.length);
+const statuses = listAllExecutionPathStatuses();
+assert('all execution paths registered', statuses.length === REQUIRED_PATHS.length);
 assert(
   'every path is known',
   statuses.every((s) => s.known),
 );
 
-// Production money movement blocked
-const prodSend = evaluateExecutionGate(MONEY_PATHS.WALLET_SEND, {
+const liveBlocked = evaluateExecutionGate(EXECUTION_PATHS.LIVE_EXECUTION, {
   environment: 'production',
-  kycVerified: true,
+  liveMode: true,
+  liveModeAuthorized: false,
+  governanceApproved: false,
 });
-assert('production send blocked', !prodSend.allowed && prodSend.decision === 'BLOCK');
+assert('live execution blocked by default', !liveBlocked.allowed && liveBlocked.decision === 'BLOCK');
 
-// Tap-to-pay disabled
-const tap = evaluateExecutionGate(MONEY_PATHS.TAP_TO_PAY, { environment: 'sandbox' });
-assert('tap-to-pay disabled', !tap.allowed && tap.decision === 'DISABLED');
-
-// Developer sandbox preserved
-const devApi = evaluateExecutionGate(MONEY_PATHS.DEVELOPER_WALLET_API, {
-  environment: 'sandbox',
-});
-assert('developer sandbox allowed', devApi.allowed && devApi.decision === 'SANDBOX_ONLY');
-
-// Developer production blocked
-const devProd = evaluateExecutionGate(MONEY_PATHS.DEVELOPER_WALLET_API, {
-  environment: 'production',
-});
-assert('developer production blocked', !devProd.allowed);
-
-// OAuth read allowed
-const oauthRead = evaluateExecutionGate(MONEY_PATHS.OAUTH_WALLET_ACCESS, {
-  oauthScope: 'wallet:read',
-});
-assert('oauth read allowed', oauthRead.allowed && oauthRead.decision === 'ALLOW');
-
-// OAuth mutation blocked
-const oauthMut = evaluateExecutionGate(MONEY_PATHS.OAUTH_WALLET_ACCESS, {
-  oauthMutationRequested: true,
-});
-assert('oauth mutation blocked', !oauthMut.allowed);
-
-// Withdrawal KYC enforcement
-const withdrawNoKyc = evaluateExecutionGate(MONEY_PATHS.WALLET_WITHDRAWAL, {
+const liveAuthorized = evaluateExecutionGate(EXECUTION_PATHS.LIVE_EXECUTION, {
   environment: 'development',
-  kycVerified: false,
+  liveModeAuthorized: true,
+  governanceApproved: true,
+  lifecycleApproved: true,
+  allocationApproved: true,
+  riskConstraintsSatisfied: true,
 });
-assert('withdrawal requires kyc', !withdrawNoKyc.allowed);
+assert('live execution review when authorized', !liveAuthorized.allowed && liveAuthorized.decision === 'REVIEW_REQUIRED');
 
-// assertMoneyPathAllowed throws when blocked
+const paperAllowed = evaluateExecutionGate(EXECUTION_PATHS.PAPER_EXECUTION, {
+  environment: 'development',
+  paperMode: true,
+  lifecycleApproved: true,
+  riskConstraintsSatisfied: true,
+});
+assert('paper execution allowed', paperAllowed.allowed && paperAllowed.decision === 'ALLOW');
+
+const paperLiveSeparation = evaluateExecutionGate(EXECUTION_PATHS.PAPER_EXECUTION, {
+  environment: 'development',
+  liveMode: true,
+  paperMode: false,
+});
+assert('paper/live separation enforced', !paperLiveSeparation.allowed);
+
+const brokerBlocked = evaluateExecutionGate(EXECUTION_PATHS.BROKER_SUBMISSION, {
+  environment: 'development',
+  lifecycleApproved: false,
+  brokerConnected: false,
+});
+assert('broker submission blocked without auth', !brokerBlocked.allowed);
+
+const brokerAllowed = evaluateExecutionGate(EXECUTION_PATHS.BROKER_SUBMISSION, {
+  environment: 'development',
+  lifecycleApproved: true,
+  executionAuthorized: true,
+  brokerConnected: true,
+  executionGuardApproved: true,
+  duplicateOrderClear: true,
+  riskConstraintsSatisfied: true,
+});
+assert('broker submission allowed with guards', brokerAllowed.allowed);
+
+const capitalBlocked = evaluateExecutionGate(EXECUTION_PATHS.CAPITAL_DEPLOYMENT, {
+  environment: 'development',
+  lifecycleApproved: false,
+  allocationApproved: false,
+});
+assert('capital deployment requires lifecycle and allocation', !capitalBlocked.allowed);
+
+const emergencyAllowed = evaluateExecutionGate(EXECUTION_PATHS.RISK_EMERGENCY_ACTION, {
+  riskEmergencyTriggered: true,
+  emergencyAction: 'FORCE_EXIT',
+});
+assert('emergency risk action allowed', emergencyAllowed.allowed && emergencyAllowed.decision === 'ALLOW');
+
+const emergencyBlocked = evaluateExecutionGate(EXECUTION_PATHS.RISK_EMERGENCY_ACTION, {
+  riskEmergencyTriggered: false,
+});
+assert('emergency blocked without trigger', !emergencyBlocked.allowed);
+
+const governanceReview = evaluateExecutionGate(EXECUTION_PATHS.GOVERNANCE_OVERRIDE, {
+  operatorAuthorized: false,
+});
+assert('governance override requires operator', !governanceReview.allowed && governanceReview.decision === 'REVIEW_REQUIRED');
+
 let threw = false;
 try {
-  assertMoneyPathAllowed(MONEY_PATHS.TAP_TO_PAY);
+  assertExecutionAllowed(EXECUTION_PATHS.LIVE_EXECUTION, { liveModeAuthorized: false });
 } catch {
   threw = true;
 }
-assert('assertMoneyPathAllowed throws on block', threw);
+assert('assertExecutionAllowed throws on block', threw);
 
-// explainGateDecision produces text
-const explanation = explainGateDecision(prodSend);
-assert('explainGateDecision returns string', typeof explanation === 'string' && explanation.length > 0);
+const explanation = explainExecutionDecision(liveBlocked);
+assert('explainExecutionDecision returns string', typeof explanation === 'string' && explanation.length > 0);
 
-// getMoneyPathStatus returns metadata
-const pathStatus = getMoneyPathStatus(MONEY_PATHS.WALLET_FUNDING);
-assert('getMoneyPathStatus returns path metadata', pathStatus.path === MONEY_PATHS.WALLET_FUNDING);
+const pathStatus = getExecutionPathStatus(EXECUTION_PATHS.SIGNAL_GENERATION);
+assert('getExecutionPathStatus returns path metadata', pathStatus.path === EXECUTION_PATHS.SIGNAL_GENERATION);
 
 const failed = checks.filter((c) => !c.ok);
 

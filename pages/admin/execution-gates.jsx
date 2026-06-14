@@ -1,28 +1,32 @@
 /**
  * pages/admin/execution-gates.jsx
- * Optional admin dashboard — read-only view of money path gate statuses.
+ * Optional admin dashboard — read-only view of TRITON execution path gate statuses.
  */
 
 import {
-  listAllMoneyPathStatuses,
+  listAllExecutionPathStatuses,
   evaluateExecutionGate,
-  explainGateDecision,
-  MONEY_PATHS,
+  explainExecutionDecision,
+  EXECUTION_PATHS,
 } from '../../lib/executionGate.js';
 
 /**
- * @param {{ environment?: string }} props
+ * @param {{ environment?: string, paperMode?: boolean }} props
  */
-export default function ExecutionGatesPage({ environment = 'development' }) {
-  const paths = listAllMoneyPathStatuses();
+export default function ExecutionGatesPage({ environment = 'development', paperMode = true }) {
+  const paths = listAllExecutionPathStatuses();
 
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 960 }}>
-      <h1>Execution Gates</h1>
+      <h1>TRITON Execution Gates</h1>
       <p>
-        THP-001 TRITON execution gate — environment:
+        THP-002 execution authorization — environment:
         {' '}
         <strong>{environment}</strong>
+        {' '}
+        | paper:
+        {' '}
+        <strong>{paperMode ? 'yes' : 'no'}</strong>
       </p>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '1.5rem' }}>
@@ -37,7 +41,7 @@ export default function ExecutionGatesPage({ environment = 'development' }) {
         </thead>
         <tbody>
           {paths.map((item) => {
-            const live = evaluateExecutionGate(item.path, { environment });
+            const live = evaluateExecutionGate(item.path, { environment, paperMode });
             return (
               <tr key={item.path}>
                 <td style={cell}>{item.path}</td>
@@ -52,9 +56,11 @@ export default function ExecutionGatesPage({ environment = 'development' }) {
       </table>
 
       <section style={{ marginTop: '2rem' }}>
-        <h2>Sample: Tap-to-Pay</h2>
+        <h2>Sample: Live Execution</h2>
         <pre style={pre}>
-          {explainGateDecision(evaluateExecutionGate(MONEY_PATHS.TAP_TO_PAY, { environment }))}
+          {explainExecutionDecision(
+            evaluateExecutionGate(EXECUTION_PATHS.LIVE_EXECUTION, { environment, liveMode: true }),
+          )}
         </pre>
       </section>
     </main>
