@@ -108,42 +108,22 @@ def place_bracket(
             )
             return ProtectResult(True, "Bracket submitted.", payload)
 
-        # Notional-based bracket
+        # Notional-based bracket (THP-H002 — gated broker API)
         n = float(notional)  # type: ignore[arg-type]
         if n <= 0:
             return ProtectResult(False, "Notional must be > 0.")
 
-        # Alpaca supports notional on parent order; still uses bracket legs for SL/TP.
-        # We'll call submit_order directly with "notional" by using broker._post (private),
-        # but since your broker does NOT expose a public notional+bracket helper,
-        # we build the exact payload and post to /v2/orders using broker._post via a safe wrapper.
-
-        # NOTE: We cannot access broker._post if you want strict encapsulation;
-        # if you prefer, I can add a public method to AlpacaBroker for this.
-        try:
-            post = getattr(broker, "_post")
-        except Exception:
-            return ProtectResult(
-                False, "Broker missing internal _post method for notional bracket."
-            )
-
-        bracket_payload = {
-            "symbol": symbol,
-            "notional": round(abs(n), 2),
-            "side": side,
-            "type": entry_type,
-            "time_in_force": tif,
-            "order_class": "bracket",
-            "take_profit": take_profit,
-            "stop_loss": stop_loss,
-            "extended_hours": False,
-        }
-        if entry_type == "limit":
-            bracket_payload["limit_price"] = _round_price(entry_limit_price)  # type: ignore[arg-type]
-        if client_order_id:
-            bracket_payload["client_order_id"] = client_order_id
-
-        resp = post("/v2/orders", bracket_payload)
+        resp = broker.submit_bracket_order_notional(
+            symbol=symbol,
+            notional=n,
+            side=side,
+            take_profit=take_profit,
+            stop_loss=stop_loss,
+            entry_type=entry_type,
+            entry_limit_price=_round_price(entry_limit_price) if entry_type == "limit" else None,
+            time_in_force=tif,
+            client_order_id=client_order_id,
+        )
         return ProtectResult(True, "Notional bracket submitted.", resp)
 
     except AlpacaError as e:

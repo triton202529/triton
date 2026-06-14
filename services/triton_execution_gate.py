@@ -470,7 +470,9 @@ def enforce_broker_submission_gate(
     force_exit: bool = False,
     gate_extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Final choke point before any broker HTTP submission."""
+    """Final choke point before any broker HTTP submission (THP-H002 governed)."""
+    from services.execution_approval_workflow import evaluate_governed_execution
+
     mode = getattr(broker, "mode", "paper")
     position_path = execution_path or map_side_to_execution_path(side, force_exit=force_exit)
     ctx = build_gate_context(
@@ -486,7 +488,7 @@ def enforce_broker_submission_gate(
         ctx["riskEmergencyTriggered"] = True
         ctx["emergencyAction"] = ctx.get("emergencyAction") or "FORCE_EXIT"
 
-    pos_eval = evaluate_execution_gate(
+    pos_eval = evaluate_governed_execution(
         position_path,
         ctx,
         source=f"{source}:position",
@@ -494,11 +496,13 @@ def enforce_broker_submission_gate(
         symbols=[symbol],
         execution_identifier=client_order_id,
         side=side,
+        action_requested=side.upper(),
+        record_requests=False,
     )
     if not pos_eval.get("allowed"):
         raise ExecutionGateBlocked(pos_eval)
 
-    broker_eval = evaluate_execution_gate(
+    broker_eval = evaluate_governed_execution(
         EXECUTION_PATHS["BROKER_SUBMISSION"],
         ctx,
         source=f"{source}:broker",
@@ -507,6 +511,7 @@ def enforce_broker_submission_gate(
         execution_identifier=client_order_id,
         side=side,
         action_requested="BROKER_SUBMIT",
+        record_requests=False,
     )
     if not broker_eval.get("allowed"):
         raise ExecutionGateBlocked(broker_eval)

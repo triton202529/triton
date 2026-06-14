@@ -502,3 +502,26 @@ Investigation-only institutional audit — no architecture or trading changes.
 ```bash
 python -m services.system_integration_audit
 ```
+
+## THP-H002 Broker Execution Gate Hardening
+
+Seals CRITICAL bypass in `place_bracket_market` and enforces governed authorization on all broker order paths.
+
+| Change | Purpose |
+|--------|---------|
+| `enforce_broker_submission_gate` → `evaluate_governed_execution` | Governance overlay on every broker submit |
+| `_submit_order_payload` + `_post` final check | No POST `/v2/orders` without auth context |
+| `place_bracket_market` → `submit_order` | Bracket orders use full gate chain |
+| `submit_bracket_order_notional` | Fixes `position_protector` notional bypass |
+| `services/broker_execution_audit.py` | Protection matrix and bypass inventory |
+
+### Artifacts
+
+- `broker_execution_protection_matrix.json` / `.csv`
+- `execution_bypass_report.json`
+
+### Run Audit
+
+```bash
+python -m services.broker_execution_audit
+```

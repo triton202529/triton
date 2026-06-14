@@ -12,6 +12,7 @@ print("[ENV CHECK] ALPACA_KEY_ID =", os.getenv("ALPACA_KEY_ID"))
 print("[ENV CHECK] APCA_API_KEY_ID =", os.getenv("APCA_API_KEY_ID"))
 
 import json
+import contextvars
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Union, Iterable
 from zoneinfo import ZoneInfo
@@ -25,6 +26,30 @@ ALPACA_DATA_BASE = "https://data.alpaca.markets"
 
 class AlpacaError(RuntimeError):
     pass
+
+
+class BrokerAuthorizationRequired(AlpacaError):
+    """Raised when POST /v2/orders is attempted without execution authorization."""
+
+
+_broker_order_authorized: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_broker_order_authorized", default=False
+)
+
+
+class _BrokerOrderAuthContext:
+    """Context manager marking authorized broker order submission (THP-H002)."""
+
+    def __enter__(self) -> "_BrokerOrderAuthContext":
+        self._token = _broker_order_authorized.set(True)
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        _broker_order_authorized.reset(self._token)
+
+
+def broker_order_auth_context() -> _BrokerOrderAuthContext:
+    return _BrokerOrderAuthContext()
 
 
 def _ts() -> str:
@@ -117,11 +142,21 @@ class AlpacaBroker:
         return r.json()
 
     def _post(self, path: str, payload: Dict[str, Any]) -> Any:
+        if path == "/v2/orders" and not _broker_order_authorized.get():
+            raise BrokerAuthorizationRequired(
+                "BROKER FINAL CHECK: POST /v2/orders blocked — execution authorization "
+                "evidence missing. All orders must pass enforce_broker_submission_gate."
+            )
         url = f"{self.base}{path}"
         r = self.session.post(url, data=json.dumps(payload), timeout=self.timeout)
         if r.status_code >= 300:
             raise AlpacaError(f"POST {path} failed {r.status_code}: {r.text}")
         return r.json()
+
+    def _submit_order_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Submit order payload after gate authorization (sets broker auth context)."""
+        with broker_order_auth_context():
+            return self._post("/v2/orders", payload)
 
     def _delete(self, path: str) -> Any:
         url = f"{self.base}{path}"
@@ -487,7 +522,7 @@ class AlpacaBroker:
             payload["take_profit"] = take_profit
         if stop_loss:
             payload["stop_loss"] = stop_loss
-        return self._post("/v2/orders", payload)
+        return self._submit_order_payload(payload)
 
     def submit_market_order(
         self,
@@ -569,7 +604,53 @@ class AlpacaBroker:
         }
         if client_order_id:
             payload["client_order_id"] = client_order_id
-        return self._post("/v2/orders", payload)
+        return self._submit_order_payload(payload)
+
+    def submit_bracket_order_notional(
+        self,
+        symbol: str,
+        notional: float,
+        side: str,
+        take_profit: Dict[str, Any],
+        stop_loss: Dict[str, Any],
+        *,
+        entry_type: str = "market",
+        entry_limit_price: Optional[float] = None,
+        time_in_force: str = "day",
+        client_order_id: Optional[str] = None,
+        execution_path: Optional[str] = None,
+        force_exit_override: bool = False,
+        execution_gate_extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Notional bracket order — gated like submit_order_notional (THP-H002)."""
+        from services.triton_execution_gate import enforce_broker_submission_gate
+
+        enforce_broker_submission_gate(
+            broker=self,
+            symbol=symbol,
+            side=side,
+            execution_path=execution_path or "capital_deployment",
+            client_order_id=client_order_id,
+            source="broker_alpaca.submit_bracket_order_notional",
+            force_exit=force_exit_override,
+            gate_extra=execution_gate_extra,
+        )
+        payload: Dict[str, Any] = {
+            "symbol": symbol.upper().strip(),
+            "notional": round(float(abs(notional)), 2),
+            "side": side.lower().strip(),
+            "type": entry_type.lower().strip(),
+            "time_in_force": time_in_force.lower().strip(),
+            "order_class": "bracket",
+            "take_profit": take_profit,
+            "stop_loss": stop_loss,
+            "extended_hours": False,
+        }
+        if entry_type.lower().strip() == "limit" and entry_limit_price is not None:
+            payload["limit_price"] = round(float(entry_limit_price), 4)
+        if client_order_id:
+            payload["client_order_id"] = client_order_id
+        return self._submit_order_payload(payload)
 
     # Aliases other modules use:
     def place_order_notional(
@@ -619,23 +700,28 @@ class AlpacaBroker:
         stop_loss_price: float,
         tif: str = "day",
         client_order_id: Optional[str] = None,
+        execution_path: Optional[str] = None,
+        force_exit_override: bool = False,
+        execution_gate_extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Market bracket (TP/SL) by quantity.
+        Market bracket (TP/SL) by quantity — gated via submit_order (THP-H002).
         """
-        payload: Dict[str, Any] = {
-            "symbol": symbol.upper().strip(),
-            "qty": qty,
-            "side": side.lower().strip(),
-            "type": "market",
-            "time_in_force": tif.lower().strip(),
-            "order_class": "bracket",
-            "take_profit": {"limit_price": round(float(take_profit_price), 4)},
-            "stop_loss": {"stop_price": round(float(stop_loss_price), 4)},
-        }
-        if client_order_id:
-            payload["client_order_id"] = client_order_id
-        return self._post("/v2/orders", payload)
+        return self.submit_order(
+            symbol=symbol,
+            qty=qty,
+            side=side,
+            order_type="market",
+            time_in_force=tif,
+            client_order_id=client_order_id,
+            order_class="bracket",
+            take_profit={"limit_price": round(float(take_profit_price), 4)},
+            stop_loss={"stop_price": round(float(stop_loss_price), 4)},
+            extended_hours=False,
+            execution_path=execution_path,
+            force_exit_override=force_exit_override,
+            execution_gate_extra=execution_gate_extra,
+        )
 
     def place_bracket(
         self,

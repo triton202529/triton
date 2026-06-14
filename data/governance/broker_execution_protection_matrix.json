@@ -1,0 +1,122 @@
+{
+  "generated_at": "2026-06-14T23:14:56.559128+00:00",
+  "framework": "THP-H002",
+  "summary": {
+    "total_paths_inspected": 12,
+    "protected_paths": 12,
+    "bypass_risks_in_broker": 0,
+    "external_bypass_risks": 8,
+    "broker_final_check_active": true,
+    "governed_gate_active": true
+  },
+  "records": [
+    {
+      "function_name": "submit_order",
+      "order_type": "generic_qty",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "enforce_broker_submission_gate \u2192 evaluate_governed_execution",
+      "broker_final_check": false,
+      "calling_services": "services/place_live_orders.py; services/manage_open_orders.py; services/reprice_open_orders.py; services/reprice_order_ladder.py; services/position_protector.py; pages/manual_order_desk.py",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "submit_order_notional",
+      "order_type": "notional_market",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "enforce_broker_submission_gate \u2192 evaluate_governed_execution",
+      "broker_final_check": false,
+      "calling_services": "pages_order_desk.py",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "submit_bracket_order_notional",
+      "order_type": "notional_bracket",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "enforce_broker_submission_gate \u2192 evaluate_governed_execution",
+      "broker_final_check": false,
+      "calling_services": "services/position_protector.py",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "place_bracket_market",
+      "order_type": "bracket_market_qty",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "submit_order (gated)",
+      "broker_final_check": false,
+      "calling_services": "pages_order_desk.py",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "place_bracket",
+      "order_type": "bracket_entry",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "submit_order (gated)",
+      "broker_final_check": false,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "submit_market_order",
+      "order_type": "market_qty",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "submit_order (gated)",
+      "broker_final_check": false,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "submit_limit_order",
+      "order_type": "limit_qty",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "submit_order (gated)",
+      "broker_final_check": false,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "place_order",
+      "order_type": "alias_qty",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "submit_order (gated)",
+      "broker_final_check": false,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "place_order_notional",
+      "order_type": "alias_notional",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "submit_order_notional (gated)",
+      "broker_final_check": false,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "cancel_order",
+      "order_type": "cancel",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "N/A \u2014 order cancellation (DELETE)",
+      "broker_final_check": false,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "cancel_all_orders",
+      "order_type": "cancel_all",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "N/A \u2014 order cancellation (DELETE)",
+      "broker_final_check": false,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    },
+    {
+      "function_name": "_post",
+      "order_type": "raw_http_post",
+      "protection_status": "EXECUTION_PROTECTED",
+      "gate_chain": "BROKER FINAL CHECK blocks /v2/orders without auth context",
+      "broker_final_check": true,
+      "calling_services": "",
+      "risk_severity": "NONE"
+    }
+  ]
+}

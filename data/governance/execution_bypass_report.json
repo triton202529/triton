@@ -1,0 +1,126 @@
+{
+  "generated_at": "2026-06-14T23:14:56.559363+00:00",
+  "framework": "THP-H002",
+  "summary": {
+    "total_bypass_risks": 17,
+    "broker_layer_clean": true,
+    "remaining_external_risks": 8,
+    "highest_severity": "HIGH"
+  },
+  "broker_bypass_risks": [
+    {
+      "component": "scripts/auto_execute_signals.py",
+      "severity": "HIGH",
+      "description": "Legacy direct Alpaca client"
+    },
+    {
+      "component": "scripts/auto_trade.py",
+      "severity": "HIGH",
+      "description": "Legacy api.submit_order"
+    },
+    {
+      "component": "scripts/auto_exit.py",
+      "severity": "HIGH",
+      "description": "Legacy api.submit_order"
+    },
+    {
+      "component": "scripts/execute_trade.py",
+      "severity": "HIGH",
+      "description": "Direct REST POST /v2/orders"
+    },
+    {
+      "component": "alpaca_client.py",
+      "severity": "HIGH",
+      "description": "Direct REST POST /v2/orders"
+    },
+    {
+      "component": "ui/pages/Order_Desk.py",
+      "severity": "HIGH",
+      "description": "Direct api_post /v2/orders"
+    },
+    {
+      "component": "scripts/postfill_attach_oco.py",
+      "severity": "HIGH",
+      "description": "Direct requests POST"
+    },
+    {
+      "component": "scripts/oco_watch.py",
+      "severity": "HIGH",
+      "description": "Direct requests POST"
+    }
+  ],
+  "external_paths": [
+    {
+      "path": "place_orders_from_csv.py",
+      "note": "POST /v2/orders via requests (has enforce_broker_submission_gate in place_order)",
+      "exists": true,
+      "has_gate_reference": true,
+      "severity": "MEDIUM",
+      "status": "PARTIAL_PROTECTION"
+    },
+    {
+      "path": "scripts/auto_execute_signals.py",
+      "note": "Legacy direct Alpaca client",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    },
+    {
+      "path": "scripts/auto_trade.py",
+      "note": "Legacy api.submit_order",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    },
+    {
+      "path": "scripts/auto_exit.py",
+      "note": "Legacy api.submit_order",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    },
+    {
+      "path": "scripts/execute_trade.py",
+      "note": "Direct REST POST /v2/orders",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    },
+    {
+      "path": "alpaca_client.py",
+      "note": "Direct REST POST /v2/orders",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    },
+    {
+      "path": "ui/pages/Order_Desk.py",
+      "note": "Direct api_post /v2/orders",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    },
+    {
+      "path": "scripts/postfill_attach_oco.py",
+      "note": "Direct requests POST",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    },
+    {
+      "path": "scripts/oco_watch.py",
+      "note": "Direct requests POST",
+      "exists": true,
+      "has_gate_reference": false,
+      "severity": "HIGH",
+      "status": "BYPASS_RISK"
+    }
+  ]
+}
