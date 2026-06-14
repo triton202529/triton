@@ -451,3 +451,32 @@ evaluation = evaluate_governed_execution(path, context, record_evidence=True)
 
 Live deployment and high-risk actions downgrade ALLOW → REVIEW_REQUIRED until approved.
 LOCKDOWN blocks non-emergency capital deployment; emergency paths remain available.
+
+## THP-009 Time Travel, Decision Reconstruction & Regulatory Audit
+
+Forensic-grade execution reconstruction — read-only on historical evidence; new snapshot
+and audit artifacts only.
+
+| Module | Purpose |
+|--------|---------|
+| `services/execution_time_machine.py` | Immutable fingerprinted execution snapshots |
+| `services/execution_decision_reconstructor.py` | Historical vs present-day decision comparison |
+| `services/execution_regulatory_audit_pack.py` | Exportable regulatory audit packages |
+| `dashboard/execution_time_travel_dashboard.py` | Time travel search, replay, and audit export UI |
+
+### Artifacts
+
+- `execution_snapshots.json` / `execution_snapshot_index.csv`
+- `execution_reconstruction_reports.json` / `.csv`
+- `execution_audit_packages.json` / `.csv`
+- `execution_policy_drift_analysis.json`
+
+### Comparison Classifications
+
+SAME_DECISION, POLICY_CHANGED, RISK_CHANGED, GOVERNANCE_CHANGED, ENVIRONMENT_CHANGED
+
+### Run Forensic Pipeline
+
+```bash
+python -m services.execution_regulatory_audit_pack
+```

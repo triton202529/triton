@@ -1,0 +1,453 @@
+{
+  "records": [
+    {
+      "snapshot_id": "eg-snap-e90ca5a5396f",
+      "captured_at": "2026-06-14T21:48:00.520651+00:00",
+      "framework": "THP-009",
+      "immutable": true,
+      "fingerprint": "6c8ffb6935a133928b4886f49036f542abc497d6096fd7a980d9a43c991c45ec",
+      "source_decision_hash": "a2dbdb6586880bcbc6c1a5b1d174468132cae8ff4552535d3b3b7d614baea2b4",
+      "decision_timestamp": "2026-06-14T19:40:38.593Z",
+      "execution_identity": {
+        "decision_id": "egd-8ba958c222004319",
+        "execution_identifier": "",
+        "timestamp": "2026-06-14T19:40:38.593Z",
+        "requesting_service": "thp004_validation",
+        "execution_path": "paper_execution",
+        "symbol(s)": "",
+        "action_requested": "PAPER_EXECUTE",
+        "operator_identity": ""
+      },
+      "market_intelligence": {
+        "signal_state": {
+          "AMD": {
+            "position_state": "FLAT",
+            "last_action": "NONE",
+            "last_change_date": null,
+            "cooldown_until": null
+          },
+          "ARKK": {
+            "position_state": "FLAT",
+            "last_action": "NONE",
+            "last_change_date": null,
+            "cooldown_until": null
+          },
+          "GBTC": {
+            "position_state": "FLAT",
+            "last_action": "NONE",
+            "last_change_date": null,
+            "cooldown_until": null
+          },
+          "INTC": {
+            "position_state": "FLAT",
+            "last_action": "NONE",
+            "last_change_date": null,
+            "cooldown_until": null
+          },
+          "QQQ": {
+            "position_state": "LONG",
+            "last_action": "HOLD"
+          },
+          "SLV": {
+            "position_state": "FLAT",
+            "last_action": "NONE",
+            "last_change_date": null,
+            "cooldown_until": null
+          },
+          "TSLA": {
+            "position_state": "FLAT",
+            "last_action": "NONE",
+            "last_change_date": null,
+            "cooldown_until": null
+          },
+          "XLK": {
+            "position_state": "FLAT",
+            "last_action": "NONE",
+            "last_change_date": null,
+            "cooldown_until": null
+          }
+        },
+        "lifecycle_state": "unknown",
+        "lifecycle_from_signal": null,
+        "model_outputs": null,
+        "confidence_scores": null
+      },
+      "portfolio_state": {
+        "allocation_summary": {
+          "generated_at_utc": "2026-06-13T11:13:53Z",
+          "total_position_value": 1442.68,
+          "current_positions": 1,
+          "max_positions": 35,
+          "max_positions_source": "execute_trades.json",
+          "available_slots": 34,
+          "largest_position_symbol": "QQQ",
+          "largest_position_weight_pct": 100.0,
+          "overweight_count": 1,
+          "underweight_count": 0,
+          "open_new_candidates": 0,
+          "add_candidates": 1,
+          "exit_candidates": 1,
+          "trim_candidates": 0,
+          "blocked_candidates": 5,
+          "watch_candidates": 16,
+          "hold_candidates": 41,
+          "force_exit_count": 1,
+          "trim_priority_count": 0,
+          "block_new_buy_count": 6,
+          "force_exit_symbols": [
+            "GE"
+          ],
+          "trim_priority_symbols": [],
+          "blocked_new_buy_symbols": [
+            "GBTC",
+            "GE",
+            "JNJ",
+            "MRK",
+            "SCHW",
+            "UNG"
+          ],
+          "high_risk_positions": [
+            "GE"
+          ],
+          "allocation_diagnostics": {
+            "universe_count": 64,
+            "currently_held_count": 1,
+            "available_slots": 34,
+            "buy_add_lifecycle_count": 8,
+            "positive_signal_count": 18,
+            "strong_edge_count": 8,
+            "confidence_pass_count": 29,
+            "delta_pass_count": 18,
+            "open_gate_candidates": 0,
+            "open_new_candidates": 0,
+            "add_candidates": 1,
+            "watch_candidates": 16,
+            "top_rejection_reasons": {
+              "no_actionable_rule_matched": 41,
+              "positive_signal_but_edge_weak,conf<0.5": 12,
+              "risk_flag_contains=BLOCK_NEW_BUY": 5,
+              "positive_signal_but_conf<0.5": 2,
+              "positive_signal_but_edge_weak": 2,
+              "risk_flag_contains=FORCE_EXIT": 1,
+              "held_and_effective_stance=HOLD_and_strong_edge": 1
+            }
+          },
+          "top_5_opportunities": [
+            {
+              "ticker": "QQQ",
+              "recommended_action": "ADD",
+              "allocation_score": 0.236855,
+              "edge_score": 0.650813,
+              "confidence": 0.530954,
+              "delta_pct": -0.003064,
+              "reason": "held_and_effective_stance=HOLD_and_strong_edge"
+            }
+          ],
+          "rotation_min_edge_delta": 0.05
+        },
+        "allocation_state": "unknown",
+        "positions_summary": {
+          "position_count": 1,
+          "positions": [
+            {
+              "snapshot_ts": "2026-06-14T21:27:06Z",
+              "date": "2026-06-14",
+              "ticker": "QQQ",
+              "symbol": "QQQ",
+              "market_value": "1442.68",
+              "value": "1442.68",
+              "asset_id": "2d9e926c-e17c-47c3-ad8c-26c7a594e48f",
+              "exchange": "NASDAQ",
+              "asset_class": "us_equity",
+              "asset_marginable": "True",
+              "qty": "2",
+              "qty_available": "0",
+              "avg_entry_price": "715.03",
+              "side": "long",
+              "cost_basis": "1430.06",
+              "unrealized_pl": "12.62",
+              "unrealized_plpc": "0.00882",
+              "unrealized_intraday_pl": "0",
+              "unrealized_intraday_plpc": "0",
+              "current_price": "721.34",
+              "lastday_price": "721.34",
+              "change_today": "0"
+            }
+          ]
+        },
+        "capital_exposure": ""
+      },
+      "risk_state": {
+        "recorded_risk_state": "Bull",
+        "adaptive_risk": {
+          "timestamp": "2026-06-14T21:27:05.866077+00:00",
+          "source": {
+            "portfolio_history": "enhanced_portfolio_history.csv",
+            "has_enhanced": true,
+            "has_regimes": true,
+            "has_guard_snapshot": true,
+            "has_risk_report": true,
+            "has_kill_switch": false
+          },
+          "regime": "Bull",
+          "mode": "NORMAL",
+          "reason": "All systems nominal",
+          "portfolio": {
+            "latest_equity": 100000.0,
+            "peak_equity": 100000.0,
+            "drawdown_pct": 0.0
+          },
+          "risk_report_headlines": {
+            "expected_volatility": null,
+            "risk_adjusted_return": null,
+            "diversification_ratio": null
+          },
+          "broker": {
+            "buying_power": null,
+            "reserve_pct": 0.2
+          },
+          "controls": {
+            "global_kill_switch": false,
+            "risk_on": true,
+            "allow_new_orders": true,
+            "max_gross_exposure": 1.0,
+            "max_position_weight": 0.1,
+            "block_reason": ""
+          },
+          "diagnostics": {
+            "errors": {
+              "portfolio_history": null,
+              "regimes": null,
+              "guard_snapshot": null,
+              "risk_report": null,
+              "kill_switch": null
+            }
+          }
+        },
+        "restrictions": null,
+        "emergency_conditions": null
+      },
+      "governance_state": {
+        "governance_status": "not_authorized",
+        "authority_classification": "automatic_approval",
+        "authorization_chain": [
+          {
+            "step": "signal",
+            "status": "observed",
+            "detail": "signal_generation upstream"
+          },
+          {
+            "step": "lifecycle",
+            "status": "approved",
+            "detail": "lifecycle authorization"
+          },
+          {
+            "step": "allocation",
+            "status": "approved",
+            "detail": "portfolio allocation"
+          },
+          {
+            "step": "risk_protection",
+            "status": "satisfied",
+            "detail": "risk validation"
+          },
+          {
+            "step": "execution_gate",
+            "status": "allow",
+            "detail": "Paper execution permitted with environment authorization satisfied."
+          },
+          {
+            "step": "broker_authorization",
+            "status": "pending",
+            "detail": "broker connectivity and guard"
+          },
+          {
+            "step": "execution_outcome",
+            "status": "authorized",
+            "detail": "final execution disposition"
+          }
+        ],
+        "authority_level_at_capture": 0,
+        "authority_triggers_at_capture": [],
+        "approval_records": [],
+        "escalation_records": [],
+        "health_at_capture": {
+          "health_score": 100.0,
+          "health_classification": "GREEN"
+        },
+        "certification_at_capture": {
+          "certification_level": "INSTITUTIONAL_GRADE",
+          "resilience_score": 100.0
+        },
+        "operational_state": "MONITOR"
+      },
+      "environment_state": {
+        "environment": "development",
+        "paper_or_live": "paper",
+        "governance_authorization": {
+          "generated_at": "2026-06-13T22:13:33Z",
+          "governance_authorized": false,
+          "operator_authorized": true,
+          "policy_authorized": true,
+          "execution_authorized": true,
+          "overall_authorization": false,
+          "gate_reasons": {
+            "governance": "Escalation ORANGE does not meet green-governance requirement",
+            "operator": "At least one operator approval present",
+            "policy": "At least one protective policy enabled",
+            "execution": "Paper execution authorized by policy gate"
+          },
+          "paper_execution_permitted": true,
+          "live_execution_permitted": false,
+          "candidate_authorizations": [
+            {
+              "candidate_id": "c3d6f21db6bc5c17",
+              "candidate_action": "REDUCE_CONCENTRATION",
+              "governance_authorized": false,
+              "operator_authorized": true,
+              "policy_authorized": false,
+              "execution_authorized": true,
+              "overall_authorization": false,
+              "gate_reasons": {
+                "governance": "Escalation ORANGE does not meet green-governance requirement",
+                "operator": "Operator approval present in queue",
+                "policy": "Protective policy disabled for REDUCE_CONCENTRATION",
+                "execution": "Paper execution authorized by policy gate"
+              }
+            },
+            {
+              "candidate_id": "55a277da4e325c99",
+              "candidate_action": "REVIEW_STALE_ORDERS",
+              "governance_authorized": false,
+              "operator_authorized": false,
+              "policy_authorized": false,
+              "execution_authorized": true,
+              "overall_authorization": false,
+              "gate_reasons": {
+                "governance": "Escalation ORANGE does not meet green-governance requirement",
+                "operator": "No approved operator authorization for this action",
+                "policy": "No protective policy defined for REVIEW_STALE_ORDERS",
+                "execution": "Paper execution authorized by policy gate"
+              }
+            },
+            {
+              "candidate_id": "9ab0f0c442acd1bf",
+              "candidate_action": "REVIEW_ELEVATED_EXPOSURE",
+              "governance_authorized": false,
+              "operator_authorized": false,
+              "policy_authorized": false,
+              "execution_authorized": true,
+              "overall_authorization": false,
+              "gate_reasons": {
+                "governance": "Escalation ORANGE does not meet green-governance requirement",
+                "operator": "No approved operator authorization for this action",
+                "policy": "Protective policy disabled for REVIEW_ELEVATED_EXPOSURE",
+                "execution": "Paper execution authorized by policy gate"
+              }
+            }
+          ],
+          "authorization_questions": {
+            "is_governance_permitting": false,
+            "is_operator_approval_present": true,
+            "is_policy_enabled": true,
+            "is_execution_allowed": true
+          },
+          "disclaimer": "Authorization evaluation only. Paper execution may be permitted when configured; live execution remains blocked. This layer does not place orders."
+        }
+      },
+      "frozen_decision": {
+        "decision_id": "egd-8ba958c222004319",
+        "timestamp": "2026-06-14T19:40:38.593Z",
+        "execution_identifier": "",
+        "execution_path": "paper_execution",
+        "symbol(s)": "",
+        "action_requested": "PAPER_EXECUTE",
+        "quantity": "",
+        "capital_exposure": "",
+        "environment": "development",
+        "paper_or_live": "paper",
+        "requesting_service": "thp004_validation",
+        "operator_identity": "",
+        "execution_gate_decision": "ALLOW",
+        "decision_reason": "Paper execution permitted with environment authorization satisfied.",
+        "risk_state": "Bull",
+        "lifecycle_state": "unknown",
+        "allocation_state": "unknown",
+        "governance_status": "not_authorized",
+        "authorization_chain": [
+          {
+            "step": "signal",
+            "status": "observed",
+            "detail": "signal_generation upstream"
+          },
+          {
+            "step": "lifecycle",
+            "status": "approved",
+            "detail": "lifecycle authorization"
+          },
+          {
+            "step": "allocation",
+            "status": "approved",
+            "detail": "portfolio allocation"
+          },
+          {
+            "step": "risk_protection",
+            "status": "satisfied",
+            "detail": "risk validation"
+          },
+          {
+            "step": "execution_gate",
+            "status": "allow",
+            "detail": "Paper execution permitted with environment authorization satisfied."
+          },
+          {
+            "step": "broker_authorization",
+            "status": "pending",
+            "detail": "broker connectivity and guard"
+          },
+          {
+            "step": "execution_outcome",
+            "status": "authorized",
+            "detail": "final execution disposition"
+          }
+        ],
+        "evidence_links": [
+          "decision:egd-8ba958c222004319",
+          "audit:C:/Users/akimw/triton/data/results/execution_gate_audit.csv"
+        ],
+        "authority_classification": "automatic_approval",
+        "allowed": true
+      },
+      "frozen_evidence": [
+        {
+          "evidence_id": "ege-8ba958c222004319",
+          "decision_id": "egd-8ba958c222004319",
+          "category": "EXECUTION_GATE",
+          "severity": "INFO",
+          "title": "Execution gate ALLOW \u2014 paper_execution",
+          "description": "Paper execution permitted with environment authorization satisfied.",
+          "created_at": "2026-06-14T19:40:38.593Z",
+          "source": "thp004_validation",
+          "status": "VERIFIED",
+          "linked_audit_path": "C:/Users/akimw/triton/data/results/execution_gate_audit.csv",
+          "execution_path": "paper_execution",
+          "decision": "ALLOW",
+          "allowed": true,
+          "framework": "THP-004",
+          "tags": "automatic_approval,paper,paper_execution"
+        }
+      ],
+      "evidence_links": [
+        "decision:egd-8ba958c222004319",
+        "audit:C:/Users/akimw/triton/data/results/execution_gate_audit.csv"
+      ]
+    }
+  ],
+  "generated_at": "2026-06-14T21:48:01.040999+00:00",
+  "framework": "THP-009",
+  "summary": {
+    "total": 1,
+    "decisions_source": 1,
+    "new_captured": 0
+  }
+}

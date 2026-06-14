@@ -1,0 +1,90 @@
+{
+  "generated_at": "2026-06-14T21:48:00.911650+00:00",
+  "framework": "THP-009",
+  "summary": {
+    "total": 1,
+    "by_classification": {
+      "SAME_DECISION": 1
+    },
+    "integrity_valid_count": 1
+  },
+  "records": [
+    {
+      "reconstruction_id": "eg-rec-451ea2740091",
+      "generated_at": "2026-06-14T21:48:00.911615+00:00",
+      "framework": "THP-009",
+      "decision_id": "egd-8ba958c222004319",
+      "snapshot_id": "eg-snap-e90ca5a5396f",
+      "original_decision": {
+        "decision": "ALLOW",
+        "allowed": true,
+        "reason": "Paper execution permitted with environment authorization satisfied.",
+        "timestamp": "2026-06-14T19:40:38.593Z",
+        "execution_path": "paper_execution",
+        "authorization_chain": [
+          {
+            "step": "signal",
+            "status": "observed",
+            "detail": "signal_generation upstream"
+          },
+          {
+            "step": "lifecycle",
+            "status": "approved",
+            "detail": "lifecycle authorization"
+          },
+          {
+            "step": "allocation",
+            "status": "approved",
+            "detail": "portfolio allocation"
+          },
+          {
+            "step": "risk_protection",
+            "status": "satisfied",
+            "detail": "risk validation"
+          },
+          {
+            "step": "execution_gate",
+            "status": "allow",
+            "detail": "Paper execution permitted with environment authorization satisfied."
+          },
+          {
+            "step": "broker_authorization",
+            "status": "pending",
+            "detail": "broker connectivity and guard"
+          },
+          {
+            "step": "execution_outcome",
+            "status": "authorized",
+            "detail": "final execution disposition"
+          }
+        ]
+      },
+      "current_analysis": {
+        "gate_decision": "ALLOW",
+        "gate_allowed": true,
+        "governed_decision": "ALLOW",
+        "governed_allowed": true,
+        "authority_level_then": 0,
+        "authority_level_now": 0,
+        "authority_triggers_now": [],
+        "replay_classification": "CONSISTENT",
+        "changed_conditions": [
+          "liveModeAuthorized: True -> False"
+        ]
+      },
+      "comparison_classification": "SAME_DECISION",
+      "narrative_summary": "Current gate and governance model reproduce the original authorization outcome.",
+      "integrity": {
+        "snapshot_id": "eg-snap-e90ca5a5396f",
+        "fingerprint_valid": true,
+        "stored_fingerprint": "6c8ffb6935a133928b4886f49036f542abc497d6096fd7a980d9a43c991c45ec",
+        "computed_fingerprint": "6c8ffb6935a133928b4886f49036f542abc497d6096fd7a980d9a43c991c45ec",
+        "source_decision_hash_valid": true,
+        "immutable_flag": true
+      },
+      "missing_evidence": [],
+      "missing_evidence_count": 0,
+      "integrity_valid": true
+    }
+  ]
+}

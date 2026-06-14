@@ -390,6 +390,7 @@ def evaluate_governed_execution(
     operator_identity: Optional[str] = None,
     action_requested: Optional[str] = None,
     skip_governance: bool = False,
+    record_requests: bool = True,
 ) -> Dict[str, Any]:
     """
     Evaluate execution with THP-008 human governance overlay.
@@ -439,7 +440,7 @@ def evaluate_governed_execution(
         operational_state=op_state,
     )
 
-    if result.get("governance", {}).get("human_approval_required"):
+    if result.get("governance", {}).get("human_approval_required") and record_requests:
         create_approval_request(
             path=path,
             context=ctx,

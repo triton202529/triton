@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-06-14T21:48:00.915270+00:00",
+  "framework": "THP-009",
+  "summary": {
+    "drift_count": 0,
+    "same_decision_count": 1,
+    "by_classification": {
+      "POLICY_CHANGED": 0,
+      "RISK_CHANGED": 0,
+      "GOVERNANCE_CHANGED": 0,
+      "ENVIRONMENT_CHANGED": 0
+    }
+  },
+  "records": []
+}

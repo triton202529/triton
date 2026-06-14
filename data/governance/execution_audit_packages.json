@@ -1,0 +1,428 @@
+{
+  "records": [
+    {
+      "package_id": "eg-aud-f93215dcb4eb",
+      "generated_at": "2026-06-14T21:48:01.317659+00:00",
+      "framework": "THP-009",
+      "decision_id": "egd-8ba958c222004319",
+      "executive_summary": {
+        "decision_outcome": "ALLOW",
+        "allowed": true,
+        "date_time": "2026-06-14T19:40:38.593Z",
+        "capital_involved": "not_recorded",
+        "symbols": "",
+        "execution_path": "paper_execution",
+        "approving_authority": "Execution Gate (Automatic)",
+        "environment": "development",
+        "paper_or_live": "paper"
+      },
+      "decision_timeline": [
+        {
+          "step": "signal",
+          "status": "observed",
+          "detail": "signal_generation upstream"
+        },
+        {
+          "step": "lifecycle",
+          "status": "approved",
+          "detail": "lifecycle authorization"
+        },
+        {
+          "step": "allocation",
+          "status": "approved",
+          "detail": "portfolio allocation"
+        },
+        {
+          "step": "risk_protection",
+          "status": "satisfied",
+          "detail": "risk validation"
+        },
+        {
+          "step": "execution_gate",
+          "status": "allow",
+          "detail": "Paper execution permitted with environment authorization satisfied."
+        },
+        {
+          "step": "broker_authorization",
+          "status": "pending",
+          "detail": "broker connectivity and guard"
+        },
+        {
+          "step": "execution_outcome",
+          "status": "authorized",
+          "detail": "final execution disposition"
+        }
+      ],
+      "timeline_flow": "Signal \u2192 Lifecycle \u2192 Allocation \u2192 Risk \u2192 Gate \u2192 Governance \u2192 Outcome",
+      "evidence_bundle": {
+        "decision_record": {
+          "decision_id": "egd-8ba958c222004319",
+          "timestamp": "2026-06-14T19:40:38.593Z",
+          "execution_identifier": "",
+          "execution_path": "paper_execution",
+          "symbol(s)": "",
+          "action_requested": "PAPER_EXECUTE",
+          "quantity": "",
+          "capital_exposure": "",
+          "environment": "development",
+          "paper_or_live": "paper",
+          "requesting_service": "thp004_validation",
+          "operator_identity": "",
+          "execution_gate_decision": "ALLOW",
+          "decision_reason": "Paper execution permitted with environment authorization satisfied.",
+          "risk_state": "Bull",
+          "lifecycle_state": "unknown",
+          "allocation_state": "unknown",
+          "governance_status": "not_authorized",
+          "authorization_chain": [
+            {
+              "step": "signal",
+              "status": "observed",
+              "detail": "signal_generation upstream"
+            },
+            {
+              "step": "lifecycle",
+              "status": "approved",
+              "detail": "lifecycle authorization"
+            },
+            {
+              "step": "allocation",
+              "status": "approved",
+              "detail": "portfolio allocation"
+            },
+            {
+              "step": "risk_protection",
+              "status": "satisfied",
+              "detail": "risk validation"
+            },
+            {
+              "step": "execution_gate",
+              "status": "allow",
+              "detail": "Paper execution permitted with environment authorization satisfied."
+            },
+            {
+              "step": "broker_authorization",
+              "status": "pending",
+              "detail": "broker connectivity and guard"
+            },
+            {
+              "step": "execution_outcome",
+              "status": "authorized",
+              "detail": "final execution disposition"
+            }
+          ],
+          "evidence_links": [
+            "decision:egd-8ba958c222004319",
+            "audit:C:/Users/akimw/triton/data/results/execution_gate_audit.csv"
+          ],
+          "authority_classification": "automatic_approval",
+          "allowed": true
+        },
+        "snapshot_reference": {
+          "snapshot_id": "eg-snap-e90ca5a5396f",
+          "fingerprint": "6c8ffb6935a133928b4886f49036f542abc497d6096fd7a980d9a43c991c45ec"
+        },
+        "signals": {
+          "signal_state": {
+            "AMD": {
+              "position_state": "FLAT",
+              "last_action": "NONE",
+              "last_change_date": null,
+              "cooldown_until": null
+            },
+            "ARKK": {
+              "position_state": "FLAT",
+              "last_action": "NONE",
+              "last_change_date": null,
+              "cooldown_until": null
+            },
+            "GBTC": {
+              "position_state": "FLAT",
+              "last_action": "NONE",
+              "last_change_date": null,
+              "cooldown_until": null
+            },
+            "INTC": {
+              "position_state": "FLAT",
+              "last_action": "NONE",
+              "last_change_date": null,
+              "cooldown_until": null
+            },
+            "QQQ": {
+              "position_state": "LONG",
+              "last_action": "HOLD"
+            },
+            "SLV": {
+              "position_state": "FLAT",
+              "last_action": "NONE",
+              "last_change_date": null,
+              "cooldown_until": null
+            },
+            "TSLA": {
+              "position_state": "FLAT",
+              "last_action": "NONE",
+              "last_change_date": null,
+              "cooldown_until": null
+            },
+            "XLK": {
+              "position_state": "FLAT",
+              "last_action": "NONE",
+              "last_change_date": null,
+              "cooldown_until": null
+            }
+          },
+          "lifecycle_state": "unknown",
+          "lifecycle_from_signal": null,
+          "model_outputs": null,
+          "confidence_scores": null
+        },
+        "risk_reports": {
+          "recorded_risk_state": "Bull",
+          "adaptive_risk": {
+            "timestamp": "2026-06-14T21:27:05.866077+00:00",
+            "source": {
+              "portfolio_history": "enhanced_portfolio_history.csv",
+              "has_enhanced": true,
+              "has_regimes": true,
+              "has_guard_snapshot": true,
+              "has_risk_report": true,
+              "has_kill_switch": false
+            },
+            "regime": "Bull",
+            "mode": "NORMAL",
+            "reason": "All systems nominal",
+            "portfolio": {
+              "latest_equity": 100000.0,
+              "peak_equity": 100000.0,
+              "drawdown_pct": 0.0
+            },
+            "risk_report_headlines": {
+              "expected_volatility": null,
+              "risk_adjusted_return": null,
+              "diversification_ratio": null
+            },
+            "broker": {
+              "buying_power": null,
+              "reserve_pct": 0.2
+            },
+            "controls": {
+              "global_kill_switch": false,
+              "risk_on": true,
+              "allow_new_orders": true,
+              "max_gross_exposure": 1.0,
+              "max_position_weight": 0.1,
+              "block_reason": ""
+            },
+            "diagnostics": {
+              "errors": {
+                "portfolio_history": null,
+                "regimes": null,
+                "guard_snapshot": null,
+                "risk_report": null,
+                "kill_switch": null
+              }
+            }
+          },
+          "restrictions": null,
+          "emergency_conditions": null
+        },
+        "allocation_evidence": {
+          "allocation_summary": {
+            "generated_at_utc": "2026-06-13T11:13:53Z",
+            "total_position_value": 1442.68,
+            "current_positions": 1,
+            "max_positions": 35,
+            "max_positions_source": "execute_trades.json",
+            "available_slots": 34,
+            "largest_position_symbol": "QQQ",
+            "largest_position_weight_pct": 100.0,
+            "overweight_count": 1,
+            "underweight_count": 0,
+            "open_new_candidates": 0,
+            "add_candidates": 1,
+            "exit_candidates": 1,
+            "trim_candidates": 0,
+            "blocked_candidates": 5,
+            "watch_candidates": 16,
+            "hold_candidates": 41,
+            "force_exit_count": 1,
+            "trim_priority_count": 0,
+            "block_new_buy_count": 6,
+            "force_exit_symbols": [
+              "GE"
+            ],
+            "trim_priority_symbols": [],
+            "blocked_new_buy_symbols": [
+              "GBTC",
+              "GE",
+              "JNJ",
+              "MRK",
+              "SCHW",
+              "UNG"
+            ],
+            "high_risk_positions": [
+              "GE"
+            ],
+            "allocation_diagnostics": {
+              "universe_count": 64,
+              "currently_held_count": 1,
+              "available_slots": 34,
+              "buy_add_lifecycle_count": 8,
+              "positive_signal_count": 18,
+              "strong_edge_count": 8,
+              "confidence_pass_count": 29,
+              "delta_pass_count": 18,
+              "open_gate_candidates": 0,
+              "open_new_candidates": 0,
+              "add_candidates": 1,
+              "watch_candidates": 16,
+              "top_rejection_reasons": {
+                "no_actionable_rule_matched": 41,
+                "positive_signal_but_edge_weak,conf<0.5": 12,
+                "risk_flag_contains=BLOCK_NEW_BUY": 5,
+                "positive_signal_but_conf<0.5": 2,
+                "positive_signal_but_edge_weak": 2,
+                "risk_flag_contains=FORCE_EXIT": 1,
+                "held_and_effective_stance=HOLD_and_strong_edge": 1
+              }
+            },
+            "top_5_opportunities": [
+              {
+                "ticker": "QQQ",
+                "recommended_action": "ADD",
+                "allocation_score": 0.236855,
+                "edge_score": 0.650813,
+                "confidence": 0.530954,
+                "delta_pct": -0.003064,
+                "reason": "held_and_effective_stance=HOLD_and_strong_edge"
+              }
+            ],
+            "rotation_min_edge_delta": 0.05
+          },
+          "allocation_state": "unknown",
+          "positions_summary": {
+            "position_count": 1,
+            "positions": [
+              {
+                "snapshot_ts": "2026-06-14T21:27:06Z",
+                "date": "2026-06-14",
+                "ticker": "QQQ",
+                "symbol": "QQQ",
+                "market_value": "1442.68",
+                "value": "1442.68",
+                "asset_id": "2d9e926c-e17c-47c3-ad8c-26c7a594e48f",
+                "exchange": "NASDAQ",
+                "asset_class": "us_equity",
+                "asset_marginable": "True",
+                "qty": "2",
+                "qty_available": "0",
+                "avg_entry_price": "715.03",
+                "side": "long",
+                "cost_basis": "1430.06",
+                "unrealized_pl": "12.62",
+                "unrealized_plpc": "0.00882",
+                "unrealized_intraday_pl": "0",
+                "unrealized_intraday_plpc": "0",
+                "current_price": "721.34",
+                "lastday_price": "721.34",
+                "change_today": "0"
+              }
+            ]
+          },
+          "capital_exposure": ""
+        },
+        "governance_records": {
+          "governance_status": "not_authorized",
+          "authority_classification": "automatic_approval",
+          "authorization_chain": [
+            {
+              "step": "signal",
+              "status": "observed",
+              "detail": "signal_generation upstream"
+            },
+            {
+              "step": "lifecycle",
+              "status": "approved",
+              "detail": "lifecycle authorization"
+            },
+            {
+              "step": "allocation",
+              "status": "approved",
+              "detail": "portfolio allocation"
+            },
+            {
+              "step": "risk_protection",
+              "status": "satisfied",
+              "detail": "risk validation"
+            },
+            {
+              "step": "execution_gate",
+              "status": "allow",
+              "detail": "Paper execution permitted with environment authorization satisfied."
+            },
+            {
+              "step": "broker_authorization",
+              "status": "pending",
+              "detail": "broker connectivity and guard"
+            },
+            {
+              "step": "execution_outcome",
+              "status": "authorized",
+              "detail": "final execution disposition"
+            }
+          ],
+          "authority_level_at_capture": 0,
+          "authority_triggers_at_capture": [],
+          "approval_records": [],
+          "escalation_records": [],
+          "health_at_capture": {
+            "health_score": 100.0,
+            "health_classification": "GREEN"
+          },
+          "certification_at_capture": {
+            "certification_level": "INSTITUTIONAL_GRADE",
+            "resilience_score": 100.0
+          },
+          "operational_state": "MONITOR"
+        },
+        "approval_records": [],
+        "audit_logs": [
+          {
+            "timestamp": "2026-06-14T19:40:38.593Z",
+            "execution_path": "paper_execution",
+            "decision": "ALLOW",
+            "allowed": "True",
+            "reason": "Paper execution permitted with environment authorization satisfied.",
+            "environment": "development",
+            "operator_source": "thp004_validation",
+            "broker_mode": "paper",
+            "symbols": "",
+            "execution_identifier": ""
+          }
+        ],
+        "reconstruction_summary": "Current gate and governance model reproduce the original authorization outcome."
+      },
+      "certification": {
+        "integrity_fingerprint": "745eb9080c8723ea3f7d6ff22599fc708df7d7c2fdd70ea4a1ce0f76b78541de",
+        "snapshot_integrity": {
+          "snapshot_id": "eg-snap-e90ca5a5396f",
+          "fingerprint_valid": true,
+          "stored_fingerprint": "6c8ffb6935a133928b4886f49036f542abc497d6096fd7a980d9a43c991c45ec",
+          "computed_fingerprint": "6c8ffb6935a133928b4886f49036f542abc497d6096fd7a980d9a43c991c45ec",
+          "source_decision_hash_valid": true,
+          "immutable_flag": true
+        },
+        "completeness_score": 100.0,
+        "missing_artifact_warnings": [],
+        "comparison_classification": "SAME_DECISION",
+        "present_day_narrative": "Current gate and governance model reproduce the original authorization outcome."
+      },
+      "reconstruction_id": "eg-rec-0a400c1f3249"
+    }
+  ],
+  "framework": "THP-009",
+  "generated_at": "2026-06-14T21:48:01.318035+00:00",
+  "summary": {
+    "total": 1
+  }
+}
