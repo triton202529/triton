@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-06-14T19:47:27.654584+00:00",
+  "framework": "THP-005",
+  "summary": {
+    "total": 1,
+    "consistent": 1,
+    "drift_detected": 0,
+    "requires_review": 0
+  },
+  "records": [
+    {
+      "replay_id": "rpl-egd-8ba958c222004319",
+      "decision_id": "egd-8ba958c222004319",
+      "timestamp_replayed": "2026-06-14T19:47:27.652992+00:00",
+      "execution_path": "paper_execution",
+      "original_decision": "ALLOW",
+      "original_allowed": true,
+      "historical_replay_decision": "ALLOW",
+      "historical_replay_allowed": true,
+      "current_replay_decision": "ALLOW",
+      "current_replay_allowed": true,
+      "classification": "CONSISTENT",
+      "consistency_detail": "Current gate reproduces original authorization outcome.",
+      "risk_state_original": "Bull",
+      "risk_state_current": "Bull",
+      "governance_status_original": "not_authorized",
+      "governance_status_current": "not_authorized",
+      "environment_original": "development",
+      "environment_current": "development",
+      "changed_conditions": [
+        "liveModeAuthorized: True -> False"
+      ],
+      "original_request": {
+        "action_requested": "PAPER_EXECUTE",
+        "symbol(s)": "",
+        "requesting_service": "thp004_validation",
+        "operator_identity": ""
+      }
+    }
+  ]
+}

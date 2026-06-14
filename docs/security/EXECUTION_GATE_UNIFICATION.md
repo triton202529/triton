@@ -304,3 +304,27 @@ Broker Authorization → Execution Outcome
 ### Registry Module
 
 `services/execution_gate_evidence_registry.py` — deduplicated decision and evidence persistence.
+
+## THP-005 Simulation, Replay & Failure Investigation
+
+Read-only validation laboratory — no broker calls or capital deployment.
+
+| Module | Purpose |
+|--------|---------|
+| `services/execution_gate_replay_engine.py` | Replay `execution_gate_decisions.json` and detect drift |
+| `services/execution_gate_simulator.py` | Scenario catalog via `evaluate_execution_gate(record_evidence=False)` |
+| `services/execution_gate_failure_investigator.py` | Human-readable failure analysis |
+| `dashboard/execution_gate_simulation_dashboard.py` | Streamlit lab UI |
+
+### Artifacts
+
+- `execution_gate_replay_results.json` / `.csv`
+- `execution_gate_simulation_results.json` / `.csv`
+- `execution_gate_failure_analysis.json` / `.csv`
+- `execution_gate_drift_report.json`
+
+### Replay Classifications
+
+- **CONSISTENT** — Current gate reproduces original outcome
+- **DRIFT_DETECTED** — Authorization behavior changed under current conditions
+- **REQUIRES_REVIEW** — Historical replay mismatch or ambiguous outcome

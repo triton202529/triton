@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-06-14T19:47:27.782193+00:00",
+  "framework": "THP-005",
+  "summary": {
+    "total_analyses": 0,
+    "top_rejection_reasons": {},
+    "top_failed_stages": {},
+    "risk_related_failures": 0,
+    "governance_related_failures": 0
+  },
+  "records": []
+}

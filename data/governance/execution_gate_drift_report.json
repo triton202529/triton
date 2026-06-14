@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-06-14T19:47:27.657739+00:00",
+  "framework": "THP-005",
+  "summary": {
+    "total": 1,
+    "consistent": 1,
+    "drift_detected": 0,
+    "requires_review": 0
+  },
+  "drift_count": 0,
+  "review_count": 0,
+  "drift_by_path": {},
+  "drift_records": [],
+  "review_records": [],
+  "policy_observations": [
+    "Authorization drift indicates current gate conditions differ from historical decision context.",
+    "Review records where historical replay cannot reproduce stored outcomes."
+  ]
+}

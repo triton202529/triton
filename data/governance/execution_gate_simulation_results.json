@@ -1,0 +1,302 @@
+{
+  "generated_at": "2026-06-14T19:47:27.434857+00:00",
+  "framework": "THP-005",
+  "summary": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "unexpected_authorizations": 0,
+    "unexpected_blocks": 0
+  },
+  "records": [
+    {
+      "simulation_id": "sim-live-no-governance",
+      "scenario_name": "Live execution without governance approval",
+      "category": "live_authorization",
+      "execution_path": "live_execution",
+      "input_conditions": {
+        "liveMode": true,
+        "liveModeAuthorized": true,
+        "governanceApproved": false,
+        "lifecycleApproved": true,
+        "allocationApproved": true,
+        "riskConstraintsSatisfied": true
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T19:47:26.531272+00:00"
+    },
+    {
+      "simulation_id": "sim-live-no-prod-readiness",
+      "scenario_name": "Live execution without production readiness",
+      "category": "live_authorization",
+      "execution_path": "live_execution",
+      "input_conditions": {
+        "liveMode": true,
+        "liveModeAuthorized": true,
+        "governanceApproved": true,
+        "lifecycleApproved": true,
+        "allocationApproved": true,
+        "riskConstraintsSatisfied": true,
+        "environment": "production",
+        "productionReadinessOverride": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Live capital deployment remains disabled until explicit production authorization is granted.",
+      "timestamp": "2026-06-14T19:47:26.588433+00:00"
+    },
+    {
+      "simulation_id": "sim-live-authorized-review",
+      "scenario_name": "Live execution with full authorization",
+      "category": "live_authorization",
+      "execution_path": "live_execution",
+      "input_conditions": {
+        "liveMode": true,
+        "liveModeAuthorized": true,
+        "governanceApproved": true,
+        "lifecycleApproved": true,
+        "allocationApproved": true,
+        "riskConstraintsSatisfied": true,
+        "environment": "development"
+      },
+      "expected_decision": "REVIEW_REQUIRED",
+      "expected_allowed": false,
+      "actual_decision": "REVIEW_REQUIRED",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Live execution authorized pending final governance checkpoint.",
+      "timestamp": "2026-06-14T19:47:26.649940+00:00"
+    },
+    {
+      "simulation_id": "sim-paper-enabled",
+      "scenario_name": "Paper execution with paper mode enabled",
+      "category": "execution",
+      "execution_path": "paper_execution",
+      "input_conditions": {
+        "paperMode": true,
+        "lifecycleApproved": true,
+        "riskConstraintsSatisfied": true,
+        "executionAuthorized": true
+      },
+      "expected_decision": "ALLOW",
+      "expected_allowed": true,
+      "actual_decision": "ALLOW",
+      "actual_allowed": true,
+      "pass_fail": "PASS",
+      "explanation": "Paper execution permitted with environment authorization satisfied.",
+      "timestamp": "2026-06-14T19:47:26.716877+00:00"
+    },
+    {
+      "simulation_id": "sim-paper-live-separation",
+      "scenario_name": "Paper/live environment separation violation",
+      "category": "execution",
+      "execution_path": "paper_execution",
+      "input_conditions": {
+        "paperMode": false,
+        "liveMode": true,
+        "lifecycleApproved": true
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Paper and live broker environments must remain separated.",
+      "timestamp": "2026-06-14T19:47:26.788058+00:00"
+    },
+    {
+      "simulation_id": "sim-broker-unavailable",
+      "scenario_name": "Broker submission without connectivity",
+      "category": "execution",
+      "execution_path": "broker_submission",
+      "input_conditions": {
+        "lifecycleApproved": true,
+        "executionAuthorized": true,
+        "brokerConnected": false,
+        "executionGuardApproved": true,
+        "duplicateOrderClear": true
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Broker submission blocked: active broker connectivity is required.",
+      "timestamp": "2026-06-14T19:47:26.842114+00:00"
+    },
+    {
+      "simulation_id": "sim-duplicate-order",
+      "scenario_name": "Broker submission with duplicate order detected",
+      "category": "execution",
+      "execution_path": "broker_submission",
+      "input_conditions": {
+        "lifecycleApproved": true,
+        "executionAuthorized": true,
+        "brokerConnected": true,
+        "executionGuardApproved": true,
+        "duplicateOrderClear": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Broker submission blocked: duplicate order protection triggered.",
+      "timestamp": "2026-06-14T19:47:26.897793+00:00"
+    },
+    {
+      "simulation_id": "sim-broker-authorized",
+      "scenario_name": "Broker submission fully authorized",
+      "category": "execution",
+      "execution_path": "broker_submission",
+      "input_conditions": {
+        "lifecycleApproved": true,
+        "executionAuthorized": true,
+        "brokerConnected": true,
+        "executionGuardApproved": true,
+        "duplicateOrderClear": true,
+        "environment": "development"
+      },
+      "expected_decision": "ALLOW",
+      "expected_allowed": true,
+      "actual_decision": "ALLOW",
+      "actual_allowed": true,
+      "pass_fail": "PASS",
+      "explanation": "Broker submission authorized with execution guard and connectivity checks satisfied.",
+      "timestamp": "2026-06-14T19:47:26.953004+00:00"
+    },
+    {
+      "simulation_id": "sim-risk-lockdown",
+      "scenario_name": "Capital deployment with risk constraints violated",
+      "category": "risk",
+      "execution_path": "capital_deployment",
+      "input_conditions": {
+        "lifecycleApproved": true,
+        "allocationApproved": true,
+        "riskConstraintsSatisfied": false,
+        "environment": "development"
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Capital deployment blocked: risk constraints, sizing, or concentration limits not satisfied.",
+      "timestamp": "2026-06-14T19:47:27.008087+00:00"
+    },
+    {
+      "simulation_id": "sim-emergency-force-exit",
+      "scenario_name": "Emergency FORCE_EXIT under risk emergency",
+      "category": "risk",
+      "execution_path": "risk_emergency_action",
+      "input_conditions": {
+        "riskEmergencyTriggered": true,
+        "emergencyAction": "FORCE_EXIT"
+      },
+      "expected_decision": "ALLOW",
+      "expected_allowed": true,
+      "actual_decision": "ALLOW",
+      "actual_allowed": true,
+      "pass_fail": "PASS",
+      "explanation": "Emergency risk authority granted for FORCE_EXIT.",
+      "timestamp": "2026-06-14T19:47:27.064284+00:00"
+    },
+    {
+      "simulation_id": "sim-emergency-no-trigger",
+      "scenario_name": "Emergency action without risk trigger",
+      "category": "risk",
+      "execution_path": "risk_emergency_action",
+      "input_conditions": {
+        "riskEmergencyTriggered": false,
+        "emergencyAction": "FORCE_EXIT"
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Risk emergency action blocked: no active risk emergency detected.",
+      "timestamp": "2026-06-14T19:47:27.180574+00:00"
+    },
+    {
+      "simulation_id": "sim-governance-override-missing-operator",
+      "scenario_name": "Governance override without operator identity",
+      "category": "operator",
+      "execution_path": "governance_override",
+      "input_conditions": {
+        "operatorAuthorized": false
+      },
+      "expected_decision": "REVIEW_REQUIRED",
+      "expected_allowed": false,
+      "actual_decision": "REVIEW_REQUIRED",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Governance override requires verified operator identity.",
+      "timestamp": "2026-06-14T19:47:27.253219+00:00"
+    },
+    {
+      "simulation_id": "sim-operator-override-unauthorized",
+      "scenario_name": "Manual operator override without authorization",
+      "category": "operator",
+      "execution_path": "manual_operator_override",
+      "input_conditions": {
+        "operatorAuthorized": false,
+        "overrideReason": "",
+        "operationalContext": ""
+      },
+      "expected_decision": "REVIEW_REQUIRED",
+      "expected_allowed": false,
+      "actual_decision": "REVIEW_REQUIRED",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Governance override requires verified operator identity.",
+      "timestamp": "2026-06-14T19:47:27.316702+00:00"
+    },
+    {
+      "simulation_id": "sim-operator-override-documented",
+      "scenario_name": "Manual operator override with audit context",
+      "category": "operator",
+      "execution_path": "manual_operator_override",
+      "input_conditions": {
+        "operatorAuthorized": true,
+        "overrideReason": "Manual review of stale position",
+        "operationalContext": "Operator desk simulation THP-005",
+        "auditTrailId": "sim-override-001"
+      },
+      "expected_decision": "REVIEW_REQUIRED",
+      "expected_allowed": false,
+      "actual_decision": "REVIEW_REQUIRED",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Governance override queued for review with audit evidence recorded.",
+      "timestamp": "2026-06-14T19:47:27.374404+00:00"
+    },
+    {
+      "simulation_id": "sim-capital-no-lifecycle",
+      "scenario_name": "Capital deployment without lifecycle approval",
+      "category": "risk",
+      "execution_path": "capital_deployment",
+      "input_conditions": {
+        "lifecycleApproved": false,
+        "allocationApproved": true,
+        "riskConstraintsSatisfied": true,
+        "environment": "development"
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "explanation": "Capital deployment blocked: approved lifecycle decision is required.",
+      "timestamp": "2026-06-14T19:47:27.434813+00:00"
+    }
+  ]
+}
