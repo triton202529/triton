@@ -1,9 +1,9 @@
 {
-  "name": "tropicash",
+  "name": "triton",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Tropicash execution gate and money path protection (THP-001)",
+  "description": "TRITON execution gate and money path protection (THP-001)",
   "scripts": {
     "lint": "eslint lib pages --ext .js,.jsx",
     "build": "node scripts/verify-gate-build.js"

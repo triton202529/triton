@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tropicash now routes every money-moving operation through a centralized **Execution Gate** before any balance mutation, payout, or wallet API action may proceed. This phase adds governance and protection only — it does not change Supabase schema, balance mutation logic, PayPal credentials, OAuth token implementation, KYC policy tables, or production environment settings.
+TRITON now routes every execution-sensitive operation through a centralized **Execution Gate** before any order placement, portfolio mutation, trade authorization, or capital deployment action may proceed. This phase adds governance and protection only — it does not change broker schema, order placement logic, broker credentials, risk policy tables, or production environment settings.
 
 ## Modules
 
@@ -157,7 +157,7 @@ Wire `assertMoneyPathAllowed()` or `gateApiRequest()` at these surfaces before e
 
 The gate reads (in order):
 
-1. `TROPICASH_ENV`
+1. `TRITON_ENV`
 2. `VERCEL_ENV`
 3. `NODE_ENV`
 
@@ -178,9 +178,8 @@ Build verifies all gate functions export correctly and runs representative evalu
 
 ## Out of Scope (This Phase)
 
-- Supabase schema changes
-- Balance mutation logic changes
-- PayPal credential handling
-- OAuth token implementation
-- KYC policy table changes
+- Broker schema changes
+- Order placement logic changes
+- Broker credential handling
+- Risk policy table changes
 - Production environment configuration changes

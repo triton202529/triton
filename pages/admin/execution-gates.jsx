@@ -20,7 +20,7 @@ export default function ExecutionGatesPage({ environment = 'development' }) {
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 960 }}>
       <h1>Execution Gates</h1>
       <p>
-        THP-001 money path protection — environment:
+        THP-001 TRITON execution gate — environment:
         {' '}
         <strong>{environment}</strong>
       </p>
