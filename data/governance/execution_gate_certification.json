@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-06-14T20:22:19.744662+00:00",
+  "framework": "THP-006",
+  "resilience_score": 100.0,
+  "certification_level": "INSTITUTIONAL_GRADE",
+  "accidental_authorizations": 0,
+  "paper_live_boundary_intact": true,
+  "determinism_verified": true,
+  "category_scores": [
+    {
+      "category": "broker_safety",
+      "score": 100.0,
+      "weight": 0.2,
+      "weighted_score": 20.0,
+      "passed": 4,
+      "failed": 0,
+      "total": 4,
+      "status": "PASS",
+      "notes": "Stress suite: 4/4 passed"
+    },
+    {
+      "category": "governance_integrity",
+      "score": 100.0,
+      "weight": 0.18,
+      "weighted_score": 18.0,
+      "passed": 3,
+      "failed": 0,
+      "total": 3,
+      "status": "PASS",
+      "notes": "Stress suite: 3/3 passed"
+    },
+    {
+      "category": "risk_protection",
+      "score": 100.0,
+      "weight": 0.18,
+      "weighted_score": 18.0,
+      "passed": 3,
+      "failed": 0,
+      "total": 3,
+      "status": "PASS",
+      "notes": "Stress suite: 3/3 passed"
+    },
+    {
+      "category": "environment_isolation",
+      "score": 100.0,
+      "weight": 0.15,
+      "weighted_score": 15.0,
+      "passed": 4,
+      "failed": 0,
+      "total": 4,
+      "status": "PASS",
+      "notes": "Stress suite: 4/4 passed"
+    },
+    {
+      "category": "authorization_determinism",
+      "score": 100.0,
+      "weight": 0.12,
+      "weighted_score": 12.0,
+      "passed": 3,
+      "failed": 0,
+      "total": 3,
+      "status": "PASS",
+      "notes": "Stress suite: 3/3 passed"
+    },
+    {
+      "category": "audit_reliability",
+      "score": 100.0,
+      "weight": 0.1,
+      "weighted_score": 10.0,
+      "passed": 0,
+      "failed": 0,
+      "total": 0,
+      "status": "PASS",
+      "notes": "Replay consistency; drift events: 0"
+    },
+    {
+      "category": "failure_recovery",
+      "score": 100.0,
+      "weight": 0.07,
+      "weighted_score": 7.0,
+      "passed": 0,
+      "failed": 0,
+      "total": 0,
+      "status": "PASS",
+      "notes": "Chaos fail-safe: 10/10"
+    }
+  ],
+  "failed_scenarios": [],
+  "summary": {
+    "stress_passed": 17,
+    "stress_total": 17,
+    "chaos_passed": 10,
+    "chaos_total": 10,
+    "replay_consistent": 1,
+    "simulation_passed": 15
+  }
+}

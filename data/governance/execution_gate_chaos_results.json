@@ -1,0 +1,189 @@
+{
+  "generated_at": "2026-06-14T20:22:19.589090+00:00",
+  "framework": "THP-006",
+  "summary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "accidental_authorizations": 0,
+    "all_fail_safe": true
+  },
+  "records": [
+    {
+      "chaos_id": "chaos-missing-governance",
+      "fault_type": "missing_authorization",
+      "scenario_name": "Missing governance artifact (simulated)",
+      "execution_path": "live_execution",
+      "injected_fault": {
+        "liveMode": true,
+        "governanceApproved": false,
+        "liveModeAuthorized": false
+      },
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T20:22:19.080672+00:00"
+    },
+    {
+      "chaos_id": "chaos-empty-operator",
+      "fault_type": "empty_authorization",
+      "scenario_name": "Empty operator authorization record",
+      "execution_path": "manual_operator_override",
+      "injected_fault": {
+        "operatorAuthorized": false,
+        "operatorId": "",
+        "overrideReason": ""
+      },
+      "expected_safe": true,
+      "actual_decision": "REVIEW_REQUIRED",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Governance override requires verified operator identity.",
+      "timestamp": "2026-06-14T20:22:19.136730+00:00"
+    },
+    {
+      "chaos_id": "chaos-invalid-env",
+      "fault_type": "invalid_environment",
+      "scenario_name": "Invalid environment state",
+      "execution_path": "live_execution",
+      "injected_fault": {
+        "environment": "",
+        "liveMode": true,
+        "paperMode": true,
+        "liveModeAuthorized": false
+      },
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T20:22:19.193075+00:00"
+    },
+    {
+      "chaos_id": "chaos-unknown-path",
+      "fault_type": "unexpected_input",
+      "scenario_name": "Unknown execution path",
+      "execution_path": "wallet_funding_legacy_removed",
+      "injected_fault": {},
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Unknown execution path \"wallet_funding_legacy_removed\" \u00e2\u20ac\u201d all unrecognized paths are blocked.",
+      "timestamp": "2026-06-14T20:22:19.250998+00:00"
+    },
+    {
+      "chaos_id": "chaos-partial-context",
+      "fault_type": "partial_failure",
+      "scenario_name": "Partial authorization context",
+      "execution_path": "capital_deployment",
+      "injected_fault": {
+        "lifecycleApproved": false,
+        "allocationApproved": false
+      },
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Capital deployment blocked: approved lifecycle decision is required.",
+      "timestamp": "2026-06-14T20:22:19.306854+00:00"
+    },
+    {
+      "chaos_id": "chaos-risk-kill",
+      "fault_type": "kill_switch",
+      "scenario_name": "Emergency kill switch (simulated lockdown)",
+      "execution_path": "broker_submission",
+      "injected_fault": {
+        "riskConstraintsSatisfied": false,
+        "executionGuardApproved": false,
+        "brokerConnected": false,
+        "lifecycleApproved": false
+      },
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Broker submission blocked: valid execution authorization is required.",
+      "timestamp": "2026-06-14T20:22:19.364574+00:00"
+    },
+    {
+      "chaos_id": "chaos-type-coercion",
+      "fault_type": "unexpected_data_type",
+      "scenario_name": "Unexpected data types in context",
+      "execution_path": "live_execution",
+      "injected_fault": {
+        "liveMode": "true",
+        "liveModeAuthorized": 0,
+        "governanceApproved": null,
+        "productionReadinessOverride": "no"
+      },
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T20:22:19.418825+00:00"
+    },
+    {
+      "chaos_id": "chaos-null-context",
+      "fault_type": "missing_files",
+      "scenario_name": "Minimal empty context",
+      "execution_path": "broker_submission",
+      "injected_fault": {},
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Broker submission blocked: valid execution authorization is required.",
+      "timestamp": "2026-06-14T20:22:19.473258+00:00"
+    },
+    {
+      "chaos_id": "chaos-live-bypass-attempt",
+      "fault_type": "authorization_bypass",
+      "scenario_name": "Live bypass without credentials",
+      "execution_path": "live_execution",
+      "injected_fault": {
+        "liveMode": true,
+        "liveModeAuthorized": true,
+        "governanceApproved": false,
+        "productionReadinessOverride": false,
+        "environment": "production"
+      },
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T20:22:19.531004+00:00"
+    },
+    {
+      "chaos_id": "chaos-paper-disabled",
+      "fault_type": "invalid_environment",
+      "scenario_name": "Missing broker authorization on submission path",
+      "execution_path": "broker_submission",
+      "injected_fault": {
+        "brokerConnected": true,
+        "executionAuthorized": false,
+        "lifecycleApproved": false
+      },
+      "expected_safe": true,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "fail_safe": true,
+      "pass_fail": "PASS",
+      "explanation": "Broker submission blocked: valid execution authorization is required.",
+      "timestamp": "2026-06-14T20:22:19.589061+00:00"
+    }
+  ]
+}

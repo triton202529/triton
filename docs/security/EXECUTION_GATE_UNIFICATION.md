@@ -328,3 +328,42 @@ Read-only validation laboratory — no broker calls or capital deployment.
 - **CONSISTENT** — Current gate reproduces original outcome
 - **DRIFT_DETECTED** — Authorization behavior changed under current conditions
 - **REQUIRES_REVIEW** — Historical replay mismatch or ambiguous outcome
+
+## THP-006 Stress Testing, Chaos Engineering & Resilience Certification
+
+Read-only resilience validation — no broker calls, order placement, or portfolio mutations.
+
+| Module | Purpose |
+|--------|---------|
+| `services/execution_gate_stress_suite.py` | Broker, governance, risk, environment, concurrency stress catalog |
+| `services/execution_gate_chaos_engine.py` | Controlled fault injection via gate context |
+| `services/execution_gate_resilience_certification.py` | Aggregate scores and institutional certification |
+| `dashboard/execution_gate_resilience_dashboard.py` | Streamlit resilience lab UI |
+
+All tests use `evaluate_execution_gate(record_evidence=False)` to avoid governance pollution.
+
+### Artifacts
+
+- `execution_gate_stress_results.json` / `.csv`
+- `execution_gate_chaos_results.json` / `.csv`
+- `execution_gate_resilience_report.json` / `.csv`
+- `execution_gate_certification.json`
+
+### Resilience Categories
+
+Broker Safety, Governance Integrity, Risk Protection, Environment Isolation, Authorization Determinism, Audit Reliability, Failure Recovery.
+
+### Certification Levels
+
+| Score | Level |
+|-------|-------|
+| 95–100 | INSTITUTIONAL_GRADE |
+| 85–94 | PRODUCTION_READY |
+| 70–84 | REQUIRES_IMPROVEMENT |
+| &lt;70 | FAILED |
+
+### Run Certification
+
+```bash
+python -m services.execution_gate_resilience_certification
+```

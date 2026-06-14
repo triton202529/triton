@@ -1,0 +1,368 @@
+{
+  "generated_at": "2026-06-14T20:22:19.019866+00:00",
+  "framework": "THP-006",
+  "summary": {
+    "total": 17,
+    "passed": 17,
+    "failed": 0,
+    "categories": {
+      "broker_safety": {
+        "pass": 4,
+        "fail": 0,
+        "total": 4
+      },
+      "governance_integrity": {
+        "pass": 3,
+        "fail": 0,
+        "total": 3
+      },
+      "risk_protection": {
+        "pass": 3,
+        "fail": 0,
+        "total": 3
+      },
+      "environment_isolation": {
+        "pass": 4,
+        "fail": 0,
+        "total": 4
+      },
+      "authorization_determinism": {
+        "pass": 3,
+        "fail": 0,
+        "total": 3
+      }
+    }
+  },
+  "records": [
+    {
+      "stress_id": "str-broker-offline",
+      "category": "broker_safety",
+      "scenario_name": "Broker offline",
+      "execution_path": "broker_submission",
+      "input_summary": {
+        "brokerConnected": false,
+        "lifecycleApproved": true,
+        "executionGuardApproved": true,
+        "duplicateOrderClear": true
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Broker submission blocked: active broker connectivity is required.",
+      "timestamp": "2026-06-14T20:22:14.317699+00:00"
+    },
+    {
+      "stress_id": "str-broker-timeout",
+      "category": "broker_safety",
+      "scenario_name": "Broker timeout (simulated unavailable)",
+      "execution_path": "broker_submission",
+      "input_summary": {
+        "brokerConnected": false,
+        "executionAuthorized": true,
+        "executionGuardApproved": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Broker submission blocked: active broker connectivity is required.",
+      "timestamp": "2026-06-14T20:22:14.541393+00:00"
+    },
+    {
+      "stress_id": "str-broker-auth-fail",
+      "category": "broker_safety",
+      "scenario_name": "Broker authentication failure",
+      "execution_path": "broker_submission",
+      "input_summary": {
+        "brokerConnected": false,
+        "executionAuthorized": false,
+        "lifecycleApproved": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Broker submission blocked: valid execution authorization is required.",
+      "timestamp": "2026-06-14T20:22:14.776139+00:00"
+    },
+    {
+      "stress_id": "str-paper-live-routing",
+      "category": "broker_safety",
+      "scenario_name": "Paper broker attempting live routing",
+      "execution_path": "live_execution",
+      "input_summary": {
+        "paperMode": true,
+        "liveMode": true,
+        "liveModeAuthorized": false,
+        "governanceApproved": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T20:22:15.008452+00:00"
+    },
+    {
+      "stress_id": "str-gov-missing",
+      "category": "governance_integrity",
+      "scenario_name": "Missing governance authorization",
+      "execution_path": "live_execution",
+      "input_summary": {
+        "liveMode": true,
+        "liveModeAuthorized": true,
+        "governanceApproved": false,
+        "lifecycleApproved": true,
+        "allocationApproved": true
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T20:22:15.302304+00:00"
+    },
+    {
+      "stress_id": "str-gov-invalid-chain",
+      "category": "governance_integrity",
+      "scenario_name": "Invalid approval chain",
+      "execution_path": "governance_override",
+      "input_summary": {
+        "operatorAuthorized": false,
+        "overrideReason": "",
+        "operationalContext": ""
+      },
+      "expected_decision": "REVIEW_REQUIRED",
+      "expected_allowed": false,
+      "actual_decision": "REVIEW_REQUIRED",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Governance override requires verified operator identity.",
+      "timestamp": "2026-06-14T20:22:15.545716+00:00"
+    },
+    {
+      "stress_id": "str-gov-unauthorized-override",
+      "category": "governance_integrity",
+      "scenario_name": "Unauthorized override attempt",
+      "execution_path": "manual_operator_override",
+      "input_summary": {
+        "operatorAuthorized": false
+      },
+      "expected_decision": "REVIEW_REQUIRED",
+      "expected_allowed": false,
+      "actual_decision": "REVIEW_REQUIRED",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Governance override requires verified operator identity.",
+      "timestamp": "2026-06-14T20:22:15.763797+00:00"
+    },
+    {
+      "stress_id": "str-risk-lockdown",
+      "category": "risk_protection",
+      "scenario_name": "Risk lockdown active",
+      "execution_path": "capital_deployment",
+      "input_summary": {
+        "lifecycleApproved": true,
+        "allocationApproved": true,
+        "riskConstraintsSatisfied": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Capital deployment blocked: risk constraints, sizing, or concentration limits not satisfied.",
+      "timestamp": "2026-06-14T20:22:15.985001+00:00"
+    },
+    {
+      "stress_id": "str-risk-emergency-no-trigger",
+      "category": "risk_protection",
+      "scenario_name": "Emergency action without trigger",
+      "execution_path": "risk_emergency_action",
+      "input_summary": {
+        "riskEmergencyTriggered": false,
+        "emergencyAction": "RISK_LOCKDOWN"
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Risk emergency action blocked: no active risk emergency detected.",
+      "timestamp": "2026-06-14T20:22:16.208256+00:00"
+    },
+    {
+      "stress_id": "str-risk-invalid-portfolio",
+      "category": "risk_protection",
+      "scenario_name": "Invalid portfolio state (allocation missing)",
+      "execution_path": "position_entry",
+      "input_summary": {
+        "lifecycleApproved": true,
+        "allocationApproved": false,
+        "riskConstraintsSatisfied": true,
+        "environment": "development"
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Capital deployment blocked: portfolio allocation approval is required.",
+      "timestamp": "2026-06-14T20:22:16.428615+00:00"
+    },
+    {
+      "stress_id": "str-env-live-in-paper",
+      "category": "environment_isolation",
+      "scenario_name": "Live execution in paper environment",
+      "execution_path": "paper_execution",
+      "input_summary": {
+        "paperMode": false,
+        "liveMode": true
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Paper and live broker environments must remain separated.",
+      "timestamp": "2026-06-14T20:22:16.648172+00:00"
+    },
+    {
+      "stress_id": "str-env-paper-live-creds",
+      "category": "environment_isolation",
+      "scenario_name": "Paper execution with live mode flags",
+      "execution_path": "paper_execution",
+      "input_summary": {
+        "paperMode": false,
+        "liveMode": true,
+        "executionAuthorized": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Paper and live broker environments must remain separated.",
+      "timestamp": "2026-06-14T20:22:16.867826+00:00"
+    },
+    {
+      "stress_id": "str-env-missing-vars",
+      "category": "environment_isolation",
+      "scenario_name": "Missing environment variables (paper/live unset)",
+      "execution_path": "paper_execution",
+      "input_summary": {
+        "paperMode": false,
+        "liveMode": true
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Paper and live broker environments must remain separated.",
+      "timestamp": "2026-06-14T20:22:17.086038+00:00"
+    },
+    {
+      "stress_id": "str-env-invalid-mode",
+      "category": "environment_isolation",
+      "scenario_name": "Invalid execution mode combination",
+      "execution_path": "live_execution",
+      "input_summary": {
+        "liveMode": true,
+        "liveModeAuthorized": false,
+        "governanceApproved": false
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Live execution blocked: production authorization and governance approval are required.",
+      "timestamp": "2026-06-14T20:22:17.304584+00:00"
+    },
+    {
+      "stress_id": "str-concurrency-burst",
+      "category": "authorization_determinism",
+      "scenario_name": "Concurrent burst (100 requests)",
+      "execution_path": "broker_submission",
+      "input_summary": {
+        "concurrent_requests": 100,
+        "lifecycleApproved": true,
+        "executionAuthorized": true,
+        "brokerConnected": true,
+        "executionGuardApproved": true,
+        "duplicateOrderClear": true,
+        "environment": "development"
+      },
+      "expected_decision": "DETERMINISTIC",
+      "expected_allowed": true,
+      "actual_decision": "UNIQUE",
+      "actual_allowed": true,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "100 concurrent evaluations produced 1 unique outcome(s). No accidental authorization drift detected: True",
+      "timestamp": "2026-06-14T20:22:18.184259+00:00"
+    },
+    {
+      "stress_id": "str-duplicate-identifier",
+      "category": "authorization_determinism",
+      "scenario_name": "Duplicate execution identifier burst",
+      "execution_path": "broker_submission",
+      "input_summary": {
+        "lifecycleApproved": true,
+        "executionAuthorized": true,
+        "brokerConnected": true,
+        "executionGuardApproved": true,
+        "duplicateOrderClear": false,
+        "auditTrailId": "stress-dup-001"
+      },
+      "expected_decision": "BLOCK",
+      "expected_allowed": false,
+      "actual_decision": "BLOCK",
+      "actual_allowed": false,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Duplicate order protection must block all repeated submissions.",
+      "timestamp": "2026-06-14T20:22:18.741211+00:00"
+    },
+    {
+      "stress_id": "str-auth-fingerprint",
+      "category": "authorization_determinism",
+      "scenario_name": "Authorization fingerprint consistency",
+      "execution_path": "live_execution",
+      "input_summary": {
+        "liveMode": true,
+        "liveModeAuthorized": false,
+        "governanceApproved": false
+      },
+      "expected_decision": "DETERMINISTIC",
+      "expected_allowed": true,
+      "actual_decision": "4c084fd4a2587d47",
+      "actual_allowed": true,
+      "pass_fail": "PASS",
+      "determinism_class": "DETERMINISTIC",
+      "explanation": "Fingerprint stable across 5 runs: True",
+      "timestamp": "2026-06-14T20:22:19.019825+00:00"
+    }
+  ]
+}
