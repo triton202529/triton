@@ -1,0 +1,115 @@
+{
+  "generated_at": "2026-06-14T22:04:35.008713+00:00",
+  "framework": "THP-H001",
+  "summary": {
+    "total_issues": 10,
+    "by_severity": {
+      "CRITICAL": 1,
+      "HIGH": 6,
+      "MEDIUM": 2,
+      "LOW": 1
+    },
+    "critical_count": 1,
+    "high_count": 6,
+    "capital_affecting": 7
+  },
+  "remediation_order": [
+    "Resolve CRITICAL execution bypass paths",
+    "Wire or formally exempt governance council from capital path",
+    "Refresh stale operational artifacts",
+    "Consolidate duplicate source-of-truth documentation",
+    "Archive unused advisory services"
+  ],
+  "records": [
+    {
+      "issue_id": "INT-0001",
+      "severity": "CRITICAL",
+      "category": "execution_bypass",
+      "component": "services/broker_alpaca.py:place_bracket_market",
+      "description": "place_bracket_market posts directly to /v2/orders without enforce_broker_submission_gate.",
+      "remediation": "Route place_bracket_market through enforce_broker_submission_gate or submit_order.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0002",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/auto_execute_signals.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0003",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/auto_trade.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0004",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/auto_exit.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0005",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/execute_trade.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0006",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "alpaca_client.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0007",
+      "severity": "HIGH",
+      "category": "duplicate_authority",
+      "component": "master_execution_gate + triton_execution_gate",
+      "description": "Two layered gate systems (MasterExecutionGate + Node execution gate) both required; failure modes differ.",
+      "remediation": "Document precedence chain; ensure both must pass for production.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0008",
+      "severity": "MEDIUM",
+      "category": "advisory_only",
+      "component": "execution_governance_council",
+      "description": "THP-007/008 health and council systems monitor and recommend but do not block execute_trades by default.",
+      "remediation": "Integrate operational_status LOCKDOWN flag into execution entry if institutional enforcement required.",
+      "affects_capital": false
+    },
+    {
+      "issue_id": "INT-0009",
+      "severity": "MEDIUM",
+      "category": "duplicate_source_of_truth",
+      "component": "signal_lifecycle.csv vs signal_lifecycle_effective.csv",
+      "description": "Two lifecycle artifacts; execution uses effective copy via lifecycle_truth.",
+      "remediation": "Treat signal_lifecycle_effective.csv as sole execution authority; dashboards should match.",
+      "affects_capital": false
+    },
+    {
+      "issue_id": "INT-0010",
+      "severity": "LOW",
+      "category": "legacy_file",
+      "component": "services/execute_trades.recovered.py",
+      "description": "Recovered duplicate of execute_trades exists in repo.",
+      "remediation": "Remove or move to archive outside execution path.",
+      "affects_capital": false
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "generated_at": "2026-06-14T22:04:31.166758+00:00",
+  "framework": "THP-H001",
+  "entries": [
+    {
+      "decision": "lifecycle_authorization",
+      "owner": "services/lifecycle_truth.py",
+      "primary_artifact": "data/results/signal_lifecycle_effective.csv",
+      "secondary_artifacts": [
+        "data/results/signal_lifecycle.csv"
+      ],
+      "consumers": [
+        "services/execute_trades.py",
+        "services/manage_positions.py",
+        "services/place_live_orders.py"
+      ],
+      "refresh_method": "build_effective_lifecycle after apply_signal_lifecycle",
+      "duplicate_risk": "signal_lifecycle.csv vs effective copy"
+    },
+    {
+      "decision": "portfolio_allocation",
+      "owner": "services/portfolio_allocation_engine.py",
+      "primary_artifact": "data/results/portfolio_allocation_recommendations.csv",
+      "secondary_artifacts": [
+        "data/results/portfolio_allocation_summary.json"
+      ],
+      "consumers": [
+        "services/manage_positions.py"
+      ],
+      "refresh_method": "portfolio allocation engine run",
+      "duplicate_risk": "dashboard may show summary json while execution reads csv"
+    },
+    {
+      "decision": "risk_restriction",
+      "owner": "services/master_execution_gate.py",
+      "primary_artifact": "data/results/master_execution_gate.json",
+      "secondary_artifacts": [
+        "data/results/adaptive_risk_state.json",
+        "data/results/performance_risk_overlay.csv"
+      ],
+      "consumers": [
+        "services/execute_trades.py",
+        "services/place_live_orders.py",
+        "place_orders_from_csv.py"
+      ],
+      "refresh_method": "MasterExecutionGate.evaluate each batch",
+      "duplicate_risk": "adaptive_risk_state vs master gate snapshot"
+    },
+    {
+      "decision": "execution_authorization",
+      "owner": "lib/executionGate.js via services/triton_execution_gate.py",
+      "primary_artifact": "data/governance/execution_gate_decisions.json",
+      "secondary_artifacts": [
+        "data/results/execution_gate_audit.csv"
+      ],
+      "consumers": [
+        "services/broker_alpaca.submit_order"
+      ],
+      "refresh_method": "evaluate_execution_gate on each enforcement call",
+      "duplicate_risk": "master_execution_gate vs triton execution gate (layered)"
+    },
+    {
+      "decision": "human_governance_approval",
+      "owner": "services/execution_approval_workflow.py",
+      "primary_artifact": "data/governance/execution_approval_requests.json",
+      "secondary_artifacts": [
+        "data/governance/execution_escalations.json"
+      ],
+      "consumers": [
+        "dashboard/execution_governance_council_dashboard.py"
+      ],
+      "refresh_method": "evaluate_governed_execution (not wired to main execution path)",
+      "duplicate_risk": "THP-008 council not enforced on execute_trades path"
+    },
+    {
+      "decision": "broker_order_submission",
+      "owner": "services/broker_alpaca.py",
+      "primary_artifact": "data/results/live_orders_log.csv",
+      "secondary_artifacts": [
+        "data/results/live_orders.csv"
+      ],
+      "consumers": [
+        "Alpaca API"
+      ],
+      "refresh_method": "submit_order with enforce_broker_submission_gate",
+      "duplicate_risk": "place_orders_from_csv uses raw requests POST"
+    },
+    {
+      "decision": "operational_heartbeat",
+      "owner": "run_full_pipeline.py / services/loop_safety.py",
+      "primary_artifact": "data/results/heartbeat.json",
+      "secondary_artifacts": [
+        "data/results/pipeline_status.json"
+      ],
+      "consumers": [
+        "services/master_execution_gate.py"
+      ],
+      "refresh_method": "pipeline stages + loop_safety refresh",
+      "duplicate_risk": "stale heartbeat blocks master gate"
+    }
+  ]
+}

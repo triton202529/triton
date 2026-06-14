@@ -480,3 +480,25 @@ SAME_DECISION, POLICY_CHANGED, RISK_CHANGED, GOVERNANCE_CHANGED, ENVIRONMENT_CHA
 ```bash
 python -m services.execution_regulatory_audit_pack
 ```
+
+## THP-H001 Full System Integration & Source-of-Truth Audit
+
+Investigation-only institutional audit — no architecture or trading changes.
+
+| Module | Purpose |
+|--------|---------|
+| `services/system_integration_audit.py` | Dependency map, source-of-truth registry, integration risk matrix |
+
+### Artifacts
+
+- `system_integration_audit.json` / `.csv`
+- `source_of_truth_registry.json`
+- `dependency_map.json`
+- `unused_components_report.json`
+- `integration_risk_matrix.json`
+
+### Run Audit
+
+```bash
+python -m services.system_integration_audit
+```

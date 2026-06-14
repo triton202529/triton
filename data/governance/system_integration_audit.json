@@ -1,0 +1,1316 @@
+{
+  "generated_at": "2026-06-14T22:04:35.008733+00:00",
+  "framework": "THP-H001",
+  "audit_type": "full_system_integration",
+  "investigation_only": true,
+  "executive_summary": {
+    "question": "Does every part of TRITON work together as one coherent institution?",
+    "execution_path_traceable": true,
+    "gate_final_authority_before_broker": true,
+    "governance_council_on_execution_path": false,
+    "total_issues": 10,
+    "critical_issues": 1,
+    "high_issues": 6,
+    "components_driving_execution": [
+      "signal_lifecycle_effective.csv",
+      "trade_opportunities.csv",
+      "MasterExecutionGate",
+      "ExecutionGuard",
+      "triton_execution_gate",
+      "broker_alpaca.submit_order"
+    ],
+    "advisory_only_layers": [
+      "THP-004..009 governance dashboards and evidence registries",
+      "services/risk_watchdog.py",
+      "services/execution_gate_health_monitor.py",
+      "services/execution_governance_council.py (not on main execute path)",
+      "governance_* analysis and certification services"
+    ]
+  },
+  "sections": {
+    "1_system_dependency_map": {
+      "generated_at": "2026-06-14T22:04:31.255333+00:00",
+      "framework": "THP-H001",
+      "operating_chain": [
+        {
+          "stage": "market_data",
+          "role": "advisory_input",
+          "services": [
+            "services/fetch_raw_data.py",
+            "services/preprocess_data.py"
+          ],
+          "artifacts": [
+            "data/raw/",
+            "data/processed/"
+          ],
+          "consumers": [
+            "run_full_pipeline.py"
+          ],
+          "refresh": "pipeline stage fetch_raw",
+          "failure_behavior": "pipeline aborts early stage",
+          "recovery": "retry fetch_raw with diagnostics"
+        },
+        {
+          "stage": "signal_intelligence",
+          "role": "decision_input",
+          "services": [
+            "services/generate_signals.py",
+            "services/score_stocks.py",
+            "services/build_orders_from_signals.py"
+          ],
+          "artifacts": [
+            "data/results/signals.csv",
+            "data/results/signals_with_rationale.csv",
+            "data/results/stock_scores.csv"
+          ],
+          "consumers": [
+            "run_full_pipeline.py",
+            "services/execute_trades.py"
+          ],
+          "refresh": "pipeline signals/scores stages",
+          "failure_behavior": "empty or stale signals block downstream",
+          "recovery": "re-run run_full_pipeline.py"
+        },
+        {
+          "stage": "lifecycle_engine",
+          "role": "decision_authority",
+          "services": [
+            "services/apply_signal_lifecycle.py",
+            "services/build_effective_lifecycle.py",
+            "services/lifecycle_truth.py"
+          ],
+          "artifacts": [
+            "data/results/signal_lifecycle.csv",
+            "data/results/signal_lifecycle_effective.csv"
+          ],
+          "consumers": [
+            "services/execute_trades.py",
+            "services/manage_positions.py",
+            "services/place_live_orders.py"
+          ],
+          "refresh": "pipeline lifecycle stage + build_effective_lifecycle",
+          "failure_behavior": "lifecycle gate blocks entries",
+          "recovery": "apply_signal_lifecycle + build_effective_lifecycle"
+        },
+        {
+          "stage": "portfolio_allocation",
+          "role": "advisory_with_enforcement",
+          "services": [
+            "services/portfolio_allocation_engine.py"
+          ],
+          "artifacts": [
+            "data/results/portfolio_allocation_recommendations.csv",
+            "data/results/portfolio_allocation_summary.json"
+          ],
+          "consumers": [
+            "services/manage_positions.py",
+            "services/execute_trades.py"
+          ],
+          "refresh": "allocation engine run",
+          "failure_behavior": "allocation overlay may be stale",
+          "recovery": "re-run portfolio_allocation_engine"
+        },
+        {
+          "stage": "risk_protection",
+          "role": "enforcement",
+          "services": [
+            "services/risk_gate.py",
+            "services/performance_risk_overlay.py",
+            "services/execution_guard.py",
+            "services/master_execution_gate.py",
+            "services/adaptive_risk_engine.py"
+          ],
+          "artifacts": [
+            "data/results/adaptive_risk_state.json",
+            "data/results/performance_risk_overlay.csv",
+            "data/results/master_execution_gate.json",
+            "data/results/guard_snapshot.json"
+          ],
+          "consumers": [
+            "services/execute_trades.py",
+            "services/place_live_orders.py",
+            "place_orders_from_csv.py"
+          ],
+          "refresh": "each execution cycle",
+          "failure_behavior": "master gate or guard blocks batch",
+          "recovery": "refresh snapshots + risk state"
+        },
+        {
+          "stage": "execution_gate",
+          "role": "final_authority_pre_broker",
+          "services": [
+            "lib/executionGate.js",
+            "services/triton_execution_gate.py"
+          ],
+          "artifacts": [
+            "data/results/execution_gate_audit.csv",
+            "data/governance/execution_gate_decisions.json"
+          ],
+          "consumers": [
+            "services/broker_alpaca.py",
+            "services/execute_trades.py",
+            "services/place_live_orders.py",
+            "services/manage_positions.py",
+            "place_orders_from_csv.py"
+          ],
+          "refresh": "every gate evaluation",
+          "failure_behavior": "BLOCK on gate failure",
+          "recovery": "fix gate script / env vars"
+        },
+        {
+          "stage": "governance_council",
+          "role": "advisory_overlay",
+          "services": [
+            "services/execution_governance_council.py",
+            "services/execution_approval_workflow.py",
+            "services/execution_escalation_engine.py"
+          ],
+          "artifacts": [
+            "data/governance/execution_approval_requests.json",
+            "data/governance/execution_governance_council_status.json"
+          ],
+          "consumers": [
+            "dashboard/execution_governance_council_dashboard.py"
+          ],
+          "refresh": "supervision cycle",
+          "failure_behavior": "does NOT block execution path by default",
+          "recovery": "run governance council supervision"
+        },
+        {
+          "stage": "broker_authorization",
+          "role": "enforcement",
+          "services": [
+            "services/broker_alpaca.py"
+          ],
+          "artifacts": [
+            "data/results/live_orders_log.csv"
+          ],
+          "consumers": [
+            "services/place_live_orders.py"
+          ],
+          "refresh": "per submit_order call",
+          "failure_behavior": "API error raises",
+          "recovery": "broker reconnect / cancel stale orders"
+        },
+        {
+          "stage": "order_execution",
+          "role": "capital_deployment",
+          "services": [
+            "services/execute_trades.py",
+            "services/place_live_orders.py",
+            "services/manage_positions.py"
+          ],
+          "artifacts": [
+            "data/live/orders_today.csv",
+            "data/results/execution_plan.json"
+          ],
+          "consumers": [
+            "broker API"
+          ],
+          "refresh": "execution loop",
+          "failure_behavior": "logged to execution_drop_diagnostics",
+          "recovery": "continuous_loop_recovery_manager"
+        },
+        {
+          "stage": "position_management",
+          "role": "capital_deployment",
+          "services": [
+            "services/manage_positions.py"
+          ],
+          "artifacts": [
+            "data/live/manage_orders.csv",
+            "data/results/positions_snapshot.csv"
+          ],
+          "consumers": [
+            "services/place_live_orders.py"
+          ],
+          "refresh": "market open loop / execution loop",
+          "failure_behavior": "management plan only if dry-run",
+          "recovery": "re-run manage_positions"
+        },
+        {
+          "stage": "monitoring_recovery",
+          "role": "advisory_supervision",
+          "services": [
+            "services/risk_watchdog.py",
+            "services/loop_safety.py",
+            "services/continuous_loop_recovery_manager.py",
+            "services/execution_gate_health_monitor.py"
+          ],
+          "artifacts": [
+            "data/results/watchdog_status.json",
+            "data/results/heartbeat.json",
+            "data/results/continuous_loop_health.json",
+            "data/governance/execution_gate_operational_status.json"
+          ],
+          "consumers": [
+            "dashboards",
+            "governance monitors"
+          ],
+          "refresh": "watchdog loop / supervision",
+          "failure_behavior": "alerts only \u2014 does not halt trading",
+          "recovery": "continuous_loop_recovery_manager restart"
+        }
+      ],
+      "execution_modules": [
+        "services/execute_trades.py",
+        "services/place_live_orders.py",
+        "services/manage_positions.py",
+        "services/broker_alpaca.py",
+        "place_orders_from_csv.py"
+      ],
+      "schedulers": [
+        {
+          "path": "scripts/run_continuous_loop.ps1",
+          "exists": true
+        },
+        {
+          "path": "scripts/run_market_open.ps1",
+          "exists": true
+        },
+        {
+          "path": "scripts/run_watchdog_loop.ps1",
+          "exists": true
+        },
+        {
+          "path": "services/run_execution_loop.py",
+          "exists": true
+        },
+        {
+          "path": "services/run_scheduled_paper_cycle.py",
+          "exists": true
+        },
+        {
+          "path": "run_full_pipeline.py",
+          "exists": true
+        }
+      ],
+      "gate_enforcement_callers": [
+        "place_orders_from_csv.py",
+        "services/broker_alpaca.py",
+        "services/execute_trades.py",
+        "services/manage_positions.py",
+        "services/place_live_orders.py",
+        "services/system_integration_audit.py",
+        "services/triton_execution_gate.py"
+      ],
+      "edges": [
+        {
+          "from": "services/fetch_raw_data.py",
+          "to": "run_full_pipeline.py",
+          "via_stage": "market_data",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/preprocess_data.py",
+          "to": "run_full_pipeline.py",
+          "via_stage": "market_data",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/results/signals.csv",
+          "to": "run_full_pipeline.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signals_with_rationale.csv",
+          "to": "run_full_pipeline.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/stock_scores.csv",
+          "to": "run_full_pipeline.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signals.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signals_with_rationale.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/stock_scores.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "services/generate_signals.py",
+          "to": "run_full_pipeline.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/generate_signals.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/score_stocks.py",
+          "to": "run_full_pipeline.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/score_stocks.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/build_orders_from_signals.py",
+          "to": "run_full_pipeline.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/build_orders_from_signals.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "signal_intelligence",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/results/signal_lifecycle.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signal_lifecycle_effective.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signal_lifecycle.csv",
+          "to": "services/manage_positions.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signal_lifecycle_effective.csv",
+          "to": "services/manage_positions.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signal_lifecycle.csv",
+          "to": "services/place_live_orders.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/signal_lifecycle_effective.csv",
+          "to": "services/place_live_orders.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "services/apply_signal_lifecycle.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/apply_signal_lifecycle.py",
+          "to": "services/manage_positions.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/apply_signal_lifecycle.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/build_effective_lifecycle.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/build_effective_lifecycle.py",
+          "to": "services/manage_positions.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/build_effective_lifecycle.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/lifecycle_truth.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/lifecycle_truth.py",
+          "to": "services/manage_positions.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/lifecycle_truth.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "lifecycle_engine",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/results/portfolio_allocation_recommendations.csv",
+          "to": "services/manage_positions.py",
+          "via_stage": "portfolio_allocation",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/portfolio_allocation_summary.json",
+          "to": "services/manage_positions.py",
+          "via_stage": "portfolio_allocation",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/portfolio_allocation_recommendations.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "portfolio_allocation",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/portfolio_allocation_summary.json",
+          "to": "services/execute_trades.py",
+          "via_stage": "portfolio_allocation",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "services/portfolio_allocation_engine.py",
+          "to": "services/manage_positions.py",
+          "via_stage": "portfolio_allocation",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/portfolio_allocation_engine.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "portfolio_allocation",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/results/adaptive_risk_state.json",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/performance_risk_overlay.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/master_execution_gate.json",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/guard_snapshot.json",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/adaptive_risk_state.json",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/performance_risk_overlay.csv",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/master_execution_gate.json",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/guard_snapshot.json",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/adaptive_risk_state.json",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/performance_risk_overlay.csv",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/master_execution_gate.json",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/guard_snapshot.json",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "services/risk_gate.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/risk_gate.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/risk_gate.py",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/performance_risk_overlay.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/performance_risk_overlay.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/performance_risk_overlay.py",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/execution_guard.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/execution_guard.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/execution_guard.py",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/master_execution_gate.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/master_execution_gate.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/master_execution_gate.py",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/adaptive_risk_engine.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/adaptive_risk_engine.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/adaptive_risk_engine.py",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "risk_protection",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/results/execution_gate_audit.csv",
+          "to": "services/broker_alpaca.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_gate_decisions.json",
+          "to": "services/broker_alpaca.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/execution_gate_audit.csv",
+          "to": "services/execute_trades.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_gate_decisions.json",
+          "to": "services/execute_trades.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/execution_gate_audit.csv",
+          "to": "services/place_live_orders.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_gate_decisions.json",
+          "to": "services/place_live_orders.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/execution_gate_audit.csv",
+          "to": "services/manage_positions.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_gate_decisions.json",
+          "to": "services/manage_positions.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/execution_gate_audit.csv",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_gate_decisions.json",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "execution_gate",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "lib/executionGate.js",
+          "to": "services/broker_alpaca.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "lib/executionGate.js",
+          "to": "services/execute_trades.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "lib/executionGate.js",
+          "to": "services/place_live_orders.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "lib/executionGate.js",
+          "to": "services/manage_positions.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "lib/executionGate.js",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/triton_execution_gate.py",
+          "to": "services/broker_alpaca.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/triton_execution_gate.py",
+          "to": "services/execute_trades.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/triton_execution_gate.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/triton_execution_gate.py",
+          "to": "services/manage_positions.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/triton_execution_gate.py",
+          "to": "place_orders_from_csv.py",
+          "via_stage": "execution_gate",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/governance/execution_approval_requests.json",
+          "to": "dashboard/execution_governance_council_dashboard.py",
+          "via_stage": "governance_council",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_governance_council_status.json",
+          "to": "dashboard/execution_governance_council_dashboard.py",
+          "via_stage": "governance_council",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "services/execution_governance_council.py",
+          "to": "dashboard/execution_governance_council_dashboard.py",
+          "via_stage": "governance_council",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/execution_approval_workflow.py",
+          "to": "dashboard/execution_governance_council_dashboard.py",
+          "via_stage": "governance_council",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "services/execution_escalation_engine.py",
+          "to": "dashboard/execution_governance_council_dashboard.py",
+          "via_stage": "governance_council",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/results/live_orders_log.csv",
+          "to": "services/place_live_orders.py",
+          "via_stage": "broker_authorization",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "services/broker_alpaca.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "broker_authorization",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/live/orders_today.csv",
+          "to": "broker API",
+          "via_stage": "order_execution",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/execution_plan.json",
+          "to": "broker API",
+          "via_stage": "order_execution",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/live/manage_orders.csv",
+          "to": "services/place_live_orders.py",
+          "via_stage": "position_management",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/positions_snapshot.csv",
+          "to": "services/place_live_orders.py",
+          "via_stage": "position_management",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "services/manage_positions.py",
+          "to": "services/place_live_orders.py",
+          "via_stage": "position_management",
+          "relationship": "service_used_by"
+        },
+        {
+          "from": "data/results/watchdog_status.json",
+          "to": "dashboards",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/heartbeat.json",
+          "to": "dashboards",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/continuous_loop_health.json",
+          "to": "dashboards",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_gate_operational_status.json",
+          "to": "dashboards",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/watchdog_status.json",
+          "to": "governance monitors",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/heartbeat.json",
+          "to": "governance monitors",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/results/continuous_loop_health.json",
+          "to": "governance monitors",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        },
+        {
+          "from": "data/governance/execution_gate_operational_status.json",
+          "to": "governance monitors",
+          "via_stage": "monitoring_recovery",
+          "relationship": "artifact_consumed_by"
+        }
+      ],
+      "env_dependencies": [
+        "TRITON_ENABLE_PAPER_EXECUTION",
+        "TRITON_ENABLE_LIVE_EXECUTION",
+        "TRITON_LIVE_GOVERNANCE_APPROVED",
+        "TRITON_DISABLE_EXECUTION_GATE"
+      ]
+    },
+    "2_source_of_truth_registry": {
+      "generated_at": "2026-06-14T22:04:31.166758+00:00",
+      "framework": "THP-H001",
+      "entries": [
+        {
+          "decision": "lifecycle_authorization",
+          "owner": "services/lifecycle_truth.py",
+          "primary_artifact": "data/results/signal_lifecycle_effective.csv",
+          "secondary_artifacts": [
+            "data/results/signal_lifecycle.csv"
+          ],
+          "consumers": [
+            "services/execute_trades.py",
+            "services/manage_positions.py",
+            "services/place_live_orders.py"
+          ],
+          "refresh_method": "build_effective_lifecycle after apply_signal_lifecycle",
+          "duplicate_risk": "signal_lifecycle.csv vs effective copy"
+        },
+        {
+          "decision": "portfolio_allocation",
+          "owner": "services/portfolio_allocation_engine.py",
+          "primary_artifact": "data/results/portfolio_allocation_recommendations.csv",
+          "secondary_artifacts": [
+            "data/results/portfolio_allocation_summary.json"
+          ],
+          "consumers": [
+            "services/manage_positions.py"
+          ],
+          "refresh_method": "portfolio allocation engine run",
+          "duplicate_risk": "dashboard may show summary json while execution reads csv"
+        },
+        {
+          "decision": "risk_restriction",
+          "owner": "services/master_execution_gate.py",
+          "primary_artifact": "data/results/master_execution_gate.json",
+          "secondary_artifacts": [
+            "data/results/adaptive_risk_state.json",
+            "data/results/performance_risk_overlay.csv"
+          ],
+          "consumers": [
+            "services/execute_trades.py",
+            "services/place_live_orders.py",
+            "place_orders_from_csv.py"
+          ],
+          "refresh_method": "MasterExecutionGate.evaluate each batch",
+          "duplicate_risk": "adaptive_risk_state vs master gate snapshot"
+        },
+        {
+          "decision": "execution_authorization",
+          "owner": "lib/executionGate.js via services/triton_execution_gate.py",
+          "primary_artifact": "data/governance/execution_gate_decisions.json",
+          "secondary_artifacts": [
+            "data/results/execution_gate_audit.csv"
+          ],
+          "consumers": [
+            "services/broker_alpaca.submit_order"
+          ],
+          "refresh_method": "evaluate_execution_gate on each enforcement call",
+          "duplicate_risk": "master_execution_gate vs triton execution gate (layered)"
+        },
+        {
+          "decision": "human_governance_approval",
+          "owner": "services/execution_approval_workflow.py",
+          "primary_artifact": "data/governance/execution_approval_requests.json",
+          "secondary_artifacts": [
+            "data/governance/execution_escalations.json"
+          ],
+          "consumers": [
+            "dashboard/execution_governance_council_dashboard.py"
+          ],
+          "refresh_method": "evaluate_governed_execution (not wired to main execution path)",
+          "duplicate_risk": "THP-008 council not enforced on execute_trades path"
+        },
+        {
+          "decision": "broker_order_submission",
+          "owner": "services/broker_alpaca.py",
+          "primary_artifact": "data/results/live_orders_log.csv",
+          "secondary_artifacts": [
+            "data/results/live_orders.csv"
+          ],
+          "consumers": [
+            "Alpaca API"
+          ],
+          "refresh_method": "submit_order with enforce_broker_submission_gate",
+          "duplicate_risk": "place_orders_from_csv uses raw requests POST"
+        },
+        {
+          "decision": "operational_heartbeat",
+          "owner": "run_full_pipeline.py / services/loop_safety.py",
+          "primary_artifact": "data/results/heartbeat.json",
+          "secondary_artifacts": [
+            "data/results/pipeline_status.json"
+          ],
+          "consumers": [
+            "services/master_execution_gate.py"
+          ],
+          "refresh_method": "pipeline stages + loop_safety refresh",
+          "duplicate_risk": "stale heartbeat blocks master gate"
+        }
+      ]
+    },
+    "3_dead_or_unused_components": {
+      "generated_at": "2026-06-14T22:04:33.085828+00:00",
+      "framework": "THP-H001",
+      "summary": {
+        "total_services": 338,
+        "referenced_services": 312,
+        "unreferenced_services": 26,
+        "advisory_only_estimate": 89
+      },
+      "unreferenced_services": [
+        "alternative_data_integrator.py",
+        "automated_feature_engineering.py",
+        "baseline_analyzer.py",
+        "black_litterman_optimizer.py",
+        "check_parquet_columns.py",
+        "combine_predictions.py",
+        "compliance_audit_engine.py",
+        "enhanced_portfolio_manager.py",
+        "execution_intelligence_engine.py",
+        "fetch_raw_yfinance.py",
+        "fix_portfolio_history.py",
+        "generate_random_strategy.py",
+        "generate_smart_alerts.py",
+        "generate_trade_rationale.py",
+        "get_data_yf.py",
+        "opportunity_persistence_engine.py",
+        "portfolio_construction_engine.py",
+        "portfolio_execution_intent_engine.py",
+        "portfolio_manager.py",
+        "portfolio_rebalance_engine.py",
+        "set_paper_arm_confirm.py",
+        "test_connection.py",
+        "trade_executor.py",
+        "trade_rationale_engine.py",
+        "train_all_models_2025-07-06.py",
+        "var_cvar_risk_engine.py"
+      ],
+      "advisory_only_services_sample": [
+        "arm_governance_doctrine_activation_authorization_engine.py",
+        "arm_governance_doctrine_activation_board_engine.py",
+        "arm_governance_doctrine_activation_consideration_engine.py",
+        "arm_governance_doctrine_activation_eligibility_engine.py",
+        "arm_governance_doctrine_approval_board_engine.py",
+        "arm_governance_doctrine_evidence_accumulation_engine.py",
+        "arm_governance_doctrine_impact_assessment_engine.py",
+        "arm_governance_doctrine_institutional_trust_engine.py",
+        "arm_governance_doctrine_readiness_engine.py",
+        "arm_governance_doctrine_recommendation_engine.py",
+        "arm_governance_doctrine_simulation_engine.py",
+        "arm_governance_drift_detection_engine.py",
+        "arm_governance_learning_engine.py",
+        "arm_governance_policy_evolution_engine.py",
+        "arm_governance_policy_ratification_engine.py",
+        "arm_governance_policy_review_board_engine.py",
+        "arm_governance_recovery_effectiveness_engine.py",
+        "arm_governance_recovery_engine.py",
+        "arm_governance_runtime_shadow_activation_engine.py",
+        "arm_mode_governance_engine.py",
+        "arm_runtime_governance_admission_board.py",
+        "arm_runtime_governance_constitutional_eligibility_board.py",
+        "arm_runtime_governance_enablement_recommendation_engine.py",
+        "arm_runtime_governance_enablement_review_board.py",
+        "arm_runtime_governance_human_escalation_dossier_engine.py",
+        "arm_runtime_governance_institutional_verdict_engine.py",
+        "arm_runtime_governance_readiness_gate.py",
+        "arm_supreme_governance_council_engine.py",
+        "autonomous_execution_simulator_engine.py",
+        "autonomous_governance_scorecard_engine.py",
+        "backtest_dashboard.py",
+        "capital_preservation_certification.py",
+        "capital_preservation_certification_audit.py",
+        "concentration_exit_strategy_planner.py",
+        "concentration_governance_analysis.py",
+        "concentration_recovery_simulator.py",
+        "diversification_recovery_basket.py",
+        "enhanced_stress_test.py",
+        "executive_oversight_certification.py",
+        "final_governance_recovery_optimization.py",
+        "governance_authorization_intelligence.py",
+        "governance_authorization_trace.py",
+        "governance_daily_evidence_monitor.py",
+        "governance_execution_readiness.py",
+        "governance_outcome_prediction_engine.py",
+        "governance_recovery_acceleration_engine.py",
+        "governance_recovery_exception_analysis.py",
+        "governance_recovery_execution_feasibility.py",
+        "governance_recovery_execution_simulator.py",
+        "governance_recovery_roadmap_tracker.py",
+        "governance_recovery_threshold_optimizer.py",
+        "governance_recovery_timeline_forecaster.py",
+        "governance_risk_prediction_engine.py",
+        "governance_runtime_injection_engine.py",
+        "governance_trust_feedback_engine.py",
+        "hung_loop_recovery_manager.py",
+        "institutional_autonomy.py",
+        "institutional_intelligence.py",
+        "institutional_intelligence_stress_test.py",
+        "institutional_memory.py",
+        "institutional_memory_learning_engine.py",
+        "institutional_operations.py",
+        "institutional_optimization.py",
+        "institutional_planning.py",
+        "institutional_protection.py",
+        "institutional_reasoning.py",
+        "institutional_self_evaluation_engine.py",
+        "live_simulator.py",
+        "paper_execution_certification.py",
+        "portfolio_management_certification.py",
+        "portfolio_management_stress_test.py",
+        "post_green_certification_monitor.py",
+        "promotion_probability_forecast_engine.py",
+        "recovery_basket_exception_governance.py",
+        "recovery_basket_exception_simulator.py",
+        "recovery_basket_implementation_readiness.py",
+        "recovery_basket_monitor.py",
+        "recovery_basket_reconstruction_engine.py",
+        "recovery_candidate_deterioration_analysis.py",
+        "recovery_exception_approval_package.py"
+      ],
+      "legacy_candidates": [
+        "execute_trades.recovered.py"
+      ],
+      "execution_critical_services": [
+        "apply_signal_lifecycle.py",
+        "broker_alpaca.py",
+        "build_effective_lifecycle.py",
+        "continuous_loop_recovery_manager.py",
+        "execute_trades.py",
+        "execution_guard.py",
+        "lifecycle_truth.py",
+        "loop_safety.py",
+        "manage_positions.py",
+        "master_execution_gate.py",
+        "place_live_orders.py",
+        "risk_gate.py",
+        "risk_watchdog.py",
+        "run_execution_loop.py",
+        "run_scheduled_paper_cycle.py",
+        "triton_execution_gate.py"
+      ]
+    },
+    "4_operational_gaps": [
+      {
+        "issue_id": "INT-0008",
+        "severity": "MEDIUM",
+        "category": "advisory_only",
+        "component": "execution_governance_council",
+        "description": "THP-007/008 health and council systems monitor and recommend but do not block execute_trades by default.",
+        "remediation": "Integrate operational_status LOCKDOWN flag into execution entry if institutional enforcement required.",
+        "affects_capital": false
+      }
+    ],
+    "5_risk_ranking": {
+      "total_issues": 10,
+      "by_severity": {
+        "CRITICAL": 1,
+        "HIGH": 6,
+        "MEDIUM": 2,
+        "LOW": 1
+      },
+      "critical_count": 1,
+      "high_count": 6,
+      "capital_affecting": 7
+    }
+  },
+  "execution_path_trace": {
+    "paper_production_path": [
+      "scripts/run_continuous_loop.ps1 (TRITON_ENABLE_PAPER_EXECUTION=1)",
+      "scripts/run_market_open.ps1 OR services/run_execution_loop.py",
+      "run_full_pipeline.py (signals \u2192 lifecycle)",
+      "services/build_effective_lifecycle.py \u2192 signal_lifecycle_effective.csv",
+      "services/execute_trades.py --execute (MasterGate + enforce_pipeline_gate)",
+      "services/place_live_orders.py --no-dry-run (MasterGate + enforce_pipeline_gate)",
+      "services/broker_alpaca.submit_order (enforce_broker_submission_gate)",
+      "Alpaca POST /v2/orders"
+    ],
+    "management_path": [
+      "services/manage_positions.py (lifecycle_truth + MasterGate + enforce_pipeline_gate)",
+      "subprocess place_live_orders --no-dry-run",
+      "broker_alpaca.submit_order"
+    ],
+    "gate_choke_points": [
+      "MasterExecutionGate.evaluate \u2014 batch operational gate",
+      "enforce_pipeline_gate \u2014 stage path (capital_deployment / broker_submission / position_*)",
+      "ExecutionGuard.validate \u2014 per-order",
+      "enforce_broker_submission_gate \u2014 final pre-API",
+      "evaluate_execution_gate \u2014 Node lib/executionGate.js single source of truth"
+    ],
+    "advisory_only_layers": [
+      "THP-004..009 governance dashboards and evidence registries",
+      "services/risk_watchdog.py",
+      "services/execution_gate_health_monitor.py",
+      "services/execution_governance_council.py (not on main execute path)",
+      "governance_* analysis and certification services"
+    ],
+    "components_driving_execution": [
+      "signal_lifecycle_effective.csv",
+      "trade_opportunities.csv",
+      "MasterExecutionGate",
+      "ExecutionGuard",
+      "triton_execution_gate",
+      "broker_alpaca.submit_order"
+    ]
+  },
+  "issues": [
+    {
+      "issue_id": "INT-0001",
+      "severity": "CRITICAL",
+      "category": "execution_bypass",
+      "component": "services/broker_alpaca.py:place_bracket_market",
+      "description": "place_bracket_market posts directly to /v2/orders without enforce_broker_submission_gate.",
+      "remediation": "Route place_bracket_market through enforce_broker_submission_gate or submit_order.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0002",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/auto_execute_signals.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0003",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/auto_trade.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0004",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/auto_exit.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0005",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "scripts/execute_trade.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0006",
+      "severity": "HIGH",
+      "category": "legacy_execution_path",
+      "component": "alpaca_client.py",
+      "description": "Legacy script exists outside unified execution gate pipeline.",
+      "remediation": "Deprecate or wire through triton_execution_gate enforcement.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0007",
+      "severity": "HIGH",
+      "category": "duplicate_authority",
+      "component": "master_execution_gate + triton_execution_gate",
+      "description": "Two layered gate systems (MasterExecutionGate + Node execution gate) both required; failure modes differ.",
+      "remediation": "Document precedence chain; ensure both must pass for production.",
+      "affects_capital": true
+    },
+    {
+      "issue_id": "INT-0008",
+      "severity": "MEDIUM",
+      "category": "advisory_only",
+      "component": "execution_governance_council",
+      "description": "THP-007/008 health and council systems monitor and recommend but do not block execute_trades by default.",
+      "remediation": "Integrate operational_status LOCKDOWN flag into execution entry if institutional enforcement required.",
+      "affects_capital": false
+    },
+    {
+      "issue_id": "INT-0009",
+      "severity": "MEDIUM",
+      "category": "duplicate_source_of_truth",
+      "component": "signal_lifecycle.csv vs signal_lifecycle_effective.csv",
+      "description": "Two lifecycle artifacts; execution uses effective copy via lifecycle_truth.",
+      "remediation": "Treat signal_lifecycle_effective.csv as sole execution authority; dashboards should match.",
+      "affects_capital": false
+    },
+    {
+      "issue_id": "INT-0010",
+      "severity": "LOW",
+      "category": "legacy_file",
+      "component": "services/execute_trades.recovered.py",
+      "description": "Recovered duplicate of execute_trades exists in repo.",
+      "remediation": "Remove or move to archive outside execution path.",
+      "affects_capital": false
+    }
+  ]
+}
