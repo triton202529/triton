@@ -3819,6 +3819,18 @@ def page_institutional_memory_learning_engine() -> None:
         st.error(f"Institutional Memory Learning Engine failed to load: {_short_err(e)}")
 
 
+def page_institutional_self_evaluation_engine() -> None:
+    """🏛 TRITON Institutional Self-Evaluation & Strategic Evolution Engine."""
+    try:
+        from dashboard.institutional_self_evaluation_engine import (
+            render_institutional_self_evaluation_engine,
+        )
+
+        render_institutional_self_evaluation_engine(RESULTS_DIR)
+    except Exception as e:
+        st.error(f"Institutional Self-Evaluation Engine failed to load: {_short_err(e)}")
+
+
 def page_concentration_governance_analysis() -> None:
     """⚖️ Concentration Governance Paradox — diversification vs governance analysis."""
     try:
@@ -23224,6 +23236,10 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
         "Risk & Guardrails",
         "🧠 Institutional Memory & Governance Learning Engine",
     ): page_institutional_memory_learning_engine,
+    (
+        "Risk & Guardrails",
+        "🏛 TRITON Institutional Self-Evaluation & Strategic Evolution Engine",
+    ): page_institutional_self_evaluation_engine,
     (
         "Risk & Guardrails",
         "⚖️ Concentration Governance Analysis",
