@@ -1,0 +1,253 @@
+{
+  "summary": {
+    "generated_at": "2026-06-15T00:18:47.277688+00:00",
+    "framework": "THP-H004",
+    "gate_infrastructure_governed": true,
+    "total_paths_audited": 23,
+    "active_paths_audited": 10,
+    "fully_governed": 10,
+    "partially_governed": 0,
+    "non_compliant": 0,
+    "all_active_fully_governed": true,
+    "required_chain": [
+      "evaluate_governed_execution",
+      "Execution Gate Decision",
+      "Governance Council Review",
+      "Approval Workflow",
+      "enforce_broker_submission_gate",
+      "Alpaca"
+    ]
+  },
+  "records": [
+    {
+      "execution_path": "services/execute_trades.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": true,
+      "uses_governance_council": false,
+      "approval_workflow_status": "ENFORCED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": ""
+    },
+    {
+      "execution_path": "services/place_live_orders.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": true,
+      "uses_governance_council": false,
+      "approval_workflow_status": "ENFORCED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": ""
+    },
+    {
+      "execution_path": "services/manage_positions.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": true,
+      "uses_governance_council": false,
+      "approval_workflow_status": "ENFORCED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": ""
+    },
+    {
+      "execution_path": "place_orders_from_csv.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": true,
+      "uses_governance_council": false,
+      "approval_workflow_status": "ENFORCED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": ""
+    },
+    {
+      "execution_path": "services/broker_alpaca.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": true,
+      "uses_governance_council": false,
+      "approval_workflow_status": "DELEGATED",
+      "broker_authorization_status": "ENFORCED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": ""
+    },
+    {
+      "execution_path": "services/triton_execution_gate.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": true,
+      "uses_governance_council": true,
+      "approval_workflow_status": "ENFORCED",
+      "broker_authorization_status": "ENFORCED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": ""
+    },
+    {
+      "execution_path": "pages/manual_order_desk.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "DELEGATED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": "delegates to governed institutional chain"
+    },
+    {
+      "execution_path": "pages_order_desk.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "DELEGATED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": "delegates to governed institutional chain"
+    },
+    {
+      "execution_path": "services/run_execution_loop.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "DELEGATED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": "delegates to governed institutional chain"
+    },
+    {
+      "execution_path": "services/run_scheduled_paper_cycle.py",
+      "status": "ACTIVE",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "DELEGATED",
+      "broker_authorization_status": "DELEGATED",
+      "compliance_result": "FULLY_GOVERNED",
+      "notes": "delegates to governed institutional chain"
+    },
+    {
+      "execution_path": "alpaca_client.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/attach_brackets_now.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/attach_oco.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/auto_execute_signals.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/auto_exit.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/auto_trade.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/chase_limit.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/execute_trade.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/oco_watch.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/opening_sequence.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "scripts/postfill_attach_oco.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "services/execute_trades.recovered.py",
+      "status": "ARCHIVED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    },
+    {
+      "execution_path": "ui/pages/Order_Desk.py",
+      "status": "DEPRECATED",
+      "uses_execution_gate": false,
+      "uses_governance_council": false,
+      "approval_workflow_status": "N/A",
+      "broker_authorization_status": "N/A",
+      "compliance_result": "N/A",
+      "notes": "Not an active capital path"
+    }
+  ]
+}

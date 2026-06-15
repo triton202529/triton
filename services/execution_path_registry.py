@@ -139,8 +139,8 @@ EXECUTION_PATHS: Dict[str, Dict[str, Any]] = {
         "last_known_operational_use": "manual CSV batch placement",
         "broker_access_capability": "AlpacaBroker.submit_order",
         "execution_gate_compliance": "YES",
-        "governance_compliance": "PARTIAL",
-        "recommended_action": "KEEP — hardened to AlpacaBroker",
+        "governance_compliance": "YES",
+        "recommended_action": "KEEP — governed operator CSV workflow",
         "approved_alternative": "",
     },
     "pages/manual_order_desk.py": {
@@ -150,8 +150,8 @@ EXECUTION_PATHS: Dict[str, Dict[str, Any]] = {
         "last_known_operational_use": "view_results manual_order_desk",
         "broker_access_capability": "AlpacaBroker.submit_order",
         "execution_gate_compliance": "YES",
-        "governance_compliance": "PARTIAL",
-        "recommended_action": "KEEP — gated operator UI",
+        "governance_compliance": "YES",
+        "recommended_action": "KEEP — governed operator UI",
         "approved_alternative": "",
     },
     "pages_order_desk.py": {
@@ -161,8 +161,8 @@ EXECUTION_PATHS: Dict[str, Dict[str, Any]] = {
         "last_known_operational_use": "manual operator orders",
         "broker_access_capability": "AlpacaBroker.submit_order / submit_order_notional",
         "execution_gate_compliance": "YES",
-        "governance_compliance": "PARTIAL",
-        "recommended_action": "KEEP — uses gated broker only",
+        "governance_compliance": "YES",
+        "recommended_action": "KEEP — governed broker wrapper",
         "approved_alternative": "",
     },
     # --- DEPRECATED: legacy bypass paths ---

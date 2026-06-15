@@ -336,6 +336,17 @@ def _apply_governance_overlay(
         "operational_state": operational_state,
     }
 
+    if authority_level >= 3 and evaluation.get("allowed"):
+        result["governance"]["emergency_authority"] = True
+        result["governance"]["human_approval_required"] = False
+        result["decision"] = "ALLOW"
+        result["allowed"] = True
+        result["reason"] = (
+            f"Emergency authority ({authority_level_name(authority_level)}): "
+            f"{evaluation.get('reason', '')}"
+        )
+        return result
+
     if path in EMERGENCY_PATHS and evaluation.get("allowed"):
         result["governance"]["emergency_authority"] = True
         return result

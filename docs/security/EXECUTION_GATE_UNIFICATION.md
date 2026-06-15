@@ -556,3 +556,30 @@ Approved operator workflows: `place_orders_from_csv.py`, `pages/manual_order_des
 python -m services.execution_path_registry
 python -m services.broker_execution_audit
 ```
+
+## THP-H004 Governance Council Enforcement
+
+Ensures every ACTIVE capital deployment path uses `evaluate_governed_execution()` — not execution gate alone.
+
+| Change | Purpose |
+|--------|---------|
+| `enforce_pipeline_gate` → `evaluate_governed_execution` | Pipeline stages require Governance Council |
+| `enforce_broker_submission_gate` | Already governed (THP-H002) |
+| Level 3 emergency authority | FORCE_EXIT / FORCE_TRIM preserved with evidence |
+| `governance_execution_compliance_audit.py` | Compliance inventory |
+
+### Required authorization chain
+
+```
+evaluate_governed_execution → Gate → Council → Approval → Broker → Alpaca
+```
+
+### Artifacts
+
+- `governance_execution_compliance.json` / `.csv`
+
+### Run Audit
+
+```bash
+python -m services.governance_execution_compliance_audit
+```

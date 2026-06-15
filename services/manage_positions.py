@@ -3551,6 +3551,14 @@ def maybe_execute_management(
                 execution_path=stage_path,
                 source="manage_positions",
                 symbols=[p.symbol for p in planned],
+                gate_extra=(
+                    {
+                        "riskEmergencyTriggered": True,
+                        "emergencyAction": "FORCE_EXIT",
+                    }
+                    if stage_path == "risk_emergency_action"
+                    else None
+                ),
             )
         except ExecutionGateBlocked as eg:
             rs = [str(eg)]

@@ -419,8 +419,13 @@ def enforce_pipeline_gate(
     allocation_approved: bool = True,
     risk_constraints_satisfied: bool = True,
     execution_guard_approved: bool = True,
+    execution_identifier: Optional[str] = None,
+    capital_exposure: Optional[Any] = None,
+    gate_extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Batch-level gate for pipeline stages (execute_trades, manage_positions, place_live_orders)."""
+    """Batch-level governed gate for pipeline stages (THP-H004)."""
+    from services.execution_approval_workflow import evaluate_governed_execution
+
     mode_l = mode.lower()
     pipeline_path = (
         EXECUTION_PATHS["PAPER_EXECUTION"]
@@ -432,27 +437,35 @@ def enforce_pipeline_gate(
         mode=mode_l,
         source=source,
         symbols=symbols,
+        execution_identifier=execution_identifier,
         lifecycle_approved=lifecycle_approved,
         allocation_approved=allocation_approved,
         risk_constraints_satisfied=risk_constraints_satisfied,
         execution_guard_approved=execution_guard_approved,
     )
-    mode_eval = evaluate_execution_gate(
+    if gate_extra:
+        ctx.update(gate_extra)
+
+    mode_eval = evaluate_governed_execution(
         pipeline_path,
         ctx,
         source=f"{source}:mode",
         broker_mode=mode_l,
         symbols=symbols,
+        execution_identifier=execution_identifier,
+        capital_exposure=capital_exposure,
     )
     if not mode_eval.get("allowed"):
         raise ExecutionGateBlocked(mode_eval)
 
-    stage_eval = evaluate_execution_gate(
+    stage_eval = evaluate_governed_execution(
         execution_path,
         ctx,
         source=source,
         broker_mode=mode_l,
         symbols=symbols,
+        execution_identifier=execution_identifier,
+        capital_exposure=capital_exposure,
     )
     if not stage_eval.get("allowed"):
         raise ExecutionGateBlocked(stage_eval)
