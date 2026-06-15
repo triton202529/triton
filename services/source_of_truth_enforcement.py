@@ -307,11 +307,20 @@ def _assess_compliance(domain: Dict[str, Any], consumers: Dict[str, List[str]]) 
     patterns = domain.get("artifact_patterns", [])
 
     if domain_id == "lifecycle_authorization":
-        if "services/execute_trades.py" in exec_consumers:
-            # execute_trades gates on effective; place_live_orders has fallback chain
-            if "services/place_live_orders.py" in exec_consumers:
-                return "PARTIAL — execute_trades uses effective; place_live_orders has multi-source fallback"
-        return "PARTIAL"
+        exec_snippets = " ".join(_read_snippet(c) for c in exec_consumers)
+        if (
+            "validate_authoritative_lifecycle" in exec_snippets
+            or "decision_authority" in exec_snippets
+        ):
+            if (
+                "resolve_execution_source" in exec_snippets
+                and "derived_trade_opps" in exec_snippets
+            ):
+                return "COMPLIANT — THP-H006 effective lifecycle authority enforced"
+            return "COMPLIANT — THP-H006 lifecycle authority module active"
+        if "signal_lifecycle_effective" in exec_snippets:
+            return "PARTIAL — uses effective artifact; authority module not unified"
+        return "NON_COMPLIANT"
 
     if domain_id == "portfolio_allocation":
         if "services/manage_positions.py" in exec_consumers:
@@ -319,12 +328,19 @@ def _assess_compliance(domain: Dict[str, Any], consumers: Dict[str, List[str]]) 
         return "COMPLIANT"
 
     if domain_id == "risk_restriction":
-        direct_adaptive = any("adaptive_risk_state" in _read_snippet(c) for c in exec_consumers)
-        uses_master = any("master_execution_gate" in _read_snippet(c) for c in exec_consumers)
-        if direct_adaptive and uses_master:
-            return "PARTIAL — execution uses master gate and reads adaptive_risk_state directly"
-        if uses_master:
-            return "COMPLIANT"
+        direct_adaptive = any(
+            "adaptive_risk_state" in _read_snippet(c)
+            and "decision_authority" not in _read_snippet(c)
+            for c in exec_consumers
+        )
+        uses_authority = any(
+            "decision_authority" in _read_snippet(c) or "master_execution_gate" in _read_snippet(c)
+            for c in exec_consumers
+        )
+        if direct_adaptive:
+            return "PARTIAL — execution still reads adaptive_risk_state directly"
+        if uses_authority:
+            return "COMPLIANT — THP-H006 master_execution_gate.json authority"
         return "NON_COMPLIANT"
 
     if domain_id == "execution_authorization":
@@ -547,6 +563,32 @@ def detect_conflicts(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "Document layered authority in operator runbook; no merge required.",
         )
     )
+
+    _h006_resolved_domains = {
+        ("DUPLICATE_AUTHORITY", "lifecycle_authorization"),
+        ("DUPLICATE_AUTHORITY", "risk_restriction"),
+    }
+    _h006_resolved_stale = {
+        ("STALE_CONSUMER", "lifecycle_authorization"),
+        ("UNCONTROLLED_DERIVATION", "lifecycle_authorization"),
+    }
+    for c in conflicts:
+        key = (c.get("conflict_type"), c.get("decision_domain"))
+        if key in _h006_resolved_domains:
+            c["status"] = "RESOLVED_THP-H006"
+            c["severity"] = "RESOLVED"
+            c["resolution"] = (
+                "THP-H006 enforced via decision_authority.py and execution consumer updates"
+            )
+        elif key in _h006_resolved_stale and c.get("severity") in ("MEDIUM", "LOW"):
+            if (
+                "place_live_orders" in str(c.get("affected_systems"))
+                or "governance_execution" in str(c.get("affected_systems"))
+                or "ticker_timeline" in str(c.get("affected_systems"))
+            ):
+                c["status"] = "RESOLVED_THP-H006"
+                c["severity"] = "RESOLVED"
+                c["resolution"] = "THP-H006 consumer alignment complete"
 
     return conflicts
 

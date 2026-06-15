@@ -576,9 +576,12 @@ def _max_add_qty_respecting_weight(
 def resolve_lifecycle_path(override: Optional[str]) -> Path:
     if override:
         return Path(override)
-    if DEFAULT_LIFECYCLE_EFFECTIVE.is_file() and DEFAULT_LIFECYCLE_EFFECTIVE.stat().st_size > 0:
-        return DEFAULT_LIFECYCLE_EFFECTIVE
-    return DEFAULT_LIFECYCLE_RAW
+    if not DEFAULT_LIFECYCLE_EFFECTIVE.is_file() or DEFAULT_LIFECYCLE_EFFECTIVE.stat().st_size == 0:
+        raise FileNotFoundError(
+            "Authoritative lifecycle artifact missing: "
+            f"{DEFAULT_LIFECYCLE_EFFECTIVE} (run build_effective_lifecycle)"
+        )
+    return DEFAULT_LIFECYCLE_EFFECTIVE
 
 
 def load_lifecycle_df(path: Path) -> pd.DataFrame:

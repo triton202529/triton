@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-15T00:30:53.634791+00:00",
+  "generated_at": "2026-06-15T02:21:48.669923+00:00",
   "framework": "THP-H005",
   "principle": "ONE DECISION \u2192 ONE OWNER \u2192 ONE ARTIFACT \u2192 MANY READ-ONLY CONSUMERS",
   "domains": 7,
@@ -27,6 +27,7 @@
         "services/capital_reallocation.py",
         "services/concentration_exit_strategy_planner.py",
         "services/concentration_recovery_simulator.py",
+        "services/decision_authority.py",
         "services/diversification_execution_readiness_gate.py",
         "services/diversification_feasibility_analysis.py",
         "services/edge_ranking.py",
@@ -47,6 +48,7 @@
         "services/late_exit_detector.py",
         "services/lifecycle_drift_root_cause_analysis.py",
         "services/lifecycle_readiness_diagnostics.py",
+        "services/lifecycle_risk_authority_audit.py",
         "services/lifecycle_truth.py",
         "services/manage_positions.py",
         "services/market_open_checklist.py",
@@ -108,6 +110,7 @@
           "services/governance_recovery_execution_feasibility.py",
           "services/governance_recovery_threshold_optimizer.py",
           "services/lifecycle_readiness_diagnostics.py",
+          "services/lifecycle_risk_authority_audit.py",
           "services/paper_execution_certification.py",
           "services/portfolio_management_certification.py",
           "services/post_green_certification_monitor.py",
@@ -138,6 +141,7 @@
           "services/capital_deployment_engine.py",
           "services/capital_reallocation.py",
           "services/concentration_exit_strategy_planner.py",
+          "services/decision_authority.py",
           "services/diversification_execution_readiness_gate.py",
           "services/diversification_feasibility_analysis.py",
           "services/edge_ranking.py",
@@ -181,7 +185,7 @@
         "data/results/signals_snapshot.csv"
       ],
       "staleness_risk": "HIGH \u2014 execution may fall back to raw lifecycle or trade_opportunities",
-      "compliance_status": "PARTIAL \u2014 execute_trades uses effective; place_live_orders has multi-source fallback"
+      "compliance_status": "COMPLIANT \u2014 THP-H006 effective lifecycle authority enforced"
     },
     {
       "decision_domain": "portfolio_allocation",
@@ -195,6 +199,7 @@
         "services/concentration_exit_strategy_planner.py",
         "services/concentration_governance_analysis.py",
         "services/concentration_recovery_simulator.py",
+        "services/decision_authority.py",
         "services/diversification_execution_readiness_gate.py",
         "services/diversification_feasibility_analysis.py",
         "services/diversification_recovery_basket.py",
@@ -266,6 +271,7 @@
           "services/capital_deployment_engine.py",
           "services/concentration_exit_strategy_planner.py",
           "services/concentration_governance_analysis.py",
+          "services/decision_authority.py",
           "services/diversification_execution_readiness_gate.py",
           "services/diversification_feasibility_analysis.py",
           "services/execution_gate_evidence_registry.py",
@@ -307,9 +313,9 @@
         "services/adaptive_risk_engine.py",
         "services/build_trade_opportunities.py",
         "services/capital_deployment_engine.py",
+        "services/decision_authority.py",
         "services/edge_sizing_engine.py",
         "services/effective_lifecycle.py",
-        "services/execute_trades.py",
         "services/execute_trades.recovered.py",
         "services/execution_approval_workflow.py",
         "services/execution_gate_evidence_registry.py",
@@ -318,6 +324,7 @@
         "services/historical_exit_replay_validation.py",
         "services/institutional_self_evaluation_engine.py",
         "services/investment_committee_report_engine.py",
+        "services/lifecycle_risk_authority_audit.py",
         "services/manage_positions.py",
         "services/master_execution_gate.py",
         "services/paper_trade_session_review.py",
@@ -342,7 +349,6 @@
       ],
       "consumers_by_role": {
         "EXECUTION": [
-          "services/execute_trades.py",
           "services/manage_positions.py",
           "services/place_live_orders.py"
         ],
@@ -352,6 +358,7 @@
         ],
         "ADVISORY": [
           "services/exit_rotation_audit.py",
+          "services/lifecycle_risk_authority_audit.py",
           "services/recovery_candidate_deterioration_analysis.py",
           "services/system_integration_audit.py"
         ],
@@ -361,6 +368,7 @@
           "services/adaptive_risk_engine.py",
           "services/build_trade_opportunities.py",
           "services/capital_deployment_engine.py",
+          "services/decision_authority.py",
           "services/edge_sizing_engine.py",
           "services/effective_lifecycle.py",
           "services/execute_trades.recovered.py",
@@ -396,7 +404,7 @@
       ],
       "historical_artifacts": [],
       "staleness_risk": "MEDIUM \u2014 adaptive_risk_state consumed directly by multiple services",
-      "compliance_status": "PARTIAL \u2014 execution uses master gate and reads adaptive_risk_state directly"
+      "compliance_status": "COMPLIANT \u2014 THP-H006 master_execution_gate.json authority"
     },
     {
       "decision_domain": "execution_authorization",
@@ -741,10 +749,10 @@
   ],
   "summary": {
     "decision_domains_defined": 7,
-    "compliant_domains": 3,
-    "partial_domains": 4,
+    "compliant_domains": 5,
+    "partial_domains": 2,
     "non_compliant_domains": 0,
     "total_conflicts": 8,
-    "high_or_critical_conflicts": 2
+    "high_or_critical_conflicts": 0
   }
 }

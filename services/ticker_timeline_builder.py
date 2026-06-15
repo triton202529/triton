@@ -150,8 +150,6 @@ def _audit_context_for(
 def _load_current_snapshot() -> pd.DataFrame:
     snap = _safe_read_csv(RESULTS / "signal_lifecycle_effective.csv")
     if snap.empty:
-        snap = _safe_read_csv(RESULTS / "signal_lifecycle.csv")
-    if snap.empty:
         return pd.DataFrame()
     snap.columns = [str(c).strip().lower() for c in snap.columns]
     snap["ticker"] = snap.get("ticker", pd.Series(dtype=str)).map(_norm_sym)

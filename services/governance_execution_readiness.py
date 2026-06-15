@@ -327,7 +327,8 @@ def _check_broker_health(broker_connected: bool, broker_error: Optional[str]) ->
 
 def _check_lifecycle_integrity(results_dir: Path) -> Tuple[bool, str]:
     lifecycle_cfg = ROOT / "config" / "lifecycle_logic.json"
-    lifecycle_csv = results_dir / "signal_lifecycle.csv"
+    lifecycle_csv = results_dir / "signal_lifecycle_effective.csv"
+    lifecycle_raw = results_dir / "signal_lifecycle.csv"
     signals_csv = results_dir / "signals.csv"
 
     if lifecycle_cfg.is_file():
@@ -336,24 +337,26 @@ def _check_lifecycle_integrity(results_dir: Path) -> Tuple[bool, str]:
             return False, "Lifecycle logic disabled in config"
 
     if not lifecycle_csv.is_file():
-        return False, "signal_lifecycle.csv missing"
+        return False, "signal_lifecycle_effective.csv missing (authoritative lifecycle)"
 
     age = _file_age_minutes(lifecycle_csv)
     if age is not None and age > LIFECYCLE_FRESHNESS_HOURS * 60:
-        return False, "signal_lifecycle.csv is stale"
+        return False, "signal_lifecycle_effective.csv is stale"
 
     if signals_csv.is_file():
-        sig_mtime = lifecycle_csv.stat().st_mtime
+        eff_mtime = lifecycle_csv.stat().st_mtime
         mtimes = [signals_csv.stat().st_mtime]
         mtimes.extend(p.stat().st_mtime for p in results_dir.glob("signals*.csv") if p.is_file())
         upstream_mtime = max(mtimes)
-        if sig_mtime < upstream_mtime:
-            return False, "Lifecycle state older than upstream signals"
+        if eff_mtime < upstream_mtime and lifecycle_raw.is_file():
+            raw_mtime = lifecycle_raw.stat().st_mtime
+            if eff_mtime < raw_mtime:
+                return False, "Effective lifecycle older than raw lifecycle rebuild"
 
     recon = results_dir / "lifecycle_reconciliation.csv"
     if recon.is_file() and recon.stat().st_size > 0:
-        return True, "Lifecycle artifacts present and reconciled"
-    return True, "Lifecycle CSV present (reconciliation optional)"
+        return True, "Effective lifecycle present and reconciled"
+    return True, "Effective lifecycle CSV present (reconciliation optional)"
 
 
 def _check_signal_freshness(results_dir: Path) -> Tuple[bool, str]:

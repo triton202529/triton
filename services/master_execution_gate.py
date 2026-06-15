@@ -490,6 +490,8 @@ class MasterExecutionGate:
         sub["global_kill_switch"] = kill
         sub["risk_on"] = risk_on
         sub["allow_new_orders"] = allow_new
+        sub["max_gross_exposure"] = controls.get("max_gross_exposure")
+        sub["max_position_weight"] = controls.get("max_position_weight")
 
         if kill:
             if mode == "live":

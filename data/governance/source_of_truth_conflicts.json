@@ -1,17 +1,17 @@
 {
-  "generated_at": "2026-06-15T00:30:53.634811+00:00",
+  "generated_at": "2026-06-15T02:21:48.669946+00:00",
   "framework": "THP-H005",
   "summary": {
     "total_conflicts": 8,
     "critical": 0,
-    "high": 2,
-    "medium": 4,
-    "low": 2
+    "high": 0,
+    "medium": 2,
+    "low": 1
   },
   "conflicts": [
     {
       "conflict_type": "DUPLICATE_AUTHORITY",
-      "severity": "HIGH",
+      "severity": "RESOLVED",
       "decision_domain": "lifecycle_authorization",
       "description": "Three artifacts can drive execution intent: signal_lifecycle_effective.csv, signal_lifecycle.csv, and trade_opportunities.csv.",
       "impact": "Capital deployment may use a different lifecycle view than dashboards or lifecycle gate.",
@@ -20,7 +20,9 @@
         "services/place_live_orders.py",
         "services/build_trade_opportunities.py"
       ],
-      "recommended_remediation": "H006: Enforce single read path \u2014 effective lifecycle only; trade_opportunities as derived view labeled non-authoritative."
+      "recommended_remediation": "H006: Enforce single read path \u2014 effective lifecycle only; trade_opportunities as derived view labeled non-authoritative.",
+      "status": "RESOLVED_THP-H006",
+      "resolution": "THP-H006 enforced via decision_authority.py and execution consumer updates"
     },
     {
       "conflict_type": "DUPLICATE_AUTHORITY",
@@ -37,7 +39,7 @@
     },
     {
       "conflict_type": "DUPLICATE_AUTHORITY",
-      "severity": "HIGH",
+      "severity": "RESOLVED",
       "decision_domain": "risk_restriction",
       "description": "master_execution_gate.json (batch snapshot) and adaptive_risk_state.json (continuous intelligence) both inform execution restrictions.",
       "impact": "execute_trades reads adaptive_risk_state directly while batch gate uses master snapshot.",
@@ -46,18 +48,22 @@
         "services/master_execution_gate.py",
         "services/execution_governance_council.py"
       ],
-      "recommended_remediation": "H006: Execution batch decisions must consume master_execution_gate.json only; adaptive_risk_state reserved for intelligence/producer input."
+      "recommended_remediation": "H006: Execution batch decisions must consume master_execution_gate.json only; adaptive_risk_state reserved for intelligence/producer input.",
+      "status": "RESOLVED_THP-H006",
+      "resolution": "THP-H006 enforced via decision_authority.py and execution consumer updates"
     },
     {
       "conflict_type": "STALE_CONSUMER",
-      "severity": "MEDIUM",
+      "severity": "RESOLVED",
       "decision_domain": "lifecycle_authorization",
       "description": "governance_execution_readiness.py validates signal_lifecycle.csv staleness, not signal_lifecycle_effective.csv.",
       "impact": "Operational readiness may pass while effective lifecycle is stale.",
       "affected_systems": [
         "services/governance_execution_readiness.py"
       ],
-      "recommended_remediation": "H006: Align readiness checks to authoritative effective lifecycle artifact."
+      "recommended_remediation": "H006: Align readiness checks to authoritative effective lifecycle artifact.",
+      "status": "RESOLVED_THP-H006",
+      "resolution": "THP-H006 consumer alignment complete"
     },
     {
       "conflict_type": "STALE_CONSUMER",
@@ -73,18 +79,20 @@
     },
     {
       "conflict_type": "UNCONTROLLED_DERIVATION",
-      "severity": "MEDIUM",
+      "severity": "RESOLVED",
       "decision_domain": "lifecycle_authorization",
       "description": "place_live_orders.apply_effective_lifecycle_columns() re-merges effective columns at read time instead of consuming pre-built effective artifact only.",
       "impact": "In-memory transformation may diverge from build_effective_lifecycle output.",
       "affected_systems": [
         "services/place_live_orders.py"
       ],
-      "recommended_remediation": "H006: Require pre-built signal_lifecycle_effective.csv; remove runtime column merge."
+      "recommended_remediation": "H006: Require pre-built signal_lifecycle_effective.csv; remove runtime column merge.",
+      "status": "RESOLVED_THP-H006",
+      "resolution": "THP-H006 consumer alignment complete"
     },
     {
       "conflict_type": "UNCONTROLLED_DERIVATION",
-      "severity": "LOW",
+      "severity": "RESOLVED",
       "decision_domain": "lifecycle_authorization",
       "description": "ticker_timeline_builder.py falls back from effective to raw signal_lifecycle.csv.",
       "impact": "Historical timeline may mix authoritative and pre-effective states.",
@@ -92,7 +100,9 @@
         "services/ticker_timeline_builder.py",
         "services/pnl_ledger_builder.py"
       ],
-      "recommended_remediation": "H006: Use effective only; treat raw lifecycle as historical archive."
+      "recommended_remediation": "H006: Use effective only; treat raw lifecycle as historical archive.",
+      "status": "RESOLVED_THP-H006",
+      "resolution": "THP-H006 consumer alignment complete"
     },
     {
       "conflict_type": "DUPLICATE_AUTHORITY",

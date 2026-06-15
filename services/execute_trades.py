@@ -953,41 +953,10 @@ def load_broker_state(
 
 
 def _risk_cpm_flags() -> Tuple[bool, bool, float, float, float]:
-    """allow_new_orders, allow_new_trades, exposure_mult, max_pos_w, max_gross."""
-    allow_new = True
-    allow_trades = True
-    exp_mult = 1.0
-    max_pos_w = 0.10
-    max_gross = 1.0
+    """allow_new_orders, allow_new_trades, exposure_mult, max_pos_w, max_gross (THP-H006)."""
+    from services.decision_authority import load_risk_execution_controls
 
-    rj = _load_json(RESULTS / "adaptive_risk_state.json")
-    if isinstance(rj, dict):
-        ctrl = rj.get("controls") if isinstance(rj.get("controls"), dict) else {}
-        if "risk_on" in ctrl:
-            allow_new = allow_new and bool(ctrl.get("risk_on", True))
-        if "allow_new_orders" in ctrl:
-            allow_new = allow_new and bool(ctrl.get("allow_new_orders", True))
-        mg = _safe_float(ctrl.get("max_gross_exposure"), 1.0)
-        if mg > 0:
-            max_gross = min(max_gross, mg)
-        mw = _safe_float(ctrl.get("max_position_weight"), 0.10)
-        if mw > 0:
-            max_pos_w = min(max_pos_w, mw)
-
-    for cpm_path in (
-        RESULTS / "capital_preservation_mode.json",
-        RESULTS / "capital_preservation_state.json",
-    ):
-        cj = _load_json(cpm_path)
-        if isinstance(cj, dict):
-            if "allow_new_trades" in cj:
-                allow_trades = allow_trades and bool(cj.get("allow_new_trades", True))
-            em = _safe_float(cj.get("exposure_multiplier"), 1.0)
-            if em >= 0:
-                exp_mult = min(exp_mult, em) if exp_mult > 0 else em
-            break
-
-    return allow_new, allow_trades, exp_mult, max_pos_w, max_gross
+    return load_risk_execution_controls()
 
 
 def _ref_price(broker: Any, symbol: str, side: str) -> Optional[float]:

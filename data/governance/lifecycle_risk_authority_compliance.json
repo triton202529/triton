@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-06-15T02:21:15.574441+00:00",
+  "framework": "THP-H006",
+  "authorities": {
+    "lifecycle": "data/results/signal_lifecycle_effective.csv",
+    "risk_execution": "data/results/master_execution_gate.json",
+    "risk_intelligence": "data/results/adaptive_risk_state.json (non-execution)"
+  },
+  "summary": {
+    "consumers_audited": 9,
+    "consolidated": 5,
+    "partial": 4,
+    "non_compliant": 0,
+    "execution_consumers_consolidated": true
+  },
+  "records": [
+    {
+      "consumer": "services/execute_trades.py",
+      "domain": "lifecycle_authorization",
+      "role": "EXECUTION",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": false,
+      "compliance_result": "CONSOLIDATED",
+      "notes": "THP-H006 effective lifecycle authority"
+    },
+    {
+      "consumer": "services/execute_trades.py",
+      "domain": "risk_restriction",
+      "role": "EXECUTION",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": false,
+      "compliance_result": "CONSOLIDATED",
+      "notes": "THP-H006 master_execution_gate.json authority"
+    },
+    {
+      "consumer": "services/place_live_orders.py",
+      "domain": "lifecycle_authorization",
+      "role": "EXECUTION",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": true,
+      "compliance_result": "PARTIAL",
+      "notes": "THP-H006 effective lifecycle authority"
+    },
+    {
+      "consumer": "services/place_live_orders.py",
+      "domain": "risk_restriction",
+      "role": "EXECUTION",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": false,
+      "compliance_result": "CONSOLIDATED",
+      "notes": "THP-H006 master_execution_gate.json authority"
+    },
+    {
+      "consumer": "services/manage_positions.py",
+      "domain": "lifecycle_authorization",
+      "role": "EXECUTION",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": true,
+      "compliance_result": "PARTIAL",
+      "notes": "THP-H006 effective lifecycle authority"
+    },
+    {
+      "consumer": "services/manage_positions.py",
+      "domain": "risk_restriction",
+      "role": "EXECUTION",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": false,
+      "compliance_result": "CONSOLIDATED",
+      "notes": "THP-H006 master_execution_gate.json authority"
+    },
+    {
+      "consumer": "services/governance_execution_readiness.py",
+      "domain": "lifecycle_authorization",
+      "role": "SUPPORTING",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": true,
+      "compliance_result": "PARTIAL",
+      "notes": "THP-H006 effective lifecycle authority"
+    },
+    {
+      "consumer": "services/ticker_timeline_builder.py",
+      "domain": "lifecycle_authorization",
+      "role": "SUPPORTING",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": true,
+      "compliance_result": "PARTIAL",
+      "notes": "THP-H006 effective lifecycle authority"
+    },
+    {
+      "consumer": "services/pnl_ledger_builder.py",
+      "domain": "lifecycle_authorization",
+      "role": "SUPPORTING",
+      "uses_authoritative_source": true,
+      "uses_deprecated_source": false,
+      "compliance_result": "CONSOLIDATED",
+      "notes": "THP-H006 effective lifecycle authority"
+    }
+  ],
+  "enforcement": {
+    "lifecycle_module": "services/decision_authority.py",
+    "risk_reader": "load_risk_execution_controls()"
+  }
+}

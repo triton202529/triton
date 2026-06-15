@@ -423,8 +423,6 @@ def _build_lifecycle_map() -> Dict[str, str]:
     out: Dict[str, str] = {}
     lc = _safe_read_csv(RESULTS / "signal_lifecycle_effective.csv")
     if lc.empty:
-        lc = _safe_read_csv(RESULTS / "signal_lifecycle.csv")
-    if lc.empty:
         return out
     lc.columns = [str(c).strip().lower() for c in lc.columns]
     sym_col = "ticker" if "ticker" in lc.columns else ("symbol" if "symbol" in lc.columns else None)

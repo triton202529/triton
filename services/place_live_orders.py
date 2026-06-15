@@ -39,7 +39,7 @@ SESSION + POLL COMPAT (IMPORTANT):
 - Cancel-dupes rows are logged with action="cancel" (audit trail)
 
 PATCH (2026-04-01):
-- ✅ Execution source priority (default path): trade_opportunities.csv → signal_lifecycle_effective.csv → signal_lifecycle.csv
+- ✅ Execution source (THP-H006): signal_lifecycle_effective.csv (authoritative); trade_opportunities.csv (derived); orders_today handoff from execute_trades
 - ✅ Explicit --orders path uses that file; effective_* column mapping unchanged for lifecycle sources
 
 PATCH (2026-02-01):
@@ -87,7 +87,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LIFECYCLE_CSV = ROOT / "data" / "results" / "signal_lifecycle.csv"
 EFFECTIVE_LIFECYCLE_PATH = ROOT / "data" / "results" / "signal_lifecycle_effective.csv"
 TRADE_OPPORTUNITIES_PATH = ROOT / "data" / "results" / "trade_opportunities.csv"
-DEFAULT_ORDERS_CSV = DEFAULT_LIFECYCLE_CSV
+DEFAULT_ORDERS_CSV = EFFECTIVE_LIFECYCLE_PATH
 DEFAULT_MANAGE_ORDERS_CSV = ROOT / "data" / "live" / "manage_orders.csv"
 PERFORMANCE_RISK_OVERLAY_CSV = ROOT / "data" / "results" / "performance_risk_overlay.csv"
 
@@ -610,66 +610,60 @@ def load_signal_lifecycle_csv(path: Path) -> pd.DataFrame:
     return df
 
 
+def validate_authoritative_lifecycle(df: pd.DataFrame, *, source_kind: str) -> pd.DataFrame:
+    """
+    THP-H006: Require pre-built lifecycle artifacts — no runtime effective-column merge.
+    """
+    if df is None or df.empty:
+        die("[EMPTY] lifecycle dataframe")
+    if source_kind == "effective":
+        cols = {str(c).strip().lower() for c in df.columns}
+        if "ticker" not in cols:
+            die("[BAD_SCHEMA] signal_lifecycle_effective.csv must include ticker")
+        if "effective_stance" not in cols and "stance" not in cols:
+            die(
+                "[BAD_SCHEMA] signal_lifecycle_effective.csv must include effective_stance or stance"
+            )
+    return df
+
+
 def apply_effective_lifecycle_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Prefer effective_stance / effective_position_state into stance / position_state when present.
-    Missing effective cells fall back to original columns.
-    """
-    out = df.copy()
-    if "effective_stance" in out.columns:
-        if "stance" in out.columns:
-            out["stance"] = out["effective_stance"].fillna(out["stance"])
-        else:
-            out["stance"] = out["effective_stance"]
-    if "effective_position_state" in out.columns:
-        if "position_state" in out.columns:
-            out["position_state"] = out["effective_position_state"].fillna(out["position_state"])
-        else:
-            out["position_state"] = out["effective_position_state"]
-    return out
+    """Deprecated alias — THP-H006 pass-through (no runtime merge)."""
+    return df
 
 
 def resolve_execution_source(cli_path: Path) -> Tuple[Path, str]:
     """
-    Resolve CSV path and execution kind.
-    Kind: 'trade_opps' | 'effective' | 'raw'
-    Default lifecycle path: trade_opportunities.csv > signal_lifecycle_effective.csv > signal_lifecycle.csv
+    Resolve CSV path and execution kind (THP-H006).
+
+    Kind:
+      - effective: authoritative signal_lifecycle_effective.csv
+      - derived_trade_opps: non-authoritative derived actionable set
+      - execution_handoff: pre-planned orders_today from execute_trades
     """
     try:
         cli_r = cli_path.resolve()
         trade_r = TRADE_OPPORTUNITIES_PATH.resolve()
         eff_r = EFFECTIVE_LIFECYCLE_PATH.resolve()
-        raw_r = DEFAULT_LIFECYCLE_CSV.resolve()
     except Exception:
         cli_r = cli_path
         trade_r = TRADE_OPPORTUNITIES_PATH
         eff_r = EFFECTIVE_LIFECYCLE_PATH
-        raw_r = DEFAULT_LIFECYCLE_CSV
 
     if cli_r == trade_r:
-        return TRADE_OPPORTUNITIES_PATH, "trade_opps"
+        return TRADE_OPPORTUNITIES_PATH, "derived_trade_opps"
     if cli_r == eff_r:
         return EFFECTIVE_LIFECYCLE_PATH, "effective"
-    if cli_r != raw_r:
-        return cli_path, "raw"
 
-    if TRADE_OPPORTUNITIES_PATH.exists() and TRADE_OPPORTUNITIES_PATH.stat().st_size > 0:
-        try:
-            tdf = pd.read_csv(TRADE_OPPORTUNITIES_PATH)
-            if tdf is not None and len(tdf) > 0:
-                return TRADE_OPPORTUNITIES_PATH, "trade_opps"
-        except Exception:
-            pass
+    # Explicit handoff (orders_today.csv) or operator override path
+    name = cli_path.name.lower()
+    if name == "orders_today.csv" or "orders_today" in name:
+        return cli_path, "execution_handoff"
 
-    if EFFECTIVE_LIFECYCLE_PATH.exists() and EFFECTIVE_LIFECYCLE_PATH.stat().st_size > 0:
-        try:
-            edf = pd.read_csv(EFFECTIVE_LIFECYCLE_PATH)
-            if edf is not None and len(edf) > 0:
-                return EFFECTIVE_LIFECYCLE_PATH, "effective"
-        except Exception:
-            pass
+    if cli_path != EFFECTIVE_LIFECYCLE_PATH and cli_path != TRADE_OPPORTUNITIES_PATH:
+        return cli_path, "execution_handoff"
 
-    return DEFAULT_LIFECYCLE_CSV, "raw"
+    return EFFECTIVE_LIFECYCLE_PATH, "effective"
 
 
 def load_trade_opportunities_csv(path: Path) -> pd.DataFrame:
@@ -1560,7 +1554,7 @@ def main() -> None:
         "--orders",
         type=str,
         default=str(DEFAULT_ORDERS_CSV),
-        help="Lifecycle/trade CSV path. Default signal_lifecycle.csv: auto-picks trade_opportunities.csv then signal_lifecycle_effective.csv when non-empty.",
+        help="Lifecycle CSV path. Default: signal_lifecycle_effective.csv (THP-H006 authoritative).",
     )
     ap.add_argument(
         "--default-qty",
@@ -1713,7 +1707,7 @@ def main() -> None:
 
     pos_map = build_position_map(broker)
 
-    if exec_source == "trade_opps":
+    if exec_source == "derived_trade_opps":
         top_df = load_trade_opportunities_csv(orders_path)
         lc_df = prepare_trade_opportunities_for_lifecycle(top_df)
         lc_df, _expl_kept, _expl_skip, _expl_drop_meta = cap_exploration_trade_opportunities(
@@ -1734,9 +1728,13 @@ def main() -> None:
                 )
             )
         print("[EXPLORATION_CAP] allowed=", _expl_kept, "skipped=", _expl_skip)
+        print(
+            "[LIFECYCLE_AUTHORITY] DERIVED trade_opportunities.csv — "
+            "non-authoritative; lifecycle truth is signal_lifecycle_effective.csv"
+        )
     else:
         lc_df = load_signal_lifecycle_csv(orders_path)
-        lc_df = apply_effective_lifecycle_columns(lc_df)
+        lc_df = validate_authoritative_lifecycle(lc_df, source_kind=exec_source)
 
     sig_state = read_json(SIGNAL_STATE_PATH) or {}
     if not isinstance(sig_state, dict):
@@ -1748,17 +1746,17 @@ def main() -> None:
         signal_state=sig_state,
         default_qty=max(1, int(args.default_qty)),
         trim_qty=max(1, int(args.trim_qty)),
-        trade_opportunities_mode=(exec_source == "trade_opps"),
+        trade_opportunities_mode=(exec_source == "derived_trade_opps"),
         run_mode=mode,
         session=placement_session,
     )
     _PLACE_DIAG_ROWS.extend(lifecycle_diag)
-    if exec_source == "trade_opps":
-        print("[EXECUTION] source: trade_opportunities.csv (final actionable set)")
-    elif exec_source == "effective":
-        print("[EXECUTION] source: signal_lifecycle_effective.csv (broker-aligned)")
+    if exec_source == "derived_trade_opps":
+        print("[EXECUTION] source: trade_opportunities.csv (DERIVED non-authoritative)")
+    elif exec_source == "execution_handoff":
+        print("[EXECUTION] source: execution handoff (orders_today / execute_trades plan)")
     else:
-        print("[EXECUTION] source: signal_lifecycle.csv (raw lifecycle)")
+        print("[EXECUTION] source: signal_lifecycle_effective.csv (AUTHORITATIVE)")
     print("ticker | stance | action | qty | decision_reason | exploration")
     for ln in lifecycle_lines:
         print(ln)

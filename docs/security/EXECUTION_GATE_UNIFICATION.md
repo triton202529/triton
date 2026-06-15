@@ -622,3 +622,30 @@ ONE DECISION → ONE OWNER → ONE ARTIFACT → MANY READ-ONLY CONSUMERS
 ```bash
 python -m services.source_of_truth_enforcement
 ```
+
+## THP-H006 Lifecycle & Risk Authority Consolidation
+
+Enforces named authorities from THP-H005 on execution consumers.
+
+| Authority | Artifact | Module |
+|-----------|----------|--------|
+| Lifecycle | `signal_lifecycle_effective.csv` | `services/decision_authority.py` |
+| Execution risk | `master_execution_gate.json` | `load_risk_execution_controls()` |
+
+### Changes
+
+- `place_live_orders`: default effective lifecycle; no raw fallback or runtime merge
+- `execute_trades`: risk flags from master gate snapshot (not adaptive_risk_state)
+- `manage_positions`: effective lifecycle only (no raw fallback)
+- Readiness/diagnostics: validate effective lifecycle artifact
+
+### Artifacts
+
+- `lifecycle_risk_authority_compliance.json` / `.csv`
+
+### Run Audit
+
+```bash
+python -m services.lifecycle_risk_authority_audit
+python -m services.source_of_truth_enforcement
+```
