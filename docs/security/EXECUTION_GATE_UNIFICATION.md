@@ -525,3 +525,34 @@ Seals CRITICAL bypass in `place_bracket_market` and enforces governed authorizat
 ```bash
 python -m services.broker_execution_audit
 ```
+
+## THP-H003 Execution Authority Consolidation
+
+Ensures a single institutional capital deployment chain. Legacy execution scripts are classified, protected, or retired.
+
+| Module | Purpose |
+|--------|---------|
+| `services/execution_path_registry.py` | Authoritative execution path catalog |
+| `services/execution_path_guard.py` | Safe exit for DEPRECATED / ARCHIVED paths |
+
+### Official Capital Chain
+
+```
+run_execution_loop / run_scheduled_paper_cycle
+  → execute_trades → place_live_orders / manage_positions
+  → triton_execution_gate → broker_alpaca → Alpaca
+```
+
+Approved operator workflows: `place_orders_from_csv.py`, `pages/manual_order_desk.py`, `pages_order_desk.py` (gated broker only).
+
+### Artifacts
+
+- `execution_path_registry.json` / `.csv`
+- `execution_path_cleanup_report.json`
+
+### Run Registry
+
+```bash
+python -m services.execution_path_registry
+python -m services.broker_execution_audit
+```

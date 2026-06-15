@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-06-15T00:10:43.055298+00:00",
+  "framework": "THP-H003",
+  "total_execution_paths_discovered": 23,
+  "active_paths": 10,
+  "deprecated_paths": 12,
+  "archived_paths": 1,
+  "official_capital_chain": [
+    "services/run_execution_loop.py",
+    "services/run_scheduled_paper_cycle.py",
+    "services/execute_trades.py",
+    "services/place_live_orders.py",
+    "services/manage_positions.py",
+    "services/triton_execution_gate.py",
+    "services/broker_alpaca.py"
+  ],
+  "capital_authority_consolidated": true,
+  "remaining_authority_conflicts": [],
+  "remaining_bypass_risks": [],
+  "unprotected_deprecated_paths": [],
+  "summary": {
+    "single_institutional_chain": true,
+    "all_deprecated_protected": true,
+    "active_paths_gate_compliant": true
+  }
+}

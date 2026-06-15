@@ -4,7 +4,23 @@
 #   python scripts/oco_watch.py --tp 0.08 --sl 0.05 --qty 1 --minutes 60
 #   python scripts/oco_watch.py --symbols AMZN,NVDA --tp 0.08 --sl 0.05 --qty 1
 
-import argparse, os, time, datetime as dt, requests
+import argparse
+import datetime as dt
+import os
+import sys
+import time
+from pathlib import Path
+
+import requests
+
+
+def _deprecation_guard() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
 
 
 def base():
@@ -85,6 +101,7 @@ def attach_oco(sym, qty, tp_pct, sl_pct, tif="gtc"):
 
 
 def main():
+    _deprecation_guard()
     ap = argparse.ArgumentParser(description="Watch for BUY fills and attach OCO exits.")
     ap.add_argument("--tp", type=float, default=0.08)
     ap.add_argument("--sl", type=float, default=0.05)

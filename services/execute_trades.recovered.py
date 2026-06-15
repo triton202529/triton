@@ -2,6 +2,16 @@
 """TRITON execution engine — plan from trade_opportunities.csv, optional handoff to place_live_orders."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_root = Path(__file__).resolve().parents[1]
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+from services.execution_path_guard import exit_if_deprecated
+
+exit_if_deprecated(__file__)
+
 import argparse
 import csv
 import json

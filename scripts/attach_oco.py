@@ -1,5 +1,19 @@
 # scripts/attach_oco.py
-import argparse, os, requests
+import argparse
+import os
+import sys
+from pathlib import Path
+
+import requests
+
+
+def _deprecation_guard() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
 
 
 def alpaca_base():
@@ -58,6 +72,7 @@ def attach_oco(sym, qty, tp_pct, sl_pct, tif="gtc"):
 
 
 def main():
+    _deprecation_guard()
     p = argparse.ArgumentParser(description="Attach OCO exits to open positions.")
     p.add_argument(
         "--symbols", default="", help="Comma-separated symbols (leave empty = all positions)"

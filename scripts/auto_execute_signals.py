@@ -261,7 +261,17 @@ def close_position_safely(
         return False
 
 
+def _deprecation_guard() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
+
+
 def main():
+    _deprecation_guard()
     ap = argparse.ArgumentParser(description="Execute signals file via Alpaca (alpaca-py).")
     ap.add_argument(
         "--signals",

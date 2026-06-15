@@ -10,9 +10,19 @@ import datetime as dt
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
+
+
+def _deprecation_guard() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
 
 
 def alpaca_base() -> str:
@@ -134,6 +144,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _deprecation_guard()
     args = parse_args()
     base = alpaca_base()
     hdrs = alpaca_headers()

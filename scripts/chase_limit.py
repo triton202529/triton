@@ -1,5 +1,21 @@
 # scripts/chase_limit.py
-import argparse, os, time, decimal as D, requests
+import argparse
+import decimal as D
+import os
+import sys
+import time
+from pathlib import Path
+
+import requests
+
+
+def _deprecation_guard() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
 
 
 def base():
@@ -26,6 +42,7 @@ def latest_open_limit_for(b, h, sym):
 
 
 def main():
+    _deprecation_guard()
     p = argparse.ArgumentParser(description="Bump a BUY limit order up to a ceiling.")
     p.add_argument("--symbol", required=True)
     p.add_argument("--step", type=str, default="0.05", help="increment per bump")

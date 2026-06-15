@@ -1,4 +1,17 @@
-﻿import os, requests, math, time
+﻿import math
+import os
+import sys
+import time
+from pathlib import Path
+
+import requests
+
+_root = Path(__file__).resolve().parents[1]
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+from services.execution_path_guard import exit_if_deprecated
+
+exit_if_deprecated(__file__)
 
 TP_PCT = float(os.getenv("TRITON_TP_PCT", "0.08"))
 SL_PCT = float(os.getenv("TRITON_SL_PCT", "0.05"))

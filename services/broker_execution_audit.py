@@ -190,36 +190,48 @@ def _verify_method_protection(name: str, source: str) -> Dict[str, Any]:
 
 def _find_external_bypass_risks() -> List[Dict[str, Any]]:
     """Known out-of-band order POST paths outside AlpacaBroker protections."""
+    from services.execution_path_registry import (
+        EXECUTION_PATHS,
+        path_has_deprecation_guard,
+        path_has_direct_order_post,
+    )
+
     risks: List[Dict[str, Any]] = []
-    external = [
-        (
-            "place_orders_from_csv.py",
-            "POST /v2/orders via requests (has enforce_broker_submission_gate in place_order)",
-        ),
-        ("scripts/auto_execute_signals.py", "Legacy direct Alpaca client"),
-        ("scripts/auto_trade.py", "Legacy api.submit_order"),
-        ("scripts/auto_exit.py", "Legacy api.submit_order"),
-        ("scripts/execute_trade.py", "Direct REST POST /v2/orders"),
-        ("alpaca_client.py", "Direct REST POST /v2/orders"),
-        ("ui/pages/Order_Desk.py", "Direct api_post /v2/orders"),
-        ("scripts/postfill_attach_oco.py", "Direct requests POST"),
-        ("scripts/oco_watch.py", "Direct requests POST"),
-    ]
-    for path, note in external:
+    for path, meta in sorted(EXECUTION_PATHS.items()):
         full = ROOT / path.replace("/", os.sep)
-        if full.is_file():
-            text = full.read_text(encoding="utf-8", errors="ignore")
-            has_gate = (
-                "enforce_broker_submission_gate" in text or "evaluate_governed_execution" in text
-            )
+        if not full.is_file():
+            continue
+        status = str(meta.get("status", "")).upper()
+        note = str(meta.get("purpose", ""))
+        has_gate = "enforce_broker_submission_gate" in full.read_text(
+            encoding="utf-8", errors="ignore"
+        ) or "evaluate_governed_execution" in full.read_text(encoding="utf-8", errors="ignore")
+        guarded = path_has_deprecation_guard(full)
+        direct_post = path_has_direct_order_post(full)
+
+        if status in ("DEPRECATED", "ARCHIVED"):
             risks.append(
                 {
                     "path": path,
                     "note": note,
                     "exists": True,
                     "has_gate_reference": has_gate,
-                    "severity": "HIGH" if not has_gate else "MEDIUM",
-                    "status": "BYPASS_RISK" if not has_gate else "PARTIAL_PROTECTION",
+                    "deprecation_guard": guarded,
+                    "severity": "RESOLVED" if guarded else "HIGH",
+                    "status": "DEPRECATED_PROTECTED" if guarded else "BYPASS_RISK",
+                }
+            )
+            continue
+
+        if status == "ACTIVE" and direct_post and path != "services/broker_alpaca.py":
+            risks.append(
+                {
+                    "path": path,
+                    "note": note,
+                    "exists": True,
+                    "has_gate_reference": has_gate,
+                    "severity": "MEDIUM",
+                    "status": "PARTIAL_PROTECTION" if has_gate else "BYPASS_RISK",
                 }
             )
     return risks
@@ -301,17 +313,22 @@ def run_broker_execution_audit() -> Dict[str, Any]:
 
     bypass_doc = {
         "generated_at": _utc_now_iso(),
-        "framework": "THP-H002",
+        "framework": "THP-H003",
         "summary": {
-            "total_bypass_risks": len(bypass_risks) + len(external_risks),
+            "total_bypass_risks": len(
+                [b for b in bypass_risks if b.get("severity") not in ("RESOLVED",)]
+            ),
             "broker_layer_clean": bypass_count == 0,
             "remaining_external_risks": len(
                 [r for r in external_risks if r["status"] == "BYPASS_RISK"]
             ),
+            "deprecated_paths_protected": len(
+                [r for r in external_risks if r["status"] == "DEPRECATED_PROTECTED"]
+            ),
             "highest_severity": (
                 "CRITICAL"
                 if any(b.get("severity") == "CRITICAL" for b in bypass_risks)
-                else "HIGH" if bypass_risks else "NONE"
+                else "HIGH" if any(b.get("severity") == "HIGH" for b in bypass_risks) else "NONE"
             ),
         },
         "broker_bypass_risks": bypass_risks,

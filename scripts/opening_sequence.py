@@ -47,6 +47,13 @@ def wait_until_flat(c: TradingClient, timeout_s: int = 90, poll_s: int = 2) -> b
 
 
 def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
+
     c, conf = load_client()
     paper_flag = ["--paper"] if conf.get("paper", True) else []
 

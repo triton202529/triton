@@ -1,0 +1,482 @@
+{
+  "generated_at": "2026-06-15T00:10:43.055330+00:00",
+  "framework": "THP-H003",
+  "official_capital_chain": [
+    "services/run_execution_loop.py",
+    "services/run_scheduled_paper_cycle.py",
+    "services/execute_trades.py",
+    "services/place_live_orders.py",
+    "services/manage_positions.py",
+    "services/triton_execution_gate.py",
+    "services/broker_alpaca.py"
+  ],
+  "paths": [
+    {
+      "file_name": "alpaca_client.py",
+      "purpose": "Legacy Alpaca REST helper",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "imported by legacy scripts",
+      "broker_access_capability": "POST /v2/orders via requests",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED \u2014 use services.broker_alpaca"
+    },
+    {
+      "file_name": "pages/manual_order_desk.py",
+      "purpose": "Approved Streamlit manual order desk",
+      "status": "ACTIVE",
+      "owner": "operator",
+      "last_known_operational_use": "view_results manual_order_desk",
+      "broker_access_capability": "AlpacaBroker.submit_order",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "PARTIAL",
+      "recommended_action": "KEEP \u2014 gated operator UI"
+    },
+    {
+      "file_name": "pages_order_desk.py",
+      "purpose": "Legacy Streamlit order desk (gated broker wrapper)",
+      "status": "ACTIVE",
+      "owner": "operator",
+      "last_known_operational_use": "manual operator orders",
+      "broker_access_capability": "AlpacaBroker.submit_order / submit_order_notional",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "PARTIAL",
+      "recommended_action": "KEEP \u2014 uses gated broker only"
+    },
+    {
+      "file_name": "place_orders_from_csv.py",
+      "purpose": "Operator CSV order workflow (view_results integration)",
+      "status": "ACTIVE",
+      "owner": "operator",
+      "last_known_operational_use": "manual CSV batch placement",
+      "broker_access_capability": "AlpacaBroker.submit_order",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "PARTIAL",
+      "recommended_action": "KEEP \u2014 hardened to AlpacaBroker"
+    },
+    {
+      "file_name": "scripts/attach_brackets_now.py",
+      "purpose": "Legacy bracket attachment utility",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "manual bracket attachment",
+      "broker_access_capability": "requests POST /v2/orders",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED"
+    },
+    {
+      "file_name": "scripts/attach_oco.py",
+      "purpose": "Legacy OCO attachment utility",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "manual OCO",
+      "broker_access_capability": "requests POST /v2/orders",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED"
+    },
+    {
+      "file_name": "scripts/auto_execute_signals.py",
+      "purpose": "Legacy signal CSV executor (alpaca-py direct)",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "pre-THP opening sequence / run_all",
+      "broker_access_capability": "TradingClient.submit_order (un gated)",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED \u2014 use run_scheduled_paper_cycle"
+    },
+    {
+      "file_name": "scripts/auto_exit.py",
+      "purpose": "Legacy signal-driven exit script",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "historical exit automation",
+      "broker_access_capability": "REST api.submit_order",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED"
+    },
+    {
+      "file_name": "scripts/auto_trade.py",
+      "purpose": "Legacy live signal auto-trader",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "historical live trading",
+      "broker_access_capability": "REST api.submit_order",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED"
+    },
+    {
+      "file_name": "scripts/chase_limit.py",
+      "purpose": "Legacy limit chase utility",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "manual limit repricing",
+      "broker_access_capability": "requests POST /v2/orders",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED \u2014 use reprice_open_orders"
+    },
+    {
+      "file_name": "scripts/execute_trade.py",
+      "purpose": "Legacy single-order REST script",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "manual one-off orders",
+      "broker_access_capability": "POST /v2/orders via requests",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED"
+    },
+    {
+      "file_name": "scripts/oco_watch.py",
+      "purpose": "Legacy OCO watch loop",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "background OCO attachment",
+      "broker_access_capability": "requests POST /v2/orders",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED"
+    },
+    {
+      "file_name": "scripts/opening_sequence.py",
+      "purpose": "Legacy market-open sequence (called auto_execute_signals)",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "app.py opening sequence button",
+      "broker_access_capability": "indirect via deprecated auto_execute",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED \u2014 use run_scheduled_paper_cycle"
+    },
+    {
+      "file_name": "scripts/postfill_attach_oco.py",
+      "purpose": "Legacy post-fill OCO attachment",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "manual OCO attachment",
+      "broker_access_capability": "requests POST /v2/orders",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED \u2014 use position_protector"
+    },
+    {
+      "file_name": "services/broker_alpaca.py",
+      "purpose": "Authorized Alpaca broker interface",
+      "status": "ACTIVE",
+      "owner": "broker",
+      "last_known_operational_use": "all gated order submission",
+      "broker_access_capability": "POST /v2/orders (BROKER FINAL CHECK only)",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "YES",
+      "recommended_action": "KEEP \u2014 sole broker order POST authority"
+    },
+    {
+      "file_name": "services/execute_trades.py",
+      "purpose": "Lifecycle-aware trade execution orchestrator",
+      "status": "ACTIVE",
+      "owner": "execution",
+      "last_known_operational_use": "pipeline execute_trades --execute",
+      "broker_access_capability": "via place_live_orders / manage_positions",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "YES",
+      "recommended_action": "KEEP \u2014 core execution orchestrator"
+    },
+    {
+      "file_name": "services/execute_trades.recovered.py",
+      "purpose": "Recovered backup of execute_trades (historical)",
+      "status": "ARCHIVED",
+      "owner": "legacy",
+      "last_known_operational_use": "recovery reference only",
+      "broker_access_capability": "unknown / historical",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "ARCHIVE \u2014 reference only"
+    },
+    {
+      "file_name": "services/manage_positions.py",
+      "purpose": "Position management and exits",
+      "status": "ACTIVE",
+      "owner": "execution",
+      "last_known_operational_use": "execute_trades exit path",
+      "broker_access_capability": "AlpacaBroker gated methods",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "YES",
+      "recommended_action": "KEEP \u2014 exit / rotation path"
+    },
+    {
+      "file_name": "services/place_live_orders.py",
+      "purpose": "Place live orders from approved signals",
+      "status": "ACTIVE",
+      "owner": "execution",
+      "last_known_operational_use": "execute_trades capital deployment",
+      "broker_access_capability": "AlpacaBroker.submit_order",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "YES",
+      "recommended_action": "KEEP \u2014 broker submission layer"
+    },
+    {
+      "file_name": "services/run_execution_loop.py",
+      "purpose": "Continuous execution loop orchestrator",
+      "status": "ACTIVE",
+      "owner": "platform",
+      "last_known_operational_use": "continuous loop / scheduler",
+      "broker_access_capability": "indirect via place_live_orders",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "YES",
+      "recommended_action": "KEEP \u2014 primary loop entry"
+    },
+    {
+      "file_name": "services/run_scheduled_paper_cycle.py",
+      "purpose": "Scheduled paper trading cycle",
+      "status": "ACTIVE",
+      "owner": "platform",
+      "last_known_operational_use": "scheduled paper runs",
+      "broker_access_capability": "indirect via execute_trades",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "YES",
+      "recommended_action": "KEEP \u2014 scheduled paper entry"
+    },
+    {
+      "file_name": "services/triton_execution_gate.py",
+      "purpose": "Execution gate and broker submission enforcement",
+      "status": "ACTIVE",
+      "owner": "governance",
+      "last_known_operational_use": "evaluate_governed_execution / enforce_broker_submission_gate",
+      "broker_access_capability": "none (gate only)",
+      "execution_gate_compliance": "YES",
+      "governance_compliance": "YES",
+      "recommended_action": "KEEP \u2014 gate authority"
+    },
+    {
+      "file_name": "ui/pages/Order_Desk.py",
+      "purpose": "Legacy Streamlit order desk (direct REST)",
+      "status": "DEPRECATED",
+      "owner": "legacy",
+      "last_known_operational_use": "ui Order_Desk page",
+      "broker_access_capability": "api_post /v2/orders",
+      "execution_gate_compliance": "NO",
+      "governance_compliance": "NO",
+      "recommended_action": "RETIRED \u2014 use pages/manual_order_desk.py"
+    }
+  ],
+  "runtime_verification": [
+    {
+      "file_name": "alpaca_client.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "pages/manual_order_desk.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": true,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "pages_order_desk.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": true,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "place_orders_from_csv.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": true,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "scripts/attach_brackets_now.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": true,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/attach_oco.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": true,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/auto_execute_signals.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/auto_exit.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/auto_trade.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/chase_limit.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": true,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/execute_trade.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/oco_watch.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/opening_sequence.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "scripts/postfill_attach_oco.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": true,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "services/broker_alpaca.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": true,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "services/execute_trades.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "services/execute_trades.recovered.py",
+      "status": "ARCHIVED",
+      "deprecation_guard": true,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    },
+    {
+      "file_name": "services/manage_positions.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "services/place_live_orders.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": true,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "services/run_execution_loop.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "services/run_scheduled_paper_cycle.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "services/triton_execution_gate.py",
+      "status": "ACTIVE",
+      "deprecation_guard": false,
+      "direct_order_post": false,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "NONE"
+    },
+    {
+      "file_name": "ui/pages/Order_Desk.py",
+      "status": "DEPRECATED",
+      "deprecation_guard": true,
+      "direct_order_post": true,
+      "uses_gated_broker": false,
+      "runtime_protected": true,
+      "residual_risk": "RESOLVED"
+    }
+  ],
+  "summary": {
+    "single_institutional_chain": true,
+    "all_deprecated_protected": true,
+    "active_paths_gate_compliant": true
+  }
+}

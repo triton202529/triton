@@ -55,6 +55,19 @@ def _find_project_root(start: Path) -> Path:
 PROJECT_ROOT = _find_project_root(Path(__file__).resolve().parent)
 DOTENV_PATH = PROJECT_ROOT / ".env"
 
+
+def _deprecation_guard() -> None:
+    import sys
+
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
+
+
+_deprecation_guard()
+
 DATA_DIR = PROJECT_ROOT / "data"
 ORDERS_DIR = DATA_DIR / "orders"
 RESULTS_DIR = DATA_DIR / "results"

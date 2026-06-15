@@ -1,10 +1,23 @@
 import os
-import pandas as pd
+import sys
 from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
 from alpaca_trade_api.rest import REST
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _deprecation_guard() -> None:
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
+
+    exit_if_deprecated(__file__)
+
 
 # 🔐 API credentials
 API_KEY = os.getenv("ALPACA_API_KEY")
@@ -91,4 +104,5 @@ def main():
 
 
 if __name__ == "__main__":
+    _deprecation_guard()
     main()

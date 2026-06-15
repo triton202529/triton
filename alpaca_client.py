@@ -1,42 +1,38 @@
 import os
-import requests
-from dotenv import load_dotenv
+import sys
+from pathlib import Path
 
-load_dotenv()
+import requests
 
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL = os.getenv("ALPACA_BASE_URL")
+BASE_URL = os.getenv("ALPACA_API_BASE_URL", "https://paper-api.alpaca.markets")
 
 HEADERS = {"APCA-API-KEY-ID": API_KEY, "APCA-API-SECRET-KEY": SECRET_KEY}
 
 
-def get_account():
-    url = f"{BASE_URL}/v2/account"
-    response = requests.get(url, headers=HEADERS)
-    return response.json()
+def _deprecation_guard() -> None:
+    root = Path(__file__).resolve().parent
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from services.execution_path_guard import exit_if_deprecated
 
-
-def get_positions():
-    url = f"{BASE_URL}/v2/positions"
-    response = requests.get(url, headers=HEADERS)
-    return response.json()
+    exit_if_deprecated(__file__)
 
 
 def submit_order(symbol, qty, side, type="market", time_in_force="gtc"):
+    _deprecation_guard()
     url = f"{BASE_URL}/v2/orders"
     order = {
         "symbol": symbol,
         "qty": qty,
-        "side": side,
+        "side": side.lower(),
         "type": type,
         "time_in_force": time_in_force,
     }
-    response = requests.post(url, headers=HEADERS, json=order)
-    return response.json()
 
-
-def cancel_all_orders():
-    url = f"{BASE_URL}/v2/orders"
-    response = requests.delete(url, headers=HEADERS)
-    return response.status_code
+    response = requests.post(url, json=order, headers=HEADERS)
+    if response.status_code == 200 or response.status_code == 201:
+        return {"status": "success", "data": response.json()}
+    else:
+        return {"status": "error", "message": response.text}

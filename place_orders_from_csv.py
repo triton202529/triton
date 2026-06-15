@@ -639,7 +639,6 @@ def build_guard_payload(o: OrderRow) -> Dict[str, Any]:
 
 def place_order(o: OrderRow, dry_run: bool) -> Tuple[str, str, Any, Dict[str, Any]]:
     base = alpaca_base_url()
-    H = alpaca_headers()
 
     payload: Dict[str, Any] = {
         "symbol": o.symbol,
@@ -661,36 +660,30 @@ def place_order(o: OrderRow, dry_run: bool) -> Tuple[str, str, Any, Dict[str, An
     if dry_run:
         return "DRY_RUN", "", payload, payload
 
-    from services.triton_execution_gate import (
-        ExecutionGateBlocked,
-        enforce_broker_submission_gate,
-    )
-
-    class _CsvBrokerShim:
-        def __init__(self, broker_mode: str, account_getter):
-            self.mode = broker_mode
-            self._account_getter = account_getter
-
-        def get_account(self):
-            return self._account_getter()
+    from services.broker_alpaca import AlpacaBroker
+    from services.triton_execution_gate import ExecutionGateBlocked
 
     mode = mode_from_base(base)
-
-    def _account_getter():
-        return _req_json("GET", f"{base}/v2/account", H, timeout=15)
+    broker = AlpacaBroker(mode=mode)
+    limit_price = None
+    if o.order_type == "limit":
+        limit_price = float(o.limit_price if o.limit_price is not None else o.close)
 
     try:
-        enforce_broker_submission_gate(
-            broker=_CsvBrokerShim(mode, _account_getter),
+        raw = broker.submit_order(
             symbol=o.symbol,
+            qty=float(o.qty),
             side=o.side,
+            order_type=o.order_type,
+            time_in_force=o.tif,
+            limit_price=limit_price,
             client_order_id=o.client_order_id,
-            source="place_orders_from_csv",
+            extended_hours=o.extended_hours,
+            execution_path="operator_csv_workflow",
         )
     except ExecutionGateBlocked as exc:
         raise RuntimeError(f"EXEC_GATE_BLOCK: {exc}") from exc
 
-    raw = _req_json("POST", f"{base}/v2/orders", H, json_body=payload, timeout=30)
     oid = str(raw.get("id", "")) if isinstance(raw, dict) else ""
     status = str(raw.get("status", "")) if isinstance(raw, dict) else "unknown"
     return status or "PLACED", oid, raw, payload
