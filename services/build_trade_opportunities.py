@@ -27,7 +27,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from services.lifecycle_truth import evaluate_lifecycle_gate, summarize_opportunity_build
+from services.lifecycle_truth import (
+    evaluate_lifecycle_gate,
+    summarize_opportunity_build,
+)
 from services.edge_ranking import (
     EnrichmentSpec,
     enrich_with_edge,
@@ -139,7 +142,9 @@ def load_effective(path: Path) -> pd.DataFrame:
     if "ticker" not in df.columns:
         raise ValueError("signal_lifecycle_effective.csv must include ticker")
     if "effective_position_state" not in df.columns:
-        raise ValueError("signal_lifecycle_effective.csv must include effective_position_state")
+        raise ValueError(
+            "signal_lifecycle_effective.csv must include effective_position_state"
+        )
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
     return df
 
@@ -155,7 +160,9 @@ def _series_lifecycle_action(df: pd.DataFrame) -> pd.Series:
     return s.fillna("").astype(str).str.strip().str.upper()
 
 
-def classify_opportunity_from_lifecycle(pos_u: str, lifecycle_action_u: str) -> Optional[str]:
+def classify_opportunity_from_lifecycle(
+    pos_u: str, lifecycle_action_u: str
+) -> Optional[str]:
     """
     Map effective position + lifecycle intent → opportunity_type.
     Authoritative: ENTRY = FLAT+BUY; ADD = LONG+ADD only (LONG+BUY must not appear after effective build).
@@ -214,28 +221,13 @@ def _load_json(path: Path) -> Optional[dict]:
 
 def _parse_hard_risk_flags() -> Tuple[bool, bool]:
     """
-    allow_new_orders, allow_new_trades — False means hard block (mirror execute_trades / risk snapshot).
+    allow_new_orders, allow_new_trades — False means hard block.
+
+    THP-H006 / Phase 195E: resolve from master_execution_gate.json via decision_authority loader.
     """
-    allow_new_orders = True
-    allow_new_trades = True
+    from services.decision_authority import load_risk_execution_controls
 
-    rj = _load_json(RESULTS_DIR / "adaptive_risk_state.json")
-    if isinstance(rj, dict):
-        ctrl = rj.get("controls") if isinstance(rj.get("controls"), dict) else {}
-        if "risk_on" in ctrl:
-            allow_new_orders = allow_new_orders and bool(ctrl.get("risk_on", True))
-        if "allow_new_orders" in ctrl:
-            allow_new_orders = allow_new_orders and bool(ctrl.get("allow_new_orders", True))
-
-    for cpm_path in (
-        RESULTS_DIR / "capital_preservation_mode.json",
-        RESULTS_DIR / "capital_preservation_state.json",
-    ):
-        cj = _load_json(cpm_path)
-        if isinstance(cj, dict) and "allow_new_trades" in cj:
-            allow_new_trades = allow_new_trades and bool(cj.get("allow_new_trades", True))
-            break
-
+    allow_new_orders, allow_new_trades, _, _, _ = load_risk_execution_controls()
     return allow_new_orders, allow_new_trades
 
 
@@ -284,7 +276,9 @@ def _output_columns(sub: pd.DataFrame) -> list[str]:
     tail = ["opportunity_type", "exploration_flag"]
     edge_tail = [c for c in EDGE_OUTPUT_COLS if c in sub.columns]
     exec_tail = [c for c in EXEC_CONTEXT_COLS if c in sub.columns]
-    return [c for c in head if c in sub.columns] + optional + tail + edge_tail + exec_tail
+    return (
+        [c for c in head if c in sub.columns] + optional + tail + edge_tail + exec_tail
+    )
 
 
 def _load_feature_components_optional() -> Optional[pd.DataFrame]:
@@ -524,8 +518,12 @@ def _load_execution_context_optional() -> Optional[pd.DataFrame]:
             combined[col] = pd.Series([None] * len(combined))
 
     combined["spread_bucket"] = combined["spread_bucket"].apply(_norm_upper_or_unknown)
-    combined["execution_risk_flag"] = combined["execution_risk_flag"].apply(_norm_upper_or_unknown)
-    combined["execution_style"] = combined["execution_style"].apply(_norm_upper_or_unknown)
+    combined["execution_risk_flag"] = combined["execution_risk_flag"].apply(
+        _norm_upper_or_unknown
+    )
+    combined["execution_style"] = combined["execution_style"].apply(
+        _norm_upper_or_unknown
+    )
     combined["quote_reason"] = combined["quote_reason"].apply(_norm_upper_or_unknown)
     combined["liquidity_pressure_bucket"] = combined["liquidity_pressure_bucket"].apply(
         _norm_upper_or_unknown
@@ -589,7 +587,10 @@ def _merge_execution_context(
 
     ctx = _load_execution_context_optional()
     sources: List[str] = []
-    if EXECUTION_INTELLIGENCE_CSV.exists() and EXECUTION_INTELLIGENCE_CSV.stat().st_size > 0:
+    if (
+        EXECUTION_INTELLIGENCE_CSV.exists()
+        and EXECUTION_INTELLIGENCE_CSV.stat().st_size > 0
+    ):
         sources.append(EXECUTION_INTELLIGENCE_CSV.name)
     if EXECUTION_PLAN_CSV.exists() and EXECUTION_PLAN_CSV.stat().st_size > 0:
         sources.append(EXECUTION_PLAN_CSV.name)
@@ -686,13 +687,19 @@ def _merge_execution_context(
                 "liquidity_pressure_bucket",
             ):
                 if col in enriched.columns:
-                    cond = cond | (enriched[col].astype(str).str.upper() != EXEC_CTX_UNKNOWN)
+                    cond = cond | (
+                        enriched[col].astype(str).str.upper() != EXEC_CTX_UNKNOWN
+                    )
             for num_col in ("spread_bps", "spread_pct"):
                 if num_col in enriched.columns:
                     cond = cond | enriched[num_col].notna()
             if "quote_is_stale" in enriched.columns:
-                cond = cond | enriched["quote_is_stale"].apply(lambda v: v is True or v is False)
-            matched = enriched.loc[cond]["ticker"].astype(str).str.upper().unique().tolist()
+                cond = cond | enriched["quote_is_stale"].apply(
+                    lambda v: v is True or v is False
+                )
+            matched = (
+                enriched.loc[cond]["ticker"].astype(str).str.upper().unique().tolist()
+            )
             diag["matched_symbols"] = len(matched)
             diag["coverage_ratio"] = round(len(matched) / len(unique_tickers), 6)
     diag["unknown_rows"] = (
@@ -732,12 +739,18 @@ def _enrich_opportunities_with_edge(
     components = _load_feature_components_optional()
     if components is not None and "ticker" in enriched.columns:
         # Avoid clobbering existing columns (e.g. confidence already present).
-        merge_cols = [c for c in components.columns if c == "ticker" or c not in enriched.columns]
+        merge_cols = [
+            c for c in components.columns if c == "ticker" or c not in enriched.columns
+        ]
         if len(merge_cols) > 1:
             try:
-                enriched = enriched.merge(components[merge_cols], on="ticker", how="left")
+                enriched = enriched.merge(
+                    components[merge_cols], on="ticker", how="left"
+                )
                 diag["edge_components_loaded"] = True
-                diag["edge_components_columns"] = [c for c in merge_cols if c != "ticker"]
+                diag["edge_components_columns"] = [
+                    c for c in merge_cols if c != "ticker"
+                ]
             except Exception:
                 # Defensive: never break opportunity build because of optional enrichment.
                 enriched = out_df.copy()
@@ -752,7 +765,9 @@ def _enrich_opportunities_with_edge(
             enriched["sizing_bucket"].fillna("").astype(str).value_counts().to_dict()
         )
     if "allocation_multiplier" in enriched.columns:
-        diag["edge_eligible_rows"] = int((enriched["allocation_multiplier"] > 0.0).sum())
+        diag["edge_eligible_rows"] = int(
+            (enriched["allocation_multiplier"] > 0.0).sum()
+        )
 
     return enriched, diag
 
@@ -853,7 +868,9 @@ def build_opportunities_clean(
             "input_rows": input_rows_total,
             "blocked_execution_rows": blocked_due_exec,
             "note": (
-                "no rows left after execution_blocked filter" if blocked_due_exec else "empty input"
+                "no rows left after execution_blocked filter"
+                if blocked_due_exec
+                else "empty input"
             ),
         }
         return pd.DataFrame(columns=out_cols), zdiag, pd.DataFrame()
@@ -1036,7 +1053,7 @@ def main() -> int:
             "OK": "Included in trade_opportunities.csv (strict path).",
             "INVALID_PRICE": "close missing, NaN, or <= 0 (hard drop).",
             "INVALID_QTY": "explicit qty/target_qty/planned_qty/order_qty column equals 0.",
-            "RISK_GUARD": "Hard block from adaptive_risk_state / capital_preservation (no sizing changes).",
+            "RISK_GUARD": "Hard block from master_execution_gate.json via decision_authority (no sizing changes).",
             "LOW_CONFIDENCE": "Not used to drop strict lifecycle rows (reserved / exploration diagnostics only).",
             "LOW_DELTA": "Not used to drop strict lifecycle rows (reserved / exploration diagnostics only).",
             "UNKNOWN_FILTER": "Unexpected drop reason (should not occur in strict path).",
@@ -1063,7 +1080,9 @@ def main() -> int:
         pass
 
     try:
-        from services.signal_pressure_diagnostics import refresh_signal_pressure_diagnostics
+        from services.signal_pressure_diagnostics import (
+            refresh_signal_pressure_diagnostics,
+        )
 
         refresh_signal_pressure_diagnostics()
     except Exception:
