@@ -54,6 +54,7 @@ PEP
 PFE
 PG
 SCHW
+SPCX
 T
 UNH
 V

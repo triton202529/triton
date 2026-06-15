@@ -152,6 +152,7 @@ _TICKER_SECTOR: Dict[str, str] = {
     "LMT": "Industrials",
     "BA": "Industrials",
     "GE": "Industrials",
+    "SPCX": "Industrials",
     "MMM": "Industrials",
     "XLI": "Industrials",
     "IYT": "Industrials",

@@ -1,0 +1,15 @@
+{
+  "framework": "Phase-195A",
+  "authority": "data/config/tickers.txt",
+  "description": "Optional metadata overlay; membership authority is tickers.txt only.",
+  "assets": {
+    "SPCX": {
+      "ticker": "SPCX",
+      "name": "SpaceX",
+      "asset_class": "US Equity",
+      "exchange": "NASDAQ",
+      "sector": "Aerospace / Space Technology",
+      "status": "ACTIVE"
+    }
+  }
+}
