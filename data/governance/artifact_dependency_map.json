@@ -1,0 +1,1838 @@
+{
+  "generated_at": "2026-06-15T00:30:53.631683+00:00",
+  "framework": "THP-H005",
+  "principle": "ONE DECISION \u2192 ONE OWNER \u2192 ONE ARTIFACT \u2192 MANY READ-ONLY CONSUMERS",
+  "edge_count": 305,
+  "edges": [
+    {
+      "from": "services/build_effective_lifecycle.py",
+      "to": "data/results/signal_lifecycle_effective.csv",
+      "relationship": "produces",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "dashboard/lifecycle_drift_root_cause_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "run_full_pipeline.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/adaptation_layer.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/adaptation_simulation.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/allocation_execution_path_audit.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/apply_signal_lifecycle.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/autonomous_portfolio_transition_planner.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/build_effective_lifecycle.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/build_open_position_risk_diagnostics.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/build_performance_intelligence.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/build_signal_lifecycle_state.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/build_trade_opportunities.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/build_trade_outcomes.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/capital_deployment_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/capital_reallocation.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/concentration_exit_strategy_planner.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/concentration_recovery_simulator.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/diversification_execution_readiness_gate.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/diversification_feasibility_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/edge_ranking.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/edge_sizing_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/execute_trades.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/execute_trades.recovered.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/execution_intelligence.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/execution_pressure_diagnostics.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/exit_rotation_audit.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/feedback_loop.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/final_governance_recovery_optimization.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/governance_authorization_trace.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/governance_execution_readiness.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/governance_recovery_exception_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/governance_recovery_execution_feasibility.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/governance_recovery_threshold_optimizer.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/historical_exit_replay_validation.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/late_exit_detector.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/lifecycle_drift_root_cause_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/lifecycle_readiness_diagnostics.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/lifecycle_truth.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/manage_positions.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/market_open_checklist.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/opportunity_persistence_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/opportunity_promotion_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/paper_execution_certification.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/paper_trade_session_review.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/path_verification.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/place_live_orders.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/pnl_ledger_builder.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/poll_order_status.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/portfolio_allocation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/portfolio_execution_intent_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/portfolio_management_certification.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/portfolio_management_stress_test.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/position_sizer.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/post_green_certification_monitor.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/reconcile_lifecycle_vs_positions.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_basket_exception_simulator.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_basket_implementation_readiness.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_basket_monitor.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_basket_reconstruction_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_candidate_deterioration_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_exception_approval_package.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_transition_authorization_assessment.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_transition_final_authorization_simulator.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/recovery_transition_readiness_monitor.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/run_execution_loop.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/signal_distribution.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/signal_pressure_diagnostics.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/source_of_truth_enforcement.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/stage1_recovery_execution_playbook.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/system_integration_audit.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/threshold_calibration.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/ticker_timeline_builder.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/trade_rationale.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "services/trade_rationale_engine.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "view_results.py",
+      "relationship": "consumed_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle_effective.csv",
+      "to": "data/results/trade_opportunities.csv",
+      "relationship": "derives",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signal_lifecycle.csv",
+      "to": "data/results/signal_lifecycle_effective.csv",
+      "relationship": "superseded_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signals.csv",
+      "to": "data/results/signal_lifecycle_effective.csv",
+      "relationship": "superseded_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "data/results/signals_snapshot.csv",
+      "to": "data/results/signal_lifecycle_effective.csv",
+      "relationship": "superseded_by",
+      "domain": "lifecycle_authorization"
+    },
+    {
+      "from": "services/portfolio_allocation_engine.py",
+      "to": "data/results/portfolio_allocation_recommendations.csv",
+      "relationship": "produces",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/allocation_execution_path_audit.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/autonomous_portfolio_transition_planner.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/capital_deployment_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/concentration_exit_strategy_planner.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/concentration_governance_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/concentration_recovery_simulator.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/diversification_execution_readiness_gate.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/diversification_feasibility_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/diversification_recovery_basket.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/execution_gate_evidence_registry.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/exit_rotation_audit.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/final_governance_recovery_optimization.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/governance_authorization_trace.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/governance_recovery_exception_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/governance_recovery_execution_feasibility.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/governance_recovery_execution_simulator.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/governance_recovery_threshold_optimizer.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/green_authorization_strategy_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/historical_exit_replay_validation.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/lifecycle_drift_root_cause_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/manage_positions.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/market_open_checklist.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/opportunity_persistence_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/opportunity_promotion_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/paper_execution_certification.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/paper_trade_session_review.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/path_verification.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/portfolio_allocation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/portfolio_construction_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/portfolio_management_certification.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/portfolio_management_operational_validation.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/portfolio_management_stress_test.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/post_green_certification_monitor.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/promotion_probability_forecast_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/recovery_basket_exception_simulator.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/recovery_basket_implementation_readiness.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/recovery_basket_monitor.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/recovery_basket_reconstruction_engine.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/recovery_candidate_deterioration_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/recovery_exception_approval_package.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/recovery_transition_authorization_assessment.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/source_of_truth_enforcement.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/stage1_recovery_execution_playbook.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "services/system_integration_audit.py",
+      "relationship": "consumed_by",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "data/results/portfolio_allocation_summary.json",
+      "relationship": "derives",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "data/results/portfolio_allocation_recommendations.csv",
+      "to": "data/results/stock_scores.csv",
+      "relationship": "derives",
+      "domain": "portfolio_allocation"
+    },
+    {
+      "from": "services/master_execution_gate.py",
+      "to": "data/results/master_execution_gate.json",
+      "relationship": "produces",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "dashboard/live_trading_panel.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "run_full_pipeline.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/adaptive_regime_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/adaptive_risk_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/build_trade_opportunities.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/capital_deployment_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/edge_sizing_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/effective_lifecycle.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/execute_trades.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/execute_trades.recovered.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/execution_approval_workflow.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/execution_gate_evidence_registry.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/execution_governance_council.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/exit_rotation_audit.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/historical_exit_replay_validation.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/institutional_self_evaluation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/investment_committee_report_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/manage_positions.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/master_execution_gate.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/paper_trade_session_review.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/path_verification.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/performance_risk_overlay.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/place_live_orders.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/portfolio_allocation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/portfolio_construction_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/portfolio_execution_intent_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/portfolio_management_stress_test.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/portfolio_rebalance_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/recovery_candidate_deterioration_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/regime_weighting.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/risk_dashboard.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/risk_gate.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/source_of_truth_enforcement.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/system_integration_audit.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/ticker_timeline_builder.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/trade_rationale_engine.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "services/write_adaptive_risk_state.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "view_results.py",
+      "relationship": "consumed_by",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "data/results/adaptive_risk_state.json",
+      "relationship": "derives",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "data/results/performance_risk_overlay.csv",
+      "relationship": "derives",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "data/results/master_execution_gate.json",
+      "to": "data/results/risk_report.json",
+      "relationship": "derives",
+      "domain": "risk_restriction"
+    },
+    {
+      "from": "lib/executionGate.js via services/triton_execution_gate.py",
+      "to": "data/governance/execution_gate_decisions.json",
+      "relationship": "produces",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "dashboard/execution_gate_governance_dashboard.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_approval_workflow.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_decision_reconstructor.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_gate_anomaly_detector.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_gate_degradation_manager.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_gate_evidence_registry.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_gate_failure_investigator.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_gate_health_monitor.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_gate_replay_engine.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_governance_council.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_regulatory_audit_pack.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/execution_time_machine.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/source_of_truth_enforcement.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/system_integration_audit.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "services/triton_execution_gate.py",
+      "relationship": "consumed_by",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "data/results/execution_gate_audit.csv",
+      "relationship": "derives",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "data/governance/execution_gate_decisions.json",
+      "to": "data/governance/execution_gate_evidence.json",
+      "relationship": "derives",
+      "domain": "execution_authorization"
+    },
+    {
+      "from": "services/execution_approval_workflow.py",
+      "to": "data/governance/execution_approval_requests.json",
+      "relationship": "produces",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "services/execution_approval_workflow.py",
+      "relationship": "consumed_by",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "services/execution_escalation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "services/execution_governance_council.py",
+      "relationship": "consumed_by",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "services/execution_time_machine.py",
+      "relationship": "consumed_by",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "services/source_of_truth_enforcement.py",
+      "relationship": "consumed_by",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "services/system_integration_audit.py",
+      "relationship": "consumed_by",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "data/governance/execution_escalations.json",
+      "relationship": "derives",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "data/governance/execution_governance_council_status.json",
+      "relationship": "derives",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "data/governance/execution_approval_requests.json",
+      "to": "data/governance/execution_approval_history.csv",
+      "relationship": "derives",
+      "domain": "governance_approval"
+    },
+    {
+      "from": "services/broker_alpaca.py",
+      "to": "Alpaca API (live broker state)",
+      "relationship": "produces",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "dashboard/live_trading_panel.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "dashboard/pnl_ledger.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "dashboard/ticker_lifecycle_tracker.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "run_full_pipeline.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "scripts/append_equity_snapshot.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "scripts/bootstrap_dashboard_data.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "scripts/import_equity_history.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "scripts/seed_dashboard_demo.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/advisor_introspection.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/apply_signal_lifecycle.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/arm_mode.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/arm_shadow_performance_evaluation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/autonomous_execution_simulator_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/autonomous_strategy_diagnostics.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/backtest_signals.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/baseline_analyzer.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/broker_history_recovery.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/build_effective_lifecycle.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/build_open_position_risk_diagnostics.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/build_performance_intelligence.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/build_trade_outcomes.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/capital_deployment_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/capital_preservation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/capital_reallocation.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/concentration_governance_analysis.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/contracts_registry.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/data_contracts.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/duplicate_order_guard.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/effective_lifecycle.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/execute_cycle.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/execute_trades.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/execute_trades.recovered.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/execution_pressure_diagnostics.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/execution_quality.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/execution_time_machine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/exit_rotation_audit.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/feedback_loop.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/fix_portfolio_history.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/freshness_gate.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/generate_risk_report.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/governance_authorization_trace.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/historical_exit_replay_validation.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/late_exit_detector.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/lifecycle_truth.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/manage_open_orders.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/manage_positions.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/master_execution_gate.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/normalize_results_contracts.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/order_discipline.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/paper_execution_certification.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/paper_trade_session_review.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/performance_metrics.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/place_live_orders.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/pnl_ledger_builder.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/poll_order_status.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_allocation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_construction_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_health.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_intelligence.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_management_certification.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_management_operational_validation.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_management_stress_test.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_manager.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_memory_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_rebalance_engine.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/portfolio_summary.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/reconcile_lifecycle_vs_positions.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/record_equity.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/regime_detector.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/reprice_open_orders.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/reprice_order_ladder.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/risk_dashboard.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/run_paper_trading.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/run_scheduled_paper_cycle.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/sector_exposure.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/session_fill_pressure.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/simulate_portfolio.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/simulate_trades.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/snapshot_equity.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/snapshot_live_orders.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/snapshot_open_orders.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/snapshot_positions.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/source_of_truth_enforcement.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/system_integration_audit.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/ticker_timeline_builder.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "services/write_adaptive_risk_state.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "view_results.py",
+      "relationship": "consumed_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "data/results/positions_snapshot.csv",
+      "relationship": "derives",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "data/results/open_orders_snapshot.csv",
+      "relationship": "derives",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "Alpaca API (live broker state)",
+      "to": "data/live/orders_today.csv",
+      "relationship": "derives",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "data/results/portfolio_history.csv",
+      "to": "Alpaca API (live broker state)",
+      "relationship": "superseded_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "data/results/trade_log.csv",
+      "to": "Alpaca API (live broker state)",
+      "relationship": "superseded_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "data/results/live_orders_log.csv",
+      "to": "Alpaca API (live broker state)",
+      "relationship": "superseded_by",
+      "domain": "broker_positions_orders"
+    },
+    {
+      "from": "services/loop_safety.py",
+      "to": "data/results/heartbeat.json",
+      "relationship": "produces",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "run_full_pipeline.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/artifacts_writer.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/build_signal_lifecycle_state.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/continuous_loop_recovery_manager.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/institutional_self_evaluation_engine.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/live_gate.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/market_calendar.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/master_execution_gate.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/source_of_truth_enforcement.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "services/system_integration_audit.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "view_results.py",
+      "relationship": "consumed_by",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "data/results/pipeline_status.json",
+      "relationship": "derives",
+      "domain": "operational_pipeline_state"
+    },
+    {
+      "from": "data/results/heartbeat.json",
+      "to": "data/results/asof_contract.json",
+      "relationship": "derives",
+      "domain": "operational_pipeline_state"
+    }
+  ]
+}

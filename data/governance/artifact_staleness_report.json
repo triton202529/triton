@@ -1,0 +1,217 @@
+{
+  "generated_at": "2026-06-15T00:30:53.634767+00:00",
+  "framework": "THP-H005",
+  "summary": {
+    "artifacts_checked": 23,
+    "stale_artifacts": 5
+  },
+  "entries": [
+    {
+      "decision_domain": "lifecycle_authorization",
+      "artifact": "data/results/signal_lifecycle_effective.csv",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 24,
+      "is_stale": false,
+      "staleness_risk": "HIGH \u2014 execution may fall back to raw lifecycle or trade_opportunities"
+    },
+    {
+      "decision_domain": "lifecycle_authorization",
+      "artifact": "data/results/trade_opportunities.csv",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 24,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "portfolio_allocation",
+      "artifact": "data/results/portfolio_allocation_recommendations.csv",
+      "exists": true,
+      "age_hours": 37.28,
+      "stale_threshold_hours": 24,
+      "is_stale": true,
+      "staleness_risk": "MEDIUM \u2014 summary JSON may lag recommendations CSV"
+    },
+    {
+      "decision_domain": "portfolio_allocation",
+      "artifact": "data/results/portfolio_allocation_summary.json",
+      "exists": true,
+      "age_hours": 37.28,
+      "stale_threshold_hours": 24,
+      "is_stale": true,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "portfolio_allocation",
+      "artifact": "data/results/stock_scores.csv",
+      "exists": true,
+      "age_hours": 0.23,
+      "stale_threshold_hours": 24,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "risk_restriction",
+      "artifact": "data/results/master_execution_gate.json",
+      "exists": true,
+      "age_hours": 51.53,
+      "stale_threshold_hours": 4,
+      "is_stale": true,
+      "staleness_risk": "MEDIUM \u2014 adaptive_risk_state consumed directly by multiple services"
+    },
+    {
+      "decision_domain": "risk_restriction",
+      "artifact": "data/results/adaptive_risk_state.json",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 4,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "risk_restriction",
+      "artifact": "data/results/performance_risk_overlay.csv",
+      "exists": true,
+      "age_hours": 37.28,
+      "stale_threshold_hours": 4,
+      "is_stale": true,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "risk_restriction",
+      "artifact": "data/results/risk_report.json",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 4,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "execution_authorization",
+      "artifact": "data/governance/execution_gate_decisions.json",
+      "exists": true,
+      "age_hours": 4.84,
+      "stale_threshold_hours": 168,
+      "is_stale": false,
+      "staleness_risk": "LOW \u2014 runtime evaluation; artifacts are audit trail"
+    },
+    {
+      "decision_domain": "execution_authorization",
+      "artifact": "data/results/execution_gate_audit.csv",
+      "exists": true,
+      "age_hours": 4.84,
+      "stale_threshold_hours": 168,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "execution_authorization",
+      "artifact": "data/governance/execution_gate_evidence.json",
+      "exists": true,
+      "age_hours": 4.84,
+      "stale_threshold_hours": 168,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "governance_approval",
+      "artifact": "data/governance/execution_approval_requests.json",
+      "exists": true,
+      "age_hours": 2.92,
+      "stale_threshold_hours": 168,
+      "is_stale": false,
+      "staleness_risk": "LOW \u2014 dashboards must be read-only consumers"
+    },
+    {
+      "decision_domain": "governance_approval",
+      "artifact": "data/governance/execution_escalations.json",
+      "exists": true,
+      "age_hours": 2.92,
+      "stale_threshold_hours": 168,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "governance_approval",
+      "artifact": "data/governance/execution_governance_council_status.json",
+      "exists": true,
+      "age_hours": 2.92,
+      "stale_threshold_hours": 168,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "governance_approval",
+      "artifact": "data/governance/execution_approval_history.csv",
+      "exists": true,
+      "age_hours": 2.92,
+      "stale_threshold_hours": 168,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "broker_positions_orders",
+      "artifact": "Alpaca API (live broker state)",
+      "exists": null,
+      "age_hours": null,
+      "stale_threshold_hours": 1,
+      "is_stale": false,
+      "staleness_risk": "HIGH \u2014 local snapshots used for planning without guaranteed refresh"
+    },
+    {
+      "decision_domain": "broker_positions_orders",
+      "artifact": "data/results/positions_snapshot.csv",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 1,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "broker_positions_orders",
+      "artifact": "data/results/open_orders_snapshot.csv",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 1,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "broker_positions_orders",
+      "artifact": "data/live/orders_today.csv",
+      "exists": true,
+      "age_hours": 100.18,
+      "stale_threshold_hours": 1,
+      "is_stale": true,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "operational_pipeline_state",
+      "artifact": "data/results/heartbeat.json",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 24,
+      "is_stale": false,
+      "staleness_risk": "MEDIUM \u2014 stale heartbeat blocks master execution gate"
+    },
+    {
+      "decision_domain": "operational_pipeline_state",
+      "artifact": "data/results/pipeline_status.json",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 24,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    },
+    {
+      "decision_domain": "operational_pipeline_state",
+      "artifact": "data/results/asof_contract.json",
+      "exists": true,
+      "age_hours": 0.17,
+      "stale_threshold_hours": 24,
+      "is_stale": false,
+      "staleness_risk": "derived \u2014 must not exceed authoritative artifact age"
+    }
+  ]
+}

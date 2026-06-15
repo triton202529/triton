@@ -1,0 +1,260 @@
+{
+  "generated_at": "2026-06-15T00:30:53.634786+00:00",
+  "framework": "THP-H005",
+  "discovery_only": true,
+  "summary": {
+    "total_conflicts": 8,
+    "critical": 0,
+    "high": 2,
+    "medium": 4,
+    "low": 2
+  },
+  "by_severity": {
+    "CRITICAL": [],
+    "HIGH": [
+      {
+        "conflict_type": "DUPLICATE_AUTHORITY",
+        "severity": "HIGH",
+        "decision_domain": "lifecycle_authorization",
+        "description": "Three artifacts can drive execution intent: signal_lifecycle_effective.csv, signal_lifecycle.csv, and trade_opportunities.csv.",
+        "impact": "Capital deployment may use a different lifecycle view than dashboards or lifecycle gate.",
+        "affected_systems": [
+          "services/execute_trades.py",
+          "services/place_live_orders.py",
+          "services/build_trade_opportunities.py"
+        ],
+        "recommended_remediation": "H006: Enforce single read path \u2014 effective lifecycle only; trade_opportunities as derived view labeled non-authoritative."
+      },
+      {
+        "conflict_type": "DUPLICATE_AUTHORITY",
+        "severity": "HIGH",
+        "decision_domain": "risk_restriction",
+        "description": "master_execution_gate.json (batch snapshot) and adaptive_risk_state.json (continuous intelligence) both inform execution restrictions.",
+        "impact": "execute_trades reads adaptive_risk_state directly while batch gate uses master snapshot.",
+        "affected_systems": [
+          "services/execute_trades.py",
+          "services/master_execution_gate.py",
+          "services/execution_governance_council.py"
+        ],
+        "recommended_remediation": "H006: Execution batch decisions must consume master_execution_gate.json only; adaptive_risk_state reserved for intelligence/producer input."
+      }
+    ],
+    "MEDIUM": [
+      {
+        "conflict_type": "DUPLICATE_AUTHORITY",
+        "severity": "MEDIUM",
+        "decision_domain": "portfolio_allocation",
+        "description": "portfolio_allocation_recommendations.csv and portfolio_allocation_summary.json both represent allocation state.",
+        "impact": "Dashboard or manage_positions may display summary while sizing uses CSV.",
+        "affected_systems": [
+          "services/manage_positions.py",
+          "view_results.py",
+          "services/execution_gate_evidence_registry.py"
+        ],
+        "recommended_remediation": "H006: Mark summary JSON as derived read-only; dashboards must read recommendations CSV."
+      },
+      {
+        "conflict_type": "STALE_CONSUMER",
+        "severity": "MEDIUM",
+        "decision_domain": "lifecycle_authorization",
+        "description": "governance_execution_readiness.py validates signal_lifecycle.csv staleness, not signal_lifecycle_effective.csv.",
+        "impact": "Operational readiness may pass while effective lifecycle is stale.",
+        "affected_systems": [
+          "services/governance_execution_readiness.py"
+        ],
+        "recommended_remediation": "H006: Align readiness checks to authoritative effective lifecycle artifact."
+      },
+      {
+        "conflict_type": "STALE_CONSUMER",
+        "severity": "MEDIUM",
+        "decision_domain": "broker_positions_orders",
+        "description": "view_results.py displays positions_snapshot.csv which may lag live broker state.",
+        "impact": "Operator may see stale positions while execution uses live broker API.",
+        "affected_systems": [
+          "view_results.py",
+          "data/results/positions_snapshot.csv"
+        ],
+        "recommended_remediation": "H006: Label snapshot as derived; show as-of timestamp; optional live broker refresh panel."
+      },
+      {
+        "conflict_type": "UNCONTROLLED_DERIVATION",
+        "severity": "MEDIUM",
+        "decision_domain": "lifecycle_authorization",
+        "description": "place_live_orders.apply_effective_lifecycle_columns() re-merges effective columns at read time instead of consuming pre-built effective artifact only.",
+        "impact": "In-memory transformation may diverge from build_effective_lifecycle output.",
+        "affected_systems": [
+          "services/place_live_orders.py"
+        ],
+        "recommended_remediation": "H006: Require pre-built signal_lifecycle_effective.csv; remove runtime column merge."
+      }
+    ],
+    "LOW": [
+      {
+        "conflict_type": "UNCONTROLLED_DERIVATION",
+        "severity": "LOW",
+        "decision_domain": "lifecycle_authorization",
+        "description": "ticker_timeline_builder.py falls back from effective to raw signal_lifecycle.csv.",
+        "impact": "Historical timeline may mix authoritative and pre-effective states.",
+        "affected_systems": [
+          "services/ticker_timeline_builder.py",
+          "services/pnl_ledger_builder.py"
+        ],
+        "recommended_remediation": "H006: Use effective only; treat raw lifecycle as historical archive."
+      },
+      {
+        "conflict_type": "DUPLICATE_AUTHORITY",
+        "severity": "LOW",
+        "decision_domain": "execution_authorization",
+        "description": "master_execution_gate (Python batch) and triton_execution_gate (Node runtime) operate at different layers.",
+        "impact": "Intentional layering \u2014 not a bypass \u2014 but operators must understand both layers.",
+        "affected_systems": [
+          "services/master_execution_gate.py",
+          "services/triton_execution_gate.py"
+        ],
+        "recommended_remediation": "Document layered authority in operator runbook; no merge required."
+      }
+    ]
+  },
+  "phased_remediation": [
+    {
+      "phase": "THP-H006",
+      "title": "Lifecycle authority hardening",
+      "items": [
+        {
+          "conflict_type": "DUPLICATE_AUTHORITY",
+          "severity": "HIGH",
+          "decision_domain": "lifecycle_authorization",
+          "description": "Three artifacts can drive execution intent: signal_lifecycle_effective.csv, signal_lifecycle.csv, and trade_opportunities.csv.",
+          "impact": "Capital deployment may use a different lifecycle view than dashboards or lifecycle gate.",
+          "affected_systems": [
+            "services/execute_trades.py",
+            "services/place_live_orders.py",
+            "services/build_trade_opportunities.py"
+          ],
+          "recommended_remediation": "H006: Enforce single read path \u2014 effective lifecycle only; trade_opportunities as derived view labeled non-authoritative."
+        },
+        {
+          "conflict_type": "STALE_CONSUMER",
+          "severity": "MEDIUM",
+          "decision_domain": "lifecycle_authorization",
+          "description": "governance_execution_readiness.py validates signal_lifecycle.csv staleness, not signal_lifecycle_effective.csv.",
+          "impact": "Operational readiness may pass while effective lifecycle is stale.",
+          "affected_systems": [
+            "services/governance_execution_readiness.py"
+          ],
+          "recommended_remediation": "H006: Align readiness checks to authoritative effective lifecycle artifact."
+        },
+        {
+          "conflict_type": "UNCONTROLLED_DERIVATION",
+          "severity": "MEDIUM",
+          "decision_domain": "lifecycle_authorization",
+          "description": "place_live_orders.apply_effective_lifecycle_columns() re-merges effective columns at read time instead of consuming pre-built effective artifact only.",
+          "impact": "In-memory transformation may diverge from build_effective_lifecycle output.",
+          "affected_systems": [
+            "services/place_live_orders.py"
+          ],
+          "recommended_remediation": "H006: Require pre-built signal_lifecycle_effective.csv; remove runtime column merge."
+        },
+        {
+          "conflict_type": "UNCONTROLLED_DERIVATION",
+          "severity": "LOW",
+          "decision_domain": "lifecycle_authorization",
+          "description": "ticker_timeline_builder.py falls back from effective to raw signal_lifecycle.csv.",
+          "impact": "Historical timeline may mix authoritative and pre-effective states.",
+          "affected_systems": [
+            "services/ticker_timeline_builder.py",
+            "services/pnl_ledger_builder.py"
+          ],
+          "recommended_remediation": "H006: Use effective only; treat raw lifecycle as historical archive."
+        }
+      ]
+    },
+    {
+      "phase": "THP-H006",
+      "title": "Risk authority consolidation",
+      "items": [
+        {
+          "conflict_type": "DUPLICATE_AUTHORITY",
+          "severity": "HIGH",
+          "decision_domain": "risk_restriction",
+          "description": "master_execution_gate.json (batch snapshot) and adaptive_risk_state.json (continuous intelligence) both inform execution restrictions.",
+          "impact": "execute_trades reads adaptive_risk_state directly while batch gate uses master snapshot.",
+          "affected_systems": [
+            "services/execute_trades.py",
+            "services/master_execution_gate.py",
+            "services/execution_governance_council.py"
+          ],
+          "recommended_remediation": "H006: Execution batch decisions must consume master_execution_gate.json only; adaptive_risk_state reserved for intelligence/producer input."
+        }
+      ]
+    },
+    {
+      "phase": "THP-H006",
+      "title": "Allocation & snapshot clarity",
+      "items": [
+        {
+          "conflict_type": "DUPLICATE_AUTHORITY",
+          "severity": "MEDIUM",
+          "decision_domain": "portfolio_allocation",
+          "description": "portfolio_allocation_recommendations.csv and portfolio_allocation_summary.json both represent allocation state.",
+          "impact": "Dashboard or manage_positions may display summary while sizing uses CSV.",
+          "affected_systems": [
+            "services/manage_positions.py",
+            "view_results.py",
+            "services/execution_gate_evidence_registry.py"
+          ],
+          "recommended_remediation": "H006: Mark summary JSON as derived read-only; dashboards must read recommendations CSV."
+        },
+        {
+          "conflict_type": "STALE_CONSUMER",
+          "severity": "MEDIUM",
+          "decision_domain": "broker_positions_orders",
+          "description": "view_results.py displays positions_snapshot.csv which may lag live broker state.",
+          "impact": "Operator may see stale positions while execution uses live broker API.",
+          "affected_systems": [
+            "view_results.py",
+            "data/results/positions_snapshot.csv"
+          ],
+          "recommended_remediation": "H006: Label snapshot as derived; show as-of timestamp; optional live broker refresh panel."
+        }
+      ]
+    },
+    {
+      "phase": "THP-H007",
+      "title": "Documentation & orphan cleanup",
+      "items": [
+        {
+          "conflict_type": "UNCONTROLLED_DERIVATION",
+          "severity": "LOW",
+          "decision_domain": "lifecycle_authorization",
+          "description": "ticker_timeline_builder.py falls back from effective to raw signal_lifecycle.csv.",
+          "impact": "Historical timeline may mix authoritative and pre-effective states.",
+          "affected_systems": [
+            "services/ticker_timeline_builder.py",
+            "services/pnl_ledger_builder.py"
+          ],
+          "recommended_remediation": "H006: Use effective only; treat raw lifecycle as historical archive."
+        },
+        {
+          "conflict_type": "DUPLICATE_AUTHORITY",
+          "severity": "LOW",
+          "decision_domain": "execution_authorization",
+          "description": "master_execution_gate (Python batch) and triton_execution_gate (Node runtime) operate at different layers.",
+          "impact": "Intentional layering \u2014 not a bypass \u2014 but operators must understand both layers.",
+          "affected_systems": [
+            "services/master_execution_gate.py",
+            "services/triton_execution_gate.py"
+          ],
+          "recommended_remediation": "Document layered authority in operator runbook; no merge required."
+        }
+      ]
+    }
+  ],
+  "enforcement_rules": {
+    "lifecycle": "Execution may only consume signal_lifecycle_effective.csv",
+    "allocation": "Capital sizing must use portfolio_allocation_recommendations.csv",
+    "risk": "Execution restrictions must use master_execution_gate.json snapshot",
+    "governance": "Permissions via execution_approval_requests.json + evaluate_governed_execution",
+    "broker": "Live state from Alpaca API via broker_alpaca.py"
+  }
+}

@@ -583,3 +583,42 @@ evaluate_governed_execution → Gate → Council → Approval → Broker → Alp
 ```bash
 python -m services.governance_execution_compliance_audit
 ```
+
+## THP-H005 Source of Truth Authority
+
+Establishes institutional clarity: one decision, one owner, one artifact, many read-only consumers.
+
+| Module | Purpose |
+|--------|---------|
+| `services/source_of_truth_enforcement.py` | Registry, conflict detection, dependency map |
+
+### Principle
+
+```
+ONE DECISION → ONE OWNER → ONE ARTIFACT → MANY READ-ONLY CONSUMERS
+```
+
+### Official authorities
+
+| Domain | Authoritative artifact |
+|--------|---------------------|
+| Lifecycle | `signal_lifecycle_effective.csv` |
+| Allocation | `portfolio_allocation_recommendations.csv` |
+| Risk | `master_execution_gate.json` |
+| Execution gate | `execution_gate_decisions.json` |
+| Governance | `execution_approval_requests.json` |
+| Broker state | Alpaca API via `broker_alpaca.py` |
+
+### Artifacts
+
+- `source_of_truth_registry.json` / `.csv`
+- `source_of_truth_conflicts.json`
+- `artifact_dependency_map.json`
+- `artifact_staleness_report.json`
+- `artifact_remediation_plan.json`
+
+### Run Audit
+
+```bash
+python -m services.source_of_truth_enforcement
+```
