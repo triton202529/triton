@@ -15,7 +15,7 @@ Inputs (best-effort, never required):
     data/results/execution_intelligence.csv     (optional)
     data/results/target_weights.csv             (optional)
     data/results/trade_opportunities.csv        (optional)
-    data/results/signal_lifecycle.csv           (optional)
+    data/results/signal_lifecycle.csv           (optional; RAW_SIGNAL_LIFECYCLE — advisory only)
 
 Outputs:
     data/results/adaptation_proposals.csv       — every candidate proposal
@@ -54,6 +54,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+
+from services.authority_labels import authority_label_block, lifecycle_raw_metadata
 
 # ─────────────────────────────────────────────────────────────
 # Paths
@@ -796,6 +798,10 @@ def _build_summary_obj(
         "advisory_only": True,
         "auto_apply_allowed": False,
         "phase": "1-advisory-proposals-only",
+        "authority_labeling": authority_label_block(),
+        "input_authority_labels": {
+            "signal_lifecycle": lifecycle_raw_metadata(),
+        },
         "source_availability": src_rows,
         "missing_inputs": [n for n, s in inp.status.items() if s != "ok"],
         "proposal_count": n,

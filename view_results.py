@@ -181,7 +181,10 @@ GUARD_SNAPSHOT_PATH = RESULTS_DIR / "guard_snapshot.json"
 
 # Risk artifacts (prefer risk_report.json; fallback to adaptive_risk_state.json if you still write it)
 RISK_REPORT_PATH = RESULTS_DIR / "risk_report.json"  # produced by services/generate_risk_report.py
-RISK_STATE_PATH = RESULTS_DIR / "adaptive_risk_state.json"  # legacy/optional fallback
+RISK_STATE_PATH = RESULTS_DIR / "adaptive_risk_state.json"  # ADAPTIVE_RISK_INTELLIGENCE fallback
+MASTER_EXECUTION_GATE_PATH = (
+    RESULTS_DIR / "master_execution_gate.json"
+)  # MASTER_EXECUTION_GATE_AUTHORITY
 
 # Risk Office (Capital Preservation Doctrine stack — read-only watchdog artifacts)
 CPI_JSON_PATH = RESULTS_DIR / "capital_preservation_intelligence.json"
@@ -3068,8 +3071,10 @@ def page_trade_log() -> None:
 def page_signal_lifecycle() -> None:
     st.markdown("### 🧭 Signal Lifecycle")
     st.caption(
-        "Authoritative, stateful stance per ticker: **BUY / ADD / HOLD / TRIM / EXIT**. "
-        "This page reads the STATE artifact (one row per ticker)."
+        "**RAW_SIGNAL_LIFECYCLE** — Advisory only · Not execution authority. "
+        "Source: `signal_lifecycle.csv` (raw model/signal lifecycle output). "
+        "For operational lifecycle authority see **EFFECTIVE_LIFECYCLE_AUTHORITY** "
+        "(`signal_lifecycle_effective.csv`) on the Executive Outlook page."
     )
 
     df, csv_err = read_csv_dashboard(SIGNAL_LIFECYCLE_PATH)
@@ -3601,24 +3606,45 @@ def page_model_comparison() -> None:
 
 def page_risk_report() -> None:
     st.markdown("### 🛡 Risk Report")
+
+    master_gate = load_json(MASTER_EXECUTION_GATE_PATH, show_error=False)
+    if master_gate:
+        st.markdown("#### MASTER_EXECUTION_GATE_AUTHORITY")
+        st.caption("Final execution-risk authority · Source: `master_execution_gate.json`")
+        with st.expander("Execution gate snapshot", expanded=True):
+            st.json(master_gate)
+        st.divider()
+
+    st.markdown("#### Supporting risk intelligence")
     st.caption(
-        "Prefers **risk_report.json** (generate_risk_report.py). Falls back to adaptive_risk_state.json if present."
+        "Prefers **risk_report.json** (generate_risk_report.py). "
+        "Falls back to **ADAPTIVE_RISK_INTELLIGENCE** (`adaptive_risk_state.json`) "
+        "when risk_report is unavailable — supporting context only, not final execution authority."
     )
 
     data = load_json(RISK_REPORT_PATH, show_error=False)
     used = "risk_report.json"
+    authority_label = "risk_report (supporting analytics)"
 
     if not data:
         data = load_json(RISK_STATE_PATH, show_error=False)
         used = "adaptive_risk_state.json"
+        authority_label = "ADAPTIVE_RISK_INTELLIGENCE"
 
     if not data:
+        if master_gate:
+            st.info(
+                "No supplementary risk JSON found (risk_report.json and adaptive_risk_state.json "
+                "missing/empty). MASTER_EXECUTION_GATE_AUTHORITY snapshot shown above."
+            )
+            return
         st.warning(
-            "No risk JSON found (risk_report.json missing/empty, and adaptive_risk_state.json missing/empty)."
+            "No risk JSON found (master_execution_gate.json, risk_report.json, and "
+            "adaptive_risk_state.json missing/empty)."
         )
         return
 
-    st.caption(f"Loaded: **{used}**")
+    st.caption(f"Loaded: **{used}** · Label: **{authority_label}**")
     st.json(data)
 
 
@@ -4096,7 +4122,9 @@ def page_recovery_transition_readiness_monitor() -> None:
 def page_continuous_loop_health_monitor() -> None:
     """🔄 Continuous Loop Health Monitor — loop health & self-healing status."""
     try:
-        from dashboard.continuous_loop_health_monitor import render_continuous_loop_health_monitor
+        from dashboard.continuous_loop_health_monitor import (
+            render_continuous_loop_health_monitor,
+        )
 
         render_continuous_loop_health_monitor(RESULTS_DIR)
     except Exception as e:
@@ -4106,7 +4134,9 @@ def page_continuous_loop_health_monitor() -> None:
 def page_hung_loop_recovery_monitor() -> None:
     """🧠 Hung Loop Recovery Intelligence — frozen PID detection & safe recovery."""
     try:
-        from dashboard.hung_loop_recovery_monitor import render_hung_loop_recovery_monitor
+        from dashboard.hung_loop_recovery_monitor import (
+            render_hung_loop_recovery_monitor,
+        )
 
         render_hung_loop_recovery_monitor(RESULTS_DIR)
     except Exception as e:
@@ -4116,7 +4146,9 @@ def page_hung_loop_recovery_monitor() -> None:
 def page_recovery_restart_diagnostics() -> None:
     """🔧 Recovery Restart Diagnostics — restart failure root cause analysis."""
     try:
-        from dashboard.recovery_restart_diagnostics import render_recovery_restart_diagnostics
+        from dashboard.recovery_restart_diagnostics import (
+            render_recovery_restart_diagnostics,
+        )
 
         render_recovery_restart_diagnostics(RESULTS_DIR)
     except Exception as e:
@@ -4126,7 +4158,9 @@ def page_recovery_restart_diagnostics() -> None:
 def page_recovery_stabilization_monitor() -> None:
     """🟢 Recovery Stabilization Intelligence — adaptive recovery readiness."""
     try:
-        from dashboard.recovery_stabilization_monitor import render_recovery_stabilization_monitor
+        from dashboard.recovery_stabilization_monitor import (
+            render_recovery_stabilization_monitor,
+        )
 
         render_recovery_stabilization_monitor(RESULTS_DIR)
     except Exception as e:
@@ -4220,7 +4254,9 @@ def page_execution_readiness_center() -> None:
 def page_execution_readiness_stability() -> None:
     """🔎 Execution Readiness Stability — certification integrity intelligence."""
     try:
-        from dashboard.execution_readiness_stability import render_execution_readiness_stability
+        from dashboard.execution_readiness_stability import (
+            render_execution_readiness_stability,
+        )
 
         render_execution_readiness_stability(RESULTS_DIR)
     except Exception as e:
@@ -5350,6 +5386,10 @@ def page_execution_dashboard() -> None:
 
     # ── Section 5 — Lifecycle distribution ───────────────────────────────
     st.subheader("5 — Lifecycle distribution (effective)")
+    st.caption(
+        "**EFFECTIVE_LIFECYCLE_AUTHORITY** — Operational lifecycle authority · "
+        "Source: `signal_lifecycle_effective.csv`"
+    )
     le = csv_usable_rows(SIGNAL_LIFECYCLE_EFFECTIVE_PATH)
     if le is None or le.empty:
         st.info("No **signal_lifecycle_effective.csv** (or empty).")
@@ -6246,7 +6286,7 @@ def page_ticker_decision_timeline() -> None:
 
     st.caption(
         f"Timeline span: **{_fmt_ts(first_ts)}** → **{_fmt_ts(last_ts)}**  ·  "
-        f"Source: signal_lifecycle.csv"
+        f"Source: signal_lifecycle.csv · **RAW_SIGNAL_LIFECYCLE** (advisory only)"
         + (" (+ optional history file)" if history is not None else "")
     )
 
@@ -23460,10 +23500,16 @@ PAGE_REGISTRY: Dict[Tuple[str, str], Callable[[], None]] = {
     ("Research / Intel", "Economic Calendar"): page_econ_calendar,
     ("System", "🧾 Data Contracts"): page_data_contracts,
     ("System", "🫀 Pipeline Health / Heartbeat"): page_pipeline_health,
-    ("System", "🔄 Continuous Loop Health Monitor"): page_continuous_loop_health_monitor,
+    (
+        "System",
+        "🔄 Continuous Loop Health Monitor",
+    ): page_continuous_loop_health_monitor,
     ("System", "🧠 Hung Loop Recovery Intelligence"): page_hung_loop_recovery_monitor,
     ("System", "🔧 Recovery Restart Diagnostics"): page_recovery_restart_diagnostics,
-    ("System", "🟢 Recovery Stabilization Intelligence"): page_recovery_stabilization_monitor,
+    (
+        "System",
+        "🟢 Recovery Stabilization Intelligence",
+    ): page_recovery_stabilization_monitor,
     ("System", "⚙️ Execution Dashboard"): page_execution_dashboard,
     ("System", "⚙️ Execution Intelligence"): page_execution_intelligence,
     ("System", "🧠 Feedback Intelligence"): page_feedback_intelligence,

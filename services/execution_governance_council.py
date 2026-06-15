@@ -17,6 +17,11 @@ from services.execution_gate_degradation_manager import load_operational_status
 from services.execution_gate_evidence_registry import load_decisions
 from services.execution_gate_health_monitor import load_health_report
 from services.triton_execution_gate import EXECUTION_PATHS
+from services.authority_labels import (
+    adaptive_risk_metadata,
+    authority_label_block,
+    master_gate_metadata,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 GOVERNANCE_DIR = ROOT / "data" / "governance"
@@ -68,7 +73,19 @@ def load_authority_levels() -> Dict[str, Any]:
 
 
 def _load_risk_state() -> Dict[str, Any]:
+    """ADAPTIVE_RISK_INTELLIGENCE — supporting context only, not execution authority."""
     path = RESULTS_DIR / "adaptive_risk_state.json"
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _load_master_gate_snapshot() -> Dict[str, Any]:
+    """Read-only snapshot for operator labeling (MASTER_EXECUTION_GATE_AUTHORITY)."""
+    path = RESULTS_DIR / "master_execution_gate.json"
     if not path.is_file():
         return {}
     try:
@@ -240,6 +257,12 @@ def build_council_status() -> Dict[str, Any]:
         },
         "council_ready": operational.get("gate_available", False)
         and operational.get("paper_live_boundary_intact", True),
+        "authority_labeling": authority_label_block(),
+        "risk_source_authority": {
+            "adaptive_risk_intelligence": adaptive_risk_metadata(),
+            "master_execution_gate_authority": master_gate_metadata(),
+            "master_gate_snapshot_present": bool(_load_master_gate_snapshot()),
+        },
     }
     _atomic_write_json(COUNCIL_STATUS_JSON, status)
     return status

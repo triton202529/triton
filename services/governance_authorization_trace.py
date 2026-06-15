@@ -333,7 +333,11 @@ def _remediation_for_check(check: str, ctx: Dict[str, Any]) -> str:
     if check == "broker":
         return "Restore broker connectivity (read-only check)"
     if check == "lifecycle":
-        return "Regenerate signal_lifecycle.csv and reconcile lifecycle state"
+        return (
+            "Regenerate signal_lifecycle.csv (RAW_SIGNAL_LIFECYCLE — advisory) "
+            "and reconcile; operational authority is signal_lifecycle_effective.csv "
+            "(EFFECTIVE_LIFECYCLE_AUTHORITY)"
+        )
     if check == "signals":
         return "Refresh signals.csv / signals_snapshot.json"
     if "concentration" in str(alloc.get("largest_position_weight_pct", "")):

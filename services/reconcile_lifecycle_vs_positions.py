@@ -4,11 +4,16 @@ reconcile_lifecycle_vs_positions.py
 Read-only compare: signal lifecycle STATE vs broker positions snapshot.
 
 Inputs:
-  - data/results/signal_lifecycle.csv
+  - data/results/signal_lifecycle.csv  (RAW_SIGNAL_LIFECYCLE — advisory only)
   - data/results/positions_snapshot.csv
 
 Output:
   - data/results/lifecycle_reconciliation.csv
+
+Authority note:
+  This module reads raw lifecycle for diagnostic reconciliation only.
+  Operational lifecycle authority is signal_lifecycle_effective.csv
+  (EFFECTIVE_LIFECYCLE_AUTHORITY).
 
 No broker API calls; does not modify lifecycle CSV.
 """
@@ -16,6 +21,7 @@ No broker API calls; does not modify lifecycle CSV.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -23,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 from services.schema_guard import safe_merge
+from services.authority_labels import lifecycle_raw_metadata
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = PROJECT_ROOT / "data" / "results"
@@ -162,7 +169,10 @@ def reconcile_simple(lc: pd.DataFrame, pos: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Reconcile signal_lifecycle.csv vs positions_snapshot.csv"
+        description=(
+            "Reconcile signal_lifecycle.csv (RAW_SIGNAL_LIFECYCLE — advisory only) "
+            "vs positions_snapshot.csv"
+        )
     )
     ap.add_argument("--lifecycle", type=Path, default=DEFAULT_LIFECYCLE)
     ap.add_argument("--positions", type=Path, default=DEFAULT_POSITIONS)
@@ -180,6 +190,21 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(args.out, index=False)
+
+    meta_path = args.out.with_name("lifecycle_reconciliation_authority.json")
+    meta_path.write_text(
+        json.dumps(
+            {
+                "lifecycle_source": lifecycle_raw_metadata(),
+                "note": (
+                    "Reconciliation uses RAW_SIGNAL_LIFECYCLE for diagnostics. "
+                    "EFFECTIVE_LIFECYCLE_AUTHORITY is signal_lifecycle_effective.csv."
+                ),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     n = len(out_df)
     n_mis = int(out_df["mismatch"].sum()) if n else 0

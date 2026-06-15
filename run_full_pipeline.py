@@ -35,8 +35,10 @@
 # Patch (2026-04-01):
 #   ✅ Add "lifecycle" stage after rationale:
 #      - Automatically regenerates data/results/signal_lifecycle.csv
-#      - Keeps lifecycle fresh for dashboards + execution
-#      - Removes the last manual gap between rationale and execution
+#        (RAW_SIGNAL_LIFECYCLE — advisory model output; not execution authority)
+#      - Keeps lifecycle fresh for dashboards + downstream effective lifecycle build
+#      - Operational lifecycle authority: signal_lifecycle_effective.csv
+#        (EFFECTIVE_LIFECYCLE_AUTHORITY)
 #
 # Patch (2026-04-04):
 #   ✅ Improve failure visibility:
@@ -633,11 +635,13 @@ def main() -> int:
         ("backtest", "services.backtest_signals", True, []),
         # Optional (safe skips)
         ("rationale", "services.trade_rationale", False, []),
-        # Lifecycle state generation (authoritative state layer).
+        # Lifecycle state generation (RAW_SIGNAL_LIFECYCLE producer).
         # REQUIRED: signal_lifecycle.csv must always reflect the latest
         # signals_with_rationale.csv. apply_signal_lifecycle is itself
         # safe — it returns rc=2 (warn-equivalent) if no signals file
         # exists, which the runner treats as a hard fail and surfaces.
+        # Advisory only — EFFECTIVE_LIFECYCLE_AUTHORITY is built separately
+        # via build_effective_lifecycle (signal_lifecycle_effective.csv).
         ("lifecycle", "services.apply_signal_lifecycle", True, []),
         ("snapshot", "services.write_guard_snapshot", False, []),
         # Optional Phase 1.5+ risk artifacts

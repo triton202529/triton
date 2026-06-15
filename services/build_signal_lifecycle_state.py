@@ -9,9 +9,13 @@
 # Reads:
 #   data/results/signals_lifecycle.csv   (preferred)
 #   data/results/signal_lifecycle.csv    (fallback if history missing)
+#   RAW_SIGNAL_LIFECYCLE — advisory only, not execution authority
 #
 # Writes:
 #   data/results/signal_lifecycle.csv    (STATE table: unique ticker)
+#   Authority: RAW_SIGNAL_LIFECYCLE — advisory only, not execution authority.
+#   Operational lifecycle authority: signal_lifecycle_effective.csv
+#   (EFFECTIVE_LIFECYCLE_AUTHORITY via build_effective_lifecycle).
 #
 # Adds:
 #   freshness (FRESH/OK/STALE/UNKNOWN) derived from heartbeat.json / pipeline_status.json
@@ -28,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+
+from services.authority_labels import lifecycle_raw_metadata
 
 
 def utcnow() -> datetime:
@@ -285,7 +291,14 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
     state.to_csv(out_path, index=False)
 
+    meta_path = results_dir / "signal_lifecycle_authority.json"
+    meta_path.write_text(
+        json.dumps({"output": lifecycle_raw_metadata()}, indent=2),
+        encoding="utf-8",
+    )
+
     print(f"Wrote STATE: {out_path}")
+    print(f"Authority: RAW_SIGNAL_LIFECYCLE — advisory only, not execution authority")
     print(f"Rows: {len(state):,} (unique tickers)")
     print(
         f"Freshness: {state['freshness'].iloc[0] if 'freshness' in state.columns and len(state) else 'n/a'}"

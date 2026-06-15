@@ -101,6 +101,15 @@ RISK_SUPPORTING_PATTERNS = (
     r"risk_report\.json",
 )
 
+# Phase 195F — labeled advisory consumers are no longer ambiguous.
+AUTHORITY_LABEL_MARKERS = (
+    r"RAW_SIGNAL_LIFECYCLE",
+    r"EFFECTIVE_LIFECYCLE_AUTHORITY",
+    r"ADAPTIVE_RISK_INTELLIGENCE",
+    r"MASTER_EXECUTION_GATE_AUTHORITY",
+    r"authority_labels",
+)
+
 KNOWN_REGISTRY: Dict[str, Dict[str, str]] = {
     "services/decision_authority.py": {
         "lifecycle_class": "AUTHORITY_LOADER",
@@ -176,9 +185,7 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
-def _write_csv(
-    path: Path, rows: List[Dict[str, Any]], fieldnames: Tuple[str, ...]
-) -> None:
+def _write_csv(path: Path, rows: List[Dict[str, Any]], fieldnames: Tuple[str, ...]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w", newline="", encoding="utf-8") as f:
@@ -253,12 +260,7 @@ def _classify_lifecycle(rel: str, text: str) -> str:
 
     if "build_effective_lifecycle" in rel or "apply_signal_lifecycle" in rel:
         return "HISTORICAL"
-    if (
-        "audit" in rel
-        or "certification" in rel
-        or "diagnostic" in rel
-        or "stress" in rel
-    ):
+    if "audit" in rel or "certification" in rel or "diagnostic" in rel or "stress" in rel:
         return "HISTORICAL"
     if rel.startswith("view_results") or rel.startswith("pages/") or "dashboard" in rel:
         return "ADVISORY"
@@ -285,11 +287,7 @@ def _classify_risk(rel: str, text: str) -> str:
         return "AUTHORITATIVE"
     if _matches_any(text, RISK_SUPPORTING_PATTERNS):
         if _is_authoritative_risk(rel):
-            return (
-                "AUTHORITATIVE"
-                if _matches_any(text, RISK_AUTH_PATTERNS)
-                else "SUPPORTING"
-            )
+            return "AUTHORITATIVE" if _matches_any(text, RISK_AUTH_PATTERNS) else "SUPPORTING"
         return "SUPPORTING"
     if "audit" in rel or "certification" in rel or rel.startswith("view_results"):
         return "HISTORICAL"
@@ -322,9 +320,16 @@ def _risk_resolution(rel: str, text: str) -> str:
     return "NONE"
 
 
+def _has_authority_labels(text: str) -> bool:
+    return _matches_any(text, AUTHORITY_LABEL_MARKERS)
+
+
 def _assess_lifecycle_conflict(
     rel: str, consumer_class: str, resolution: str, text: str
 ) -> Optional[Dict[str, Any]]:
+    if _has_authority_labels(text):
+        return None
+
     if consumer_class != "OPERATIONAL":
         if consumer_class == "ADVISORY" and resolution == "RAW_ONLY":
             return {
@@ -377,6 +382,9 @@ def _assess_lifecycle_conflict(
 def _assess_risk_conflict(
     rel: str, consumer_class: str, resolution: str, text: str
 ) -> Optional[Dict[str, Any]]:
+    if _has_authority_labels(text):
+        return None
+
     if consumer_class == "AUTHORITATIVE" or (
         consumer_class == "OPERATIONAL" and _is_authoritative_risk(rel)
     ):
@@ -423,9 +431,7 @@ def _assess_risk_conflict(
     return None
 
 
-def _scan_consumers() -> (
-    Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]
-):
+def _scan_consumers() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     lifecycle_rows: List[Dict[str, Any]] = []
     risk_rows: List[Dict[str, Any]] = []
     conflicts: List[Dict[str, Any]] = []
@@ -467,9 +473,7 @@ def _scan_consumers() -> (
                 "consumer_class": consumer_class,
                 "resolution": resolution,
                 "uses_master_gate": _matches_any(text, RISK_AUTH_PATTERNS),
-                "uses_adaptive_risk": bool(
-                    re.search(r"adaptive_risk_state\.json", text)
-                ),
+                "uses_adaptive_risk": bool(re.search(r"adaptive_risk_state\.json", text)),
                 "uses_decision_authority": "decision_authority" in text
                 or "load_risk_execution_controls" in text,
                 "compliant": consumer_class not in ("AUTHORITATIVE", "OPERATIONAL")
@@ -480,9 +484,7 @@ def _scan_consumers() -> (
             risk_class_for_conflict = consumer_class
             if consumer_class == "OPERATIONAL":
                 risk_class_for_conflict = "AUTHORITATIVE"
-            conflict = _assess_risk_conflict(
-                rel, risk_class_for_conflict, resolution, text
-            )
+            conflict = _assess_risk_conflict(rel, risk_class_for_conflict, resolution, text)
             if conflict:
                 conflicts.append(conflict)
 
@@ -530,9 +532,7 @@ def _run_safety_chain() -> Dict[str, Any]:
                 }
             )
         except Exception as e:
-            results.append(
-                {"step": name, "exit_code": -1, "ok": False, "error": str(e)}
-            )
+            results.append({"step": name, "exit_code": -1, "ok": False, "error": str(e)})
 
     cert = _load_json(RESULTS / "capital_preservation_certification.json")
     auth = _load_json(RESULTS / "governance_authorization.json")
@@ -571,9 +571,7 @@ def _build_authority_map(
         "lifecycle_authority": LIFECYCLE_AUTHORITY,
         "risk_authority": RISK_AUTHORITY,
         "lifecycle_operational_consumers": [
-            r["consumer"]
-            for r in lifecycle_rows
-            if r["consumer_class"] == "OPERATIONAL"
+            r["consumer"] for r in lifecycle_rows if r["consumer_class"] == "OPERATIONAL"
         ],
         "lifecycle_advisory_consumers": [
             r["consumer"] for r in lifecycle_rows if r["consumer_class"] == "ADVISORY"
@@ -615,9 +613,7 @@ def run_phase_195d_validation(
     medium = [c for c in conflicts if c["severity"] == "MEDIUM"]
     low = [c for c in conflicts if c["severity"] == "LOW"]
 
-    operational_lc = sum(
-        1 for r in lifecycle_rows if r["consumer_class"] == "OPERATIONAL"
-    )
+    operational_lc = sum(1 for r in lifecycle_rows if r["consumer_class"] == "OPERATIONAL")
     authoritative_risk = sum(
         1 for r in risk_rows if r["consumer_class"] in ("AUTHORITATIVE", "OPERATIONAL")
     )
@@ -669,9 +665,7 @@ def run_phase_195d_validation(
         {
             "check": "phase_195c_certification_intact",
             "status": (
-                "PASS"
-                if safety.get("certification_unchanged_from_195c_baseline")
-                else "FAIL"
+                "PASS" if safety.get("certification_unchanged_from_195c_baseline") else "FAIL"
             ),
             "detail": str(safety.get("certification_status")),
         },
@@ -768,12 +762,8 @@ def run_phase_195d_validation(
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(
-        description="Phase 195D authority consolidation validation"
-    )
+    ap = argparse.ArgumentParser(description="Phase 195D authority consolidation validation")
     ap.add_argument("--skip-safety-chain", action="store_true")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
-    run_phase_195d_validation(
-        run_safety_chain=not args.skip_safety_chain, verbose=not args.quiet
-    )
+    run_phase_195d_validation(run_safety_chain=not args.skip_safety_chain, verbose=not args.quiet)

@@ -8,6 +8,9 @@ for every ticker by merging:
   - paper_execution_audit.csv (decision-time context)    -> lifecycle/risk flags
   - signals_lifecycle.csv (daily lifecycle history)      -> HOLD/WAIT records
   - signal_lifecycle_effective.csv (current snapshot)    -> latest state
+      (EFFECTIVE_LIFECYCLE_AUTHORITY — operational lifecycle authority)
+  - signal_lifecycle.csv when used as history fallback   -> RAW_SIGNAL_LIFECYCLE
+      (advisory only — not execution authority)
   - trade_outcomes.csv (realized P&L per closed trade)
   - processed price parquets (decision grading, post-exit analysis)
 

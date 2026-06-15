@@ -56,6 +56,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from services.authority_labels import authority_label_block, lifecycle_raw_metadata
+
 # ─────────────────────────────────────────────────────────────
 # Paths
 # ─────────────────────────────────────────────────────────────
@@ -342,7 +344,8 @@ def build_feedback_records(inp: FeedbackInputs) -> pd.DataFrame:
       - Otherwise, spine = the most-recent per-symbol view of
         execution_intelligence.csv / execution_plan.csv / live_orders_log.csv,
         whichever is non-empty first.
-      - Attach signal/decision context per symbol from signal_lifecycle.csv.
+      - Attach signal/decision context per symbol from signal_lifecycle.csv
+        (RAW_SIGNAL_LIFECYCLE — advisory only, not execution authority).
       - Attach edge / sizing context per symbol from trade_opportunities.csv.
       - Attach execution context per symbol from execution_intelligence.csv,
         execution_plan.csv (fallback), reprice_open_orders.csv.
@@ -1124,6 +1127,10 @@ def write_outputs(
         "generated_at_utc": _utc_now_iso(),
         "schema_version": 1,
         "advisory_only": True,
+        "authority_labeling": authority_label_block(),
+        "input_authority_labels": {
+            "signal_lifecycle": lifecycle_raw_metadata(),
+        },
         "source_availability": {
             name: {
                 "status": inp.status.get(name, "missing"),
