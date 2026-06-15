@@ -1108,11 +1108,24 @@ def compute_governance_risk_summary(
     cpi_doc: Dict[str, Any],
     cpe_doc: Dict[str, Any],
     cpa_doc: Dict[str, Any],
+    readiness_doc: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Read-only governance awareness mapping from capital preservation posture."""
     timestamp = str(cpi_doc.get("generated_at") or cpe_doc.get("generated_at") or _iso_utc())
     cps = int(cpi_doc.get("capital_preservation_score") or 0)
     escalation_state = str(cpe_doc.get("escalation_state") or "GREEN")
+    health_band = str(cpi_doc.get("health_band") or "").upper()
+    active_alerts = int(cpe_doc.get("active_alerts") or len(cpa_doc.get("advisories") or []))
+
+    if readiness_doc is None:
+        try:
+            readiness_doc = json.loads(
+                (GOV_RISK_PATH.parent / "execution_readiness.json").read_text(encoding="utf-8")
+            )
+        except Exception:
+            readiness_doc = {}
+
+    readiness_status = str((readiness_doc or {}).get("readiness_status") or "")
     level_code, level_label = GOVERNANCE_AWARENESS_BY_ESCALATION.get(
         escalation_state,
         ("INCREASED_MONITORING", "Increased Monitoring"),
@@ -1130,6 +1143,17 @@ def compute_governance_risk_summary(
             if s and s not in drivers:
                 drivers.append(s)
 
+    operationally_stable = (
+        cps >= 75
+        and health_band in ("HEALTHY", "EXCELLENT", "STABLE")
+        and readiness_status == "READY"
+        and active_alerts == 0
+        and not drivers
+        and str(cpi_doc.get("risk_trend") or "STABLE").upper() in ("STABLE", "IMPROVING")
+    )
+    if operationally_stable:
+        level_code, level_label = ("ROUTINE_OVERSIGHT", "Routine Oversight")
+
     doc = {
         "generated_at": timestamp,
         "capital_preservation_score": cps,
@@ -1141,6 +1165,8 @@ def compute_governance_risk_summary(
         "governance_summary": drivers,
         "governance_drivers": drivers,
         "governance_status": level_label,
+        "readiness_status": readiness_status,
+        "operationally_stable": operationally_stable,
     }
     _atomic_write_json(doc, GOV_RISK_PATH)
     return doc
@@ -1682,6 +1708,9 @@ def run_watchdog(
     )
     auth_doc = governance_exec["governance_authorization"]
     readiness_doc = governance_exec["execution_readiness"]
+    gov_doc = compute_governance_risk_summary(
+        cpi_doc, cpe_doc, cpa_doc, readiness_doc=readiness_doc
+    )
     trials_doc = governance_exec["protective_action_trials"]
 
     from services.capital_preservation_evaluation import persist_capital_preservation_evaluation

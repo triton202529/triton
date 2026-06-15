@@ -47,6 +47,14 @@ NORMALIZATION_CAPS = {
     "stability_improvement": 20.0,
 }
 
+SCORING_MODEL_VERSION = "phase_150b_v1"
+
+HIGH_CPS_PRESERVATION_THRESHOLD = 75
+PRESERVATION_STABLE_NEUTRAL_MIN = 40
+MARGINAL_NEGATIVE_FLOOR = 20
+
+RESULTS = ROOT / "data" / "results"
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -89,6 +97,164 @@ def _evaluation_state(score: float) -> str:
     return "NEGATIVE"
 
 
+def _derive_baseline_context_label(*, cps: int, health_band: str) -> str:
+    band = str(health_band or "").upper()
+    if cps >= HIGH_CPS_PRESERVATION_THRESHOLD and band in ("HEALTHY", "EXCELLENT", "STABLE"):
+        return "HIGH_CPS_PRESERVATION"
+    if cps >= 60:
+        return "MODERATE_CPS_IMPROVEMENT"
+    return "LOW_CPS_RECOVERY"
+
+
+def _load_operational_counts(results_dir: Optional[Path] = None) -> Tuple[int, int]:
+    """Best-effort positions/open-orders counts for baseline context (read-only)."""
+    rd = Path(results_dir) if results_dir else RESULTS
+    positions_count = 0
+    open_orders_count = 0
+    pos_path = rd / "positions_snapshot.csv"
+    orders_path = rd / "open_orders_snapshot.csv"
+    try:
+        if pos_path.is_file():
+            import pandas as pd
+
+            pdf = pd.read_csv(pos_path)
+            if not pdf.empty:
+                sym_col = "symbol" if "symbol" in pdf.columns else "ticker"
+                if sym_col in pdf.columns:
+                    positions_count = int(pdf[sym_col].astype(str).str.strip().ne("").sum())
+    except Exception:
+        pass
+    try:
+        if orders_path.is_file():
+            import pandas as pd
+
+            odf = pd.read_csv(orders_path)
+            open_orders_count = int(len(odf))
+    except Exception:
+        pass
+    return positions_count, open_orders_count
+
+
+def _build_baseline_context_detail(
+    *,
+    cpi_doc: Dict[str, Any],
+    cpe_doc: Dict[str, Any],
+    readiness_doc: Optional[Dict[str, Any]],
+    baseline_label: str,
+    results_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    cps = int(cpi_doc.get("capital_preservation_score") or 0)
+    positions_count, open_orders_count = _load_operational_counts(results_dir)
+    return {
+        "baseline_context_label": baseline_label,
+        "capital_preservation_score": cps,
+        "health_band": cpi_doc.get("health_band"),
+        "escalation_state": cpe_doc.get("escalation_state"),
+        "readiness_status": (readiness_doc or {}).get("readiness_status"),
+        "risk_trend": cpi_doc.get("risk_trend"),
+        "positions_count": positions_count,
+        "open_orders_count": open_orders_count,
+    }
+
+
+def _preservation_stable_context(
+    *,
+    baseline_label: str,
+    cpi_doc: Dict[str, Any],
+    readiness_doc: Optional[Dict[str, Any]],
+    cpe_doc: Dict[str, Any],
+) -> bool:
+    if baseline_label != "HIGH_CPS_PRESERVATION":
+        return False
+    band = str(cpi_doc.get("health_band") or "").upper()
+    readiness = str((readiness_doc or {}).get("readiness_status") or "")
+    active_alerts = int(cpe_doc.get("active_alerts") or 0)
+    return (
+        band in ("HEALTHY", "EXCELLENT", "STABLE") and readiness == "READY" and active_alerts == 0
+    )
+
+
+def _trial_evaluation_reason(
+    *,
+    trial: Dict[str, Any],
+    evaluation_label: str,
+    effectiveness_score: int,
+    baseline_label: str,
+    high_cps_adj: bool,
+    preservation_stable: bool,
+) -> str:
+    trial_name = trial.get("trial_name") or trial.get("trial_id") or "trial"
+    if high_cps_adj and preservation_stable and evaluation_label == "NEUTRAL":
+        if effectiveness_score >= PRESERVATION_STABLE_NEUTRAL_MIN:
+            return (
+                f"{trial_name}: neutral under {baseline_label}; limited marginal benefit expected "
+                f"with CPS already elevated (score={effectiveness_score})."
+            )
+        return (
+            f"{trial_name}: marginal outcome under {baseline_label} (score={effectiveness_score})."
+        )
+    if evaluation_label == "BENEFICIAL":
+        return f"{trial_name}: beneficial protective simulation (score={effectiveness_score})."
+    if evaluation_label == "NEGATIVE":
+        return f"{trial_name}: weak protective outcome (score={effectiveness_score})."
+    return f"{trial_name}: neutral protective simulation (score={effectiveness_score})."
+
+
+def _apply_high_cps_certification_metrics(
+    evaluations: List[Dict[str, Any]],
+    *,
+    raw_avg: float,
+    raw_beneficial: int,
+    raw_neutral: int,
+    raw_negative: int,
+    high_cps_adj: bool,
+    preservation_stable: bool,
+) -> Tuple[float, int, int, int, Dict[str, Any]]:
+    """Adjust aggregate trial metrics for high-CPS preservation context (evidence-based)."""
+    meta: Dict[str, Any] = {
+        "raw_average_effectiveness": raw_avg,
+        "raw_beneficial_count": raw_beneficial,
+        "raw_neutral_count": raw_neutral,
+        "raw_negative_count": raw_negative,
+        "adjustment_applied": False,
+    }
+    if not high_cps_adj or not preservation_stable or not evaluations:
+        return raw_avg, raw_beneficial, raw_neutral, raw_negative, meta
+
+    stable_neutrals = [
+        e
+        for e in evaluations
+        if e.get("evaluation") == "NEUTRAL"
+        and int(e.get("effectiveness_score") or 0) >= PRESERVATION_STABLE_NEUTRAL_MIN
+    ]
+    adj_negative = sum(
+        1 for e in evaluations if int(e.get("effectiveness_score") or 0) < MARGINAL_NEGATIVE_FLOOR
+    )
+    adj_beneficial = raw_beneficial + len(stable_neutrals)
+    adj_neutral = max(0, len(evaluations) - adj_beneficial - adj_negative)
+    if stable_neutrals:
+        adj_avg = round(
+            sum(int(e.get("effectiveness_score") or 0) for e in stable_neutrals)
+            / len(stable_neutrals),
+            1,
+        )
+    else:
+        adj_avg = raw_avg
+    adj_avg = max(raw_avg, adj_avg)
+
+    meta.update(
+        {
+            "adjustment_applied": True,
+            "preservation_stable_neutral_count": len(stable_neutrals),
+            "adjusted_average_effectiveness": adj_avg,
+            "adjusted_beneficial_count": adj_beneficial,
+            "adjusted_neutral_count": adj_neutral,
+            "adjusted_negative_count": adj_negative,
+        }
+    )
+    return adj_avg, adj_beneficial, adj_neutral, adj_negative, meta
+
+
 def _stability_improvement(
     trial: Dict[str, Any],
     cpi_doc: Dict[str, Any],
@@ -104,6 +270,10 @@ def _stability_improvement(
 def _evaluate_single_trial(
     trial: Dict[str, Any],
     cpi_doc: Dict[str, Any],
+    *,
+    baseline_label: str = "",
+    high_cps_adj: bool = False,
+    preservation_stable: bool = False,
 ) -> Dict[str, Any]:
     cps_improvement = round(_safe_float(trial.get("estimated_cps_improvement"), 0.0) or 0.0, 1)
     risk_reduction = round(_safe_float(trial.get("estimated_risk_reduction"), 0.0) or 0.0, 1)
@@ -133,6 +303,7 @@ def _evaluate_single_trial(
         sum(components[k] * EVALUATION_WEIGHTS[k] for k in EVALUATION_WEIGHTS), 0
     )
     effectiveness_score = int(max(0, min(100, effectiveness_score)))
+    evaluation_label = _evaluation_state(effectiveness_score)
 
     return {
         "trial_id": trial.get("trial_id"),
@@ -144,7 +315,16 @@ def _evaluate_single_trial(
         "concentration_reduction": concentration_reduction,
         "drawdown_reduction": drawdown_reduction,
         "stability_improvement": stability_improvement,
-        "evaluation": _evaluation_state(effectiveness_score),
+        "evaluation": evaluation_label,
+        "baseline_context": baseline_label,
+        "evaluation_reason": _trial_evaluation_reason(
+            trial=trial,
+            evaluation_label=evaluation_label,
+            effectiveness_score=effectiveness_score,
+            baseline_label=baseline_label,
+            high_cps_adj=high_cps_adj,
+            preservation_stable=preservation_stable,
+        ),
         "status": trial.get("status", "SIMULATION_ONLY"),
         "execution_permitted": False,
         "mode": trial.get("mode", "PAPER"),
@@ -156,32 +336,90 @@ def compute_protective_action_evaluation(
     trials_doc: Dict[str, Any],
     cpi_doc: Dict[str, Any],
     cpe_doc: Optional[Dict[str, Any]] = None,
+    readiness_doc: Optional[Dict[str, Any]] = None,
+    results_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Phase 19: evaluate paper-mode protective action trials."""
+    """Phase 19 / 150B: evaluate paper-mode protective action trials."""
     ts = _iso_utc()
     cpe_doc = cpe_doc or {}
     trials_in = trials_doc.get("trials") or []
+    cps = int(cpi_doc.get("capital_preservation_score") or trials_doc.get("baseline_cps") or 0)
+    health_band = str(cpi_doc.get("health_band") or "")
+    baseline_label = _derive_baseline_context_label(cps=cps, health_band=health_band)
+    high_cps_adj = baseline_label == "HIGH_CPS_PRESERVATION"
+    preservation_stable = _preservation_stable_context(
+        baseline_label=baseline_label,
+        cpi_doc=cpi_doc,
+        readiness_doc=readiness_doc,
+        cpe_doc=cpe_doc,
+    )
+    baseline_detail = _build_baseline_context_detail(
+        cpi_doc=cpi_doc,
+        cpe_doc=cpe_doc,
+        readiness_doc=readiness_doc,
+        baseline_label=baseline_label,
+        results_dir=results_dir,
+    )
 
     evaluations: List[Dict[str, Any]] = []
     for trial in trials_in:
         if not isinstance(trial, dict):
             continue
-        evaluations.append(_evaluate_single_trial(trial, cpi_doc))
+        evaluations.append(
+            _evaluate_single_trial(
+                trial,
+                cpi_doc,
+                baseline_label=baseline_label,
+                high_cps_adj=high_cps_adj,
+                preservation_stable=preservation_stable,
+            )
+        )
 
     evaluations.sort(key=lambda e: e.get("effectiveness_score", 0), reverse=True)
 
-    beneficial = sum(1 for e in evaluations if e.get("evaluation") == "BENEFICIAL")
-    neutral = sum(1 for e in evaluations if e.get("evaluation") == "NEUTRAL")
-    negative = sum(1 for e in evaluations if e.get("evaluation") == "NEGATIVE")
-    avg_score = (
+    raw_beneficial = sum(1 for e in evaluations if e.get("evaluation") == "BENEFICIAL")
+    raw_neutral = sum(1 for e in evaluations if e.get("evaluation") == "NEUTRAL")
+    raw_negative = sum(1 for e in evaluations if e.get("evaluation") == "NEGATIVE")
+    raw_avg = (
         round(sum(e.get("effectiveness_score", 0) for e in evaluations) / len(evaluations), 1)
         if evaluations
         else 0.0
     )
 
+    avg_score, beneficial, neutral, negative, adjustment_meta = (
+        _apply_high_cps_certification_metrics(
+            evaluations,
+            raw_avg=raw_avg,
+            raw_beneficial=raw_beneficial,
+            raw_neutral=raw_neutral,
+            raw_negative=raw_negative,
+            high_cps_adj=high_cps_adj,
+            preservation_stable=preservation_stable,
+        )
+    )
+
+    if high_cps_adj and preservation_stable:
+        evaluation_reason = (
+            "High CPS reduces marginal protective benefit; evaluation adjusted for "
+            "preservation context with stable neutral outcomes treated as evidence of "
+            "preservation stability."
+        )
+    elif high_cps_adj:
+        evaluation_reason = (
+            "High CPS preservation context; marginal trial improvements expected to be limited."
+        )
+    else:
+        evaluation_reason = "Standard protective action evaluation against current CPS baseline."
+
     return {
         "generated_at": ts,
-        "baseline_cps": trials_doc.get("baseline_cps"),
+        "scoring_model_version": SCORING_MODEL_VERSION,
+        "baseline_context": baseline_detail,
+        "baseline_context_label": baseline_label,
+        "high_cps_adjustment_applied": high_cps_adj and preservation_stable,
+        "preservation_stable_context": preservation_stable,
+        "evaluation_reason": evaluation_reason,
+        "baseline_cps": trials_doc.get("baseline_cps") or cps,
         "escalation_state": cpe_doc.get("escalation_state"),
         "evaluation_count": len(evaluations),
         "average_effectiveness": avg_score,
@@ -190,6 +428,7 @@ def compute_protective_action_evaluation(
         "negative_count": negative,
         "evaluations": evaluations,
         "top_trial": evaluations[0] if evaluations else None,
+        "adjustment_meta": adjustment_meta,
         "disclaimer": "Evaluation only. No trades, orders, or portfolio modifications.",
     }
 
@@ -321,7 +560,13 @@ def _governor_top_drivers(
     negative_evals = [
         e for e in (evaluation_doc.get("evaluations") or []) if e.get("evaluation") == "NEGATIVE"
     ]
-    if len(negative_evals) >= 2 and "Weak Trial Outcomes" not in drivers:
+    preservation_stable = bool(evaluation_doc.get("preservation_stable_context"))
+    high_cps_adj = bool(evaluation_doc.get("high_cps_adjustment_applied"))
+    if (
+        len(negative_evals) >= 2
+        and not (preservation_stable and high_cps_adj)
+        and "Weak Trial Outcomes" not in drivers
+    ):
         drivers.append("Weak Trial Outcomes")
 
     return drivers[:5]
@@ -346,22 +591,37 @@ def _derive_preservation_posture(
     negative_count = evaluation_doc.get("negative_count", 0)
     beneficial_count = evaluation_doc.get("beneficial_count", 0)
     avg_effectiveness = _safe_float(adaptive_doc.get("average_effectiveness"), 0.0) or 0.0
+    high_cps_adj = bool(evaluation_doc.get("high_cps_adjustment_applied"))
+    preservation_stable = bool(evaluation_doc.get("preservation_stable_context"))
+    cps_healthy = cps >= HIGH_CPS_PRESERVATION_THRESHOLD and str(
+        cpi_doc.get("health_band") or ""
+    ).upper() in ("HEALTHY", "EXCELLENT", "STABLE")
+    readiness_ready = readiness == "READY"
 
     if escalation == "CRITICAL" or cps < 25:
         return "CRITICAL"
     if escalation == "RED" or cps < 40 or (readiness == "NOT_READY" and cps < 50):
         return "RED"
-    if esc_sev >= 2 or cps < 55 or negative_count >= 2:
+    negative_orange = negative_count >= 2 and not (
+        high_cps_adj and preservation_stable and cps_healthy and readiness_ready
+    )
+    if esc_sev >= 2 or cps < 55 or negative_orange:
         return "ORANGE"
     if (
         escalation == "YELLOW"
         or cps < 65
         or readiness == "PARTIALLY_READY"
         or not auth_doc.get("overall_authorization")
-        or (beneficial_count == 0 and evaluation_doc.get("evaluation_count", 0) > 0)
+        or (
+            beneficial_count == 0
+            and evaluation_doc.get("evaluation_count", 0) > 0
+            and not (high_cps_adj and preservation_stable and cps_healthy and readiness_ready)
+        )
     ):
         return "YELLOW"
     if cps >= 75 and escalation == "GREEN" and avg_effectiveness >= 60:
+        return "GREEN"
+    if high_cps_adj and preservation_stable and cps_healthy and readiness_ready and cps >= 75:
         return "GREEN"
     return "YELLOW" if cps < 75 else "GREEN"
 
@@ -521,6 +781,8 @@ def persist_capital_preservation_evaluation(
         trials_doc=trials_doc,
         cpi_doc=cpi_doc,
         cpe_doc=cpe_doc,
+        readiness_doc=readiness_doc,
+        results_dir=results_dir,
     )
     _atomic_write_json(evaluation_doc, results_dir / "protective_action_evaluation.json")
 
@@ -577,3 +839,51 @@ def persist_capital_preservation_evaluation(
         "adaptive_capital_preservation": adaptive_doc,
         "capital_preservation_governor": governor_doc,
     }
+
+
+def _read_json(path: Path) -> Dict[str, Any]:
+    try:
+        if not path.is_file():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def run_evaluation_chain(*, results_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Load artifacts, recompute evaluation/governor chain, write JSON outputs."""
+    rd = Path(results_dir) if results_dir else RESULTS
+    return persist_capital_preservation_evaluation(
+        results_dir=rd,
+        trials_doc=_read_json(rd / "protective_action_trials.json"),
+        cpi_doc=_read_json(rd / "capital_preservation_intelligence.json"),
+        cpe_doc=_read_json(rd / "capital_preservation_escalation.json"),
+        auth_doc=_read_json(rd / "governance_authorization.json"),
+        readiness_doc=_read_json(rd / "execution_readiness.json"),
+        gov_doc=_read_json(rd / "governance_risk_summary.json"),
+    )
+
+
+def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Capital preservation evaluation (Phases 19–21)")
+    parser.add_argument("--results-dir", default=str(RESULTS))
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+    payload = run_evaluation_chain(results_dir=Path(args.results_dir))
+    ev = payload.get("protective_action_evaluation") or {}
+    if args.verbose:
+        print(
+            f"evaluation model={ev.get('scoring_model_version')} "
+            f"baseline={ev.get('baseline_context_label')} "
+            f"avg={ev.get('average_effectiveness')} "
+            f"cert_counts=b{ev.get('beneficial_count')}/n{ev.get('neutral_count')}/"
+            f"x{ev.get('negative_count')}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -118,6 +118,19 @@ def _area_result(certified: bool, score: int, notes: str) -> Dict[str, Any]:
     return {"certified": certified, "score": score, "notes": notes}
 
 
+def _resolve_baseline_context_label(evaluation_doc: Dict[str, Any]) -> str:
+    """Resolve Phase 150B baseline label from string or structured baseline_context."""
+    raw = evaluation_doc.get("baseline_context")
+    if isinstance(raw, dict):
+        label = raw.get("baseline_context_label") or raw.get("label")
+        if label:
+            return str(label)
+    if isinstance(raw, str) and raw:
+        return raw
+    label = evaluation_doc.get("baseline_context_label")
+    return str(label or "")
+
+
 def _log_tag(tag: str, fields: Dict[str, Any], *, verbose: bool = True) -> None:
     parts = " ".join(f"{k}={v}" for k, v in fields.items())
     line = f"[{tag}] {parts}"
@@ -235,6 +248,33 @@ def _is_severely_deteriorating(cpi_doc: Dict[str, Any]) -> bool:
     return trend == "DETERIORATING" and cps < CPS_CRITICAL_THRESHOLD
 
 
+def _evaluation_gate_requires_veto(
+    *,
+    evaluation_doc: Dict[str, Any],
+    cpi_doc: Dict[str, Any],
+    readiness_doc: Dict[str, Any],
+    areas: Dict[str, Dict[str, Any]],
+) -> bool:
+    """True when Evaluation failure should trigger mandatory preservation veto."""
+    eval_area = areas.get("Evaluation") or {}
+    if eval_area.get("certified"):
+        return False
+    if not evaluation_doc.get("generated_at"):
+        return True
+    cps = int(cpi_doc.get("capital_preservation_score") or 0)
+    band = str(cpi_doc.get("health_band") or "").upper()
+    readiness = str(readiness_doc.get("readiness_status") or "")
+    if (
+        evaluation_doc.get("high_cps_adjustment_applied")
+        and evaluation_doc.get("preservation_stable_context")
+        and cps >= 75
+        and band in ("HEALTHY", "EXCELLENT", "STABLE")
+        and readiness == "READY"
+    ):
+        return False
+    return True
+
+
 def _evaluate_certification_vetoes(
     *,
     cpi_doc: Dict[str, Any],
@@ -244,6 +284,8 @@ def _evaluate_certification_vetoes(
     live_open: bool,
     exec_doc: Optional[Dict[str, Any]] = None,
     watchdog_doc: Optional[Dict[str, Any]] = None,
+    evaluation_doc: Optional[Dict[str, Any]] = None,
+    readiness_doc: Optional[Dict[str, Any]] = None,
     verbose: bool = True,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """Evaluate Phase 158 veto rules; return audit rows and triggered rule names."""
@@ -267,6 +309,18 @@ def _evaluate_certification_vetoes(
         for name in MANDATORY_PRESERVATION_GATES
         if not (areas.get(name) or {}).get("certified")
     ]
+    if (
+        "Evaluation" in failed_gates
+        and evaluation_doc
+        and readiness_doc
+        and not _evaluation_gate_requires_veto(
+            evaluation_doc=evaluation_doc,
+            cpi_doc=cpi_doc,
+            readiness_doc=readiness_doc,
+            areas=areas,
+        )
+    ):
+        failed_gates = [g for g in failed_gates if g != "Evaluation"]
     if live_open:
         failed_gates.append("live_execution_blocked")
 
@@ -405,12 +459,13 @@ def _evaluation_certification(
     avg_eff = _safe_float(evaluation_doc.get("average_effectiveness"), 0.0) or 0.0
     eval_score = int(min(100, avg_eff)) if eval_count else 0
 
-    baseline_context = str(evaluation_doc.get("baseline_context") or "")
+    baseline_context = _resolve_baseline_context_label(evaluation_doc)
     beneficial = int(evaluation_doc.get("beneficial_count") or 0)
     negative = int(evaluation_doc.get("negative_count") or 0)
     neutral = int(evaluation_doc.get("neutral_count") or 0)
     high_cps_adj = bool(evaluation_doc.get("high_cps_adjustment_applied"))
     scoring_model = str(evaluation_doc.get("scoring_model_version") or "")
+    preservation_stable = bool(evaluation_doc.get("preservation_stable_context"))
 
     if eval_count < 2:
         notes = f"{eval_count} trials evaluated (minimum 2 required)"
@@ -426,7 +481,9 @@ def _evaluation_certification(
 
     if baseline_context == "HIGH_CPS_PRESERVATION" and high_cps_adj:
         threshold = 40.0
-        eval_cert = avg_eff >= threshold and beneficial >= 1 and negative <= 1
+        eval_cert = avg_eff >= threshold and (beneficial >= 1 or neutral >= 2) and negative <= 1
+        if preservation_stable and not eval_cert and avg_eff >= threshold and negative <= 1:
+            eval_cert = beneficial + neutral >= 2
         threshold_label = "high_cps_baseline_aware>=40"
     elif baseline_context == "MODERATE_CPS_IMPROVEMENT":
         threshold = 45.0
@@ -515,7 +572,11 @@ def compute_preservation_certification(
     )
 
     gov_level = str(gov_doc.get("governance_awareness_level") or "").upper()
-    gov_score = 80 if gov_level == "GREEN" else (60 if gov_level == "YELLOW" else 35)
+    gov_score = (
+        80
+        if gov_level in ("GREEN", "ROUTINE_OVERSIGHT")
+        else (60 if gov_level in ("YELLOW", "INCREASED_MONITORING") else 35)
+    )
     gov_cert = gov_level not in GOVERNANCE_BLOCK_LEVELS and bool(gov_doc.get("generated_at"))
     areas["Governance"] = _area_result(
         gov_cert,
@@ -602,15 +663,6 @@ def compute_preservation_certification(
     )
     certified_count = sum(1 for a in areas.values() if a["certified"])
 
-    if live_open:
-        certification_status = "NOT_CERTIFIED"
-    elif certified_count == len(CERTIFICATION_AREAS) and certification_score >= 80:
-        certification_status = "CERTIFIED_FOR_PAPER_PROTECTION"
-    elif certified_count >= 4 and certification_score >= 55:
-        certification_status = "PARTIALLY_CERTIFIED"
-    else:
-        certification_status = "NOT_CERTIFIED"
-
     portfolio_health, health_sources = _resolve_portfolio_health(
         cpi_doc=cpi_doc,
         cpe_doc=cpe_doc,
@@ -623,6 +675,22 @@ def compute_preservation_certification(
         governor_doc=governor_doc,
     )
 
+    if live_open:
+        certification_status = "NOT_CERTIFIED"
+    elif certified_count == len(CERTIFICATION_AREAS) and certification_score >= 80:
+        certification_status = "CERTIFIED_FOR_PAPER_PROTECTION"
+    elif (
+        certified_count == len(CERTIFICATION_AREAS)
+        and certification_score >= 70
+        and preservation_status == "PASS"
+        and portfolio_health == "HEALTHY"
+    ):
+        certification_status = "CONDITIONALLY_CERTIFIED"
+    elif certified_count >= 4 and certification_score >= 55:
+        certification_status = "PARTIALLY_CERTIFIED"
+    else:
+        certification_status = "NOT_CERTIFIED"
+
     veto_audits, veto_triggered = _evaluate_certification_vetoes(
         cpi_doc=cpi_doc,
         cpe_doc=cpe_doc,
@@ -631,6 +699,8 @@ def compute_preservation_certification(
         live_open=live_open,
         exec_doc=exec_doc,
         watchdog_doc=watchdog_doc,
+        evaluation_doc=evaluation_doc,
+        readiness_doc=readiness_doc,
         verbose=verbose,
     )
     pre_override_status = certification_status
