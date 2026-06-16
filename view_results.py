@@ -95,6 +95,7 @@ st.markdown(
     .triton-execbar .left{font-weight:700;letter-spacing:.2px;}
     .triton-execbar .right{opacity:.85;font-size:.85rem;white-space:nowrap;}
     .triton-execbar.enabled{border-color:rgba(34,197,94,.55);}
+    .triton-execbar.paper{border-color:rgba(34,197,94,.55);background:rgba(15,23,42,.72);}
     .triton-execbar.locked{border-color:rgba(239,68,68,.65);}
 
 
@@ -2078,6 +2079,132 @@ def compute_execution_lock() -> Tuple[bool, str]:
     return False, ""
 
 
+PAPER_CERTIFICATION_STATUSES = frozenset(
+    {
+        "CERTIFIED_FOR_PAPER_PROTECTION",
+        "CONDITIONALLY_CERTIFIED",
+        "PARTIALLY_CERTIFIED",
+    }
+)
+
+
+@dataclass
+class DashboardExecutionPosture:
+    live_execution_permitted: bool
+    paper_execution_permitted: bool
+    execution_authorized: bool
+    readiness_status: str
+    certification_status: str
+    lifecycle_gate_ok: bool
+    lifecycle_gate_reason: str
+    paper_operational: bool
+    full_execution_locked: bool
+    lock_reasons: List[str]
+
+
+def load_dashboard_execution_posture() -> DashboardExecutionPosture:
+    """
+    Read-only execution authority posture from governance artifacts.
+    Display labeling only — does not alter gates or broker behavior.
+    """
+    readiness = load_json(RESULTS_DIR / "execution_readiness.json", show_error=False) or {}
+    gov = load_json(RESULTS_DIR / "governance_authorization.json", show_error=False) or {}
+    cert = (
+        load_json(RESULTS_DIR / "capital_preservation_certification.json", show_error=False) or {}
+    )
+
+    live = bool(
+        gov.get("live_execution_permitted", readiness.get("live_execution_permitted", False))
+    )
+    paper = bool(
+        gov.get(
+            "paper_execution_permitted",
+            readiness.get("paper_execution_permitted", False),
+        )
+    )
+    exec_auth = bool(gov.get("execution_authorized", readiness.get("execution_authorized", False)))
+    readiness_status = str(readiness.get("readiness_status") or "NOT_READY").strip()
+    certification_status = str(cert.get("certification_status") or "").strip()
+
+    lifecycle_gate_ok = True
+    lifecycle_gate_reason = "OK"
+    try:
+        from services.lifecycle_truth import evaluate_lifecycle_gate
+
+        lg = evaluate_lifecycle_gate()
+        lifecycle_gate_ok = str(lg.status) == "OK"
+        lifecycle_gate_reason = str(lg.reason or lg.status)
+    except Exception as exc:
+        lifecycle_gate_ok = False
+        lifecycle_gate_reason = f"lifecycle gate error: {exc}"
+
+    cert_ok = certification_status in PAPER_CERTIFICATION_STATUSES
+
+    lock_reasons: List[str] = []
+    if not paper:
+        lock_reasons.append("paper execution not permitted")
+    if not exec_auth:
+        lock_reasons.append("execution not authorized")
+    if readiness_status != "READY":
+        lock_reasons.append(f"readiness_status={readiness_status}")
+    if not lifecycle_gate_ok:
+        lock_reasons.append(f"lifecycle gate: {lifecycle_gate_reason}")
+    if not cert_ok:
+        lock_reasons.append(
+            f"certification invalid for paper protection ({certification_status or 'missing'})"
+        )
+
+    authority_ok = (
+        paper and exec_auth and readiness_status == "READY" and lifecycle_gate_ok and cert_ok
+    )
+    paper_operational = authority_ok and not live
+    full_execution_locked = not authority_ok
+
+    return DashboardExecutionPosture(
+        live_execution_permitted=live,
+        paper_execution_permitted=paper,
+        execution_authorized=exec_auth,
+        readiness_status=readiness_status,
+        certification_status=certification_status,
+        lifecycle_gate_ok=lifecycle_gate_ok,
+        lifecycle_gate_reason=lifecycle_gate_reason,
+        paper_operational=paper_operational,
+        full_execution_locked=full_execution_locked,
+        lock_reasons=lock_reasons,
+    )
+
+
+def _certification_badge_label(certification_status: str) -> str:
+    label = certification_status.replace("_", " ").strip()
+    return label or "CERTIFICATION UNKNOWN"
+
+
+def render_sidebar_execution_status(
+    posture: DashboardExecutionPosture, pipeline_locked: bool, pipeline_reason: str
+) -> None:
+    """Sidebar truth labels: paper authorization vs live lock vs full execution lock."""
+    if posture.paper_operational:
+        st.success("✅ PAPER AUTHORIZED")
+        st.caption(
+            "Live execution remains blocked. Paper mode is the only authorized execution path."
+        )
+        cert_badge = _certification_badge_label(posture.certification_status)
+        st.markdown(f"🏷 **LIVE LOCKED** · **PAPER AUTHORIZED** · **READY** · **{cert_badge}**")
+        if pipeline_locked:
+            st.warning(f"Data integrity caution: {pipeline_reason}")
+        return
+
+    if posture.full_execution_locked:
+        st.error("🛑 EXECUTION LOCKED")
+        if posture.lock_reasons:
+            st.caption(" · ".join(posture.lock_reasons))
+        if pipeline_locked:
+            st.caption(pipeline_reason)
+        return
+
+    st.success("✅ Execution enabled")
+
+
 # ──────────────────────────────
 # LIVE EXEC PRECHECKS (ARM + GUARD)
 #   Extra safety layer for Live Trading UI.
@@ -2234,17 +2361,34 @@ def render_top_status_stack() -> None:
     gate_bits = {g.get("name"): bool(g.get("ok")) for g in gates}
     bad_bits = [k for k, v in gate_bits.items() if not v]
 
-    # Keep the legacy execution lock (pipeline/contracts) visible as context
+    # Pipeline/contracts lock (data integrity) — separate from authority posture labels.
     locked, reason = compute_execution_lock()
+    posture = load_dashboard_execution_posture()
 
-    exec_class = "enabled" if live_ready else "locked"
-    exec_title = "LIVE READY" if live_ready else "LIVE NOT READY"
-
-    gate_summary = "All gates green" if live_ready else ("Blocked: " + ", ".join(bad_bits))
-    if locked:
-        exec_detail = f"{gate_summary} | EXEC_LOCK: {reason}"
+    if posture.paper_operational:
+        exec_class = "paper"
+        exec_title = "PAPER AUTHORIZED"
+        cert_badge = _certification_badge_label(posture.certification_status)
+        exec_detail = f"LIVE LOCKED · READINESS READY · {cert_badge}"
+        if locked:
+            exec_detail += f" · Data caution: {reason.replace('Execution locked: ', '')}"
+    elif posture.full_execution_locked:
+        exec_class = "locked"
+        exec_title = "EXECUTION LOCKED"
+        auth_bits = (
+            " · ".join(posture.lock_reasons) if posture.lock_reasons else "authority gates failed"
+        )
+        exec_detail = auth_bits
+        if locked:
+            exec_detail += f" | {reason}"
     else:
-        exec_detail = gate_summary
+        exec_class = "enabled" if live_ready else "locked"
+        exec_title = "LIVE READY" if live_ready else "LIVE NOT READY"
+        gate_summary = "All gates green" if live_ready else ("Blocked: " + ", ".join(bad_bits))
+        if locked:
+            exec_detail = f"{gate_summary} | EXEC_LOCK: {reason}"
+        else:
+            exec_detail = gate_summary
 
     # compact per-gate badges (ARM / GUARD / CONFIRM)
     def _badge(label, ok):
@@ -23702,13 +23846,9 @@ def sidebar_controls() -> Tuple[str, str]:
             st.session_state.pop("pipeline_health", None)
             st.rerun()
 
-        locked, reason = compute_execution_lock()
-        if locked:
-            # Use emoji in text for broad Streamlit compatibility (avoid icon kwarg issues)
-            st.error("🛑 EXECUTION LOCKED")
-            st.caption(reason)
-        else:
-            st.success("✅ Execution enabled")
+        pipeline_locked, pipeline_reason = compute_execution_lock()
+        posture = load_dashboard_execution_posture()
+        render_sidebar_execution_status(posture, pipeline_locked, pipeline_reason)
 
         st.markdown("---")
         section = st.selectbox("Section", list(SECTIONS.keys()), index=0, key="section_choice")
