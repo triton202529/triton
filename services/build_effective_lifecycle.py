@@ -26,6 +26,7 @@ from typing import Any, Optional, Set
 
 import pandas as pd
 
+from services.lifecycle_artifact_guard import write_lifecycle_csv_protected
 from services.signal_lifecycle import (
     LifecycleLogicConfig,
     lifecycle_logic_from_dict,
@@ -70,7 +71,10 @@ def load_lifecycle_config() -> dict:
         "exit_confidence_min": 0.55,
     }
     path = os.path.join(
-        os.path.abspath(os.path.dirname(__file__)), "..", "config", "lifecycle_logic.json"
+        os.path.abspath(os.path.dirname(__file__)),
+        "..",
+        "config",
+        "lifecycle_logic.json",
     )
     path = os.path.normpath(path)
     if not os.path.exists(path):
@@ -208,7 +212,14 @@ def apply_heal(
             es = "WAIT"
         else:
             es = stance_u
-        return ep, es, True, "broker_flat_overrides_lifecycle_long", "broker_reconciled", True
+        return (
+            ep,
+            es,
+            True,
+            "broker_flat_overrides_lifecycle_long",
+            "broker_reconciled",
+            True,
+        )
 
     if reason == "lifecycle_flat_broker_long":
         ep = "LONG"
@@ -216,7 +227,14 @@ def apply_heal(
             es = "HOLD"
         else:
             es = stance_u
-        return ep, es, True, "broker_long_overrides_lifecycle_flat", "broker_reconciled", True
+        return (
+            ep,
+            es,
+            True,
+            "broker_long_overrides_lifecycle_flat",
+            "broker_reconciled",
+            True,
+        )
 
     ps = str(position_state or "").strip()
     st = str(stance or "").strip()
@@ -390,7 +408,7 @@ def main() -> int:
     lifecycle_logic = lifecycle_logic_from_dict(lc_cfg)
 
     if lc.empty:
-        print("[WARN] signal_lifecycle.csv is empty; writing empty effective file.")
+        print("[WARN] signal_lifecycle.csv is empty; skipping effective overwrite.")
         out = lc.copy()
         out["effective_position_state"] = pd.Series(dtype=object)
         out["effective_stance"] = pd.Series(dtype=object)
@@ -402,8 +420,13 @@ def main() -> int:
         out["reconciled_reason"] = pd.Series(dtype=object)
         out["stance_adjustment"] = pd.Series(dtype=object)
         out["lifecycle_consistency"] = pd.Series(dtype=object)
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        out.to_csv(args.out, index=False)
+        write_result = write_lifecycle_csv_protected(out, args.out, artifact="effective")
+        if not write_result.ok:
+            print(
+                f"[build_effective_lifecycle] effective write blocked: {write_result.action}",
+                file=sys.stderr,
+            )
+            return 3
         print(f"[build_effective_lifecycle] wrote {args.out} total_rows=0 healed_count=0")
         return 0
 
@@ -413,8 +436,14 @@ def main() -> int:
         open_orders_path=args.open_orders,
         lifecycle_logic=lifecycle_logic,
     )
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    out.to_csv(args.out, index=False)
+    write_result = write_lifecycle_csv_protected(out, args.out, artifact="effective")
+    if not write_result.ok:
+        print(
+            f"[build_effective_lifecycle] effective write blocked: rows={write_result.rows} "
+            f"min_rows={write_result.min_rows} action={write_result.action}",
+            file=sys.stderr,
+        )
+        return 3
 
     n = len(out)
     n_healed = int(out["healed"].sum()) if "healed" in out.columns else 0

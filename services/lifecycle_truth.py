@@ -204,6 +204,8 @@ class LifecycleGateResult:
     checked_at: str = field(default_factory=_utc_iso)
     row_issue_count: int = 0
     duplicate_tickers: List[str] = field(default_factory=list)
+    artifact_rows: int = 0
+    min_required_rows: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -216,6 +218,9 @@ class LifecycleGateResult:
             f"details={self.details or 'n/a'}",
             f"checked_at={self.checked_at}",
         ]
+        if self.reason in ("INSUFFICIENT_EFFECTIVE_ROWS", "INSUFFICIENT_RAW_ROWS"):
+            lines.append(f"rows={self.artifact_rows}")
+            lines.append(f"min_rows={self.min_required_rows}")
         if self.tickers:
             lines.append(f"tickers={','.join(self.tickers[:200])}")
         if self.duplicate_tickers:
@@ -297,6 +302,26 @@ def evaluate_lifecycle_gate(
 
     df = df.drop_duplicates(subset=["ticker"], keep="last")
 
+    from services.lifecycle_artifact_guard import (
+        allow_partial_lifecycle_writes,
+        insufficient_rows_reason,
+        minimum_required_rows,
+    )
+
+    min_rows = minimum_required_rows()
+    artifact_rows = int(df["ticker"].astype(str).str.strip().str.upper().nunique())
+    if artifact_rows < min_rows and not allow_partial_lifecycle_writes():
+        ins_reason = insufficient_rows_reason(target)
+        return LifecycleGateResult(
+            status="BLOCKED",
+            reason=ins_reason,
+            details=f"operational authority requires >= {min_rows} unique tickers",
+            tickers=sorted(df["ticker"].astype(str).str.upper().unique().tolist()),
+            checked_at=checked_at,
+            artifact_rows=artifact_rows,
+            min_required_rows=min_rows,
+        )
+
     effective_mode = "effective_position_state" in df.columns and "effective_stance" in df.columns
     row_bad = 0
     if effective_mode:
@@ -362,6 +387,8 @@ def evaluate_lifecycle_gate(
         details="lifecycle passed validation",
         tickers=tickers,
         checked_at=checked_at,
+        artifact_rows=artifact_rows,
+        min_required_rows=min_rows,
     )
 
 

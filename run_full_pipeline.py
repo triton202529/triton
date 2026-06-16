@@ -645,7 +645,12 @@ def main() -> int:
         ("lifecycle", "services.apply_signal_lifecycle", True, []),
         ("snapshot", "services.write_guard_snapshot", False, []),
         # Optional Phase 1.5+ risk artifacts
-        ("regime", "services.regime_detector", False, ["--verbose"] if args.verbose else []),
+        (
+            "regime",
+            "services.regime_detector",
+            False,
+            ["--verbose"] if args.verbose else [],
+        ),
         ("risk_report", "services.generate_risk_report", False, []),
         # Adaptive risk state: strongly recommended (required if present)
         (
@@ -678,7 +683,12 @@ def main() -> int:
             bool(normalize_contracts_exists),
             [],
         ),
-        ("validate_contracts", "validate_contracts.py", bool(validate_contracts_exists), []),
+        (
+            "validate_contracts",
+            "validate_contracts.py",
+            bool(validate_contracts_exists),
+            [],
+        ),
     ]
 
     last_success = ""
@@ -732,7 +742,6 @@ def main() -> int:
         except Exception as e:
             tb = traceback.format_exc()
 
-            # Extra hint if fetch fails (most common “hands-free” breaker)
             hint = ""
             if stage == "fetch_raw":
                 hint = (
@@ -753,6 +762,21 @@ def main() -> int:
             safe_print(tb)
             if hint:
                 safe_print(hint)
+            try:
+                from services.lifecycle_artifact_guard import (
+                    audit_lifecycle_authority_preservation,
+                )
+
+                audit = audit_lifecycle_authority_preservation()
+                if audit.get("partial_detected"):
+                    safe_print(
+                        f"[PIPELINE_FAIL] lifecycle authority partial after stage={stage}: "
+                        f"raw_rows={audit.get('signal_lifecycle_rows')} "
+                        f"effective_rows={audit.get('effective_lifecycle_rows')} "
+                        f"min_required={audit.get('minimum_required_rows')}"
+                    )
+            except Exception:
+                pass
             return 1
 
     write_heartbeat(

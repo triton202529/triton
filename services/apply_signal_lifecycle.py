@@ -432,7 +432,10 @@ def load_lifecycle_config() -> dict:
         "exit_confidence_min": 0.50,
     }
     path = os.path.join(
-        os.path.abspath(os.path.dirname(__file__)), "..", "config", "lifecycle_logic.json"
+        os.path.abspath(os.path.dirname(__file__)),
+        "..",
+        "config",
+        "lifecycle_logic.json",
     )
     path = os.path.normpath(path)
     if not os.path.exists(path):
@@ -651,6 +654,23 @@ def _rebuild_lifecycle(src: Path) -> int:
 
     df = pd.read_csv(src)
 
+    from services.lifecycle_artifact_guard import (
+        allow_partial_lifecycle_writes,
+        count_dataframe_rows,
+        minimum_required_rows,
+        write_lifecycle_csv_protected,
+    )
+
+    src_rows = count_dataframe_rows(df)
+    min_rows = minimum_required_rows()
+    if src_rows < min_rows and not allow_partial_lifecycle_writes():
+        print(
+            f"[LIFECYCLE_SOURCE_REJECT] source={src.name} rows={src_rows} "
+            f"min_rows={min_rows} reason=insufficient_signal_rows",
+            flush=True,
+        )
+        return 3
+
     # Critical broker-state sync: stale LONG state was causing FLAT account
     # BUY signals to become HOLD. Sync before apply_lifecycle reads STATE_PATH.
     _sync_signal_state_with_broker_snapshot(
@@ -735,7 +755,15 @@ def _rebuild_lifecycle(src: Path) -> int:
             flush=True,
         )
 
-    out_df.to_csv(OUT_LIFECYCLE, index=False)
+    write_result = write_lifecycle_csv_protected(out_df, OUT_LIFECYCLE, artifact="raw")
+    if not write_result.ok:
+        print(
+            f"[LIFECYCLE_WRITE_BLOCKED] path={OUT_LIFECYCLE.name} "
+            f"rows={write_result.rows} min_rows={write_result.min_rows} "
+            f"action={write_result.action} error={write_result.error}",
+            flush=True,
+        )
+        return 3
 
     try:
         from services.lifecycle_truth import print_self_check_result
@@ -751,7 +779,9 @@ def _rebuild_lifecycle(src: Path) -> int:
     )
 
     try:
-        from services.signal_pressure_diagnostics import refresh_signal_pressure_diagnostics
+        from services.signal_pressure_diagnostics import (
+            refresh_signal_pressure_diagnostics,
+        )
 
         refresh_signal_pressure_diagnostics()
     except Exception:

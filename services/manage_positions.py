@@ -994,7 +994,13 @@ def build_management_plan(
     positions_snapshot_path: Optional[Path] = None,
     open_buy_syms: Optional[Set[str]] = None,
 ) -> Tuple[
-    List[ManagementPlannedOrder], List[PlanRow], Dict[str, int], Dict[str, Any], int, int, bool
+    List[ManagementPlannedOrder],
+    List[PlanRow],
+    Dict[str, int],
+    Dict[str, Any],
+    int,
+    int,
+    bool,
 ]:
     from services.position_management_state import get_symbol_state
 
@@ -2455,7 +2461,7 @@ def build_management_plan(
                 profit_pct=x["profit_pct"],
                 management_action_candidate=mac,
                 final_action="NONE",
-                reason_code="rotation_turnover_capped" if cap_drop else "NOT_SELECTED_THIS_RUN",
+                reason_code=("rotation_turnover_capped" if cap_drop else "NOT_SELECTED_THIS_RUN"),
                 reason_detail=(
                     "rotation_turnover_capped"
                     if cap_drop
@@ -2788,7 +2794,7 @@ def build_management_plan(
                     profit_pct=ax.get("profit_pct"),
                     reason_code="ADD_NOT_SELECTED_THIS_RUN",
                     final_action="NONE",
-                    score=float(ax.get("score", 0.0)) if ax.get("score") is not None else None,
+                    score=(float(ax.get("score", 0.0)) if ax.get("score") is not None else None),
                     priority_bucket="HOLD",
                     selected_for_execution=False,
                 )
@@ -3061,7 +3067,15 @@ def build_management_plan(
             flush=True,
         )
 
-    return planned, lines, skip_reasons, state, trim_candidates, exit_candidates, rotation_applied
+    return (
+        planned,
+        lines,
+        skip_reasons,
+        state,
+        trim_candidates,
+        exit_candidates,
+        rotation_applied,
+    )
 
 
 def _fmt_top_skip_reasons(skip_reasons: Dict[str, int], limit: int = 8) -> str:
@@ -3071,7 +3085,9 @@ def _fmt_top_skip_reasons(skip_reasons: Dict[str, int], limit: int = 8) -> str:
     return ", ".join(f"{k}={v}" for k, v in items)
 
 
-def _count_planned_actions(planned: List[ManagementPlannedOrder]) -> Tuple[int, int, int, int]:
+def _count_planned_actions(
+    planned: List[ManagementPlannedOrder],
+) -> Tuple[int, int, int, int]:
     """Returns (exit_count, trim_count, forced_rotation_rotate_exit_count, add_count)."""
     exits = 0
     trims = 0
@@ -3340,7 +3356,7 @@ def write_manage_artifacts(
             "skip_reason": pr.skip_reason,
             "stance": pr.stance,
             "current_position_qty": pr.current_position_qty,
-            "avg_entry_price": pr.avg_entry_price if pr.avg_entry_price is not None else "",
+            "avg_entry_price": (pr.avg_entry_price if pr.avg_entry_price is not None else ""),
             "current_price": pr.current_price if pr.current_price is not None else "",
             "profit_pct": pr.profit_pct if pr.profit_pct is not None else "",
             "lifecycle_stance": pr.lifecycle_stance,
@@ -3546,7 +3562,7 @@ def maybe_execute_management(
             stage_path = (
                 "risk_emergency_action"
                 if "risk_emergency_action" in mgmt_paths
-                else "forced_rotation" if "forced_rotation" in mgmt_paths else "position_exit"
+                else ("forced_rotation" if "forced_rotation" in mgmt_paths else "position_exit")
             )
             enforce_pipeline_gate(
                 broker=broker,
@@ -3676,7 +3692,14 @@ def maybe_execute_management(
         return 1, 0, [str(e)], "", meta
 
 
-_AUTO_REFRESH_REASONS = frozenset({"STALE_LIFECYCLE", "STALE_EFFECTIVE"})
+_AUTO_REFRESH_REASONS = frozenset(
+    {
+        "STALE_LIFECYCLE",
+        "STALE_EFFECTIVE",
+        "INSUFFICIENT_EFFECTIVE_ROWS",
+        "INSUFFICIENT_RAW_ROWS",
+    }
+)
 
 
 def _maybe_auto_refresh_lifecycle(gate_reason: str) -> bool:
@@ -3711,7 +3734,7 @@ def _maybe_auto_refresh_lifecycle(gate_reason: str) -> bool:
 
     refreshed_any = False
 
-    if reason == "STALE_LIFECYCLE":
+    if reason == "STALE_LIFECYCLE" or reason == "INSUFFICIENT_RAW_ROWS":
         try:
             from services.apply_signal_lifecycle import ensure_lifecycle_fresh
 
@@ -3944,7 +3967,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         write_manage_artifacts([], [], summary, cfg, orders_path)
         append_manage_log(summary)
         try:
-            from services.effective_lifecycle import ExitLogicMetrics, write_validation_json
+            from services.effective_lifecycle import (
+                ExitLogicMetrics,
+                write_validation_json,
+            )
 
             write_validation_json(ExitLogicMetrics())
         except Exception:

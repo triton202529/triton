@@ -34,6 +34,7 @@ from pathlib import Path
 import pandas as pd
 
 from services.authority_labels import lifecycle_raw_metadata
+from services.lifecycle_artifact_guard import write_lifecycle_csv_protected
 
 
 def utcnow() -> datetime:
@@ -288,8 +289,14 @@ def main():
     state = build_state(results_dir)
 
     out_path = results_dir / args.out
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    state.to_csv(out_path, index=False)
+    write_result = write_lifecycle_csv_protected(state, out_path, artifact="raw")
+    if not write_result.ok:
+        print(
+            f"[ERROR] Lifecycle STATE write blocked: rows={write_result.rows} "
+            f"min_rows={write_result.min_rows} action={write_result.action}",
+            flush=True,
+        )
+        raise SystemExit(1)
 
     meta_path = results_dir / "signal_lifecycle_authority.json"
     meta_path.write_text(
