@@ -28,6 +28,15 @@ CHECKLIST_CSV = RESULTS / "phase_195h_monday_continuity_checklist.csv"
 
 POSITIONS_SNAPSHOT = RESULTS / "positions_snapshot.csv"
 OPEN_ORDERS_SNAPSHOT = RESULTS / "open_orders_snapshot.csv"
+CERT_PATH = RESULTS / "capital_preservation_certification.json"
+
+PAPER_CERTIFICATION_STATUSES = frozenset(
+    {
+        "CERTIFIED_FOR_PAPER_PROTECTION",
+        "CONDITIONALLY_CERTIFIED",
+        "PARTIALLY_CERTIFIED",
+    }
+)
 
 STALE_LOCK_MINUTES = 60.0
 CONTINUOUS_LOOP_CADENCE_MINUTES = 45
@@ -77,6 +86,105 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _certification_artifact_meta(path: Path = CERT_PATH) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {
+        "certification_source": str(path),
+        "certification_file_exists": path.is_file(),
+        "certification_file_mtime": None,
+        "certification_generated_at": None,
+    }
+    if path.is_file():
+        try:
+            meta["certification_file_mtime"] = datetime.fromtimestamp(
+                path.stat().st_mtime, tz=timezone.utc
+            ).isoformat()
+        except OSError:
+            pass
+    cert = _load_json(path)
+    if cert.get("generated_at"):
+        meta["certification_generated_at"] = cert.get("generated_at")
+    return meta
+
+
+def _execution_posture_supports_paper(readiness: Dict[str, Any], gov: Dict[str, Any]) -> bool:
+    """True when upstream artifacts authorize paper mode with live blocked."""
+    live = bool(
+        gov.get("live_execution_permitted", readiness.get("live_execution_permitted", True))
+    )
+    paper = bool(
+        gov.get(
+            "paper_execution_permitted",
+            readiness.get("paper_execution_permitted", False),
+        )
+    )
+    exec_auth = bool(gov.get("execution_authorized", readiness.get("execution_authorized", False)))
+    ready = str(readiness.get("readiness_status") or "").strip() == "READY"
+    return ready and paper and exec_auth and not live
+
+
+def _resolve_canonical_certification() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Load canonical capital_preservation_certification.json for freeze evaluation.
+
+    When certification disagrees with READY paper posture (common after watchdog
+    institutional_autonomy overwrites without the phase-158 chain), refresh via the
+    same canonical certification path used by Phase 195C before blocking freeze.
+    """
+    cert = _load_json(CERT_PATH)
+    meta = _certification_artifact_meta()
+    status = str(cert.get("certification_status") or "").strip()
+    readiness = _load_json(RESULTS / "execution_readiness.json")
+    gov = _load_json(RESULTS / "governance_authorization.json")
+
+    refresh_action = "none"
+    pre_refresh_status = status
+    read_reason = f"read canonical artifact ({status or 'missing'})"
+
+    if status not in PAPER_CERTIFICATION_STATUSES and _execution_posture_supports_paper(
+        readiness, gov
+    ):
+        read_reason = (
+            f"certification_status={status or 'missing'} conflicts with READY paper posture; "
+            "refreshing via phase-158 canonical certification chain"
+        )
+        try:
+            from services.capital_preservation_certification import (
+                run_certification_false_positive_elimination,
+            )
+
+            run_certification_false_positive_elimination(
+                results_dir=RESULTS,
+                verbose=False,
+                run_stress_revalidation=False,
+            )
+            refresh_action = "phase_158_canonical_refresh"
+            cert = _load_json(CERT_PATH)
+            meta = _certification_artifact_meta()
+            status = str(cert.get("certification_status") or "").strip()
+            if status in PAPER_CERTIFICATION_STATUSES:
+                read_reason = f"stale certification refreshed: {pre_refresh_status} -> {status}"
+            else:
+                read_reason = (
+                    f"canonical refresh completed; certification remains {status or 'missing'}"
+                )
+        except Exception as exc:
+            refresh_action = "refresh_failed"
+            read_reason = f"canonical refresh failed: {exc}"
+    elif status not in PAPER_CERTIFICATION_STATUSES:
+        read_reason = (
+            f"certification_status={status or 'missing'} invalid; "
+            "paper posture not fully READY/authorized — no auto-refresh"
+        )
+    else:
+        read_reason = f"certification_status={status} accepted for paper protection"
+
+    meta["certification_refresh_action"] = refresh_action
+    meta["certification_read_reason"] = read_reason
+    meta["pre_refresh_certification_status"] = pre_refresh_status
+    meta["certification_status"] = status or cert.get("certification_status")
+    return cert, meta
 
 
 def _count_csv_rows(path: Path) -> int:
@@ -574,7 +682,7 @@ def run_phase_195h_freeze(*, verbose: bool = True) -> Dict[str, Any]:
     d195e = _load_json(RESULTS / "phase_195e_authority_remediation_validation.json")
     d195f = _load_json(RESULTS / "phase_195f_authority_labeling_validation.json")
     d195g = _load_json(RESULTS / "phase_195g_post_hardening_sync_audit.json")
-    cert = _load_json(RESULTS / "capital_preservation_certification.json")
+    cert, cert_meta = _resolve_canonical_certification()
 
     high_conflicts = int(d195d.get("high_severity_count") or 0)
     medium_conflicts = int(d195d.get("medium_severity_count") or 0)
@@ -617,12 +725,17 @@ def run_phase_195h_freeze(*, verbose: bool = True) -> Dict[str, Any]:
         blocking_issues.append("Phase 195G not passing")
     if high_conflicts > 0:
         blocking_issues.append(f"HIGH conflicts={high_conflicts}")
-    if cert.get("certification_status") not in (
-        "CERTIFIED_FOR_PAPER_PROTECTION",
-        "CONDITIONALLY_CERTIFIED",
-        "PARTIALLY_CERTIFIED",
-    ):
-        blocking_issues.append(f"certification_status={cert.get('certification_status')}")
+    cert_status = str(cert.get("certification_status") or "").strip()
+    if cert_status not in PAPER_CERTIFICATION_STATUSES:
+        blocking_issues.append(
+            f"certification_status={cert_status or 'missing'} "
+            f"({cert_meta.get('certification_read_reason', 'invalid')})"
+        )
+    elif cert_meta.get("certification_refresh_action") == "phase_158_canonical_refresh":
+        review_items.append(
+            "Certification artifact was stale relative to READY paper posture; "
+            "refreshed during 195H freeze via canonical phase-158 chain"
+        )
 
     stale_lock_review = False
     for _label, audit in (("watchdog", watchdog), ("continuous_loop", loop)):
@@ -733,6 +846,12 @@ def run_phase_195h_freeze(*, verbose: bool = True) -> Dict[str, Any]:
             "pass": high_conflicts == 0,
         },
         {
+            "check": "certification_paper_protection",
+            "expected": "CERTIFIED_FOR_PAPER_PROTECTION or equivalent",
+            "actual": cert_status or "missing",
+            "pass": cert_status in PAPER_CERTIFICATION_STATUSES,
+        },
+        {
             "check": "watchdog_readiness",
             "expected": "known",
             "actual": watchdog.get("status"),
@@ -798,7 +917,13 @@ def run_phase_195h_freeze(*, verbose: bool = True) -> Dict[str, Any]:
         "operational_freeze_status": operational_freeze,
         "next_session_readiness": next_session,
         "phase_pass": phase_pass,
-        "certification_status": cert.get("certification_status"),
+        "certification_status": cert_status,
+        "certification_source": cert_meta.get("certification_source"),
+        "certification_generated_at": cert_meta.get("certification_generated_at"),
+        "certification_file_mtime": cert_meta.get("certification_file_mtime"),
+        "certification_refresh_action": cert_meta.get("certification_refresh_action"),
+        "certification_read_reason": cert_meta.get("certification_read_reason"),
+        "pre_refresh_certification_status": cert_meta.get("pre_refresh_certification_status"),
         "domains": {
             "git": git,
             "broker": broker,
