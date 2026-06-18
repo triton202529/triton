@@ -100,46 +100,11 @@ def _minutes_since(dt: Optional[datetime]) -> Optional[float]:
     return (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
 
 
-def _parse_lock(path: Path) -> Dict[str, Any]:
-    if not path.is_file():
-        return {"exists": False, "path": str(path.relative_to(ROOT)).replace("\\", "/")}
-    text = path.read_text(encoding="utf-8", errors="replace").strip()
-    info: Dict[str, Any] = {
-        "exists": True,
-        "path": str(path.relative_to(ROOT)).replace("\\", "/"),
-        "raw": text[:200],
-    }
-    m = re.search(r"started_at=([^\r\n]+)", text)
-    if m:
-        info["started_at"] = m.group(1).strip()
-        info["started_at_dt"] = _parse_ts(info["started_at"])
-    age = _minutes_since(info.get("started_at_dt"))
-    if age is not None:
-        info["lock_age_minutes"] = round(age, 1)
-        info["stale"] = age > STALE_LOCK_MINUTES
-    return info
-
-
-def _find_ps_processes(script_fragment: str) -> Tuple[bool, List[int]]:
-    if sys.platform != "win32":
-        return False, []
-    ps = (
-        "Get-CimInstance Win32_Process -Filter \"Name = 'powershell.exe' OR Name = 'pwsh.exe'\" "
-        f"| Where-Object {{ $_.CommandLine -like '*{script_fragment}*' }} "
-        "| Select-Object -ExpandProperty ProcessId"
-    )
-    try:
-        r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps],
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        pids = [int(x.strip()) for x in (r.stdout or "").splitlines() if x.strip().isdigit()]
-        return len(pids) > 0, pids
-    except (subprocess.SubprocessError, OSError):
-        return False, []
+from services.phase_195h_operational_readiness_freeze import (  # noqa: E402
+    _classify_lock,
+    _find_ps_processes,
+    _parse_lock,
+)
 
 
 def _find_python_execute_trades_execute() -> Tuple[bool, List[str]]:
@@ -306,30 +271,11 @@ def run_phase_195o_hardening(*, verbose: bool = True) -> Dict[str, Any]:
     # Operator-only: scheduled cycle config has run_execute_trades false per 195N
     automated_entry = bool(paper_cfg.get("run_execute_trades", False))
 
-    lock_status_continuous = "NO_LOCK"
-    if continuous_lock.get("exists"):
-        if continuous_lock.get("stale") and continuous_running:
-            lock_status_continuous = "STALE_LOCK_METADATA_PROCESS_ACTIVE"
-        elif continuous_lock.get("stale") and not continuous_running:
-            lock_status_continuous = "ORPHAN_LOCK_REVIEW_REQUIRED"
-        elif continuous_running:
-            lock_status_continuous = "VALID_LOCK_PROCESS_ACTIVE"
-        else:
-            lock_status_continuous = "LOCK_PRESENT"
+    lock_status_continuous = _classify_lock(continuous_lock, continuous_running, continuous_pids)
+    lock_status_watchdog = _classify_lock(watchdog_lock, watchdog_running, watchdog_pids)
 
-    lock_status_watchdog = "NO_LOCK"
-    if watchdog_lock.get("exists"):
-        if watchdog_lock.get("stale") and watchdog_running:
-            lock_status_watchdog = "STALE_LOCK_METADATA_PROCESS_ACTIVE"
-        elif watchdog_lock.get("stale") and not watchdog_running:
-            lock_status_watchdog = "ORPHAN_LOCK_REVIEW_REQUIRED"
-        elif watchdog_running:
-            lock_status_watchdog = "VALID_LOCK_PROCESS_ACTIVE"
-        else:
-            lock_status_watchdog = "LOCK_PRESENT"
-
-    orphan_continuous = lock_status_continuous == "ORPHAN_LOCK_REVIEW_REQUIRED"
-    orphan_watchdog = lock_status_watchdog == "ORPHAN_LOCK_REVIEW_REQUIRED"
+    orphan_continuous = lock_status_continuous == "ORPHAN_STALE_LOCK"
+    orphan_watchdog = lock_status_watchdog == "ORPHAN_STALE_LOCK"
 
     safe_clear = (orphan_continuous or orphan_watchdog) and not execute_detected
     safe_restart_watchdog = (
@@ -347,14 +293,14 @@ def run_phase_195o_hardening(*, verbose: bool = True) -> Dict[str, Any]:
         operator_actions.append(
             "STALE_HEARTBEAT alert active — restart watchdog loop to refresh heartbeat via loop_safety"
         )
-    if lock_status_continuous == "STALE_LOCK_METADATA_PROCESS_ACTIVE":
+    if lock_status_continuous in ("STALE_ACTIVE_LOCK", "STALE_LOCK_METADATA_PROCESS_ACTIVE"):
         operator_actions.append(
-            "continuous_loop process running but lock metadata is stale — do NOT delete lock; "
-            "stop process gracefully then restart loop to refresh lock + heartbeat"
+            "continuous_loop lock metadata stale or mismatched — restart loop to refresh "
+            "refreshed_at/pid/source (do NOT delete lock while process is running)"
         )
-    if lock_status_watchdog == "STALE_LOCK_METADATA_PROCESS_ACTIVE":
+    if lock_status_watchdog in ("STALE_ACTIVE_LOCK", "STALE_LOCK_METADATA_PROCESS_ACTIVE"):
         operator_actions.append(
-            "watchdog_loop process running but lock metadata stale — restart watchdog to refresh heartbeat"
+            "watchdog_loop lock metadata stale or mismatched — restart watchdog to refresh metadata"
         )
     if orphan_continuous:
         operator_actions.append(

@@ -43,3 +43,41 @@ function Clear-OrphanLoopLock {
     Write-Host "[LOCK_ORPHAN_CLEARED] lock=$LockFile"
     return $true
 }
+
+function Update-LoopLockMetadata {
+    <#
+    Refresh loop lock metadata each cycle so audits distinguish active ownership
+    from orphan stale locks. Preserves started_at; updates refreshed_at/pid/source/cycle.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LockFile,
+        [Parameter(Mandatory = $true)]
+        [string]$Source,
+        [int]$Cycle = 0
+    )
+
+    $now = Get-Date -Format s
+    $startedAt = $now
+
+    if (Test-Path $LockFile) {
+        try {
+            $content = Get-Content -Path $LockFile -Raw -ErrorAction Stop
+            if ($content -match 'started_at=([^\r\n]+)') {
+                $startedAt = $Matches[1].Trim()
+            }
+        } catch {
+            $startedAt = $now
+        }
+    }
+
+    $meta = @(
+        "started_at=$startedAt",
+        "refreshed_at=$now",
+        "pid=$PID",
+        "source=$Source",
+        "cycle=$Cycle"
+    ) -join [Environment]::NewLine
+
+    Set-Content -Path $LockFile -Value $meta -Encoding UTF8
+}

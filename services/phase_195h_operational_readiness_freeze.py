@@ -40,6 +40,9 @@ PAPER_CERTIFICATION_STATUSES = frozenset(
 
 STALE_LOCK_MINUTES = 60.0
 CONTINUOUS_LOOP_CADENCE_MINUTES = 45
+CONTINUOUS_LEGACY_LOCK_STALE_MINUTES = CONTINUOUS_LOOP_CADENCE_MINUTES * 2.0
+WATCHDOG_LOOP_INTERVAL_MINUTES = 1.0
+WATCHDOG_LOCK_STALE_MINUTES = max(STALE_LOCK_MINUTES, WATCHDOG_LOOP_INTERVAL_MINUTES * 5.0)
 PHASE_195G_COMMIT_PREFIX = "95093c2b"
 
 RUNTIME_PATH_PREFIXES = (
@@ -225,17 +228,54 @@ def _parse_lock(path: Path) -> Dict[str, Any]:
         "path": str(path.relative_to(ROOT)).replace("\\", "/"),
         "raw": text[:200],
     }
+    if not text:
+        info["corrupt"] = True
+        return info
+
     m = re.search(r"started_at=([^\r\n]+)", text)
     if m:
         info["started_at"] = m.group(1).strip()
         info["started_at_dt"] = _parse_ts(info["started_at"])
+    m_refresh = re.search(r"refreshed_at=([^\r\n]+)", text, re.I)
+    if m_refresh:
+        info["refreshed_at"] = m_refresh.group(1).strip()
+        info["refreshed_at_dt"] = _parse_ts(info["refreshed_at"])
     m_pid = re.search(r"pid=(\d+)", text, re.I)
     if m_pid:
         info["pid"] = int(m_pid.group(1))
-    age = _minutes_since(info.get("started_at_dt"))
-    if age is not None:
-        info["lock_age_minutes"] = round(age, 1)
-        info["stale"] = age > STALE_LOCK_MINUTES
+    m_source = re.search(r"source=([^\r\n]+)", text, re.I)
+    if m_source:
+        info["source"] = m_source.group(1).strip()
+    m_cycle = re.search(r"cycle=(\d+)", text, re.I)
+    if m_cycle:
+        info["cycle"] = int(m_cycle.group(1))
+
+    if not info.get("started_at_dt") and not info.get("refreshed_at_dt"):
+        info["corrupt"] = True
+        return info
+
+    freshness_dt = info.get("refreshed_at_dt") or info.get("started_at_dt")
+    info["freshness_source"] = "refreshed_at" if info.get("refreshed_at_dt") else "started_at"
+    freshness_age = _minutes_since(freshness_dt)
+    started_age = _minutes_since(info.get("started_at_dt"))
+    if freshness_age is not None:
+        info["lock_age_minutes"] = round(freshness_age, 1)
+        info["lock_freshness_age_minutes"] = round(freshness_age, 1)
+    if started_age is not None:
+        info["started_at_age_minutes"] = round(started_age, 1)
+
+    is_continuous = "continuous_loop" in path.name
+    stale_threshold = (
+        CONTINUOUS_LEGACY_LOCK_STALE_MINUTES
+        if is_continuous and not info.get("refreshed_at_dt")
+        else (WATCHDOG_LOCK_STALE_MINUTES if "watchdog" in path.name else STALE_LOCK_MINUTES)
+    )
+    if info.get("refreshed_at_dt") and is_continuous:
+        stale_threshold = max(STALE_LOCK_MINUTES, CONTINUOUS_LOOP_CADENCE_MINUTES * 1.5)
+
+    if freshness_age is not None:
+        info["stale_threshold_minutes"] = stale_threshold
+        info["stale"] = freshness_age > stale_threshold
     return info
 
 
@@ -261,18 +301,30 @@ def _find_ps_processes(script_fragment: str) -> Tuple[bool, List[int]]:
         return False, []
 
 
-def _classify_lock(lock: Dict[str, Any], process_running: bool) -> str:
+def _classify_lock(
+    lock: Dict[str, Any],
+    process_running: bool,
+    process_pids: Optional[List[int]] = None,
+) -> str:
+    if lock.get("corrupt"):
+        return "CORRUPT_LOCK"
     if not lock.get("exists"):
-        return "NO_LOCK"
-    if lock.get("stale") and process_running:
-        return "STALE_LOCK_METADATA_PROCESS_ACTIVE"
-    if lock.get("stale") and not process_running:
-        return "ORPHAN_LOCK_REVIEW_REQUIRED"
-    if lock.get("exists") and not process_running:
-        return "ORPHAN_LOCK_REVIEW_REQUIRED"
+        return "MISSING_ACTIVE_LOCK" if process_running else "MISSING_INACTIVE_LOCK"
+
+    stale = bool(lock.get("stale"))
+    pid = lock.get("pid")
+    pids = process_pids or []
+    pid_match = pid is not None and pid in pids
+    has_refresh = lock.get("refreshed_at_dt") is not None
+
     if process_running:
-        return "VALID_LOCK_PROCESS_ACTIVE"
-    return "LOCK_PRESENT"
+        if not stale:
+            return "FRESH_ACTIVE_LOCK"
+        if has_refresh and pid is not None and pids and not pid_match:
+            return "STALE_LOCK_METADATA_PROCESS_ACTIVE"
+        return "STALE_ACTIVE_LOCK"
+
+    return "ORPHAN_STALE_LOCK"
 
 
 def _git_output(*args: str) -> str:
@@ -450,7 +502,7 @@ def _audit_watchdog() -> Dict[str, Any]:
     alerts = _load_json(RESULTS / "watchdog_alerts.json")
     lock = _parse_lock(LIVE / "watchdog_loop.lock")
     running, pids = _find_ps_processes("run_watchdog_loop.ps1")
-    lock_status = _classify_lock(lock, running)
+    lock_status = _classify_lock(lock, running, pids)
 
     active = alerts.get("active_count")
     if active is None:
@@ -471,10 +523,10 @@ def _audit_watchdog() -> Dict[str, Any]:
         "lock_age_minutes": lock.get("lock_age_minutes"),
         "active_alerts_count": active,
         "heartbeat_age_minutes": round(hb_age, 1) if hb_age is not None else None,
-        "recommended_manual_cleanup": lock_status == "ORPHAN_LOCK_REVIEW_REQUIRED",
+        "recommended_manual_cleanup": lock_status == "ORPHAN_STALE_LOCK",
         "recommended_cleanup_command": (
             "Review scripts/run_watchdog_loop.ps1 lock; clear only after confirming no process"
-            if lock_status == "ORPHAN_LOCK_REVIEW_REQUIRED"
+            if lock_status == "ORPHAN_STALE_LOCK"
             else ""
         ),
     }
@@ -487,7 +539,7 @@ def _audit_continuous_loop() -> Dict[str, Any]:
     loop_dir = RESULTS / "continuous_loop"
 
     running, pids = _find_ps_processes("run_continuous_loop.ps1")
-    lock_status = _classify_lock(lock, running)
+    lock_status = _classify_lock(lock, running, pids)
 
     log_files = (
         sorted(
@@ -508,7 +560,7 @@ def _audit_continuous_loop() -> Dict[str, Any]:
 
     if running:
         proc_status = "RUNNING"
-    elif lock_status == "ORPHAN_LOCK_REVIEW_REQUIRED":
+    elif lock_status == "ORPHAN_STALE_LOCK":
         proc_status = "STOPPED_ORPHAN_LOCK"
     else:
         proc_status = "STOPPED"
@@ -527,10 +579,10 @@ def _audit_continuous_loop() -> Dict[str, Any]:
         ),
         "loop_log_count": len(log_files),
         "loop_health_present": bool(loop_health),
-        "recommended_manual_cleanup": lock_status == "ORPHAN_LOCK_REVIEW_REQUIRED",
+        "recommended_manual_cleanup": lock_status == "ORPHAN_STALE_LOCK",
         "recommended_cleanup_command": (
             "Review scripts/run_continuous_loop.ps1 lock; clear only after confirming no process"
-            if lock_status == "ORPHAN_LOCK_REVIEW_REQUIRED"
+            if lock_status == "ORPHAN_STALE_LOCK"
             else ""
         ),
     }
@@ -744,13 +796,12 @@ def run_phase_195h_freeze(*, verbose: bool = True) -> Dict[str, Any]:
         if ls == "STALE_LOCK_METADATA_PROCESS_ACTIVE":
             review_items.append(
                 f"{lock_path}: STALE_LOCK_METADATA_PROCESS_ACTIVE "
-                f"(age_minutes={audit.get('lock_age_minutes')})"
+                f"(freshness_age_minutes={audit.get('lock_age_minutes')})"
             )
             stale_lock_review = True
-        elif ls == "ORPHAN_LOCK_REVIEW_REQUIRED":
+        elif ls in ("ORPHAN_STALE_LOCK", "CORRUPT_LOCK", "MISSING_ACTIVE_LOCK"):
             review_items.append(
-                f"{lock_path}: ORPHAN_LOCK_REVIEW_REQUIRED "
-                f"(age_minutes={audit.get('lock_age_minutes')})"
+                f"{lock_path}: {ls} " f"(freshness_age_minutes={audit.get('lock_age_minutes')})"
             )
             stale_lock_review = True
 
@@ -766,9 +817,14 @@ def run_phase_195h_freeze(*, verbose: bool = True) -> Dict[str, Any]:
         review_items.append("Positions > 0 — confirm expected before session")
 
     restart_required = (
-        loop.get("lock_status") == "ORPHAN_LOCK_REVIEW_REQUIRED"
-        or watchdog.get("lock_status") == "ORPHAN_LOCK_REVIEW_REQUIRED"
-        or (not loop.get("process_running") and loop.get("lock_status") != "NO_LOCK")
+        loop.get("lock_status") == "ORPHAN_STALE_LOCK"
+        or watchdog.get("lock_status") == "ORPHAN_STALE_LOCK"
+        or loop.get("lock_status") in ("CORRUPT_LOCK", "MISSING_ACTIVE_LOCK")
+        or (
+            not loop.get("process_running")
+            and loop.get("lock_status")
+            not in ("MISSING_INACTIVE_LOCK", "FRESH_ACTIVE_LOCK", "STALE_ACTIVE_LOCK")
+        )
     )
 
     if not blocking_issues and review_items:

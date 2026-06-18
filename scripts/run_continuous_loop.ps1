@@ -29,7 +29,7 @@ if (Test-Path $lockFile) {
     exit 1
 }
 
-Set-Content -Path $lockFile -Value "started_at=$(Get-Date -Format s)" -Encoding UTF8
+Update-LoopLockMetadata -LockFile $lockFile -Source "continuous_loop" -Cycle 0
 
 function Log-Line($msg) {
     $line = "$(Get-Date -Format s) $msg"
@@ -59,6 +59,7 @@ try {
 
         Log-Line ""
         Log-Line "[CYCLE_START] cycle=$cycle"
+        Update-LoopLockMetadata -LockFile $lockFile -Source "continuous_loop" -Cycle $cycle
 
         $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
         Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
