@@ -38,7 +38,7 @@ function Run-Step([string]$name, [string]$cmd) {
     Log "EXIT: $name code=$code"
 
     if ($code -ne 0) {
-        Log "❌ $name FAILED. See full log: $logPath"
+        Log "âŒ $name FAILED. See full log: $logPath"
         throw "$name failed (exit=$code). Full log: $logPath"
     }
 }
@@ -60,6 +60,6 @@ Run-Step "run_full_pipeline" "python run_full_pipeline.py --verbose"
 Run-Step "snapshot_equity" "python -m services.snapshot_equity --mode paper"
 
 # 5) Snapshot positions (updates positions_snapshot.csv)
-Run-Step "snapshot_positions" "python -m services.snapshot_positions --mode paper"
+Run-Step "snapshot_positions" "python -m services.snapshot_positions --mode paper --empty-ok"
 
 Log "=== TRITON Daily Refresh OK ==="
