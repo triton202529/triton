@@ -67,6 +67,16 @@ try {
         powershell -ExecutionPolicy Bypass -File .\scripts\run_market_open.ps1
         $rc = $LASTEXITCODE
 
+        # Phase 195Y — controlled paper entry (gated; requires operator auto-entry env flag)
+        if ($rc -eq 0) {
+            Log-Line "[PAPER_ENTRY_STAGE] evaluating controlled paper entry gates"
+            python -m services.paper_entry_loop_stage --verbose
+            $paperEntryRc = $LASTEXITCODE
+            Log-Line "[PAPER_ENTRY_STAGE] exit_code=$paperEntryRc"
+        } else {
+            Log-Line "[PAPER_ENTRY_EXECUTION_BLOCKED] reason=market_open_sequence_failed exit_code=$rc"
+        }
+
         if ($rc -ne 0) {
             Log-Line "[CYCLE_FAIL] cycle=$cycle exit_code=$rc"
         } else {

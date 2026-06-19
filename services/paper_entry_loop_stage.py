@@ -1,0 +1,419 @@
+"""
+paper_entry_loop_stage.py
+Controlled paper-entry execution stage for run_continuous_loop.ps1 (Phase 195Y).
+
+Invokes execute_trades --mode paper --execute only when all safety gates pass.
+Never submits live orders.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+RESULTS = ROOT / "data" / "results"
+LIVE = ROOT / "data" / "live"
+CONFIG = ROOT / "config"
+VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+
+EXEC_READINESS = RESULTS / "execution_readiness.json"
+TRADE_OPPORTUNITIES = RESULTS / "trade_opportunities.csv"
+OPEN_ORDERS = RESULTS / "open_orders_snapshot.csv"
+POSITIONS = RESULTS / "positions_snapshot.csv"
+RISK_OVERLAY = RESULTS / "performance_risk_overlay.csv"
+ALLOC_RECOMMENDATIONS = RESULTS / "portfolio_allocation_recommendations.csv"
+AUDIT_JSON = RESULTS / "paper_entry_loop_stage_audit.json"
+EXEC_TRADES_CFG = CONFIG / "execute_trades.json"
+
+_EXECUTE_INVOKED = False
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _python_exe() -> str:
+    return str(VENV_PYTHON) if VENV_PYTHON.is_file() else sys.executable
+
+
+def _load_json(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _norm(val: Any) -> str:
+    return str(val or "").strip().upper()
+
+
+def _file_age_minutes(path: Path) -> Optional[float]:
+    if not path.is_file():
+        return None
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return (datetime.now(timezone.utc) - mtime).total_seconds() / 60.0
+
+
+def _find_execute_trades_running() -> Tuple[bool, List[str]]:
+    if sys.platform != "win32":
+        return False, []
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name = 'python.exe'\" "
+        "| Where-Object { $_.CommandLine -like '*execute_trades*' -and $_.CommandLine -like '*--execute*' } "
+        "| Select-Object -ExpandProperty CommandLine"
+    )
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        lines = [x.strip() for x in (r.stdout or "").splitlines() if x.strip()]
+        return len(lines) > 0, lines
+    except (subprocess.SubprocessError, OSError):
+        return False, []
+
+
+def _load_open_buy_keys() -> Set[Tuple[str, str]]:
+    keys: Set[Tuple[str, str]] = set()
+    if not OPEN_ORDERS.is_file():
+        return keys
+    try:
+        df = pd.read_csv(OPEN_ORDERS, low_memory=False)
+        for _, row in df.iterrows():
+            sym = _norm(row.get("symbol") or row.get("ticker"))
+            side = _norm(row.get("side") or row.get("action") or "BUY")
+            if sym and side in ("BUY", "B"):
+                keys.add((sym, "BUY"))
+    except Exception:
+        pass
+    return keys
+
+
+def _load_held_symbols() -> Set[str]:
+    held: Set[str] = set()
+    if not POSITIONS.is_file():
+        return held
+    try:
+        df = pd.read_csv(POSITIONS, low_memory=False)
+        sym_col = "symbol" if "symbol" in df.columns else "ticker"
+        if sym_col not in df.columns:
+            return held
+        for _, row in df.iterrows():
+            sym = _norm(row.get(sym_col))
+            qty = row.get("qty") or row.get("quantity") or 0
+            try:
+                if sym and float(qty) != 0:
+                    held.add(sym)
+            except (TypeError, ValueError):
+                if sym:
+                    held.add(sym)
+    except Exception:
+        pass
+    return held
+
+
+def _effective_max_positions() -> int:
+    cfg = _load_json(EXEC_TRADES_CFG)
+    try:
+        return int(cfg.get("max_positions", 25) or 25)
+    except (TypeError, ValueError):
+        return 25
+
+
+def _load_entry_candidates() -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
+    if not TRADE_OPPORTUNITIES.is_file():
+        return [], pd.DataFrame()
+    try:
+        df = pd.read_csv(TRADE_OPPORTUNITIES, low_memory=False)
+    except Exception:
+        return [], pd.DataFrame()
+    if df.empty:
+        return [], df
+
+    opp_col = "opportunity_type" if "opportunity_type" in df.columns else None
+    if opp_col:
+        mask = df[opp_col].astype(str).str.upper().isin(["ENTRY", "BUY"])
+        df = df[mask]
+    if "execution_blocked" in df.columns:
+        df = df[~df["execution_blocked"].astype(str).str.lower().isin(["true", "1", "yes"])]
+
+    risk_map: Dict[str, str] = {}
+    if RISK_OVERLAY.is_file():
+        try:
+            ro = pd.read_csv(RISK_OVERLAY, low_memory=False)
+            sym_col = "ticker" if "ticker" in ro.columns else "symbol"
+            flag_col = "risk_flag" if "risk_flag" in ro.columns else "drag_flag"
+            if sym_col in ro.columns:
+                for _, row in ro.iterrows():
+                    sym = _norm(row.get(sym_col))
+                    if sym:
+                        risk_map[sym] = str(row.get(flag_col) or "OK")
+        except Exception:
+            pass
+
+    alloc_map: Dict[str, Dict[str, Any]] = {}
+    if ALLOC_RECOMMENDATIONS.is_file():
+        try:
+            al = pd.read_csv(ALLOC_RECOMMENDATIONS, low_memory=False)
+            if "ticker" in al.columns:
+                for _, row in al.iterrows():
+                    sym = _norm(row.get("ticker"))
+                    if sym:
+                        alloc_map[sym] = row.to_dict()
+        except Exception:
+            pass
+
+    open_buy = _load_open_buy_keys()
+    held = _load_held_symbols()
+    max_pos = _effective_max_positions()
+    at_cap = len(held) >= max_pos
+
+    candidates: List[Dict[str, Any]] = []
+    sym_col = "ticker" if "ticker" in df.columns else "symbol"
+    for _, row in df.iterrows():
+        sym = _norm(row.get(sym_col))
+        if not sym:
+            continue
+        risk_flag = risk_map.get(sym, "OK")
+        risk_set = {p for p in (_norm(x) for x in risk_flag.split("|")) if p and p != "OK"}
+        alloc = alloc_map.get(sym, {})
+        alloc_action = _norm(alloc.get("recommended_action"))
+        blocked_reasons: List[str] = []
+        eligible = True
+
+        if "BLOCK_NEW_BUY" in risk_set or alloc_action == "BLOCK":
+            eligible = False
+            blocked_reasons.append("RISK_OVERLAY_BLOCK")
+        if sym in held:
+            eligible = False
+            blocked_reasons.append("ALREADY_HELD")
+        if (sym, "BUY") in open_buy:
+            eligible = False
+            blocked_reasons.append("OPEN_BUY_ORDER")
+        if at_cap and sym not in held:
+            eligible = False
+            blocked_reasons.append("MAX_POSITIONS")
+
+        try:
+            from services.duplicate_order_guard import check_duplicate_order
+
+            session = datetime.now(timezone.utc).strftime("%Y%m%d")
+            dup, dup_reason = check_duplicate_order(
+                symbol=sym,
+                side="buy",
+                session=session,
+                open_side_keys=open_buy,
+            )
+            if dup:
+                eligible = False
+                blocked_reasons.append(f"DUPLICATE:{dup_reason}")
+        except Exception:
+            pass
+
+        candidates.append(
+            {
+                "ticker": sym,
+                "opportunity_type": _norm(row.get("opportunity_type") or "ENTRY"),
+                "edge_score": row.get("edge_score"),
+                "confidence": row.get("confidence"),
+                "eligible_for_auto_entry": eligible,
+                "block_reasons": "|".join(blocked_reasons) if blocked_reasons else "",
+                "risk_flag": risk_flag,
+                "allocation_action": alloc_action,
+            }
+        )
+    return candidates, df
+
+
+def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dict[str, Any]]:
+    details: Dict[str, Any] = {"checks": {}, "candidates": []}
+
+    def fail(reason: str, check: str) -> Tuple[bool, str, Dict[str, Any]]:
+        details["failed_check"] = check
+        if verbose:
+            print(f"[PAPER_ENTRY_GATE] status=FAIL reason={reason}", flush=True)
+        return False, reason, details
+
+    paper_env = os.environ.get("TRITON_ENABLE_PAPER_EXECUTION", "").strip() == "1"
+    auto_env = os.environ.get("TRITON_ENABLE_AUTO_PAPER_ENTRIES", "").strip() == "1"
+    details["checks"]["TRITON_ENABLE_PAPER_EXECUTION"] = paper_env
+    details["checks"]["TRITON_ENABLE_AUTO_PAPER_ENTRIES"] = auto_env
+    if not paper_env:
+        return fail("TRITON_ENABLE_PAPER_EXECUTION not set to 1", "paper_execution_env")
+    if not auto_env:
+        return fail("TRITON_ENABLE_AUTO_PAPER_ENTRIES not set to 1", "auto_paper_entries_env")
+
+    from services.guard_auto import is_market_open_et
+
+    now_utc = datetime.now(timezone.utc)
+    market_open = is_market_open_et(now_utc)
+    details["checks"]["market_open"] = market_open
+    if not market_open:
+        return fail("market is closed", "market_open")
+
+    readiness = _load_json(EXEC_READINESS)
+    readiness_status = str(readiness.get("readiness_status") or "UNKNOWN")
+    live_permitted = bool(readiness.get("live_execution_permitted", True))
+    paper_permitted = bool(readiness.get("paper_execution_permitted", False))
+    details["checks"]["execution_readiness_status"] = readiness_status
+    details["checks"]["live_execution_permitted"] = live_permitted
+    details["checks"]["paper_execution_permitted"] = paper_permitted
+    if readiness_status != "READY":
+        return fail(f"execution_readiness={readiness_status}", "execution_readiness")
+    if live_permitted:
+        return fail("live_execution_permitted must be false", "live_block")
+    if not paper_permitted:
+        return fail("paper_execution_permitted must be true", "paper_authorization")
+
+    running, cmd_lines = _find_execute_trades_running()
+    details["checks"]["execute_trades_execute_running"] = running
+    if running:
+        return fail("execute_trades --execute already running", "concurrent_execute")
+
+    snap_age = _file_age_minutes(OPEN_ORDERS)
+    details["checks"]["open_orders_snapshot_age_minutes"] = snap_age
+    if snap_age is None:
+        return fail("broker open_orders snapshot missing", "broker_snapshot")
+    if snap_age > 120:
+        return fail(f"broker snapshot stale ({snap_age:.0f}m)", "broker_snapshot")
+
+    try:
+        from services.arm_mode import (
+            load_arm_config,
+            resolve_arm_mutation_permissions,
+            validate_mode,
+        )
+
+        arm_cfg = load_arm_config()
+        arm_perms, arm_blocks = resolve_arm_mutation_permissions(arm_cfg)
+        arm_mode = validate_mode(arm_cfg.get("mode"))
+        details["checks"]["arm_mode"] = arm_mode
+        details["checks"]["arm_permissions"] = arm_perms
+        details["checks"]["arm_block_reasons"] = arm_blocks
+        if not arm_perms.get("execute_trades"):
+            reason = "ARM permission denied"
+            if arm_blocks:
+                reason += f": {','.join(arm_blocks)}"
+            return fail(reason, "arm_permission")
+    except Exception as e:
+        return fail(f"ARM check error: {e}", "arm_permission")
+
+    candidates, _ = _load_entry_candidates()
+    details["candidates"] = candidates
+    eligible = [c for c in candidates if c.get("eligible_for_auto_entry")]
+    details["checks"]["entry_rows_total"] = len(candidates)
+    details["checks"]["entry_rows_eligible"] = len(eligible)
+    if not candidates:
+        return fail("no ENTRY rows in trade_opportunities.csv", "entry_candidates")
+    if not eligible:
+        return fail(
+            "no eligible ENTRY candidates after risk/duplicate/cap gates", "entry_candidates"
+        )
+
+    global _EXECUTE_INVOKED
+    if _EXECUTE_INVOKED:
+        return fail("execute_trades already invoked this cycle", "single_invoke_guard")
+
+    if verbose:
+        print(
+            f"[PAPER_ENTRY_GATE] status=PASS reason=OK eligible_entries={len(eligible)}",
+            flush=True,
+        )
+    details["failed_check"] = None
+    return True, "OK", details
+
+
+def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> int:
+    global _EXECUTE_INVOKED
+
+    gate_ok, reason, details = evaluate_paper_entry_gates(verbose=verbose)
+    audit: Dict[str, Any] = {
+        "timestamp": _utc_now_iso(),
+        "gate_pass": gate_ok,
+        "gate_reason": reason,
+        "dry_run": dry_run,
+        "executed": False,
+        "execute_exit_code": None,
+        "details": details,
+    }
+
+    if not gate_ok:
+        print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason}", flush=True)
+        _atomic_write_json(AUDIT_JSON, audit)
+        return 0
+
+    if dry_run:
+        print(
+            "[PAPER_ENTRY_EXECUTION] dry_run=true; gates passed, skipping execute_trades",
+            flush=True,
+        )
+        audit["message"] = "dry_run_skip"
+        _atomic_write_json(AUDIT_JSON, audit)
+        return 0
+
+    if _EXECUTE_INVOKED:
+        print("[PAPER_ENTRY_EXECUTION_BLOCKED] reason=already_invoked_this_process", flush=True)
+        return 0
+
+    _EXECUTE_INVOKED = True
+    py = _python_exe()
+    cmd = [py, "-m", "services.execute_trades", "--mode", "paper", "--execute", "--verbose"]
+    print("[PAPER_ENTRY_EXECUTION] starting execute_trades paper --execute", flush=True)
+    if verbose:
+        print(f"[PAPER_ENTRY_EXECUTION] CMD: {' '.join(cmd)}", flush=True)
+
+    t0 = time.perf_counter()
+    try:
+        proc = subprocess.run(cmd, cwd=str(ROOT), text=True)
+        rc = int(proc.returncode)
+    except Exception as e:
+        rc = 1
+        print(f"[PAPER_ENTRY_EXECUTION] error={e}", flush=True)
+    dur = time.perf_counter() - t0
+
+    print(f"[PAPER_ENTRY_EXECUTION] completed exit_code={rc} duration_sec={dur:.1f}", flush=True)
+    audit["executed"] = True
+    audit["execute_exit_code"] = rc
+    audit["duration_sec"] = round(dur, 3)
+    _atomic_write_json(AUDIT_JSON, audit)
+    return 0 if rc in (0, 2) else 1
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = argparse.ArgumentParser(description="Controlled paper entry stage for continuous loop")
+    ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="Evaluate gates only; never call execute_trades"
+    )
+    ap.add_argument("--evaluate-only", action="store_true", help="Alias for --dry-run")
+    args = ap.parse_args(argv)
+    dry = bool(args.dry_run or args.evaluate_only)
+    return run_paper_entry_stage(verbose=bool(args.verbose), dry_run=dry)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
