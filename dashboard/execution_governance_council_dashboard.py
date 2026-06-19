@@ -118,21 +118,27 @@ def page_execution_governance_council() -> None:
         with bc1:
             if st.button("Approve", key="egc_approve"):
                 if approver and rationale:
-                    approve_request(
+                    updated, reason = approve_request(
                         selected, approving_authority=approver, approval_rationale=rationale
                     )
-                    st.success("Request approved.")
-                    st.rerun()
+                    if updated:
+                        st.success("Request approved.")
+                        st.rerun()
+                    else:
+                        st.error(f"Approval refused: {reason}")
                 else:
                     st.warning("Approver and rationale required.")
         with bc2:
             if st.button("Reject", key="egc_reject"):
                 if approver and rationale:
-                    reject_request(
+                    updated, reason = reject_request(
                         selected, rejecting_authority=approver, rejection_rationale=rationale
                     )
-                    st.success("Request rejected.")
-                    st.rerun()
+                    if updated:
+                        st.success("Request rejected.")
+                        st.rerun()
+                    else:
+                        st.error(f"Rejection refused: {reason}")
                 else:
                     st.warning("Authority and rationale required.")
     else:

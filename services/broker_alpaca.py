@@ -8,8 +8,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 load_dotenv(os.path.join(ROOT, ".env"))
 load_dotenv(os.path.join(ROOT, "config", ".env"))
 
-print("[ENV CHECK] ALPACA_KEY_ID =", os.getenv("ALPACA_KEY_ID"))
-print("[ENV CHECK] APCA_API_KEY_ID =", os.getenv("APCA_API_KEY_ID"))
+from services.credential_mask import format_env_key_status, mask_api_key
+
+print(format_env_key_status("ALPACA_KEY_ID", os.getenv("ALPACA_KEY_ID")))
+print(format_env_key_status("APCA_API_KEY_ID", os.getenv("APCA_API_KEY_ID")))
 
 import json
 import contextvars
