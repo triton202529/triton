@@ -1,6 +1,0 @@
-field,value,source,status
-historical_trend,DETERIORATING,cpi.risk_trend,PASS
-forward_outlook,IMPROVING,pred.risk_direction,PASS
-outlook_consistency,PASS,reconciliation,PASS
-semantic_separation,True,reconciliation,PASS
-overall_result,PASS,phase_161,PASS
