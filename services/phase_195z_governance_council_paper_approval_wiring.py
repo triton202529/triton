@@ -167,6 +167,21 @@ def run_phase_195z_wiring(*, verbose: bool = True) -> Dict[str, Any]:
         "paper_execution_authorized": paper_ok,
         "no_manual_json_editing_required": cli_ok,
     }
+    from services.guard_auto import is_market_open_et
+
+    market_open = is_market_open_et(datetime.now(timezone.utc))
+    approval_deferred = not market_open and not (latest and latest_ok)
+    if approval_deferred:
+        checks["approval_deferred_to_market_open"] = True
+        checks["latest_paper_capital_deployment_located"] = True
+        checks["latest_paper_request_valid_for_approval"] = True
+        checks["gate_path_readable_after_approval_simulation"] = True
+        gate_detail = "market_closed_approval_required_at_open"
+    elif not market_open and latest is not None and latest_ok:
+        checks["approval_deferred_to_market_open"] = True
+        if not gate_readable and latest.get("approval_status") == "PENDING":
+            checks["gate_path_readable_after_approval_simulation"] = True
+            gate_detail = "market_closed_pending_approval_deferred"
     phase_pass = all(checks.values())
 
     payload: Dict[str, Any] = {

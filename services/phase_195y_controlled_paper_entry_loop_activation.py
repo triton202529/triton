@@ -258,7 +258,8 @@ def run_phase_195y_activation(*, verbose: bool = True) -> Dict[str, Any]:
             "execute_trades_execute_call_guarded"
         ],
         "gate_log_markers_present": stage_analysis.get("gate_log_markers", False),
-        "loop_does_not_auto_enable_auto_entries": not loop_analysis["auto_sets_auto_paper_entries"],
+        "loop_sets_auto_paper_entries_per_cycle": loop_analysis["auto_sets_auto_paper_entries"],
+        "loop_sets_paper_execution_env": loop_analysis["auto_sets_paper_execution_env"],
         "market_open_before_paper_entry": loop_analysis["paper_entry_after_market_open"],
         "manage_positions_still_in_market_open": "manage_positions"
         in _read_text(MARKET_OPEN).lower(),

@@ -252,10 +252,12 @@ def _load_entry_candidates() -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
 def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dict[str, Any]]:
     details: Dict[str, Any] = {"checks": {}, "candidates": []}
 
-    def fail(reason: str, check: str) -> Tuple[bool, str, Dict[str, Any]]:
+    def block(reason: str, check: str, *, safe: bool = False) -> Tuple[bool, str, Dict[str, Any]]:
         details["failed_check"] = check
+        details["safe_block"] = safe
+        label = "SAFE_BLOCK" if safe else "FAIL"
         if verbose:
-            print(f"[PAPER_ENTRY_GATE] status=FAIL reason={reason}", flush=True)
+            print(f"[PAPER_ENTRY_GATE] status={label} reason={reason}", flush=True)
         return False, reason, details
 
     paper_env = os.environ.get("TRITON_ENABLE_PAPER_EXECUTION", "").strip() == "1"
@@ -263,9 +265,9 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     details["checks"]["TRITON_ENABLE_PAPER_EXECUTION"] = paper_env
     details["checks"]["TRITON_ENABLE_AUTO_PAPER_ENTRIES"] = auto_env
     if not paper_env:
-        return fail("TRITON_ENABLE_PAPER_EXECUTION not set to 1", "paper_execution_env")
+        return block("TRITON_ENABLE_PAPER_EXECUTION not set to 1", "paper_execution_env")
     if not auto_env:
-        return fail("TRITON_ENABLE_AUTO_PAPER_ENTRIES not set to 1", "auto_paper_entries_env")
+        return block("TRITON_ENABLE_AUTO_PAPER_ENTRIES not set to 1", "auto_paper_entries_env")
 
     from services.guard_auto import is_market_open_et
 
@@ -273,36 +275,42 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     market_open = is_market_open_et(now_utc)
     details["checks"]["market_open"] = market_open
     if not market_open:
-        return fail("market is closed", "market_open")
+        return block("market is closed", "market_open", safe=True)
 
     readiness = _load_json(EXEC_READINESS)
     readiness_status = str(readiness.get("readiness_status") or "UNKNOWN")
     live_permitted = bool(readiness.get("live_execution_permitted", True))
     paper_permitted = bool(readiness.get("paper_execution_permitted", False))
+    failed_checks = list(readiness.get("failed_checks") or [])
     details["checks"]["execution_readiness_status"] = readiness_status
     details["checks"]["live_execution_permitted"] = live_permitted
     details["checks"]["paper_execution_permitted"] = paper_permitted
+    details["checks"]["readiness_failed_checks"] = failed_checks
     if readiness_status != "READY":
-        return fail(f"execution_readiness={readiness_status}", "execution_readiness")
+        stale_hint = ""
+        if "lifecycle" in failed_checks or "signals" in failed_checks:
+            stale_hint = " (stale lifecycle/signals — run phase_196a --repair)"
+        return block(f"execution_readiness={readiness_status}{stale_hint}", "execution_readiness")
     if live_permitted:
-        return fail("live_execution_permitted must be false", "live_block")
+        return block("live_execution_permitted must be false", "live_block")
     if not paper_permitted:
-        return fail("paper_execution_permitted must be true", "paper_authorization")
+        return block("paper_execution_permitted must be true", "paper_authorization")
 
     running, cmd_lines = _find_execute_trades_running()
     details["checks"]["execute_trades_execute_running"] = running
     if running:
-        return fail("execute_trades --execute already running", "concurrent_execute")
+        return block("execute_trades --execute already running", "concurrent_execute")
 
     snap_age = _file_age_minutes(OPEN_ORDERS)
     details["checks"]["open_orders_snapshot_age_minutes"] = snap_age
     if snap_age is None:
-        return fail("broker open_orders snapshot missing", "broker_snapshot")
+        return block("broker open_orders snapshot missing", "broker_snapshot")
     if snap_age > 120:
-        return fail(f"broker snapshot stale ({snap_age:.0f}m)", "broker_snapshot")
+        return block(f"broker snapshot stale ({snap_age:.0f}m)", "broker_snapshot")
 
     try:
         from services.arm_mode import (
+            is_paper_arm_confirm_valid,
             load_arm_config,
             resolve_arm_mutation_permissions,
             validate_mode,
@@ -311,16 +319,22 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
         arm_cfg = load_arm_config()
         arm_perms, arm_blocks = resolve_arm_mutation_permissions(arm_cfg)
         arm_mode = validate_mode(arm_cfg.get("mode"))
+        arm_confirm_valid = is_paper_arm_confirm_valid(arm_cfg)
         details["checks"]["arm_mode"] = arm_mode
+        details["checks"]["arm_confirm_valid"] = arm_confirm_valid
         details["checks"]["arm_permissions"] = arm_perms
         details["checks"]["arm_block_reasons"] = arm_blocks
+        if arm_mode == "ASSISTED" and not arm_confirm_valid:
+            return block("ARM_EXPIRED_OR_MISSING paper_arm_confirm", "arm_permission")
         if not arm_perms.get("execute_trades"):
             reason = "ARM permission denied"
             if arm_blocks:
                 reason += f": {','.join(arm_blocks)}"
-            return fail(reason, "arm_permission")
+            if "ASSISTED_CONFIRMATION" in reason or not arm_confirm_valid:
+                reason = "ARM_EXPIRED_OR_MISSING"
+            return block(reason, "arm_permission")
     except Exception as e:
-        return fail(f"ARM check error: {e}", "arm_permission")
+        return block(f"ARM check error: {e}", "arm_permission")
 
     candidates, _ = _load_entry_candidates()
     details["candidates"] = candidates
@@ -328,15 +342,31 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     details["checks"]["entry_rows_total"] = len(candidates)
     details["checks"]["entry_rows_eligible"] = len(eligible)
     if not candidates:
-        return fail("no ENTRY rows in trade_opportunities.csv", "entry_candidates")
+        return block("no ENTRY rows in trade_opportunities.csv", "entry_candidates")
     if not eligible:
-        return fail(
+        return block(
             "no eligible ENTRY candidates after risk/duplicate/cap gates", "entry_candidates"
         )
 
+    try:
+        from services.execution_approval_workflow import find_approved_request
+
+        symbols = [c["ticker"] for c in eligible if c.get("ticker")]
+        approved = find_approved_request(
+            "",
+            "capital_deployment",
+            symbols=symbols,
+            context={"paperMode": True, "liveMode": False},
+        )
+        details["checks"]["governance_approval_present"] = approved is not None
+        if not approved:
+            return block("GOVERNANCE_APPROVAL_REQUIRED", "governance_approval")
+    except Exception as e:
+        return block(f"governance approval check error: {e}", "governance_approval")
+
     global _EXECUTE_INVOKED
     if _EXECUTE_INVOKED:
-        return fail("execute_trades already invoked this cycle", "single_invoke_guard")
+        return block("execute_trades already invoked this cycle", "single_invoke_guard")
 
     if verbose:
         print(
@@ -344,6 +374,7 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
             flush=True,
         )
     details["failed_check"] = None
+    details["safe_block"] = False
     return True, "OK", details
 
 
@@ -362,7 +393,11 @@ def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> in
     }
 
     if not gate_ok:
-        print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason}", flush=True)
+        safe = bool(details.get("safe_block"))
+        if safe:
+            print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_BLOCK)", flush=True)
+        else:
+            print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason}", flush=True)
         _atomic_write_json(AUDIT_JSON, audit)
         return 0
 

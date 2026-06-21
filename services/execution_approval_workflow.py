@@ -760,7 +760,7 @@ def _build_cli() -> "argparse.ArgumentParser":
     p_ap.set_defaults(func=_cli_approve)
 
     p_rej = sub.add_parser("reject", help="Reject a pending request")
-    p_rej.add_argument("--id", required=True, help="approval_id")
+    p_rej.add_argument("--id", "--approval-id", dest="id", required=True, help="approval_id")
     p_rej.add_argument("--authority", required=True, help="Rejecting authority identity")
     p_rej.add_argument("--rationale", required=True, help="Rejection rationale")
     p_rej.set_defaults(func=_cli_reject)

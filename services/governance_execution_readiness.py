@@ -377,7 +377,7 @@ def _check_signal_freshness(results_dir: Path) -> Tuple[bool, str]:
                     age_h = (_utc_now() - latest).total_seconds() / 3600.0
                     if age_h <= SIGNALS_FRESHNESS_HOURS:
                         return True, f"Signals snapshot fresh ({age_h:.1f}h old)"
-                    return False, f"Signals snapshot stale ({age_h:.1f}h old)"
+                    # Stale snapshot JSON — fall through to signals.csv if chain refreshed it.
         except (json.JSONDecodeError, OSError):
             pass
 

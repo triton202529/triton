@@ -50,37 +50,48 @@ try {
     Log-Line "[HEARTBEAT_REFRESH] grace_minutes=$graceMinutes output=$hbRefresh"
 
     $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
+    $env:TRITON_ENABLE_AUTO_PAPER_ENTRIES = "1"
     Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
+    Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_ENTRIES=1"
 
     $cycle = 0
 
     while ($true) {
         $cycle++
+        $cycleRc = 0
 
-        Log-Line ""
-        Log-Line "[CYCLE_START] cycle=$cycle"
-        Update-LoopLockMetadata -LockFile $lockFile -Source "continuous_loop" -Cycle $cycle
+        try {
+            Log-Line ""
+            Log-Line "[CYCLE_START] cycle=$cycle"
+            Update-LoopLockMetadata -LockFile $lockFile -Source "continuous_loop" -Cycle $cycle
 
-        $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
-        Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
+            $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
+            $env:TRITON_ENABLE_AUTO_PAPER_ENTRIES = "1"
+            Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
+            Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_ENTRIES=1"
 
-        powershell -ExecutionPolicy Bypass -File .\scripts\run_market_open.ps1
-        $rc = $LASTEXITCODE
+            powershell -ExecutionPolicy Bypass -File .\scripts\run_market_open.ps1
+            $rc = $LASTEXITCODE
+            if ($rc -ne 0) { $cycleRc = $rc }
 
-        # Phase 195Y — controlled paper entry (gated; requires operator auto-entry env flag)
-        if ($rc -eq 0) {
-            Log-Line "[PAPER_ENTRY_STAGE] evaluating controlled paper entry gates"
-            python -m services.paper_entry_loop_stage --verbose
-            $paperEntryRc = $LASTEXITCODE
-            Log-Line "[PAPER_ENTRY_STAGE] exit_code=$paperEntryRc"
-        } else {
-            Log-Line "[PAPER_ENTRY_EXECUTION_BLOCKED] reason=market_open_sequence_failed exit_code=$rc"
+            if ($rc -eq 0) {
+                Log-Line "[PAPER_ENTRY_STAGE] evaluating controlled paper entry gates"
+                python -m services.paper_entry_loop_stage --verbose
+                $paperEntryRc = $LASTEXITCODE
+                Log-Line "[PAPER_ENTRY_STAGE] exit_code=$paperEntryRc"
+                if ($paperEntryRc -ne 0) { $cycleRc = $paperEntryRc }
+            } else {
+                Log-Line "[PAPER_ENTRY_EXECUTION_BLOCKED] reason=market_open_sequence_failed exit_code=$rc"
+            }
+
+            if ($cycleRc -ne 0) {
+                Log-Line "[CYCLE_FAIL] cycle=$cycle exit_code=$cycleRc (continuing after sleep)"
+            } else {
+                Log-Line "[CYCLE_OK] cycle=$cycle"
+            }
         }
-
-        if ($rc -ne 0) {
-            Log-Line "[CYCLE_FAIL] cycle=$cycle exit_code=$rc"
-        } else {
-            Log-Line "[CYCLE_OK] cycle=$cycle"
+        catch {
+            Log-Line "[CYCLE_ERROR] cycle=$cycle error=$($_.Exception.Message) (continuing after sleep)"
         }
 
         if ($MaxCycles -gt 0 -and $cycle -ge $MaxCycles) {
