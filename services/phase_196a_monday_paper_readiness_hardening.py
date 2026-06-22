@@ -118,9 +118,12 @@ def _run_cmd(cmd: List[str], *, label: str) -> Tuple[int, str]:
 
 
 from services.phase_195h_operational_readiness_freeze import (  # noqa: E402
-    _classify_lock,
     _find_ps_processes,
     _parse_lock,
+)
+from services.runtime_lock_classifier import (  # noqa: E402
+    audit_runtime_locks,
+    is_lock_healthy,
 )
 
 
@@ -190,6 +193,16 @@ def _audit_runtime_authority() -> Dict[str, Any]:
     cl_interval = _fetch_process_interval("run_continuous_loop.ps1")
     wd_count, wd_extras = _lock_authoritative_instance_count(wd_pids, wd_lock)
     cl_count, cl_extras = _lock_authoritative_instance_count(cl_pids, cl_lock)
+    lock_audit = audit_runtime_locks(
+        watchdog_lock=wd_lock,
+        continuous_lock=cl_lock,
+        watchdog_running=wd_running,
+        continuous_running=cl_running,
+        watchdog_pids=wd_pids,
+        continuous_pids=cl_pids,
+    )
+    wd_class = lock_audit["watchdog_lock_classification"]
+    cl_class = lock_audit["continuous_lock_classification"]
     return {
         "watchdog_process_count": wd_count,
         "watchdog_process_count_raw": len(wd_pids),
@@ -198,8 +211,9 @@ def _audit_runtime_authority() -> Dict[str, Any]:
         "watchdog_extra_process_ids": wd_extras,
         "watchdog_lock_pid": wd_lock.get("pid"),
         "watchdog_interval_minutes": wd_interval,
-        "watchdog_lock_status": _classify_lock(wd_lock, wd_running, wd_pids),
-        "watchdog_lock_fresh": not bool(wd_lock.get("stale")),
+        "watchdog_lock_status": wd_class,
+        "watchdog_lock_fresh": is_lock_healthy(wd_class),
+        "watchdog_heartbeat_age_minutes": lock_audit.get("watchdog_heartbeat_age_minutes"),
         "continuous_process_count": cl_count,
         "continuous_process_count_raw": len(cl_pids),
         "continuous_process_running": cl_running,
@@ -207,8 +221,10 @@ def _audit_runtime_authority() -> Dict[str, Any]:
         "continuous_extra_process_ids": cl_extras,
         "continuous_lock_pid": cl_lock.get("pid"),
         "continuous_interval_minutes": cl_interval,
-        "continuous_lock_status": _classify_lock(cl_lock, cl_running, cl_pids),
-        "continuous_lock_fresh": not bool(cl_lock.get("stale")),
+        "continuous_lock_status": cl_class,
+        "continuous_lock_fresh": is_lock_healthy(cl_class),
+        "continuous_heartbeat_age_minutes": lock_audit.get("continuous_heartbeat_age_minutes"),
+        "loops_runtime_healthy": lock_audit.get("loops_runtime_healthy"),
         "scheduled_tasks_running_count": _scheduled_tasks_running_count(),
         "loop_only_authority": _scheduled_tasks_running_count() == 0,
         "exactly_one_watchdog": wd_count == 1,

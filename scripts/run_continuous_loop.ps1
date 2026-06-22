@@ -51,8 +51,10 @@ try {
 
     $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
     $env:TRITON_ENABLE_AUTO_PAPER_ENTRIES = "1"
+    $env:TRITON_ENABLE_AUTO_PAPER_APPROVAL = "1"
     Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
     Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_ENTRIES=1"
+    Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_APPROVAL=1"
 
     $cycle = 0
 
@@ -67,8 +69,10 @@ try {
 
             $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
             $env:TRITON_ENABLE_AUTO_PAPER_ENTRIES = "1"
+            $env:TRITON_ENABLE_AUTO_PAPER_APPROVAL = "1"
             Log-Line "[LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1"
             Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_ENTRIES=1"
+            Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_APPROVAL=1"
 
             powershell -ExecutionPolicy Bypass -File .\scripts\run_market_open.ps1
             $rc = $LASTEXITCODE

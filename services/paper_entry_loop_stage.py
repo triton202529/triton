@@ -275,6 +275,8 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     market_open = is_market_open_et(now_utc)
     details["checks"]["market_open"] = market_open
     if not market_open:
+        if verbose:
+            print("[PAPER_AUTO_APPROVAL] status=REFUSED reason=MARKET_CLOSED", flush=True)
         return block("market is closed", "market_open", safe=True)
 
     readiness = _load_json(EXEC_READINESS)
@@ -360,7 +362,31 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
         )
         details["checks"]["governance_approval_present"] = approved is not None
         if not approved:
-            return block("GOVERNANCE_APPROVAL_REQUIRED", "governance_approval")
+            auto_enabled = os.environ.get("TRITON_ENABLE_AUTO_PAPER_APPROVAL", "").strip() == "1"
+            details["checks"]["auto_paper_approval_enabled"] = auto_enabled
+            if auto_enabled:
+                from services.auto_paper_approval import attempt_auto_paper_approval
+
+                auto_ok, auto_reason, auto_details = attempt_auto_paper_approval(
+                    symbols,
+                    context={"paperMode": True, "liveMode": False},
+                    verbose=verbose,
+                )
+                details["auto_paper_approval"] = auto_details
+                approved = find_approved_request(
+                    "",
+                    "capital_deployment",
+                    symbols=symbols,
+                    context={"paperMode": True, "liveMode": False},
+                )
+                details["checks"]["governance_approval_present"] = approved is not None
+                if not auto_ok or not approved:
+                    return block(
+                        auto_reason if not auto_ok else "GOVERNANCE_APPROVAL_REQUIRED",
+                        "governance_approval",
+                    )
+            else:
+                return block("GOVERNANCE_APPROVAL_REQUIRED", "governance_approval")
     except Exception as e:
         return block(f"governance approval check error: {e}", "governance_approval")
 
@@ -394,7 +420,9 @@ def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> in
 
     if not gate_ok:
         safe = bool(details.get("safe_block"))
-        if safe:
+        if reason == "market is closed":
+            print("[PAPER_ENTRY_EXECUTION_BLOCKED] reason=MARKET_CLOSED", flush=True)
+        elif safe:
             print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_BLOCK)", flush=True)
         else:
             print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason}", flush=True)

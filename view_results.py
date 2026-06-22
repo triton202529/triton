@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import importlib
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
@@ -2100,6 +2101,14 @@ class DashboardExecutionPosture:
     paper_operational: bool
     full_execution_locked: bool
     lock_reasons: List[str]
+    runtime_loops_healthy: bool
+    watchdog_process_running: bool
+    continuous_process_running: bool
+    watchdog_lock_classification: str
+    continuous_lock_classification: str
+    broker_snapshot_fresh: bool
+    market_open: bool
+    approval_status_label: str
 
 
 def load_dashboard_execution_posture() -> DashboardExecutionPosture:
@@ -2140,6 +2149,59 @@ def load_dashboard_execution_posture() -> DashboardExecutionPosture:
 
     cert_ok = certification_status in PAPER_CERTIFICATION_STATUSES
 
+    runtime_loops_healthy = False
+    watchdog_running = False
+    continuous_running = False
+    wd_class = "UNKNOWN"
+    cl_class = "UNKNOWN"
+    broker_fresh = False
+    market_open = False
+    try:
+        from services.phase_195h_operational_readiness_freeze import _find_ps_processes
+        from services.runtime_lock_classifier import audit_runtime_locks
+
+        wd_running, wd_pids = _find_ps_processes("run_watchdog_loop.ps1")
+        cl_running, cl_pids = _find_ps_processes("run_continuous_loop.ps1")
+        lock_audit = audit_runtime_locks(
+            watchdog_running=wd_running,
+            continuous_running=cl_running,
+            watchdog_pids=wd_pids,
+            continuous_pids=cl_pids,
+        )
+        runtime_loops_healthy = bool(lock_audit.get("loops_runtime_healthy"))
+        watchdog_running = wd_running
+        continuous_running = cl_running
+        wd_class = str(lock_audit.get("watchdog_lock_classification") or "UNKNOWN")
+        cl_class = str(lock_audit.get("continuous_lock_classification") or "UNKNOWN")
+    except Exception:
+        pass
+
+    try:
+        oo = RESULTS_DIR / "open_orders_snapshot.csv"
+        if oo.is_file():
+            age_min = (
+                datetime.now(timezone.utc)
+                - datetime.fromtimestamp(oo.stat().st_mtime, tz=timezone.utc)
+            ).total_seconds() / 60.0
+            broker_fresh = age_min <= 120
+    except Exception:
+        broker_fresh = False
+
+    try:
+        from services.guard_auto import is_market_open_et
+
+        market_open = is_market_open_et(datetime.now(timezone.utc))
+    except Exception:
+        market_open = False
+
+    auto_approval = os.environ.get("TRITON_ENABLE_AUTO_PAPER_APPROVAL", "").strip() == "1"
+    if not market_open:
+        approval_label = "MARKET_CLOSED"
+    elif auto_approval and readiness_status == "READY" and paper and not live:
+        approval_label = "AUTO_PAPER_READY"
+    else:
+        approval_label = "APPROVAL_REQUIRED"
+
     lock_reasons: List[str] = []
     if not paper:
         lock_reasons.append("paper execution not permitted")
@@ -2150,15 +2212,18 @@ def load_dashboard_execution_posture() -> DashboardExecutionPosture:
     if not lifecycle_gate_ok:
         lock_reasons.append(f"lifecycle gate: {lifecycle_gate_reason}")
     if not cert_ok:
-        lock_reasons.append(
-            f"certification invalid for paper protection ({certification_status or 'missing'})"
-        )
+        lock_reasons.append(f"certification review ({certification_status or 'missing'})")
 
-    authority_ok = (
-        paper and exec_auth and readiness_status == "READY" and lifecycle_gate_ok and cert_ok
+    paper_runtime_ready = (
+        paper
+        and readiness_status == "READY"
+        and lifecycle_gate_ok
+        and not live
+        and runtime_loops_healthy
+        and broker_fresh
     )
-    paper_operational = authority_ok and not live
-    full_execution_locked = not authority_ok
+    paper_operational = paper_runtime_ready
+    full_execution_locked = not paper_operational and not (paper and readiness_status == "READY")
 
     return DashboardExecutionPosture(
         live_execution_permitted=live,
@@ -2171,6 +2236,14 @@ def load_dashboard_execution_posture() -> DashboardExecutionPosture:
         paper_operational=paper_operational,
         full_execution_locked=full_execution_locked,
         lock_reasons=lock_reasons,
+        runtime_loops_healthy=runtime_loops_healthy,
+        watchdog_process_running=watchdog_running,
+        continuous_process_running=continuous_running,
+        watchdog_lock_classification=wd_class,
+        continuous_lock_classification=cl_class,
+        broker_snapshot_fresh=broker_fresh,
+        market_open=market_open,
+        approval_status_label=approval_label,
     )
 
 
@@ -2184,12 +2257,24 @@ def render_sidebar_execution_status(
 ) -> None:
     """Sidebar truth labels: paper authorization vs live lock vs full execution lock."""
     if posture.paper_operational:
-        st.success("✅ PAPER AUTHORIZED")
+        st.success("✅ PAPER RUNTIME: ACTIVE")
+        st.caption("Live Runtime: BLOCKED")
+        market_lbl = "OPEN" if posture.market_open else "SAFE_BLOCK"
         st.caption(
-            "Live execution remains blocked. Paper mode is the only authorized execution path."
+            f"Market: {market_lbl} · Approval: {posture.approval_status_label} · "
+            f"Readiness: {posture.readiness_status}"
         )
         cert_badge = _certification_badge_label(posture.certification_status)
-        st.markdown(f"🏷 **LIVE LOCKED** · **PAPER AUTHORIZED** · **READY** · **{cert_badge}**")
+        st.markdown(
+            f"🏷 **LIVE BLOCKED** · **PAPER ACTIVE** · **{posture.readiness_status}** · **{cert_badge}**"
+        )
+        c1, c2 = st.columns(2)
+        c1.caption(f"Watchdog: {'ON' if posture.watchdog_process_running else 'OFF'}")
+        c2.caption(f"Loop: {'ON' if posture.continuous_process_running else 'OFF'}")
+        st.caption(
+            f"Locks: WD={posture.watchdog_lock_classification} · "
+            f"CL={posture.continuous_lock_classification}"
+        )
         if pipeline_locked:
             st.warning(f"Data integrity caution: {pipeline_reason}")
         return
@@ -2367,9 +2452,13 @@ def render_top_status_stack() -> None:
 
     if posture.paper_operational:
         exec_class = "paper"
-        exec_title = "PAPER AUTHORIZED"
+        exec_title = "PAPER RUNTIME: ACTIVE"
         cert_badge = _certification_badge_label(posture.certification_status)
-        exec_detail = f"LIVE LOCKED · READINESS READY · {cert_badge}"
+        market_lbl = "OPEN" if posture.market_open else "SAFE_BLOCK"
+        exec_detail = (
+            f"LIVE BLOCKED · Market {market_lbl} · Approval {posture.approval_status_label} · "
+            f"{cert_badge}"
+        )
         if locked:
             exec_detail += f" · Data caution: {reason.replace('Execution locked: ', '')}"
     elif posture.full_execution_locked:
