@@ -345,6 +345,82 @@ def build_top_guard_message(
     return "Runtime pipeline healthy. Execution remains blocked by policy gates."
 
 
+def classify_contract_artifact_integrity(
+    *,
+    contracts_ok: Optional[bool] = None,
+    contract_summary: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Contract/artifact integrity — separate from runtime pipeline health emoji."""
+    if contracts_ok is True:
+        if contract_summary and int(contract_summary.get("warn_count") or 0) > 0:
+            return "REVIEW"
+        return "OK"
+    if contracts_ok is False:
+        return "FAIL"
+    if (
+        _broker_snapshots_ok()
+        and _portfolio_history_ok()
+        and load_pipeline_heartbeat().get("exists")
+    ):
+        return "OK"
+    return "REVIEW"
+
+
+def reconcile_integrity_lock_display(
+    *,
+    pipeline_locked: bool,
+    pipeline_lock_reason: str,
+    runtime_pipeline_health: str,
+    contracts_ok: Optional[bool],
+    contract_integrity: str,
+) -> Dict[str, Any]:
+    """
+    Display-only reconciliation: do not show 'pipeline health' integrity lock
+    when runtime pipeline is healthy and contracts pass.
+    """
+    contracts_failed = contracts_ok is False or contract_integrity == "FAIL"
+    pipeline_runtime_bad = runtime_pipeline_health in ("DEGRADED", "FAIL")
+    reason_lower = (pipeline_lock_reason or "").lower()
+
+    show_caption = False
+    detail = ""
+    conflated = False
+
+    if contracts_failed:
+        show_caption = True
+        if "data contracts" in reason_lower:
+            detail = pipeline_lock_reason or "Data contracts FAIL"
+        else:
+            detail = "Data contracts FAIL — open System → Data Contracts"
+    elif pipeline_runtime_bad and pipeline_locked:
+        show_caption = True
+        detail = pipeline_lock_reason or "Pipeline runtime degraded"
+    elif pipeline_locked and not pipeline_runtime_bad and not contracts_failed:
+        conflated = "pipeline health" in reason_lower
+
+    return {
+        "contract_artifact_integrity": contract_integrity,
+        "show_integrity_lock_caption": show_caption,
+        "integrity_lock_detail": detail,
+        "integrity_conflated_with_pipeline_health": conflated,
+    }
+
+
+def audit_reconciled_runtime_locks() -> Dict[str, Any]:
+    """Process-aware lock audit for dashboard display (Phase 196M)."""
+    from services.phase_195h_operational_readiness_freeze import _find_ps_processes
+    from services.runtime_lock_classifier import audit_runtime_locks
+
+    wd_running, wd_pids = _find_ps_processes("run_watchdog_loop.ps1")
+    cl_running, cl_pids = _find_ps_processes("run_continuous_loop.ps1")
+    return audit_runtime_locks(
+        watchdog_running=wd_running,
+        continuous_running=cl_running,
+        watchdog_pids=wd_pids,
+        continuous_pids=cl_pids,
+    )
+
+
 def build_dashboard_health_classification(
     *,
     posture: Optional[Any] = None,
@@ -497,6 +573,8 @@ def build_dashboard_guard_summary(
     live_ready: bool = False,
     live_gate_bits: Optional[Dict[str, bool]] = None,
     posture: Optional[Any] = None,
+    contracts_ok: Optional[bool] = None,
+    contract_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     health_cls = build_dashboard_health_classification(
         posture=posture,
@@ -518,6 +596,24 @@ def build_dashboard_guard_summary(
     runtime_pipeline_health = str(health_cls.get("runtime_pipeline_health") or "FAIL")
     execution_block_reasons = list(health_cls.get("execution_block_reasons") or [])
     market_open = health_cls.get("market_status") == "OPEN"
+
+    contract_integrity = classify_contract_artifact_integrity(
+        contracts_ok=contracts_ok,
+        contract_summary=contract_summary,
+    )
+    integrity_display = reconcile_integrity_lock_display(
+        pipeline_locked=pipeline_locked,
+        pipeline_lock_reason=pipeline_lock_reason,
+        runtime_pipeline_health=runtime_pipeline_health,
+        contracts_ok=contracts_ok,
+        contract_integrity=contract_integrity,
+    )
+
+    lock_audit: Dict[str, Any] = {}
+    try:
+        lock_audit = audit_reconciled_runtime_locks()
+    except Exception:
+        pass
 
     paper_operational = False
     approval_label = ""
@@ -550,10 +646,21 @@ def build_dashboard_guard_summary(
         else ("OFF" if loops.get("continuous_lock_present") is False else "UNKNOWN")
     )
 
+    wd_lock = str(lock_audit.get("watchdog_lock_classification") or "UNKNOWN")
+    cl_lock = str(lock_audit.get("continuous_lock_classification") or "UNKNOWN")
+    if posture is not None and wd_lock == "UNKNOWN":
+        wd_lock = str(getattr(posture, "watchdog_lock_classification", "") or wd_lock)
+    if posture is not None and cl_lock == "UNKNOWN":
+        cl_lock = str(getattr(posture, "continuous_lock_classification", "") or cl_lock)
+
     return {
         "health_classification": health_cls,
         "runtime_pipeline_health": runtime_pipeline_health,
         "data_freshness": data_freshness,
+        "contract_artifact_integrity": contract_integrity,
+        "integrity_display": integrity_display,
+        "watchdog_lock_classification": wd_lock,
+        "continuous_lock_classification": cl_lock,
         "pipeline_heartbeat": pipeline_hb,
         "runtime_heartbeat": runtime_hb,
         "pipeline_heartbeat_source_path": pipeline_hb.get("path", str(PIPELINE_HEARTBEAT_PATH)),

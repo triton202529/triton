@@ -2272,12 +2272,17 @@ def render_sidebar_execution_status(
     except Exception:
         pass
 
+    contracts_ok = st.session_state.get("contracts_ok")
+    contract_summary = st.session_state.get("contract_summary")
+
     summary = build_dashboard_guard_summary(
         pipeline_locked=pipeline_locked,
         pipeline_lock_reason=pipeline_reason,
         live_ready=live_ready,
         live_gate_bits=gate_bits,
         posture=posture,
+        contracts_ok=contracts_ok,
+        contract_summary=contract_summary,
     )
     label = str(summary.get("sidebar_label") or "LIVE BLOCKED · PAPER ONLY")
     level = str(summary.get("sidebar_level") or "info")
@@ -2304,6 +2309,7 @@ def render_sidebar_execution_status(
         f"Certification: **{summary.get('certification_status', 'UNKNOWN')}**"
     )
     st.caption(
+        f"Contract/artifact integrity: **{summary.get('contract_artifact_integrity', 'UNKNOWN')}** · "
         f"Execution gate: **{summary.get('execution_gate', 'UNKNOWN')}** · "
         f"Approval: **{posture.approval_status_label}**"
     )
@@ -2315,11 +2321,12 @@ def render_sidebar_execution_status(
     c1.caption(f"Watchdog: {summary.get('watchdog', 'UNKNOWN')}")
     c2.caption(f"Continuous loop: {summary.get('continuous_loop', 'UNKNOWN')}")
     st.caption(
-        f"Locks: WD={posture.watchdog_lock_classification} · "
-        f"CL={posture.continuous_lock_classification}"
+        f"Locks: WD={summary.get('watchdog_lock_classification', posture.watchdog_lock_classification)} · "
+        f"CL={summary.get('continuous_lock_classification', posture.continuous_lock_classification)}"
     )
-    if pipeline_locked:
-        st.caption(f"Data integrity lock (contracts/artifacts): {pipeline_reason}")
+    integrity = summary.get("integrity_display") or {}
+    if integrity.get("show_integrity_lock_caption"):
+        st.caption(f"Data integrity lock: {integrity.get('integrity_lock_detail')}")
 
 
 def render_dashboard_guard_summary(
@@ -2339,6 +2346,8 @@ def render_dashboard_guard_summary(
         live_ready=live_ready,
         live_gate_bits=gate_bits,
         posture=posture,
+        contracts_ok=st.session_state.get("contracts_ok"),
+        contract_summary=st.session_state.get("contract_summary"),
     )
     ph_age = summary.get("pipeline_heartbeat_age_minutes")
     rt_age = summary.get("runtime_heartbeat_age_minutes")
@@ -24214,12 +24223,6 @@ def main() -> None:
         st.info(
             _top_msg or "Runtime pipeline healthy. Execution remains blocked by policy gates.",
             icon="ℹ️",
-        )
-    elif pipeline_locked and not (section == "System" and page == "🫀 Pipeline Health / Heartbeat"):
-        st.warning(
-            "Data contracts or artifact integrity check failed. "
-            "Open **System → Data Contracts** or **Pipeline Health / Heartbeat**.",
-            icon="⚠️",
         )
 
     fn()

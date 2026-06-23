@@ -27,6 +27,7 @@ CONTINUOUS_GRACE_MINUTES = max(60.0, CONTINUOUS_INTERVAL_MINUTES * 1.5)
 
 CLASSIFICATIONS = (
     "LOCK_HEALTHY_ACTIVE",
+    "LOCK_TIMESTAMP_STALE_BUT_PROCESS_ACTIVE",
     "STALE_ACTIVE_LOCK",
     "STALE_ORPHAN_LOCK",
     "NO_LOCK_RUNNING",
@@ -80,6 +81,40 @@ def _heartbeat_age_minutes(loop_kind: str) -> Optional[float]:
     return _minutes_since(ts, now)
 
 
+def _pipeline_heartbeat_age_minutes() -> Optional[float]:
+    hb_path = RESULTS / "heartbeat.json"
+    if not hb_path.is_file():
+        return None
+    try:
+        data = json.loads(hb_path.read_text(encoding="utf-8"))
+        ts = _parse_ts(
+            data.get("timestamp") or data.get("ts") or data.get("updated_at") or data.get("time")
+        )
+        return _minutes_since(ts)
+    except Exception:
+        return None
+
+
+def _effective_heartbeat_age_minutes(
+    loop_kind: str,
+    heartbeat_age_minutes: Optional[float],
+) -> Optional[float]:
+    """Prefer freshest evidence: loop heartbeat, pipeline heartbeat, runtime watchdog."""
+    ages: List[float] = []
+    if heartbeat_age_minutes is not None:
+        ages.append(float(heartbeat_age_minutes))
+    pipeline_age = _pipeline_heartbeat_age_minutes()
+    if pipeline_age is not None:
+        ages.append(float(pipeline_age))
+    if loop_kind == "continuous":
+        wd = _load_json(WATCHDOG_STATUS)
+        hb = wd.get("heartbeat") if isinstance(wd.get("heartbeat"), dict) else {}
+        rt_age = _minutes_since(_parse_ts(hb.get("timestamp") or wd.get("timestamp")))
+        if rt_age is not None:
+            ages.append(float(rt_age))
+    return min(ages) if ages else None
+
+
 def classify_runtime_lock(
     lock: Dict[str, Any],
     process_running: bool,
@@ -114,10 +149,7 @@ def classify_runtime_lock(
 
     if heartbeat_age_minutes is None:
         heartbeat_age_minutes = _heartbeat_age_minutes(loop_kind)
-    if heartbeat_age_minutes is None:
-        heartbeat_age_minutes = lock.get("lock_freshness_age_minutes") or lock.get(
-            "lock_age_minutes"
-        )
+    effective_hb_age = _effective_heartbeat_age_minutes(loop_kind, heartbeat_age_minutes)
 
     if not lock_exists and not process_active:
         return "NO_PROCESS_NO_LOCK"
@@ -127,13 +159,31 @@ def classify_runtime_lock(
         return "STALE_ORPHAN_LOCK"
 
     # lock exists and process active
-    if heartbeat_age_minutes is not None and heartbeat_age_minutes <= grace_minutes:
+    lock_ts_age = lock.get("lock_freshness_age_minutes") or lock.get("lock_age_minutes")
+    hb_fresh = effective_hb_age is not None and effective_hb_age <= grace_minutes
+
+    if hb_fresh:
+        if (
+            lock_ts_age is not None
+            and float(lock_ts_age) > grace_minutes
+            and loop_kind == "continuous"
+        ):
+            return "LOCK_TIMESTAMP_STALE_BUT_PROCESS_ACTIVE"
         return "LOCK_HEALTHY_ACTIVE"
-    if pid_match and heartbeat_age_minutes is not None and heartbeat_age_minutes <= grace_minutes:
+
+    if pid_match and effective_hb_age is not None and effective_hb_age <= grace_minutes:
         return "LOCK_HEALTHY_ACTIVE"
     if process_active and (pid_match or not lock_pid):
-        if heartbeat_age_minutes is None or heartbeat_age_minutes <= grace_minutes:
+        if effective_hb_age is None or effective_hb_age <= grace_minutes:
             return "LOCK_HEALTHY_ACTIVE"
+        if (
+            lock_ts_age is not None
+            and float(lock_ts_age) > grace_minutes
+            and effective_hb_age is not None
+            and effective_hb_age <= grace_minutes * 2
+            and loop_kind == "continuous"
+        ):
+            return "LOCK_TIMESTAMP_STALE_BUT_PROCESS_ACTIVE"
         return "STALE_ACTIVE_LOCK"
     if lock_exists and process_active:
         return "STALE_ACTIVE_LOCK"
@@ -141,7 +191,11 @@ def classify_runtime_lock(
 
 
 def is_lock_healthy(classification: str) -> bool:
-    return classification in ("LOCK_HEALTHY_ACTIVE", "FRESH_ACTIVE_LOCK")
+    return classification in (
+        "LOCK_HEALTHY_ACTIVE",
+        "LOCK_TIMESTAMP_STALE_BUT_PROCESS_ACTIVE",
+        "FRESH_ACTIVE_LOCK",
+    )
 
 
 def audit_runtime_locks(
