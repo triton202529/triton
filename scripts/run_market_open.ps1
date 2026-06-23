@@ -115,6 +115,10 @@ try {
     Run-Step -Label "F. POSITION MANAGEMENT" `
              -PyArgs @("-m","services.manage_positions","--mode","paper","--use-performance-risk-overlay","--max-rotation-exits","3","--verbose")
 
+    # ── G. Pipeline heartbeat (dashboard freshness; status writer only) ──
+    Run-Step -Label "G. TOUCH PIPELINE HEARTBEAT" `
+             -PyArgs @("-m","services.touch_pipeline_heartbeat")
+
     Write-Host ""
     Write-Host "=== TRITON MARKET OPEN SEQUENCE COMPLETE ===" -ForegroundColor Green
     Write-Host ("FinishedAt: " + (Get-Date).ToString("s"))
