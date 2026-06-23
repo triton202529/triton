@@ -2831,53 +2831,85 @@ def page_data_contracts() -> None:
 
 def page_portfolio_history() -> None:
     st.markdown("### 📈 Portfolio History")
+    st.caption(
+        "Read-only portfolio state from **portfolio_history.csv**, reconciled with "
+        "**positions_snapshot.csv** and **open_orders_snapshot.csv**."
+    )
 
-    df, csv_err = read_csv_dashboard(PORTFOLIO_HISTORY_PATH)
-    if csv_err and csv_err != "empty":
-        st.warning(f"Could not read portfolio_history.csv: {csv_err}")
+    try:
+        from services.portfolio_history_sync import resolve_portfolio_dashboard_state
+    except Exception as e:
+        st.error(f"Could not load portfolio history sync module: {e}")
+        return
+
+    state = resolve_portfolio_dashboard_state()
+    daily = state.get("daily")
+    raw = state.get("raw")
+    sources = state.get("sources") or {}
+
+    if daily is None:
+        daily = pd.DataFrame(columns=["date", "cash", "market_value", "total_value"])
+    if raw is None:
+        raw = pd.DataFrame()
+
+    # Data source provenance
+    src_lines = []
+    for key in ("portfolio_history", "positions_snapshot", "open_orders_snapshot"):
+        info = sources.get(key) or {}
+        path_name = Path(str(info.get("path") or "")).name or key
+        mtime = info.get("mtime")
+        src_lines.append(f"**{path_name}** — modified {dt_to_et_str(mtime) if mtime else '—'}")
+    st.caption(" · ".join(src_lines))
+
+    if not state.get("portfolio_history_exists") and not state.get("positions_snapshot_exists"):
+        st.info(
+            "No portfolio history yet — **portfolio_history.csv** is missing and no "
+            "**positions_snapshot.csv** is available."
+        )
         st.dataframe(empty_table(), use_container_width=True, hide_index=True)
         return
-    if df is None or df.empty:
-        st.info("No portfolio history yet — **portfolio_history.csv** is missing or empty.")
-        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
-        return
 
-    df = sanitize_df_cols(df)
-    df = ensure_date_col(df)
+    if state.get("positions_snapshot_newer_than_history"):
+        st.warning(
+            "Positions snapshot is newer than portfolio history. History may need refresh. "
+            "Dashboard shows latest position snapshot values where history is stale."
+        )
 
-    if "ticker" not in df.columns:
-        for alt in ("symbol", "sym", "Ticker", "Symbol"):
-            if alt in df.columns:
-                df = df.rename(columns={alt: "ticker"})
-                break
+    as_of = state.get("latest_as_of")
+    if as_of is not None:
+        try:
+            if hasattr(as_of, "strftime"):
+                st.caption(
+                    f"Latest as-of: **{dt_to_et_str(as_of)}** · data_quality: **{state.get('data_quality', '—')}**"
+                )
+        except Exception:
+            pass
 
-    if "total_value" not in df.columns:
-        for alt in ("equity", "portfolio_value", "portfolio_total", "value", "total"):
-            if alt in df.columns:
-                df = df.rename(columns={alt: "total_value"})
-                break
+    daily_rows = int(state.get("portfolio_history_daily_rows") or 0)
+    drawdown_pct = state.get("drawdown_pct")
+    dd_display = "—"
+    if drawdown_pct is not None and np.isfinite(drawdown_pct):
+        dd_display = f"{drawdown_pct:.2f}%"
 
-    if "total_value" not in df.columns:
-        st.error("portfolio_history.csv missing required column: total_value")
-        st.dataframe(df.head(50), use_container_width=True)
-        return
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Latest Total Value", state.get("total_display", "—"))
+    c2.metric("Cash", state.get("cash_display", "UNKNOWN"))
+    invested = state.get("invested_value")
+    c3.metric(
+        "Invested / Market Value",
+        "—" if invested is None else f"${float(invested):,.2f}",
+    )
+    c4.metric("Positions", int(state.get("position_count") or 0))
+    c5.metric("Open Orders", int(state.get("open_orders") or 0))
+    c6.metric("Drawdown vs Peak", dd_display)
 
-    df["total_value"] = safe_numeric(df, "total_value")
-    if "cash" in df.columns:
-        df["cash"] = safe_numeric(df, "cash")
-    if "market_value" in df.columns:
-        df["market_value"] = safe_numeric(df, "market_value")
+    if state.get("latest_positions"):
+        st.caption("Latest positions: **" + ", ".join(state.get("latest_positions") or []) + "**")
 
-    daily, per_ticker, method = aggregate_portfolio_history(df)
-    if daily is None or daily.empty:
-        st.warning("portfolio_history.csv loaded, but no valid (date,total_value) rows.")
-        st.dataframe(df.head(50), use_container_width=True)
-        return
+    if state.get("cash_source") and state.get("cash_source") != "none":
+        st.caption(f"Cash source: `{state.get('cash_source')}`")
 
-    latest_dt = pd.to_datetime(daily["date"].iloc[-1], errors="coerce")
-    latest_dt_py = latest_dt.to_pydatetime() if not pd.isna(latest_dt) else None
-    mtime = file_mtime_dt(PORTFOLIO_HISTORY_PATH)
-
+    # Chart section
     range_opt = st.selectbox(
         "Range",
         options=["All", "30D", "90D", "1Y", "2Y"],
@@ -2885,73 +2917,122 @@ def page_portfolio_history() -> None:
         key="ph_range",
         help="Filters the chart/table only (does not modify any files).",
     )
-    if range_opt != "All" and latest_dt_py is not None:
-        days = {"30D": 30, "90D": 90, "1Y": 365, "2Y": 730}[range_opt]
-        cutoff = latest_dt_py - timedelta(days=days)
-        daily_plot = daily[daily["date"] >= cutoff].copy()
-    else:
-        daily_plot = daily.copy()
 
-    try:
-        today = pd.Timestamp.today().normalize().to_pydatetime()
-        if latest_dt_py is not None:
-            age_days = (today - latest_dt_py).days
-            if age_days >= 7:
-                st.warning(
-                    f"Portfolio data is **{age_days} days** old (latest row: {latest_dt_py.date()}). "
-                    "Run the pipeline/simulation to refresh artifacts."
-                )
-    except Exception:
-        pass
+    daily_plot = daily.copy()
+    if not daily_plot.empty and "date" in daily_plot.columns:
+        daily_plot["date"] = pd.to_datetime(daily_plot["date"], errors="coerce")
+        daily_plot = daily_plot.dropna(subset=["date"]).sort_values("date")
+        latest_dt_py = daily_plot["date"].iloc[-1].to_pydatetime()
+        if range_opt != "All":
+            days = {"30D": 30, "90D": 90, "1Y": 365, "2Y": 730}[range_opt]
+            cutoff = latest_dt_py - timedelta(days=days)
+            daily_plot = daily_plot[daily_plot["date"] >= cutoff].copy()
 
-    parts = []
-    if latest_dt_py is not None:
-        parts.append(f"Data as-of: **{latest_dt_py:%Y-%m-%d}**")
-    if mtime is not None:
-        parts.append(f"File modified: **{dt_to_et_str(mtime)}**")
-    if parts:
-        st.caption(" · ".join(parts))
-
-    tv = pd.to_numeric(daily_plot["total_value"], errors="coerce")
-    tv = tv.dropna()
-    if tv.empty:
-        st.warning("No numeric total_value after coercion.")
-        st.dataframe(daily_plot.tail(200), use_container_width=True)
-        return
-
-    latest = float(tv.iloc[-1])
-    peak = float(tv.max())
-    dd = (latest / peak - 1.0) if peak > 0 else np.nan
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Latest Total Value", f"${latest:,.2f}")
-    c2.metric("Peak Total Value", f"${peak:,.2f}")
-    c3.metric("Drawdown vs Peak", "—" if not np.isfinite(dd) else f"{dd*100:.2f}%")
-
-    plotted = False
-    try:
-        import plotly.express as px  # type: ignore
-
-        fig = px.line(daily_plot, x="date", y="total_value", title="Portfolio Total Value")
-        st.plotly_chart(fig, use_container_width=True)
-        plotted = True
-    except Exception:
-        plotted = False
-
-    if per_ticker:
-        st.caption(
-            f"Per-ticker rows detected — aggregation method: **{method}** (prevents multiplying totals)."
+    chart_rows = len(daily_plot) if not daily_plot.empty else 0
+    if chart_rows < 2:
+        st.info(
+            "Only one portfolio history row is available. Chart will become meaningful "
+            "after additional cycles append history."
         )
+        if state.get("use_positions_overlay") and invested is not None:
+            st.caption(
+                f"Current invested value from positions snapshot: **${float(invested):,.2f}**"
+            )
+    else:
+        plotted = False
+        try:
+            import plotly.express as px  # type: ignore
+            import plotly.graph_objects as go  # type: ignore
 
-    if not plotted:
-        st.caption("Plotly not available — showing aggregated table instead.")
-        st.dataframe(daily_plot.tail(400), use_container_width=True)
+            fig = go.Figure()
+            if "total_value" in daily_plot.columns and daily_plot["total_value"].notna().any():
+                fig.add_trace(
+                    go.Scatter(
+                        x=daily_plot["date"],
+                        y=daily_plot["total_value"],
+                        mode="lines+markers",
+                        name="Total Value",
+                    )
+                )
+            if "market_value" in daily_plot.columns and daily_plot["market_value"].notna().any():
+                fig.add_trace(
+                    go.Scatter(
+                        x=daily_plot["date"],
+                        y=daily_plot["market_value"],
+                        mode="lines",
+                        name="Market Value",
+                    )
+                )
+            if "cash" in daily_plot.columns and daily_plot["cash"].notna().any():
+                fig.add_trace(
+                    go.Scatter(
+                        x=daily_plot["date"],
+                        y=daily_plot["cash"],
+                        mode="lines",
+                        name="Cash",
+                    )
+                )
+            fig.update_layout(title="Portfolio History", xaxis_title="Date", yaxis_title="USD")
+            st.plotly_chart(fig, use_container_width=True)
+            plotted = True
+        except Exception:
+            plotted = False
+
+        if not plotted:
+            st.caption("Plotly not available — showing aggregated table instead.")
+            st.dataframe(daily_plot.tail(400), use_container_width=True)
+
+    # Stale history age warning
+    if not daily_plot.empty:
+        try:
+            latest_dt_py = pd.to_datetime(daily_plot["date"].iloc[-1], errors="coerce")
+            if pd.notna(latest_dt_py):
+                today = pd.Timestamp.today().normalize().to_pydatetime()
+                age_days = (today - latest_dt_py.to_pydatetime()).days
+                if age_days >= 7 and not state.get("use_positions_overlay"):
+                    st.warning(
+                        f"Portfolio history data is **{age_days} days** old "
+                        f"(latest row: {latest_dt_py.date()})."
+                    )
+        except Exception:
+            pass
 
     st.markdown("#### Aggregated daily totals (tail)")
-    st.dataframe(daily_plot.tail(120), use_container_width=True, hide_index=True)
+    if daily_plot.empty:
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(daily_plot.tail(120), use_container_width=True, hide_index=True)
 
     st.markdown("#### Raw history (tail)")
-    st.dataframe(df.tail(200), use_container_width=True)
+    if raw is None or raw.empty:
+        st.dataframe(empty_table(), use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(raw.tail(200), use_container_width=True)
+
+    if state.get("use_positions_overlay"):
+        st.markdown("#### Latest position snapshot summary (newer than history)")
+        pos_df, pos_err = read_csv_dashboard(POSITIONS_SNAPSHOT_PATH)
+        if pos_err and pos_err != "empty":
+            st.warning(f"Could not read positions_snapshot.csv: {pos_err}")
+        elif pos_df is not None and not pos_df.empty:
+            show_cols = [
+                c
+                for c in (
+                    "snapshot_ts",
+                    "date",
+                    "ticker",
+                    "symbol",
+                    "qty",
+                    "market_value",
+                    "value",
+                    "current_price",
+                    "unrealized_pl",
+                )
+                if c in pos_df.columns
+            ]
+            st.dataframe(pos_df[show_cols].tail(50), use_container_width=True, hide_index=True)
+        else:
+            st.info("positions_snapshot.csv is empty.")
 
 
 def _positions_trace_snapshot(df: pd.DataFrame, label: str) -> None:
