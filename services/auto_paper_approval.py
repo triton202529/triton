@@ -637,3 +637,87 @@ def attempt_auto_paper_approval(
             "approved_visible": approved_after,
         },
     )
+
+
+def parse_approved_symbols(approved_req: Optional[Dict[str, Any]]) -> List[str]:
+    if not approved_req:
+        return []
+    raw = approved_req.get("symbol(s)") or approved_req.get("symbols") or ""
+    return _norm_symbols(str(raw).split(","))
+
+
+def approval_symbols_exact_match(
+    approved_req: Optional[Dict[str, Any]],
+    symbols: Sequence[str],
+) -> bool:
+    if not approved_req:
+        return False
+    return set(parse_approved_symbols(approved_req)) == set(_norm_symbols(symbols))
+
+
+def ensure_governance_approval_for_symbols(
+    symbols: Sequence[str],
+    *,
+    context: Optional[Dict[str, Any]] = None,
+    verbose: bool = False,
+    allow_auto_retry: bool = True,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Ensure governance approval exists for the exact final symbol set.
+    Optionally runs auto paper approval when enabled.
+    """
+    from services.execution_approval_workflow import find_approved_request
+
+    sym_list = _norm_symbols(symbols)
+    details: Dict[str, Any] = {
+        "symbols_requested": sym_list,
+        "approved_symbols": [],
+        "selection_approval_sync": False,
+    }
+    if not sym_list:
+        return False, "NO_SYMBOLS", details
+
+    ctx = _build_paper_approval_context(context)
+    approved = find_approved_request(
+        "",
+        "capital_deployment",
+        symbols=sym_list,
+        context=ctx,
+    )
+    if approval_symbols_exact_match(approved, sym_list):
+        details["approved_symbols"] = parse_approved_symbols(approved)
+        details["selection_approval_sync"] = True
+        details["governance_approval_present"] = True
+        details["approval_id"] = str((approved or {}).get("approval_id") or "")
+        return True, "OK", details
+
+    auto_enabled = (
+        allow_auto_retry and os.environ.get("TRITON_ENABLE_AUTO_PAPER_APPROVAL", "").strip() == "1"
+    )
+    details["auto_paper_approval_enabled"] = auto_enabled
+    if auto_enabled:
+        auto_ok, auto_reason, auto_details = attempt_auto_paper_approval(
+            sym_list,
+            context=ctx,
+            verbose=verbose,
+        )
+        details["auto_paper_approval"] = auto_details
+        approved = find_approved_request(
+            "",
+            "capital_deployment",
+            symbols=sym_list,
+            context=ctx,
+        )
+        if auto_ok and approval_symbols_exact_match(approved, sym_list):
+            details["approved_symbols"] = parse_approved_symbols(approved)
+            details["selection_approval_sync"] = True
+            details["governance_approval_present"] = True
+            details["approval_id"] = str((approved or {}).get("approval_id") or "")
+            return True, auto_reason, details
+        if not auto_ok:
+            return False, auto_reason, details
+
+    details["approved_symbols"] = parse_approved_symbols(approved)
+    if approved and not approval_symbols_exact_match(approved, sym_list):
+        return False, "FINAL_SELECTION_NOT_APPROVED", details
+    return False, "GOVERNANCE_APPROVAL_REQUIRED", details

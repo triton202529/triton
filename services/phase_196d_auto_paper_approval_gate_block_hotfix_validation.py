@@ -379,25 +379,32 @@ def run_phase_196d_validation(*, verbose: bool = True) -> Dict[str, Any]:
                                             ),
                                         ):
                                             with patch(
-                                                "services.execution_approval_workflow.find_approved_request",
-                                                side_effect=[None, approved_record],
+                                                "services.paper_entry_loop_stage._preview_final_planned_symbols",
+                                                return_value=(
+                                                    ["BAC"],
+                                                    {"preview": True},
+                                                ),
                                             ):
                                                 with patch(
-                                                    "services.auto_paper_approval.attempt_auto_paper_approval",
+                                                    "services.auto_paper_approval.ensure_governance_approval_for_symbols",
                                                     return_value=(
                                                         True,
-                                                        "CREATED",
+                                                        "OK",
                                                         {
-                                                            "governance_approval_present_after_auto": True,
-                                                            "gate": {
-                                                                "downstream_gate_name": "execution_gate:capital_deployment",
-                                                                "downstream_gate_status": "ALLOW",
-                                                                "downstream_gate_reason": "ok",
-                                                                "approval_request_created": True,
-                                                            },
-                                                            "audit": {
-                                                                "request_id": "eg-apr-test196d0001",
-                                                                "downstream_gate_status": "ALLOW",
+                                                            "approved_symbols": ["BAC"],
+                                                            "selection_approval_sync": True,
+                                                            "governance_approval_present": True,
+                                                            "approval_id": "eg-apr-test196d0001",
+                                                            "auto_paper_approval": {
+                                                                "gate": {
+                                                                    "downstream_gate_name": "execution_gate:capital_deployment",
+                                                                    "downstream_gate_status": "ALLOW",
+                                                                    "approval_request_created": True,
+                                                                },
+                                                                "audit": {
+                                                                    "request_id": "eg-apr-test196d0001",
+                                                                    "downstream_gate_status": "ALLOW",
+                                                                },
                                                             },
                                                         },
                                                     ),
@@ -408,13 +415,14 @@ def run_phase_196d_validation(*, verbose: bool = True) -> Dict[str, Any]:
     checks["paper_entry_stage_rechecks_approval"] = (
         gate_ok
         and gate_reason == "OK"
-        and gate_det.get("checks", {}).get("governance_approval_present_after_auto") is True
+        and gate_det.get("checks", {}).get("final_selected_symbols") == ["BAC"]
     )
     checks["paper_entry_audit_has_downstream_fields"] = bool(
-        gate_det.get("downstream_gate_name") and gate_det.get("approval_request_id")
+        gate_det.get("approval_request_id")
+        and gate_det.get("checks", {}).get("selection_approval_sync")
     )
 
-    # AUTO_APPROVAL_NOT_VISIBLE_TO_EXECUTION_GATE
+    # governance sync failure when planner-final approval missing
     with patch.dict(
         os.environ,
         {
@@ -454,17 +462,17 @@ def run_phase_196d_validation(*, verbose: bool = True) -> Dict[str, Any]:
                                             ),
                                         ):
                                             with patch(
-                                                "services.execution_approval_workflow.find_approved_request",
-                                                return_value=None,
+                                                "services.paper_entry_loop_stage._preview_final_planned_symbols",
+                                                return_value=(["BAC"], {"preview": True}),
                                             ):
                                                 with patch(
-                                                    "services.auto_paper_approval.attempt_auto_paper_approval",
+                                                    "services.auto_paper_approval.ensure_governance_approval_for_symbols",
                                                     return_value=(
-                                                        True,
-                                                        "CREATED",
+                                                        False,
+                                                        "GOVERNANCE_APPROVAL_REQUIRED",
                                                         {
-                                                            "governance_approval_present_after_auto": False,
-                                                            "audit": {"request_id": "eg-apr-x"},
+                                                            "governance_approval_present": False,
+                                                            "selection_approval_sync": False,
                                                         },
                                                     ),
                                                 ):
@@ -472,7 +480,7 @@ def run_phase_196d_validation(*, verbose: bool = True) -> Dict[str, Any]:
                                                         evaluate_paper_entry_gates(verbose=False)
                                                     )
     checks["not_visible_to_gate_fails_safely"] = (
-        not vis_ok and vis_reason == "AUTO_APPROVAL_NOT_VISIBLE_TO_EXECUTION_GATE"
+        not vis_ok and vis_reason == "GOVERNANCE_APPROVAL_REQUIRED"
     )
 
     # live execution remains blocked in repo

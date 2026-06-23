@@ -4042,6 +4042,141 @@ def maybe_execute_plan(
         return 1, 0, [str(e)]
 
 
+def preview_planned_buy_symbols(
+    mode: str = "paper",
+    *,
+    verbose: bool = False,
+    for_execute: bool = True,
+    opportunities_path: Optional[Path] = None,
+) -> Tuple[List[str], Dict[str, Any]]:
+    """
+    Planner-only preview of final BUY symbols after sector-cap / diversification filtering.
+
+    Mirrors execute_trades planning through precap (and order discipline when for_execute=True)
+    without writing plans or submitting orders.
+    """
+    meta: Dict[str, Any] = {"mode": mode, "for_execute": for_execute, "preview": True}
+    cfg = load_execute_trades_config()
+    op_path = opportunities_path or DEFAULT_OPPS
+
+    _lg = evaluate_lifecycle_gate(path=RESULTS / "signal_lifecycle_effective.csv")
+    meta["lifecycle_status"] = _lg.status
+    if _lg.status == "BLOCKED":
+        meta["lifecycle_blocked"] = True
+        meta["lifecycle_reason"] = _lg.reason
+        return [], meta
+
+    df = load_trade_opportunities(op_path)
+    if df.empty:
+        meta["empty_opportunities"] = True
+        return [], meta
+
+    positions, acct, broker = load_broker_state(mode)
+    session_tag = f"preview_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+
+    (
+        planned,
+        plan_lines,
+        skip_reasons,
+        warnings,
+        sector_summary,
+        div_summary,
+        quality_summary,
+        score_sizing_summary,
+        add_position_miss_symbols,
+        _capital_engine_summary,
+        planner_core_meta,
+    ) = build_execution_plan(df, cfg, positions, acct, broker, mode, verbose=verbose)
+
+    planned, plan_lines, skip_reasons, in_flight_meta = apply_in_flight_prefilter(
+        planned,
+        plan_lines,
+        skip_reasons,
+        broker,
+        positions=positions,
+        verbose=verbose,
+        session=session_tag,
+    )
+
+    entry_eq_stats: Dict[str, int] = {"delayed_penalized": 0, "delayed_entry_skipped": 0}
+    try:
+        from services.execution_quality import (
+            apply_execution_quality_filters,
+            load_execution_quality_config,
+        )
+
+        _eq = load_execution_quality_config()
+        for _ek in (
+            "min_final_score_threshold",
+            "delayed_entry_soft_penalty_enabled",
+            "delayed_entry_penalty_factor",
+        ):
+            if _ek in cfg:
+                _eq[_ek] = cfg[_ek]
+        if _eq.get("enabled", True):
+            planned, plan_lines, skip_reasons, entry_eq_stats = apply_execution_quality_filters(
+                planned, plan_lines, skip_reasons, broker=broker, eq_cfg=_eq
+            )
+    except Exception:
+        pass
+
+    if for_execute and planned:
+        try:
+            from services.order_discipline import apply_discipline_to_planned_generic
+
+            planned, _disc_meta = apply_discipline_to_planned_generic(
+                planned,
+                session=session_tag,
+                source_module="execute_trades_preview",
+                mode=mode,
+                context=None,
+            )
+            meta["order_discipline"] = _disc_meta
+        except Exception:
+            pass
+
+    apply_orders_sized_qty_overlay(planned, path=ORDERS_SIZED_CSV)
+    apply_edge_sizing_overlay(
+        planned,
+        plan_lines,
+        skip_reasons,
+        path=EDGE_SIZING_RECOMMENDATIONS_CSV,
+    )
+    apply_entry_guard_max_notional_precap(
+        planned,
+        plan_lines,
+        broker,
+        skip_reasons,
+        enabled=bool(cfg.get("entry_guard_precap_buys", True)),
+    )
+
+    symbols = sorted(
+        {
+            str(p.symbol).strip().upper()
+            for p in planned
+            if str(p.side or "").lower() == "buy" and str(p.symbol or "").strip()
+        }
+    )
+
+    meta.update(
+        {
+            "symbols": symbols,
+            "planned_count": len(planned),
+            "skip_reasons": dict(skip_reasons),
+            "sector_summary": {
+                "enabled": sector_summary.get("enabled"),
+                "blocked_total": sector_summary.get("blocked_total"),
+            },
+            "diversification_enabled": div_summary.get("enabled"),
+            "planner_intake_rows": planner_core_meta.get("intake_rows"),
+            "planner_ranked_rows": planner_core_meta.get("ranked_rows"),
+            "in_flight_symbols": list(in_flight_meta.get("symbols") or []),
+            "warnings": warnings,
+        }
+    )
+    return symbols, meta
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description="TRITON execute_trades — plan from trade_opportunities.csv"

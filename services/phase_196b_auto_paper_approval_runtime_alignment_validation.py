@@ -254,16 +254,34 @@ def run_phase_196b_validation(*, verbose: bool = True) -> Dict[str, Any]:
                                             ),
                                         ):
                                             with patch(
-                                                "services.execution_approval_workflow.find_approved_request",
-                                                return_value=approved_record,
+                                                "services.paper_entry_loop_stage._preview_final_planned_symbols",
+                                                return_value=(
+                                                    ["AAPL"],
+                                                    {"preview": True},
+                                                ),
                                             ):
-                                                from services.paper_entry_loop_stage import (
-                                                    evaluate_paper_entry_gates,
-                                                )
+                                                with patch(
+                                                    "services.auto_paper_approval.ensure_governance_approval_for_symbols",
+                                                    return_value=(
+                                                        True,
+                                                        "OK",
+                                                        {
+                                                            "approved_symbols": ["AAPL"],
+                                                            "selection_approval_sync": True,
+                                                            "governance_approval_present": True,
+                                                            "approval_id": approved_record.get(
+                                                                "approval_id"
+                                                            ),
+                                                        },
+                                                    ),
+                                                ):
+                                                    from services.paper_entry_loop_stage import (
+                                                        evaluate_paper_entry_gates,
+                                                    )
 
-                                                gate_ok, gate_reason, _ = (
-                                                    evaluate_paper_entry_gates(verbose=False)
-                                                )
+                                                    gate_ok, gate_reason, _ = (
+                                                        evaluate_paper_entry_gates(verbose=False)
+                                                    )
     checks["paper_entry_stage_consumes_approval"] = gate_ok and gate_reason == "OK"
 
     # 11. Healthy lock classification

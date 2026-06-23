@@ -249,6 +249,92 @@ def _load_entry_candidates() -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
     return candidates, df
 
 
+def _risk_blocked_in_selection(symbols: List[str]) -> List[str]:
+    from services.auto_paper_approval import _load_risk_flags
+
+    flags = _load_risk_flags()
+    blocked: List[str] = []
+    for sym in (_norm(s) for s in symbols):
+        if not sym:
+            continue
+        flag = flags.get(sym, "OK")
+        risk_set = {p for p in (_norm(x) for x in str(flag).split("|")) if p and p != "OK"}
+        if "BLOCK_NEW_BUY" in risk_set or "FORCE_EXIT" in risk_set:
+            blocked.append(sym)
+    return blocked
+
+
+def _preview_final_planned_symbols(*, verbose: bool = False) -> Tuple[List[str], Dict[str, Any]]:
+    from services.execute_trades import preview_planned_buy_symbols
+
+    return preview_planned_buy_symbols("paper", verbose=verbose, for_execute=True)
+
+
+def _verify_final_selection_before_execute(
+    expected_symbols: List[str],
+    *,
+    verbose: bool = False,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """Re-preview planner output and ensure governance approval matches exactly."""
+    from services.auto_paper_approval import (
+        _build_paper_approval_context,
+        ensure_governance_approval_for_symbols,
+        parse_approved_symbols,
+    )
+    from services.execution_approval_workflow import find_approved_request
+
+    sync_details: Dict[str, Any] = {
+        "expected_symbols": sorted({_norm(s) for s in expected_symbols if s}),
+    }
+    final_symbols, preview_meta = _preview_final_planned_symbols(verbose=verbose)
+    sync_details["planner_preview"] = preview_meta
+    sync_details["final_selected_symbols"] = final_symbols
+
+    blocked = _risk_blocked_in_selection(final_symbols)
+    if blocked:
+        sync_details["risk_blocked_in_final_selection"] = blocked
+        return False, f"FINAL_SELECTION_RISK_OVERLAY_BLOCK:{','.join(blocked)}", sync_details
+
+    expected_set = set(sync_details["expected_symbols"])
+    final_set = set(final_symbols)
+    if expected_set != final_set:
+        sync_details["selection_drift"] = {
+            "expected": sorted(expected_set),
+            "final": sorted(final_set),
+        }
+
+    gov_ctx = _build_paper_approval_context({"paperMode": True, "liveMode": False})
+    approved = find_approved_request(
+        "",
+        "capital_deployment",
+        symbols=final_symbols,
+        context=gov_ctx,
+    )
+    sync_details["approved_symbols"] = parse_approved_symbols(approved)
+
+    from services.auto_paper_approval import approval_symbols_exact_match
+
+    if approval_symbols_exact_match(approved, final_symbols):
+        sync_details["selection_approval_sync"] = True
+        return True, "OK", sync_details
+
+    ok, reason, gov_details = ensure_governance_approval_for_symbols(
+        final_symbols,
+        context=gov_ctx,
+        verbose=verbose,
+        allow_auto_retry=True,
+    )
+    sync_details["governance_sync"] = gov_details
+    if ok:
+        sync_details["selection_approval_sync"] = True
+        sync_details["approved_symbols"] = gov_details.get("approved_symbols") or final_symbols
+        return True, "OK", sync_details
+
+    if final_set != expected_set:
+        return False, "FINAL_SELECTION_NOT_APPROVED", sync_details
+    return False, reason or "FINAL_SELECTION_NOT_APPROVED", sync_details
+
+
 def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dict[str, Any]]:
     details: Dict[str, Any] = {"checks": {}, "candidates": []}
 
@@ -351,74 +437,92 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
         )
 
     try:
-        from services.auto_paper_approval import _build_paper_approval_context
-        from services.execution_approval_workflow import find_approved_request
+        final_symbols, preview_meta = _preview_final_planned_symbols(verbose=verbose)
+        details["planner_preview"] = preview_meta
+        details["checks"]["eligible_entry_symbols"] = [
+            c["ticker"] for c in eligible if c.get("ticker")
+        ]
+        details["checks"]["final_selected_symbols"] = final_symbols
 
-        symbols = [c["ticker"] for c in eligible if c.get("ticker")]
-        gov_ctx = _build_paper_approval_context({"paperMode": True, "liveMode": False})
-        approved = find_approved_request(
-            "",
-            "capital_deployment",
-            symbols=symbols,
-            context=gov_ctx,
-        )
-        details["checks"]["governance_approval_present"] = approved is not None
-        details["checks"]["symbols_requested"] = symbols
-        if not approved:
-            auto_enabled = os.environ.get("TRITON_ENABLE_AUTO_PAPER_APPROVAL", "").strip() == "1"
-            details["checks"]["auto_paper_approval_enabled"] = auto_enabled
-            if auto_enabled:
-                from services.auto_paper_approval import attempt_auto_paper_approval
+        blocked_risk = _risk_blocked_in_selection(final_symbols)
+        if blocked_risk:
+            details["checks"]["risk_blocked_in_final_selection"] = blocked_risk
+            return block(
+                f"FINAL_SELECTION_RISK_OVERLAY_BLOCK:{','.join(blocked_risk)}",
+                "final_selection",
+            )
 
-                auto_ok, auto_reason, auto_details = attempt_auto_paper_approval(
-                    symbols,
-                    context=gov_ctx,
-                    verbose=verbose,
+        if not final_symbols:
+            if preview_meta.get("lifecycle_blocked"):
+                return block(
+                    f"planner lifecycle blocked: {preview_meta.get('lifecycle_reason', '')}",
+                    "planner_preview",
+                    safe=True,
                 )
-                details["auto_paper_approval"] = auto_details
-                gate = auto_details.get("gate") or {}
-                details["downstream_gate_name"] = gate.get("downstream_gate_name")
-                details["downstream_gate_status"] = gate.get("downstream_gate_status")
-                details["downstream_gate_reason"] = gate.get("downstream_gate_reason")
-                details["downstream_block_reasons"] = gate.get("downstream_block_reasons")
-                details["approval_request_created"] = gate.get("approval_request_created")
+            return block(
+                "NO_FINAL_PLANNED_ENTRIES after planner filtering",
+                "final_selection",
+                safe=True,
+            )
+
+        from services.auto_paper_approval import ensure_governance_approval_for_symbols
+
+        gov_ok, gov_reason, gov_details = ensure_governance_approval_for_symbols(
+            final_symbols,
+            context={"paperMode": True, "liveMode": False},
+            verbose=verbose,
+            allow_auto_retry=True,
+        )
+        details["governance_approval"] = gov_details
+        details["checks"]["governance_approval_present"] = bool(
+            gov_details.get("governance_approval_present")
+        )
+        details["checks"]["governance_approval_present_after_auto"] = bool(
+            gov_details.get("governance_approval_present")
+        )
+        details["checks"]["symbols_requested"] = final_symbols
+        details["checks"]["approved_symbols"] = gov_details.get("approved_symbols") or []
+        details["checks"]["selection_approval_sync"] = bool(
+            gov_details.get("selection_approval_sync")
+        )
+        details["approval_request_id"] = gov_details.get("approval_id") or ""
+        if gov_details.get("auto_paper_approval"):
+            auto_details = gov_details["auto_paper_approval"]
+            details["auto_paper_approval"] = auto_details
+            gate = auto_details.get("gate") or {}
+            details["downstream_gate_name"] = gate.get("downstream_gate_name")
+            details["downstream_gate_status"] = gate.get("downstream_gate_status")
+            details["downstream_gate_reason"] = gate.get("downstream_gate_reason")
+            details["downstream_block_reasons"] = gate.get("downstream_block_reasons")
+            details["approval_request_created"] = gate.get("approval_request_created")
+            if not details["approval_request_id"]:
                 details["approval_request_id"] = (
                     (auto_details.get("audit") or {}).get("request_id")
                     or (auto_details.get("approved") or {}).get("approval_id")
                     or ""
                 )
-                details["approval_request_match_status"] = auto_details.get(
-                    "approval_request_match_status"
-                ) or gate.get("approval_request_match_status")
-                details["approval_registry_path"] = str(
-                    ROOT / "data" / "governance" / "execution_approval_requests.json"
-                )
-                details["symbols_approved"] = symbols if auto_ok else []
+            details["approval_request_match_status"] = auto_details.get(
+                "approval_request_match_status"
+            ) or gate.get("approval_request_match_status")
+        details["approval_registry_path"] = str(
+            ROOT / "data" / "governance" / "execution_approval_requests.json"
+        )
+        details["symbols_approved"] = gov_details.get("approved_symbols") or []
 
-                approved = find_approved_request(
-                    "",
-                    "capital_deployment",
-                    symbols=symbols,
-                    context=gov_ctx,
+        if not gov_ok:
+            if gov_reason == "FINAL_SELECTION_NOT_APPROVED":
+                return block("FINAL_SELECTION_NOT_APPROVED", "final_selection")
+            if gov_details.get("auto_paper_approval") and not gov_details.get(
+                "governance_approval_present"
+            ):
+                return block(
+                    "AUTO_APPROVAL_NOT_VISIBLE_TO_EXECUTION_GATE",
+                    "governance_approval",
                 )
-                gov_after = approved is not None
-                details["checks"]["governance_approval_present_after_auto"] = gov_after
-                details["checks"]["governance_approval_present"] = gov_after
-                if auto_ok and not gov_after:
-                    return block(
-                        "AUTO_APPROVAL_NOT_VISIBLE_TO_EXECUTION_GATE",
-                        "governance_approval",
-                    )
-                if not auto_ok or not approved:
-                    return block(
-                        auto_reason if not auto_ok else "GOVERNANCE_APPROVAL_REQUIRED",
-                        "governance_approval",
-                    )
-            else:
-                return block("GOVERNANCE_APPROVAL_REQUIRED", "governance_approval")
-        else:
-            details["checks"]["governance_approval_present_after_auto"] = True
-            details["checks"]["symbols_approved"] = symbols
+            return block(
+                gov_reason if gov_reason else "GOVERNANCE_APPROVAL_REQUIRED",
+                "governance_approval",
+            )
     except Exception as e:
         return block(f"governance approval check error: {e}", "governance_approval")
 
@@ -428,7 +532,8 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
 
     if verbose:
         print(
-            f"[PAPER_ENTRY_GATE] status=PASS reason=OK eligible_entries={len(eligible)}",
+            f"[PAPER_ENTRY_GATE] status=PASS reason=OK "
+            f"final_selected={details['checks'].get('final_selected_symbols')}",
             flush=True,
         )
     details["failed_check"] = None
@@ -472,6 +577,21 @@ def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> in
 
     if _EXECUTE_INVOKED:
         print("[PAPER_ENTRY_EXECUTION_BLOCKED] reason=already_invoked_this_process", flush=True)
+        return 0
+
+    expected = list(details.get("checks", {}).get("final_selected_symbols") or [])
+    sync_ok, sync_reason, sync_details = _verify_final_selection_before_execute(
+        expected,
+        verbose=verbose,
+    )
+    details["pre_execute_selection_sync"] = sync_details
+    audit["details"] = details
+    if not sync_ok:
+        print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={sync_reason}", flush=True)
+        audit["gate_pass"] = False
+        audit["gate_reason"] = sync_reason
+        audit["executed"] = False
+        _atomic_write_json(AUDIT_JSON, audit)
         return 0
 
     _EXECUTE_INVOKED = True
