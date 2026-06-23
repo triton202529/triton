@@ -2255,39 +2255,106 @@ def _certification_badge_label(certification_status: str) -> str:
 def render_sidebar_execution_status(
     posture: DashboardExecutionPosture, pipeline_locked: bool, pipeline_reason: str
 ) -> None:
-    """Sidebar truth labels: paper authorization vs live lock vs full execution lock."""
-    if posture.paper_operational:
-        st.success("✅ PAPER RUNTIME: ACTIVE")
-        st.caption("Live Runtime: BLOCKED")
-        market_lbl = "OPEN" if posture.market_open else "SAFE_BLOCK"
-        st.caption(
-            f"Market: {market_lbl} · Approval: {posture.approval_status_label} · "
-            f"Readiness: {posture.readiness_status}"
-        )
-        cert_badge = _certification_badge_label(posture.certification_status)
-        st.markdown(
-            f"🏷 **LIVE BLOCKED** · **PAPER ACTIVE** · **{posture.readiness_status}** · **{cert_badge}**"
-        )
-        c1, c2 = st.columns(2)
-        c1.caption(f"Watchdog: {'ON' if posture.watchdog_process_running else 'OFF'}")
-        c2.caption(f"Loop: {'ON' if posture.continuous_process_running else 'OFF'}")
-        st.caption(
-            f"Locks: WD={posture.watchdog_lock_classification} · "
-            f"CL={posture.continuous_lock_classification}"
-        )
-        if pipeline_locked:
-            st.warning(f"Data integrity caution: {pipeline_reason}")
-        return
+    """Sidebar truth labels — never collapse stale/blocked state into 'Execution enabled'."""
+    from services.dashboard_status_sync import build_dashboard_guard_summary
 
-    if posture.full_execution_locked:
-        st.error("🛑 EXECUTION LOCKED")
-        if posture.lock_reasons:
-            st.caption(" · ".join(posture.lock_reasons))
-        if pipeline_locked:
-            st.caption(pipeline_reason)
-        return
+    live_ready = False
+    gate_bits: Dict[str, bool] = {}
+    try:
+        live_ready, gates = compute_live_gates(
+            project_root=PROJECT_ROOT,
+            confirm_ttl_minutes=10,
+            freshness_max_age_minutes=180,
+            require_market_open=True,
+            broker=None,
+        )
+        gate_bits = {str(g.get("name")): bool(g.get("ok")) for g in gates}
+    except Exception:
+        pass
 
-    st.success("✅ Execution enabled")
+    summary = build_dashboard_guard_summary(
+        pipeline_locked=pipeline_locked,
+        pipeline_lock_reason=pipeline_reason,
+        live_ready=live_ready,
+        live_gate_bits=gate_bits,
+        posture=posture,
+    )
+    label = str(summary.get("sidebar_label") or "LIVE BLOCKED · PAPER ONLY")
+    level = str(summary.get("sidebar_level") or "info")
+
+    if level == "success":
+        st.success(f"✅ {label}")
+    elif level == "warning":
+        st.warning(f"⚠️ {label}")
+    elif level == "error":
+        st.error(f"🛑 {label}")
+    else:
+        st.info(f"ℹ️ {label}")
+
+    st.caption("Live mode: **BLOCKED** (paper-only runtime)")
+    st.caption(
+        f"Paper authorization: **{'YES' if posture.paper_execution_permitted else 'NO'}** · "
+        f"Readiness: **{posture.readiness_status}** · "
+        f"Approval: **{posture.approval_status_label}**"
+    )
+    st.caption(
+        f"Data freshness: **{summary.get('data_freshness', 'UNKNOWN')}** · "
+        f"Execution gate: **{summary.get('execution_gate', 'UNKNOWN')}**"
+    )
+    blocked = summary.get("execution_blocked_reasons") or []
+    if blocked:
+        st.caption("Blocked by: " + ", ".join(str(x) for x in blocked[:6]))
+
+    c1, c2 = st.columns(2)
+    c1.caption(f"Watchdog: {summary.get('watchdog', 'UNKNOWN')}")
+    c2.caption(f"Continuous loop: {summary.get('continuous_loop', 'UNKNOWN')}")
+    st.caption(
+        f"Locks: WD={posture.watchdog_lock_classification} · "
+        f"CL={posture.continuous_lock_classification}"
+    )
+    if pipeline_locked:
+        st.caption(f"Pipeline integrity lock: {pipeline_reason}")
+
+
+def render_dashboard_guard_summary(
+    *,
+    pipeline_locked: bool,
+    pipeline_reason: str,
+    live_ready: bool,
+    gate_bits: Dict[str, bool],
+    posture: DashboardExecutionPosture,
+) -> None:
+    """Compact guard summary — separates runtime, freshness, and execution gate."""
+    from services.dashboard_status_sync import build_dashboard_guard_summary
+
+    summary = build_dashboard_guard_summary(
+        pipeline_locked=pipeline_locked,
+        pipeline_lock_reason=pipeline_reason,
+        live_ready=live_ready,
+        live_gate_bits=gate_bits,
+        posture=posture,
+    )
+    ph_age = summary.get("pipeline_heartbeat_age_minutes")
+    rt_age = summary.get("runtime_heartbeat_age_minutes")
+    ph_age_s = "—" if ph_age is None else f"{float(ph_age):.0f}m"
+    rt_age_s = "—" if rt_age is None else f"{float(rt_age):.0f}m"
+
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+    c1.metric("Data freshness", str(summary.get("data_freshness") or "UNKNOWN"))
+    c2.metric("Pipeline HB age", ph_age_s)
+    c3.metric("Watchdog", str(summary.get("watchdog") or "UNKNOWN"))
+    c4.metric("Continuous loop", str(summary.get("continuous_loop") or "UNKNOWN"))
+    c5.metric("Execution gate", str(summary.get("execution_gate") or "UNKNOWN"))
+    c6.metric("Paper mode", str(summary.get("paper_mode") or "UNKNOWN"))
+    c7.metric("Live mode", "BLOCKED")
+    c8.metric("Open orders", int(summary.get("open_orders") or 0))
+
+    st.caption(
+        f"Runtime watchdog HB age: **{rt_age_s}** · "
+        f"Positions: **{int(summary.get('positions_count') or 0)}** · "
+        f"Pipeline HB source: `{summary.get('pipeline_heartbeat_source_path', '')}` · "
+        f"Runtime HB source: `{summary.get('runtime_heartbeat', {}).get('path', '')}`"
+    )
 
 
 # ──────────────────────────────
@@ -2365,31 +2432,49 @@ def _read_pipeline_heartbeat_file() -> Optional[Dict[str, Any]]:
 
 def render_heartbeat_freshness_banner() -> None:
     """
-    Hard freshness banner from heartbeat.json only (60-minute threshold).
-    Visible on every page via main() before the top status stack.
+    Pipeline vs runtime heartbeat banners (60-minute pipeline threshold).
+    Does not suppress stale warnings when pipeline heartbeat is truly old.
     """
-    hb = _read_pipeline_heartbeat_file()
-    if hb is None:
-        st.warning("⚠ No heartbeat found. Freshness unknown.")
-        return
+    from services.dashboard_status_sync import load_pipeline_heartbeat, load_runtime_heartbeat
 
-    ts_raw = hb.get("timestamp") or hb.get("ts") or hb.get("updated_at") or hb.get("time")
-    ts = parse_any_datetime(ts_raw)
-    stage = str(hb.get("stage") or hb.get("step") or hb.get("pipeline_stage") or "").strip() or "—"
-    status = str(hb.get("status") or "").strip() or "—"
+    pipeline = load_pipeline_heartbeat()
+    runtime = load_runtime_heartbeat()
 
-    if ts is None:
-        st.warning("⚠ Heartbeat file exists but no usable timestamp. Freshness unknown.")
-        return
+    ph_ts = pipeline.get("timestamp")
+    ph_age = pipeline.get("age_minutes")
+    if ph_ts is None:
+        st.warning("⚠ No pipeline heartbeat found (`heartbeat.json`). Pipeline freshness unknown.")
+    else:
+        ph_disp = dt_to_et_str(ph_ts)
+        stage = str(pipeline.get("stage") or "—")
+        status = str(pipeline.get("status") or "—")
+        if ph_age is not None and float(ph_age) > 60:
+            st.error(
+                f"⚠ Pipeline data may be stale. Last **pipeline** heartbeat is "
+                f"**{float(ph_age):.0f} minutes** old (source: `heartbeat.json`)."
+            )
+        else:
+            st.caption(
+                f"Pipeline heartbeat · **{ph_disp}** · stage **{stage}** · status **{status}**"
+            )
 
-    now = datetime.now(timezone.utc)
-    age_minutes = (now - ts).total_seconds() / 60.0
-    if age_minutes > 60 or not np.isfinite(age_minutes):
-        st.error("⚠ Data may be stale. Last pipeline heartbeat is older than 60 minutes.")
-        return
-
-    ts_disp = dt_to_et_str(ts)
-    st.caption(f"Pipeline heartbeat · **{ts_disp}** · stage **{stage}** · status **{status}**")
+    rt_ts = runtime.get("timestamp")
+    rt_age = runtime.get("age_minutes")
+    if rt_ts is None:
+        st.warning("⚠ Runtime watchdog heartbeat unknown (`watchdog_status.json`).")
+    else:
+        rt_disp = dt_to_et_str(rt_ts)
+        src = str(runtime.get("refresh_source") or "watchdog")
+        if rt_age is not None and float(rt_age) > 60:
+            st.warning(
+                f"Runtime watchdog heartbeat is **{float(rt_age):.0f} minutes** old "
+                f"(source: watchdog_status.json)."
+            )
+        else:
+            st.caption(
+                f"Runtime watchdog heartbeat · **{rt_disp}** · source **{src}** · "
+                f"status **{runtime.get('status') or '—'}**"
+            )
 
 
 def render_top_status_stack() -> None:
@@ -2450,7 +2535,7 @@ def render_top_status_stack() -> None:
     locked, reason = compute_execution_lock()
     posture = load_dashboard_execution_posture()
 
-    if posture.paper_operational:
+    if posture.paper_operational and not locked and css_class not in ("stale", "unknown"):
         exec_class = "paper"
         exec_title = "PAPER RUNTIME: ACTIVE"
         cert_badge = _certification_badge_label(posture.certification_status)
@@ -2459,8 +2544,14 @@ def render_top_status_stack() -> None:
             f"LIVE BLOCKED · Market {market_lbl} · Approval {posture.approval_status_label} · "
             f"{cert_badge}"
         )
+    elif posture.paper_operational:
+        exec_class = "locked"
+        exec_title = "PAPER RUNTIME: ACTIVE · EXECUTION BLOCKED"
+        exec_detail = f"{label} · LIVE BLOCKED · Approval {posture.approval_status_label}"
         if locked:
-            exec_detail += f" · Data caution: {reason.replace('Execution locked: ', '')}"
+            exec_detail += f" · {reason.replace('Execution locked: ', '')}"
+        if bad_bits:
+            exec_detail += " · Blocked: " + ", ".join(bad_bits)
     elif posture.full_execution_locked:
         exec_class = "locked"
         exec_title = "EXECUTION LOCKED"
@@ -2470,6 +2561,20 @@ def render_top_status_stack() -> None:
         exec_detail = auth_bits
         if locked:
             exec_detail += f" | {reason}"
+    elif posture.paper_execution_permitted and not posture.live_execution_permitted:
+        exec_class = "locked" if (locked or not live_ready or label == "DATA STALE") else "paper"
+        if locked or not live_ready:
+            exec_title = "PAPER AUTHORIZED · EXECUTION BLOCKED"
+            gate_summary = "Blocked: " + ", ".join(bad_bits) if bad_bits else reason
+            exec_detail = gate_summary
+            if locked:
+                exec_detail += f" | EXEC_LOCK: {reason}"
+        else:
+            exec_title = "PAPER RUNTIME: ACTIVE"
+            exec_detail = (
+                f"LIVE BLOCKED · Market {'OPEN' if posture.market_open else 'SAFE_BLOCK'} · "
+                f"Approval {posture.approval_status_label}"
+            )
     else:
         exec_class = "enabled" if live_ready else "locked"
         exec_title = "LIVE READY" if live_ready else "LIVE NOT READY"
@@ -24034,6 +24139,23 @@ def main() -> None:
     section, page = sidebar_controls()
     render_heartbeat_freshness_banner()
     render_top_status_stack()
+    pipeline_locked, pipeline_reason = compute_execution_lock()
+    posture = load_dashboard_execution_posture()
+    live_ready, gates = compute_live_gates(
+        project_root=PROJECT_ROOT,
+        confirm_ttl_minutes=10,
+        freshness_max_age_minutes=180,
+        require_market_open=True,
+        broker=None,
+    )
+    gate_bits = {str(g.get("name")): bool(g.get("ok")) for g in gates}
+    render_dashboard_guard_summary(
+        pipeline_locked=pipeline_locked,
+        pipeline_reason=pipeline_reason,
+        live_ready=live_ready,
+        gate_bits=gate_bits,
+        posture=posture,
+    )
     render_global_header()
 
     fn = PAGE_REGISTRY.get((section, page))
