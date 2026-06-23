@@ -25,9 +25,23 @@ WATCHDOG_STATUS_PATH = RESULTS / "watchdog_status.json"
 GUARD_SNAPSHOT_RESULTS_PATH = RESULTS / "guard_snapshot.json"
 OPEN_ORDERS_SNAPSHOT_PATH = RESULTS / "open_orders_snapshot.csv"
 POSITIONS_SNAPSHOT_PATH = RESULTS / "positions_snapshot.csv"
+PORTFOLIO_HISTORY_PATH = RESULTS / "portfolio_history.csv"
 EXECUTION_READINESS_PATH = RESULTS / "execution_readiness.json"
+CERTIFICATION_PATH = RESULTS / "capital_preservation_certification.json"
 CONTINUOUS_LOCK_PATH = LIVE / "continuous_loop.lock"
 WATCHDOG_LOCK_PATH = LIVE / "watchdog_loop.lock"
+
+PAPER_CERTIFICATION_STATUSES = frozenset(
+    {
+        "CERTIFIED_FOR_PAPER_PROTECTION",
+        "CONDITIONALLY_CERTIFIED",
+        "PARTIALLY_CERTIFIED",
+    }
+)
+
+RUNTIME_PIPELINE_FAIL_MINUTES = 360.0
+RUNTIME_PIPELINE_DEGRADED_MINUTES = 90.0
+BROKER_SNAPSHOT_FRESH_MINUTES = 120.0
 
 
 def _utc_now() -> datetime:
@@ -162,20 +176,286 @@ def classify_data_freshness(
     *,
     stale_threshold_min: float = 90.0,
     aging_threshold_min: float = 15.0,
+    market_open: bool = True,
 ) -> str:
     if pipeline_age_min is None or pipeline_age_min != pipeline_age_min:
-        return "UNKNOWN"
+        return "STALE"
     if pipeline_age_min > stale_threshold_min:
         return "STALE"
     if pipeline_age_min > aging_threshold_min:
-        return "AGING"
+        return "AGING_AFTER_CLOSE" if not market_open else "FRESH"
     return "FRESH"
+
+
+def _broker_snapshots_ok() -> bool:
+    now = _utc_now()
+    for path in (POSITIONS_SNAPSHOT_PATH, OPEN_ORDERS_SNAPSHOT_PATH):
+        if not path.is_file() or path.stat().st_size == 0:
+            return False
+        try:
+            age = (
+                now - datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            ).total_seconds() / 60.0
+            if age > BROKER_SNAPSHOT_FRESH_MINUTES:
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _portfolio_history_ok() -> bool:
+    if not PORTFOLIO_HISTORY_PATH.is_file() or PORTFOLIO_HISTORY_PATH.stat().st_size == 0:
+        return False
+    try:
+        age = (
+            _utc_now()
+            - datetime.fromtimestamp(PORTFOLIO_HISTORY_PATH.stat().st_mtime, tz=timezone.utc)
+        ).total_seconds() / 60.0
+        return age <= RUNTIME_PIPELINE_DEGRADED_MINUTES * 4
+    except Exception:
+        return False
+
+
+def _is_market_open() -> bool:
+    try:
+        from services.guard_auto import is_market_open_et
+
+        return bool(is_market_open_et(_utc_now()))
+    except Exception:
+        return False
+
+
+def classify_runtime_pipeline_health(
+    *,
+    pipeline_hb: Dict[str, Any],
+    runtime_hb: Dict[str, Any],
+    loops: Dict[str, Any],
+    market_open: bool,
+    broker_snapshots_ok: Optional[bool] = None,
+) -> str:
+    """Runtime/data pipeline health — independent of certification or execution gates."""
+    if broker_snapshots_ok is None:
+        broker_snapshots_ok = _broker_snapshots_ok()
+
+    ph_age = pipeline_hb.get("age_minutes")
+    rt_age = runtime_hb.get("age_minutes")
+
+    if not pipeline_hb.get("exists"):
+        return "FAIL"
+
+    if ph_age is None or float(ph_age) > RUNTIME_PIPELINE_FAIL_MINUTES:
+        return "FAIL"
+
+    if rt_age is not None and float(rt_age) > RUNTIME_PIPELINE_FAIL_MINUTES:
+        return "FAIL"
+
+    wd_alive = (
+        bool(loops.get("watchdog_process_running")) or loops.get("watchdog_lock_fresh") is True
+    )
+    cl_alive = (
+        bool(loops.get("continuous_process_running")) or loops.get("continuous_lock_fresh") is True
+    )
+    if not wd_alive and not cl_alive:
+        return "FAIL"
+
+    degraded = False
+    if ph_age is not None and float(ph_age) > RUNTIME_PIPELINE_DEGRADED_MINUTES:
+        degraded = True
+    if rt_age is not None and float(rt_age) > RUNTIME_PIPELINE_DEGRADED_MINUTES:
+        degraded = True
+    if not loops.get("watchdog_process_running"):
+        degraded = True
+    if not loops.get("continuous_process_running"):
+        degraded = True
+    if not broker_snapshots_ok:
+        degraded = True
+    if not _portfolio_history_ok():
+        degraded = True
+
+    hb_status = str(pipeline_hb.get("status") or "").lower()
+    if hb_status in ("fail", "failed", "error", "crash"):
+        return "FAIL"
+    if hb_status in ("warn", "warning", "degraded"):
+        degraded = True
+
+    if degraded:
+        return "DEGRADED"
+
+    if not market_open:
+        return "OFF_HOURS_HEALTHY"
+    return "HEALTHY"
+
+
+def _normalize_certification_status(raw: str) -> str:
+    status = str(raw or "").strip()
+    if status in PAPER_CERTIFICATION_STATUSES:
+        return "CERTIFIED"
+    if status == "NOT_CERTIFIED":
+        return "NOT_CERTIFIED"
+    if status:
+        return "REVIEW"
+    return "NOT_CERTIFIED"
+
+
+def derive_execution_block_reasons(
+    *,
+    market_open: bool,
+    gate_bits: Dict[str, bool],
+    certification_status: str,
+    runtime_pipeline_health: str,
+    data_freshness: str,
+    live_permitted: bool,
+) -> List[str]:
+    """Display-only execution block reasons — not conflated with artifact contract failures."""
+    reasons: List[str] = []
+    if not market_open:
+        reasons.append("MARKET_CLOSED")
+    if not gate_bits.get("CONFIRM", False):
+        reasons.append("CONFIRM_REQUIRED")
+    cert_norm = _normalize_certification_status(certification_status)
+    if cert_norm != "CERTIFIED":
+        reasons.append("NOT_CERTIFIED")
+    if not live_permitted:
+        pass  # live_blocked tracked separately; paper mode expects live blocked
+    if runtime_pipeline_health in ("DEGRADED", "FAIL"):
+        reasons.append("PIPELINE_HEALTH")
+    elif data_freshness == "STALE":
+        reasons.append("PIPELINE_HEALTH")
+    return reasons
+
+
+def build_top_guard_message(
+    *,
+    runtime_pipeline_health: str,
+    execution_block_reasons: List[str],
+    market_open: bool,
+) -> str:
+    if runtime_pipeline_health in ("FAIL", "DEGRADED"):
+        return "Pipeline runtime looks degraded. Open **System → Pipeline Health / Heartbeat**."
+    if not execution_block_reasons:
+        return "Runtime pipeline healthy. Execution gates are clear."
+    if market_open is False and "NOT_CERTIFIED" in execution_block_reasons:
+        return "Runtime pipeline healthy. Execution remains blocked by market/certification/confirmation."
+    if market_open is False:
+        return "Market closed. Paper execution safely blocked."
+    if "NOT_CERTIFIED" in execution_block_reasons:
+        return "Certification review required before execution can proceed."
+    if "CONFIRM_REQUIRED" in execution_block_reasons:
+        return "Execution blocked pending live confirmation phrase."
+    return "Runtime pipeline healthy. Execution remains blocked by policy gates."
+
+
+def build_dashboard_health_classification(
+    *,
+    posture: Optional[Any] = None,
+    live_ready: bool = False,
+    live_gate_bits: Optional[Dict[str, bool]] = None,
+    pipeline_locked: bool = False,
+    pipeline_lock_reason: str = "",
+) -> Dict[str, Any]:
+    """
+    Read-only dashboard health taxonomy (Phase 196L).
+    Separates runtime pipeline health from execution/certification blocks.
+    """
+    pipeline_hb = load_pipeline_heartbeat()
+    runtime_hb = load_runtime_heartbeat()
+    loops = detect_loop_processes()
+    positions = load_positions_summary()
+    open_orders = count_open_orders()
+
+    readiness = _read_json(EXECUTION_READINESS_PATH)
+    if "readiness" in readiness and isinstance(readiness["readiness"], dict):
+        readiness = readiness["readiness"]
+    cert_doc = _read_json(CERTIFICATION_PATH)
+
+    live_permitted = bool(readiness.get("live_execution_permitted", False))
+    paper_permitted = bool(readiness.get("paper_execution_permitted", False))
+    readiness_status = str(readiness.get("readiness_status") or "NOT_READY")
+    certification_raw = str(cert_doc.get("certification_status") or "")
+    if posture is not None:
+        certification_raw = str(getattr(posture, "certification_status", "") or certification_raw)
+        paper_permitted = bool(
+            getattr(posture, "paper_execution_permitted", paper_permitted) or paper_permitted
+        )
+        live_permitted = bool(
+            getattr(posture, "live_execution_permitted", live_permitted) or live_permitted
+        )
+        readiness_status = str(getattr(posture, "readiness_status", "") or readiness_status)
+
+    market_open = _is_market_open()
+    if posture is not None:
+        market_open = bool(getattr(posture, "market_open", market_open))
+
+    gate_bits = dict(live_gate_bits or {})
+    data_freshness = classify_data_freshness(
+        pipeline_hb.get("age_minutes"),
+        market_open=market_open,
+    )
+    runtime_pipeline_health = classify_runtime_pipeline_health(
+        pipeline_hb=pipeline_hb,
+        runtime_hb=runtime_hb,
+        loops=loops,
+        market_open=market_open,
+    )
+    certification_status = _normalize_certification_status(certification_raw)
+    execution_block_reasons = derive_execution_block_reasons(
+        market_open=market_open,
+        gate_bits=gate_bits,
+        certification_status=certification_raw,
+        runtime_pipeline_health=runtime_pipeline_health,
+        data_freshness=data_freshness,
+        live_permitted=live_permitted,
+    )
+
+    paper_operational = False
+    if posture is not None:
+        paper_operational = bool(getattr(posture, "paper_operational", False))
+
+    if live_permitted:
+        execution_status = "READY"
+    elif paper_operational and not execution_block_reasons:
+        execution_status = "READY"
+    elif execution_block_reasons or not live_ready:
+        execution_status = "BLOCKED"
+    else:
+        execution_status = "NOT_READY"
+
+    return {
+        "runtime_pipeline_health": runtime_pipeline_health,
+        "data_freshness": data_freshness,
+        "execution_status": execution_status,
+        "execution_block_reasons": execution_block_reasons,
+        "certification_status": certification_status,
+        "market_status": "OPEN" if market_open else "CLOSED",
+        "paper_authorized": paper_permitted,
+        "live_blocked": not live_permitted,
+        "readiness_status": readiness_status,
+        "pipeline_integrity_locked": pipeline_locked,
+        "pipeline_integrity_lock_reason": pipeline_lock_reason,
+        "top_guard_message": build_top_guard_message(
+            runtime_pipeline_health=runtime_pipeline_health,
+            execution_block_reasons=execution_block_reasons,
+            market_open=market_open,
+        ),
+        "pipeline_heartbeat": pipeline_hb,
+        "runtime_heartbeat": runtime_hb,
+        "loops": loops,
+        "open_orders": open_orders,
+        "positions_count": int(positions.get("position_count") or 0),
+        "positions": list(positions.get("positions") or []),
+        "heartbeat_fresh": (
+            pipeline_hb.get("age_minutes") is not None
+            and float(pipeline_hb.get("age_minutes")) <= RUNTIME_PIPELINE_DEGRADED_MINUTES
+        ),
+        "portfolio_history_current": _portfolio_history_ok(),
+    }
 
 
 def choose_sidebar_label(
     *,
     data_freshness: str,
-    pipeline_locked: bool,
+    runtime_pipeline_health: str,
+    market_open: bool,
     paper_operational: bool,
     paper_permitted: bool,
     readiness_status: str,
@@ -186,16 +466,17 @@ def choose_sidebar_label(
     if live_permitted:
         return "LIVE RUNTIME ENABLED", "error"
 
-    if data_freshness == "STALE" or pipeline_locked:
-        detail = (
-            "DATA STALE · EXECUTION BLOCKED"
-            if data_freshness == "STALE"
-            else "EXECUTION LOCKED: PIPELINE HEALTH"
-        )
-        return detail, "error"
+    if runtime_pipeline_health in ("FAIL", "DEGRADED"):
+        return "PIPELINE DEGRADED · EXECUTION BLOCKED", "error"
+
+    if data_freshness == "STALE":
+        return "DATA STALE · EXECUTION BLOCKED", "error"
+
+    if not market_open:
+        return "MARKET CLOSED · EXECUTION BLOCKED", "warning"
 
     if execution_blocked_reasons:
-        return "PAPER AUTHORIZED · EXECUTION CURRENTLY BLOCKED", "warning"
+        return "PAPER AUTHORIZED · EXECUTION BLOCKED", "warning"
 
     if paper_operational:
         return "PAPER RUNTIME: ACTIVE", "success"
@@ -217,19 +498,26 @@ def build_dashboard_guard_summary(
     live_gate_bits: Optional[Dict[str, bool]] = None,
     posture: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    pipeline_hb = load_pipeline_heartbeat()
-    runtime_hb = load_runtime_heartbeat()
-    loops = detect_loop_processes()
-    positions = load_positions_summary()
-    open_orders = count_open_orders()
+    health_cls = build_dashboard_health_classification(
+        posture=posture,
+        live_ready=live_ready,
+        live_gate_bits=live_gate_bits,
+        pipeline_locked=pipeline_locked,
+        pipeline_lock_reason=pipeline_lock_reason,
+    )
 
-    readiness = _read_json(EXECUTION_READINESS_PATH)
-    if "readiness" in readiness and isinstance(readiness["readiness"], dict):
-        readiness = readiness["readiness"]
+    pipeline_hb = health_cls["pipeline_heartbeat"]
+    runtime_hb = health_cls["runtime_heartbeat"]
+    loops = health_cls["loops"]
+    open_orders = int(health_cls.get("open_orders") or 0)
 
-    live_permitted = bool(readiness.get("live_execution_permitted", False))
-    paper_permitted = bool(readiness.get("paper_execution_permitted", False))
-    readiness_status = str(readiness.get("readiness_status") or "NOT_READY")
+    live_permitted = not health_cls.get("live_blocked", True)
+    paper_permitted = bool(health_cls.get("paper_authorized"))
+    readiness_status = str(health_cls.get("readiness_status") or "NOT_READY")
+    data_freshness = str(health_cls.get("data_freshness") or "STALE")
+    runtime_pipeline_health = str(health_cls.get("runtime_pipeline_health") or "FAIL")
+    execution_block_reasons = list(health_cls.get("execution_block_reasons") or [])
+    market_open = health_cls.get("market_status") == "OPEN"
 
     paper_operational = False
     approval_label = ""
@@ -237,35 +525,18 @@ def build_dashboard_guard_summary(
         paper_operational = bool(getattr(posture, "paper_operational", False))
         approval_label = str(getattr(posture, "approval_status_label", "") or "")
 
-    data_freshness = classify_data_freshness(pipeline_hb.get("age_minutes"))
-
     gate_bits = live_gate_bits or {}
-    blocked_gates = [k for k, ok in gate_bits.items() if not ok]
-    execution_blocked_reasons: List[str] = []
-    if pipeline_locked:
-        execution_blocked_reasons.append(pipeline_lock_reason or "pipeline lock")
-    if not live_ready:
-        execution_blocked_reasons.extend(blocked_gates)
-    if data_freshness == "STALE":
-        execution_blocked_reasons.append("pipeline heartbeat stale")
-
-    if live_permitted:
-        execution_gate = "NOT READY"
-    elif pipeline_locked or data_freshness == "STALE" or not live_ready:
-        execution_gate = "BLOCKED"
-    elif paper_operational and not pipeline_locked:
-        execution_gate = "READY"
-    else:
-        execution_gate = "BLOCKED"
+    execution_gate = str(health_cls.get("execution_status") or "BLOCKED")
 
     sidebar_label, sidebar_level = choose_sidebar_label(
         data_freshness=data_freshness,
-        pipeline_locked=pipeline_locked,
+        runtime_pipeline_health=runtime_pipeline_health,
+        market_open=market_open,
         paper_operational=paper_operational,
         paper_permitted=paper_permitted,
         readiness_status=readiness_status,
         live_permitted=live_permitted,
-        execution_blocked_reasons=execution_blocked_reasons,
+        execution_blocked_reasons=execution_block_reasons,
     )
 
     watchdog_state = (
@@ -280,6 +551,8 @@ def build_dashboard_guard_summary(
     )
 
     return {
+        "health_classification": health_cls,
+        "runtime_pipeline_health": runtime_pipeline_health,
         "data_freshness": data_freshness,
         "pipeline_heartbeat": pipeline_hb,
         "runtime_heartbeat": runtime_hb,
@@ -290,16 +563,20 @@ def build_dashboard_guard_summary(
         "continuous_loop": continuous_state,
         "loops": loops,
         "execution_gate": execution_gate,
+        "execution_status": execution_gate,
         "paper_mode": (
             "ACTIVE" if paper_operational else ("AUTHORIZED" if paper_permitted else "INACTIVE")
         ),
         "live_mode": "BLOCKED",
+        "market_status": health_cls.get("market_status"),
+        "certification_status": health_cls.get("certification_status"),
         "open_orders": open_orders,
-        "positions_count": int(positions.get("position_count") or 0),
-        "positions": list(positions.get("positions") or []),
+        "positions_count": int(health_cls.get("positions_count") or 0),
+        "positions": list(health_cls.get("positions") or []),
         "sidebar_label": sidebar_label,
         "sidebar_level": sidebar_level,
-        "execution_blocked_reasons": execution_blocked_reasons,
+        "execution_blocked_reasons": execution_block_reasons,
+        "top_guard_message": health_cls.get("top_guard_message"),
         "live_gate_bits": gate_bits,
         "live_ready": live_ready,
         "pipeline_locked": pipeline_locked,

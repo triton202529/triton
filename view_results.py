@@ -2292,18 +2292,24 @@ def render_sidebar_execution_status(
         st.info(f"ℹ️ {label}")
 
     st.caption("Live mode: **BLOCKED** (paper-only runtime)")
+    rph = str(summary.get("runtime_pipeline_health") or "UNKNOWN")
+    st.caption(
+        f"Pipeline health: **{rph}** · "
+        f"Data freshness: **{summary.get('data_freshness', 'UNKNOWN')}** · "
+        f"Market: **{summary.get('market_status', 'UNKNOWN')}**"
+    )
     st.caption(
         f"Paper authorization: **{'YES' if posture.paper_execution_permitted else 'NO'}** · "
         f"Readiness: **{posture.readiness_status}** · "
-        f"Approval: **{posture.approval_status_label}**"
+        f"Certification: **{summary.get('certification_status', 'UNKNOWN')}**"
     )
     st.caption(
-        f"Data freshness: **{summary.get('data_freshness', 'UNKNOWN')}** · "
-        f"Execution gate: **{summary.get('execution_gate', 'UNKNOWN')}**"
+        f"Execution gate: **{summary.get('execution_gate', 'UNKNOWN')}** · "
+        f"Approval: **{posture.approval_status_label}**"
     )
     blocked = summary.get("execution_blocked_reasons") or []
     if blocked:
-        st.caption("Blocked by: " + ", ".join(str(x) for x in blocked[:6]))
+        st.caption("Blocked by: " + ", ".join(str(x) for x in blocked[:8]))
 
     c1, c2 = st.columns(2)
     c1.caption(f"Watchdog: {summary.get('watchdog', 'UNKNOWN')}")
@@ -2313,7 +2319,7 @@ def render_sidebar_execution_status(
         f"CL={posture.continuous_lock_classification}"
     )
     if pipeline_locked:
-        st.caption(f"Pipeline integrity lock: {pipeline_reason}")
+        st.caption(f"Data integrity lock (contracts/artifacts): {pipeline_reason}")
 
 
 def render_dashboard_guard_summary(
@@ -2340,13 +2346,13 @@ def render_dashboard_guard_summary(
     rt_age_s = "—" if rt_age is None else f"{float(rt_age):.0f}m"
 
     c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
-    c1.metric("Data freshness", str(summary.get("data_freshness") or "UNKNOWN"))
-    c2.metric("Pipeline HB age", ph_age_s)
-    c3.metric("Watchdog", str(summary.get("watchdog") or "UNKNOWN"))
-    c4.metric("Continuous loop", str(summary.get("continuous_loop") or "UNKNOWN"))
-    c5.metric("Execution gate", str(summary.get("execution_gate") or "UNKNOWN"))
-    c6.metric("Paper mode", str(summary.get("paper_mode") or "UNKNOWN"))
-    c7.metric("Live mode", "BLOCKED")
+    c1.metric("Pipeline health", str(summary.get("runtime_pipeline_health") or "UNKNOWN"))
+    c2.metric("Data freshness", str(summary.get("data_freshness") or "UNKNOWN"))
+    c3.metric("Pipeline HB age", ph_age_s)
+    c4.metric("Watchdog", str(summary.get("watchdog") or "UNKNOWN"))
+    c5.metric("Continuous loop", str(summary.get("continuous_loop") or "UNKNOWN"))
+    c6.metric("Execution gate", str(summary.get("execution_gate") or "UNKNOWN"))
+    c7.metric("Paper mode", str(summary.get("paper_mode") or "UNKNOWN"))
     c8.metric("Open orders", int(summary.get("open_orders") or 0))
 
     st.caption(
@@ -2554,12 +2560,24 @@ def render_top_status_stack() -> None:
             exec_detail += " · Blocked: " + ", ".join(bad_bits)
     elif posture.full_execution_locked:
         exec_class = "locked"
-        exec_title = "EXECUTION LOCKED"
+        exec_title = "EXECUTION BLOCKED"
         auth_bits = (
             " · ".join(posture.lock_reasons) if posture.lock_reasons else "authority gates failed"
         )
         exec_detail = auth_bits
-        if locked:
+        from services.dashboard_status_sync import build_dashboard_health_classification
+
+        _hc = build_dashboard_health_classification(
+            posture=posture,
+            live_ready=live_ready,
+            live_gate_bits=gate_bits,
+            pipeline_locked=locked,
+            pipeline_lock_reason=reason,
+        )
+        _rph = str(_hc.get("runtime_pipeline_health") or "")
+        if _rph in ("HEALTHY", "OFF_HOURS_HEALTHY"):
+            exec_detail = str(_hc.get("top_guard_message") or exec_detail)
+        elif locked:
             exec_detail += f" | {reason}"
     elif posture.paper_execution_permitted and not posture.live_execution_permitted:
         exec_class = "locked" if (locked or not live_ready or label == "DATA STALE") else "paper"
@@ -24174,13 +24192,34 @@ def main() -> None:
 
     if "pipeline_health" not in st.session_state:
         st.session_state["pipeline_health"] = compute_pipeline_health()
-    overall = st.session_state["pipeline_health"].get("overall", "⚪")
-    if overall in ("🔴", "⚪") and not (
+
+    from services.dashboard_status_sync import build_dashboard_health_classification
+
+    _guard_health = build_dashboard_health_classification(
+        posture=posture,
+        live_ready=live_ready,
+        live_gate_bits=gate_bits,
+        pipeline_locked=pipeline_locked,
+        pipeline_lock_reason=pipeline_reason,
+    )
+    _rph = str(_guard_health.get("runtime_pipeline_health") or "UNKNOWN")
+    _block_reasons = list(_guard_health.get("execution_block_reasons") or [])
+    _top_msg = str(_guard_health.get("top_guard_message") or "")
+
+    if _rph in ("FAIL", "DEGRADED") and not (
         section == "System" and page == "🫀 Pipeline Health / Heartbeat"
     ):
+        st.warning(_top_msg or "Pipeline runtime degraded.", icon="🫀")
+    elif _block_reasons and not (section == "System" and page == "🫀 Pipeline Health / Heartbeat"):
+        st.info(
+            _top_msg or "Runtime pipeline healthy. Execution remains blocked by policy gates.",
+            icon="ℹ️",
+        )
+    elif pipeline_locked and not (section == "System" and page == "🫀 Pipeline Health / Heartbeat"):
         st.warning(
-            "Pipeline health looks degraded/missing. Open **System → Pipeline Health / Heartbeat**.",
-            icon="🫀",
+            "Data contracts or artifact integrity check failed. "
+            "Open **System → Data Contracts** or **Pipeline Health / Heartbeat**.",
+            icon="⚠️",
         )
 
     fn()
