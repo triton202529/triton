@@ -1,0 +1,35 @@
+{
+  "phase": "196D",
+  "generated_at": "2026-06-23T13:53:47.174759+00:00",
+  "phase_pass": true,
+  "validation_status": "PASS",
+  "checks": {
+    "paper_context_has_allocation_approved": true,
+    "live_context_gate_not_allow": true,
+    "paper_gate_allows_bac_with_fix": true,
+    "bac_entry_produces_request_id": true,
+    "auto_pass_sets_governance_visible": true,
+    "ensure_pending_creates_bac_request": true,
+    "schw_blocked_risk_overlay": true,
+    "ung_blocked_risk_overlay": true,
+    "duplicate_held_entry_refused": true,
+    "live_execution_permitted_refused": true,
+    "readiness_not_ready_refused": true,
+    "stale_broker_refused": true,
+    "arm_expired_refused": true,
+    "market_closed_refused": true,
+    "empty_symbols_refused": true,
+    "invalid_symbol_refused": true,
+    "gate_block_has_exact_reason": true,
+    "gate_block_audit_has_downstream_fields": true,
+    "paper_entry_stage_rechecks_approval": true,
+    "paper_entry_audit_has_downstream_fields": true,
+    "not_visible_to_gate_fails_safely": true,
+    "live_execution_permitted_false": true
+  },
+  "issues": [],
+  "details": {
+    "paper_gate_reason": "Execution path \"capital_deployment\" permitted in non-live environment with deployment checks satisfied.",
+    "bac_request_id": "eg-apr-test196d0001"
+  }
+}

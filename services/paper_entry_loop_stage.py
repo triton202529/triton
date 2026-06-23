@@ -351,16 +351,19 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
         )
 
     try:
+        from services.auto_paper_approval import _build_paper_approval_context
         from services.execution_approval_workflow import find_approved_request
 
         symbols = [c["ticker"] for c in eligible if c.get("ticker")]
+        gov_ctx = _build_paper_approval_context({"paperMode": True, "liveMode": False})
         approved = find_approved_request(
             "",
             "capital_deployment",
             symbols=symbols,
-            context={"paperMode": True, "liveMode": False},
+            context=gov_ctx,
         )
         details["checks"]["governance_approval_present"] = approved is not None
+        details["checks"]["symbols_requested"] = symbols
         if not approved:
             auto_enabled = os.environ.get("TRITON_ENABLE_AUTO_PAPER_APPROVAL", "").strip() == "1"
             details["checks"]["auto_paper_approval_enabled"] = auto_enabled
@@ -369,17 +372,43 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
 
                 auto_ok, auto_reason, auto_details = attempt_auto_paper_approval(
                     symbols,
-                    context={"paperMode": True, "liveMode": False},
+                    context=gov_ctx,
                     verbose=verbose,
                 )
                 details["auto_paper_approval"] = auto_details
+                gate = auto_details.get("gate") or {}
+                details["downstream_gate_name"] = gate.get("downstream_gate_name")
+                details["downstream_gate_status"] = gate.get("downstream_gate_status")
+                details["downstream_gate_reason"] = gate.get("downstream_gate_reason")
+                details["downstream_block_reasons"] = gate.get("downstream_block_reasons")
+                details["approval_request_created"] = gate.get("approval_request_created")
+                details["approval_request_id"] = (
+                    (auto_details.get("audit") or {}).get("request_id")
+                    or (auto_details.get("approved") or {}).get("approval_id")
+                    or ""
+                )
+                details["approval_request_match_status"] = auto_details.get(
+                    "approval_request_match_status"
+                ) or gate.get("approval_request_match_status")
+                details["approval_registry_path"] = str(
+                    ROOT / "data" / "governance" / "execution_approval_requests.json"
+                )
+                details["symbols_approved"] = symbols if auto_ok else []
+
                 approved = find_approved_request(
                     "",
                     "capital_deployment",
                     symbols=symbols,
-                    context={"paperMode": True, "liveMode": False},
+                    context=gov_ctx,
                 )
-                details["checks"]["governance_approval_present"] = approved is not None
+                gov_after = approved is not None
+                details["checks"]["governance_approval_present_after_auto"] = gov_after
+                details["checks"]["governance_approval_present"] = gov_after
+                if auto_ok and not gov_after:
+                    return block(
+                        "AUTO_APPROVAL_NOT_VISIBLE_TO_EXECUTION_GATE",
+                        "governance_approval",
+                    )
                 if not auto_ok or not approved:
                     return block(
                         auto_reason if not auto_ok else "GOVERNANCE_APPROVAL_REQUIRED",
@@ -387,6 +416,9 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
                     )
             else:
                 return block("GOVERNANCE_APPROVAL_REQUIRED", "governance_approval")
+        else:
+            details["checks"]["governance_approval_present_after_auto"] = True
+            details["checks"]["symbols_approved"] = symbols
     except Exception as e:
         return block(f"governance approval check error: {e}", "governance_approval")
 

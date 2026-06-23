@@ -207,6 +207,11 @@ def run_phase_196b_validation(*, verbose: bool = True) -> Dict[str, Any]:
                                                 return_value=(
                                                     _sample_pending_request(),
                                                     "EXISTING_PENDING",
+                                                    {
+                                                        "downstream_gate_status": "ALLOW",
+                                                        "downstream_gate_reason": "ok",
+                                                        "approval_request_match_status": "EXISTING_PENDING",
+                                                    },
                                                 ),
                                             ):
                                                 with patch(
