@@ -443,6 +443,23 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
             c["ticker"] for c in eligible if c.get("ticker")
         ]
         details["checks"]["final_selected_symbols"] = final_symbols
+        details["checks"]["preview_candidate"] = preview_meta.get("preview_candidate")
+        details["checks"]["preview_candidate_risk_flag"] = preview_meta.get(
+            "preview_candidate_risk_flag"
+        )
+        details["checks"]["preview_candidate_executable"] = preview_meta.get(
+            "preview_candidate_executable"
+        )
+        details["checks"]["governed_executable_preview_candidate"] = preview_meta.get(
+            "governed_executable_preview_candidate"
+        )
+        details["checks"]["allocation_action"] = preview_meta.get("allocation_action")
+        details["checks"]["final_selection_status"] = preview_meta.get("final_selection_status")
+        details["checks"]["final_selection_block_reason"] = preview_meta.get(
+            "final_selection_block_reason"
+        )
+        if preview_meta.get("preview_warnings"):
+            details["checks"]["preview_warnings"] = preview_meta.get("preview_warnings")
 
         blocked_risk = _risk_blocked_in_selection(final_symbols)
         if blocked_risk:

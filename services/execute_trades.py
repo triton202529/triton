@@ -4174,6 +4174,12 @@ def preview_planned_buy_symbols(
             "warnings": warnings,
         }
     )
+    try:
+        from services.paper_entry_candidate_contract import enrich_planner_preview_metadata
+
+        enrich_planner_preview_metadata(symbols, meta)
+    except Exception:
+        pass
     return symbols, meta
 
 

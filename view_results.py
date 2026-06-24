@@ -5215,6 +5215,45 @@ def page_execution_dashboard() -> None:
     except Exception as exc:
         st.warning(f"Paper arm status unavailable: {exc}")
 
+    st.subheader("Paper Entry Candidate Contract")
+    try:
+        from services.paper_entry_candidate_contract import build_governed_candidate_summary
+
+        cand = build_governed_candidate_summary()
+        c0, c1, c2, c3 = st.columns(4)
+        c0.metric("Planner preview", str(cand.get("planner_preview_candidate") or "—"))
+        c1.metric(
+            "Executable preview",
+            "yes" if cand.get("planner_preview_executable") else "no",
+        )
+        c2.metric(
+            "Governed candidate",
+            str(cand.get("governed_executable_preview_candidate") or "none"),
+        )
+        c3.metric(
+            "open_new / add",
+            f"{cand.get('allocation_open_new_count', 0)}/{cand.get('allocation_add_count', 0)}",
+        )
+        st.caption(
+            f"Risk flag: **{cand.get('planner_preview_risk_flag') or '—'}** · "
+            f"Final selection: **{cand.get('final_selection_status') or '—'}** · "
+            f"Block: **{cand.get('final_selection_block_reason') or '—'}**"
+        )
+        for w in cand.get("preview_warnings") or []:
+            st.warning(str(w))
+        cache = cand.get("stale_candidate_cache") or {}
+        if cache.get("stale"):
+            st.info(
+                f"Legacy `controlled_paper_entry_loop_candidates.csv` is **stale/diagnostic only** "
+                f"({cache.get('reason', '')})."
+            )
+        st.caption(
+            "Read-only governed contract — BLOCK_NEW_BUY/FORCE_EXIT symbols are not executable entries. "
+            "Paper arm is a permission latch, not a candidate selector."
+        )
+    except Exception as exc:
+        st.warning(f"Candidate contract unavailable: {exc}")
+
     arm_st = load_json(RESULTS_DIR / "arm_mode_status.json", show_error=False)
     arm_cf = load_json(PROJECT_ROOT / "config" / "arm_mode.json", show_error=False)
     if isinstance(arm_st, dict) and arm_st.get("timestamp"):
