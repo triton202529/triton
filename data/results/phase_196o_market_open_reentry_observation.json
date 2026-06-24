@@ -1,0 +1,71 @@
+{
+  "phase": "196O",
+  "generated_at": "2026-06-24T14:30:20.022366+00:00",
+  "status": "PASS",
+  "previous_commit": "2e28d5ac",
+  "market_currently_open": true,
+  "market_open_observed": true,
+  "pre_market_checks_pass": true,
+  "runtime_supervisor_enabled": true,
+  "data_freshness_task_enabled": true,
+  "daily_931_task_enabled": true,
+  "old_fullpipeline_45min_restored": false,
+  "multiple_runtime_authorities": false,
+  "enabled_runtime_supervisor_tasks": [
+    "TRITON_Runtime_Supervisor_45Min"
+  ],
+  "watchdog_running": true,
+  "continuous_loop_running": true,
+  "duplicate_continuous_loops": false,
+  "heartbeat_source": "data/results/heartbeat.json",
+  "heartbeat_age_minutes": 18.175756116666665,
+  "heartbeat_fresh_after_market_open": true,
+  "heartbeat_fresh_or_acceptable": true,
+  "positions_snapshot_age_minutes": 18.179608733333335,
+  "open_orders_snapshot_age_minutes": 18.1831278,
+  "portfolio_history_age_minutes": 18.179311783333333,
+  "positions_snapshot_refreshed": true,
+  "open_orders_snapshot_refreshed": true,
+  "portfolio_history_current": true,
+  "runtime_pipeline_health": "HEALTHY",
+  "data_freshness": "FRESH",
+  "contract_artifact_integrity": "REVIEW",
+  "execution_status": "BLOCKED",
+  "execution_block_reasons": [
+    "CONFIRM_REQUIRED",
+    "NOT_CERTIFIED"
+  ],
+  "pipeline_health_false_fail_detected": false,
+  "contract_artifact_false_pipeline_lock_detected": false,
+  "paper_entry_stage_observed": true,
+  "paper_entry_result": "BLOCKED",
+  "paper_entry_block_reason": "ARM_EXPIRED_OR_MISSING paper_arm_confirm",
+  "watchdog_lock_status": "LOCK_HEALTHY_ACTIVE",
+  "continuous_loop_lock_status": "LOCK_TIMESTAMP_STALE_BUT_PROCESS_ACTIVE",
+  "open_orders": 0,
+  "positions_count": 2,
+  "positions": [
+    "JPM",
+    "WFC"
+  ],
+  "live_execution": false,
+  "manual_execute_trades_run": false,
+  "manual_approval_used": false,
+  "broker_orders_submitted_manually": false,
+  "unexpected_broker_orders": false,
+  "execution_logic_changed": false,
+  "governance_logic_changed": false,
+  "guard_summary": {
+    "sidebar_label": "PAPER AUTHORIZED \u00b7 EXECUTION BLOCKED",
+    "market_status": "OPEN",
+    "execution_blocked_reasons": [
+      "CONFIRM_REQUIRED",
+      "NOT_CERTIFIED"
+    ]
+  },
+  "continuous_log_tail": "2026-06-24T09:46:11 === TRITON CONTINUOUS LOOP START ===\n2026-06-24T09:46:11 RepoRoot=C:\\Users\\akimw\\triton\n2026-06-24T09:46:11 IntervalMinutes=45\n2026-06-24T09:46:11 MaxCycles=0\n2026-06-24T09:46:11 LoopLog=data\\results\\continuous_loop\\continuous_loop_20260624_094611.log\n2026-06-24T09:46:12 [HEARTBEAT_REFRESH] grace_minutes=55 output=[HEARTBEAT_REFRESHED] source=continuous_loop grace_until=2026-06-24T14:41:12Z\n2026-06-24T09:46:12 [LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1\n2026-06-24T09:46:12 [LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_ENTRIES=1\n2026-06-24T09:46:12 [LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_APPROVAL=1\n2026-06-24T09:46:12 \n2026-06-24T09:46:12 [CYCLE_START] cycle=1\n2026-06-24T09:46:12 [LOOP_ENV] TRITON_ENABLE_PAPER_EXECUTION=1\n2026-06-24T09:46:12 [LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_ENTRIES=1\n2026-06-24T09:46:12 [LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_APPROVAL=1\n2026-06-24T09:46:26 [PAPER_ENTRY_STAGE] evaluating controlled paper entry gates\n2026-06-24T09:46:27 [PAPER_ENTRY_STAGE] exit_code=0\n2026-06-24T09:46:27 [CYCLE_OK] cycle=1\n2026-06-24T09:46:27 [SLEEP] waiting 45 minutes before next cycle",
+  "notes": [
+    "Market currently OPEN.",
+    "Market-open re-entry observation PASS."
+  ]
+}
