@@ -2317,6 +2317,24 @@ def render_sidebar_execution_status(
     if blocked:
         st.caption("Blocked by: " + ", ".join(str(x) for x in blocked[:8]))
 
+    try:
+        from services.paper_arm_status import build_paper_arm_status
+
+        arm_st = build_paper_arm_status(verbose_notes=False)
+        st.caption(
+            f"Paper arm confirm: **{arm_st.get('status', 'UNKNOWN')}** "
+            f"(armed={'YES' if arm_st.get('paper_entry_armed') else 'NO'}) · "
+            f"Live confirm: **{arm_st.get('live_confirm_status', 'UNKNOWN')}** · "
+            f"Live execution: **BLOCKED**"
+        )
+        if arm_st.get("operator_required") and arm_st.get("status") != "VALID":
+            st.caption(
+                "ASSISTED mode needs fresh `paper_arm_confirm.json` — "
+                "distinct from live confirm and certification."
+            )
+    except Exception:
+        pass
+
     c1, c2 = st.columns(2)
     c1.caption(f"Watchdog: {summary.get('watchdog', 'UNKNOWN')}")
     c2.caption(f"Continuous loop: {summary.get('continuous_loop', 'UNKNOWN')}")
@@ -5172,6 +5190,31 @@ def page_execution_dashboard() -> None:
     )
 
     st.subheader("ARM Mode Status")
+    try:
+        from services.paper_arm_status import build_paper_arm_status
+
+        arm_detail = build_paper_arm_status(verbose_notes=False)
+        a0, a1, a2, a3 = st.columns(4)
+        a0.metric("ARM mode", str(arm_detail.get("mode") or "—"))
+        a1.metric("Paper arm confirm", str(arm_detail.get("status") or "—"))
+        a2.metric("Paper entry armed", "yes" if arm_detail.get("paper_entry_armed") else "no")
+        a3.metric("Live execution", "BLOCKED")
+        st.caption(
+            f"Paper arm path: `{arm_detail.get('paper_arm_confirm_path')}` · "
+            f"expires: **{arm_detail.get('expires_at') or '—'}** · "
+            f"live confirm: **{arm_detail.get('live_confirm_status')}** (separate)"
+        )
+        if arm_detail.get("arm_block_reasons"):
+            st.warning(
+                "ARM block reasons: " + ", ".join(str(x) for x in arm_detail["arm_block_reasons"])
+            )
+        st.caption(
+            "Check status: `python -m services.paper_arm_status` or "
+            "`scripts/show_triton_paper_arm_status.ps1` — read-only, no orders."
+        )
+    except Exception as exc:
+        st.warning(f"Paper arm status unavailable: {exc}")
+
     arm_st = load_json(RESULTS_DIR / "arm_mode_status.json", show_error=False)
     arm_cf = load_json(PROJECT_ROOT / "config" / "arm_mode.json", show_error=False)
     if isinstance(arm_st, dict) and arm_st.get("timestamp"):
@@ -5194,19 +5237,6 @@ def page_execution_dashboard() -> None:
         if isinstance(br, list) and br:
             st.warning("Block reasons: " + ", ".join(str(x) for x in br))
         st.caption(f"Last snapshot: **{arm_st.get('timestamp')}**")
-        if str((arm_cf or {}).get("mode", "")).upper() == "ASSISTED":
-            pconf = load_json(
-                PROJECT_ROOT / "data" / "live" / "paper_arm_confirm.json",
-                show_error=False,
-            )
-            if isinstance(pconf, dict) and pconf.get("expires_at"):
-                st.caption(
-                    f"ASSISTED **paper_arm_confirm.json**: allow_execute={pconf.get('allow_execute')} · expires **{pconf.get('expires_at')}**"
-                )
-            else:
-                st.caption(
-                    "ASSISTED mode: no valid **paper_arm_confirm.json** (mutations stay off until confirmed)."
-                )
     else:
         st.info(
             "No **arm_mode_status.json** yet. Run `python -m services.run_scheduled_paper_cycle` to refresh."
