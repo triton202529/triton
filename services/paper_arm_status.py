@@ -167,11 +167,11 @@ def build_paper_arm_status(*, verbose_notes: bool = True) -> Dict[str, Any]:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Read-only paper ARM operator status")
-    ap.add_argument("--json", action="store_true", help="Emit JSON only")
+    ap.add_argument("--json", action="store_true", help="Emit JSON only on stdout")
     args = ap.parse_args(argv)
-    payload = build_paper_arm_status()
+    payload = build_paper_arm_status(verbose_notes=not args.json)
     if args.json:
-        print(json.dumps(payload, indent=2))
+        sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     else:
         print(f"mode={payload.get('mode')} status={payload.get('status')}")
         print(f"paper_entry_armed={payload.get('paper_entry_armed')}")

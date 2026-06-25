@@ -19,18 +19,21 @@ if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
 
 Write-Host "=== TRITON Paper ARM Status (Phase 196Q) ===" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "READ-ONLY - does not submit orders or write paper_arm_confirm.json" -ForegroundColor Yellow
+Write-Host "READ-ONLY status display (session policy may auto-renew arm during market hours)" -ForegroundColor Yellow
 Write-Host ""
 
-$jsonOut = & $py -m services.paper_arm_status --json 2>&1
+$jsonOut = & $py -m services.paper_arm_status --json 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Failed to query paper arm status." -ForegroundColor Red
-    Write-Host $jsonOut
+    exit 1
+}
+if (-not $jsonOut) {
+    Write-Host "Empty response from paper_arm_status." -ForegroundColor Red
     exit 1
 }
 
 try {
-    $st = $jsonOut | ConvertFrom-Json
+    $st = ($jsonOut | Out-String).Trim() | ConvertFrom-Json
 } catch {
     Write-Host "Invalid JSON from paper_arm_status:" -ForegroundColor Red
     Write-Host $jsonOut

@@ -388,7 +388,8 @@ class MasterExecutionGate:
             )
             print(
                 f"[GATE_FRESHNESS] guard snapshot source={path} age_minutes={age:.1f} max={max_age} "
-                f"(not refreshed by snapshot_live_orders — see operator_note in gate details)"
+                f"(not refreshed by snapshot_live_orders — see operator_note in gate details)",
+                file=sys.stderr,
             )
             if mode == "live":
                 reasons.append("STALE_GUARD_SNAPSHOT")
@@ -593,7 +594,8 @@ class MasterExecutionGate:
         if live_block_stale:
             reasons.append("STALE_LIVE_ORDERS")
             print(
-                f"[GATE_FRESHNESS] live_orders freshness source={path} age_minutes={age:.1f} max={max_lo_age}"
+                f"[GATE_FRESHNESS] live_orders freshness source={path} age_minutes={age:.1f} max={max_lo_age}",
+                file=sys.stderr,
             )
             return out
 
@@ -618,12 +620,14 @@ class MasterExecutionGate:
                 if oo_n == 0:
                     print(
                         "[GATE_FRESHNESS] zero open orders; treating refreshed snapshots as authoritative "
-                        "(live_orders.csv event log is older than threshold but not updated by snapshot_live_orders)"
+                        "(live_orders.csv event log is older than threshold but not updated by snapshot_live_orders)",
+                        file=sys.stderr,
                     )
                 else:
                     print(
                         f"[GATE_FRESHNESS] live_orders freshness source={path} (append-only event log); "
-                        "positions_snapshot.csv and recent_orders.csv are fresh — not emitting STALE_LIVE_ORDERS"
+                        "positions_snapshot.csv and recent_orders.csv are fresh — not emitting STALE_LIVE_ORDERS",
+                        file=sys.stderr,
                     )
                 return out
 

@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "mode": "paper_only",
+  "auto_arm_before_market_open": true,
+  "auto_renew_during_market_open": true,
+  "pre_market_arm_minutes": 45,
+  "post_market_expiry_minutes": 60,
+  "renew_if_minutes_remaining_below": 90,
+  "default_ttl_minutes": 600,
+  "max_ttl_minutes": 600,
+  "live_execution_allowed": false,
+  "require_paper_execution_env": true,
+  "require_auto_paper_entries_env": true,
+  "require_broker_mode_paper": true,
+  "write_audit": true
+}

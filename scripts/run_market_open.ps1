@@ -83,6 +83,10 @@ try {
     Write-Host ("LogFile  : " + $logFile)
     Write-Host ("StartedAt: " + (Get-Date).ToString("s"))
 
+    # ── 0. Paper session ARM readiness (bounded TTL; paper only) ─────────
+    Run-Step -Label "0. PAPER SESSION ARM POLICY" `
+             -PyArgs @("-m","services.paper_session_arm_policy")
+
     # ── A. Poll order status (initial) ───────────────────────────────────
     Run-Step -Label "A. POLL ORDER STATUS (initial)" `
              -PyArgs @("-m","services.poll_order_status","--mode","paper","--refresh")

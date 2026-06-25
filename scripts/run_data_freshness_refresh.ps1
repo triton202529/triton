@@ -107,6 +107,18 @@ try {
     $stepsRun += "touch_pipeline_heartbeat"
 
     try {
+        Log-Line "[PAPER_SESSION_ARM] bounded renew if session window permits"
+        & $py -m services.paper_session_arm_policy --json 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Log-Line "[PAPER_SESSION_ARM] non-fatal exit=$LASTEXITCODE"
+        } else {
+            $stepsRun += "paper_session_arm_policy"
+        }
+    } catch {
+        Log-Line "[PAPER_SESSION_ARM] skipped: $($_.Exception.Message)"
+    }
+
+    try {
         Log-Line "[PORTFOLIO_HISTORY_APPEND_IF_STALE] append if positions newer than history"
         $appendOut = & $py -c "from services.portfolio_history_sync import append_portfolio_history_if_stale; import json; print(json.dumps(append_portfolio_history_if_stale()))"
         if ($LASTEXITCODE -ne 0) {
