@@ -2308,6 +2308,20 @@ def render_sidebar_execution_status(
         f"Readiness: **{posture.readiness_status}** · "
         f"Certification: **{summary.get('certification_status', 'UNKNOWN')}**"
     )
+    try:
+        from services.certification_evaluation_gap_plan import build_certification_gap_summary
+
+        cert_gap = build_certification_gap_summary()
+        if cert_gap.get("certification_status") == "NOT_CERTIFIED":
+            st.caption(
+                f"Evaluation gap: **{cert_gap.get('evaluation_gap_points')} pts** "
+                f"(score {cert_gap.get('evaluation_score')} vs threshold "
+                f"{cert_gap.get('evaluation_threshold')}) · "
+                f"primary: **{cert_gap.get('primary_gap')}** · "
+                f"paper entry blocked by **paper arm**, not certification"
+            )
+    except Exception:
+        pass
     st.caption(
         f"Contract/artifact integrity: **{summary.get('contract_artifact_integrity', 'UNKNOWN')}** · "
         f"Execution gate: **{summary.get('execution_gate', 'UNKNOWN')}** · "
