@@ -53,6 +53,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
 LIVE = ROOT / "data" / "live"
 DEFAULT_OPPS = RESULTS / "trade_opportunities.csv"
+DEFAULT_ALLOC_RECOMMENDATIONS = RESULTS / "portfolio_allocation_recommendations.csv"
 DEFAULT_ORDERS_TODAY = LIVE / "orders_today.csv"
 EXEC_PLAN_JSON = RESULTS / "execution_plan.json"
 EXEC_PLAN_CSV = RESULTS / "execution_plan.csv"
@@ -888,6 +889,177 @@ def load_trade_opportunities(path: Path) -> pd.DataFrame:
     if "ticker" not in df.columns:
         return pd.DataFrame()
     return df
+
+
+def _map_planner_skip_to_audit_reason(code: str) -> str:
+    """Map internal planner skip codes to explicit audit reasons."""
+    c = str(code or "").strip().upper()
+    mapping = {
+        "BELOW_MIN_SCORE": "final_score too low",
+        "NEGATIVE_SCORE_BLOCK": "final_score too low",
+        "SCORE_SIZED_TOO_SMALL": "sizing zero",
+        "BELOW_MIN_ORDER_NOTIONAL": "sizing zero",
+        "BELOW_MIN_NOTIONAL": "sizing zero",
+        "INSUFFICIENT_BUYING_POWER": "sizing zero",
+        "IN_FLIGHT_ALREADY_SATISFIED": "duplicate/in-flight order",
+        "IN_FLIGHT_OPEN_ORDER": "duplicate/in-flight order",
+        "ALREADY_IN_PORTFOLIO": "duplicate/in-flight order",
+        "ALREADY_LONG_SKIP": "duplicate/in-flight order",
+        "ALREADY_LONG_LOW_CONFIDENCE_SKIP": "duplicate/in-flight order",
+        "POSITION_NOT_FLAT_FOR_BUY": "ADD requires existing position",
+        "ADD_POSITION_MISS": "ADD requires existing position",
+        "ADD_BELOW_SCORE_THRESHOLD": "final_score too low",
+        "ADD_TOO_SMALL": "sizing zero",
+        "MAX_POSITIONS": "max positions cap",
+        "LOW_CONFIDENCE": "final_score too low",
+        "BELOW_MIN_CONFIDENCE": "final_score too low",
+        "ORDER_DISCIPLINE": "governance approval mismatch",
+        "EDGE_SIZING_BLOCKED": "sizing zero",
+        "DROPPED_DUE_TO_PRECAP": "sizing zero",
+        "MISSING_REF_PRICE": "missing price",
+        "NO_REF_PRICE": "missing price",
+    }
+    if c in mapping:
+        return mapping[c]
+    if c.startswith("SECTOR") or "SECTOR_CAP" in c:
+        return "sector cap"
+    if c.startswith("RISK") or "BLOCK_NEW_BUY" in c:
+        return "risk overlay block"
+    return c.replace("_", " ").lower() or "other explicit reason"
+
+
+def _extract_planner_symbol_outcomes(
+    plan_lines: List[PlanLine],
+    planned: List[PlannedOrder],
+    considered: List[str],
+) -> Tuple[List[str], Dict[str, str]]:
+    selected = sorted(
+        {
+            _norm_sym(p.symbol)
+            for p in planned
+            if str(p.side or "").lower() == "buy" and _norm_sym(p.symbol)
+        }
+    )
+    selected_set = set(selected)
+    line_reason: Dict[str, str] = {}
+    for line in plan_lines:
+        sym = _norm_sym(line.symbol)
+        if not sym:
+            continue
+        if line.status == "planned" and line.planned is not None:
+            line_reason[sym] = "selected"
+        elif line.skip_reason:
+            line_reason[sym] = _map_planner_skip_to_audit_reason(line.skip_reason)
+
+    rejected: Dict[str, str] = {}
+    for sym in sorted({_norm_sym(s) for s in considered if s}):
+        if sym in selected_set:
+            continue
+        if sym in line_reason and line_reason[sym] != "selected":
+            rejected[sym] = line_reason[sym]
+        else:
+            rejected[sym] = "not in planner universe"
+    return selected, rejected
+
+
+def build_governed_allocation_opportunities_df(
+    allowed_symbols: List[str],
+    *,
+    opportunities_path: Optional[Path] = None,
+    allocation_path: Optional[Path] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Build planner intake rows from governed allocation candidates only.
+    Merges trade_opportunities fields when present; otherwise uses allocation row data.
+    """
+    meta: Dict[str, Any] = {
+        "planner_input_mode": "allocation",
+        "enrichment_by_symbol": {},
+        "missing_opportunity_rows": [],
+        "considered_symbols": [],
+    }
+    allowed = sorted({_norm_sym(s) for s in (allowed_symbols or []) if s})
+    if not allowed:
+        return pd.DataFrame(), meta
+
+    alloc_path = allocation_path or DEFAULT_ALLOC_RECOMMENDATIONS
+    if not alloc_path.is_file():
+        meta["error"] = "allocation_recommendations_missing"
+        return pd.DataFrame(), meta
+
+    try:
+        alloc_df = pd.read_csv(alloc_path, low_memory=False)
+    except Exception as exc:
+        meta["error"] = str(exc)
+        return pd.DataFrame(), meta
+
+    sym_col = "ticker" if "ticker" in alloc_df.columns else "symbol"
+    if sym_col not in alloc_df.columns or "recommended_action" not in alloc_df.columns:
+        meta["error"] = "allocation_schema_invalid"
+        return pd.DataFrame(), meta
+
+    opps = load_trade_opportunities(opportunities_path or DEFAULT_OPPS)
+    opps_by_sym: Dict[str, pd.Series] = {}
+    if not opps.empty and "ticker" in opps.columns:
+        for _, r in opps.iterrows():
+            s = _norm_sym(r.get("ticker"))
+            if s:
+                opps_by_sym[s] = r
+
+    rows: List[Dict[str, Any]] = []
+    for sym in allowed:
+        matches = alloc_df[alloc_df[sym_col].astype(str).str.upper().str.strip() == sym]
+        if matches.empty:
+            continue
+        alloc_row = matches.iloc[0]
+        action = str(alloc_row.get("recommended_action") or "").strip().upper()
+        if action not in ("OPEN_NEW", "ADD"):
+            continue
+
+        if sym in opps_by_sym:
+            row = opps_by_sym[sym].to_dict()
+            meta["enrichment_by_symbol"][sym] = "trade_opportunities"
+        else:
+            opp_type = "ENTRY" if action == "OPEN_NEW" else "ADD"
+            stance = (
+                str(alloc_row.get("effective_stance") or alloc_row.get("lifecycle_action") or "BUY")
+                .strip()
+                .upper()
+            )
+            conf = _safe_float(alloc_row.get("confidence"), 0.0)
+            d_pct = _safe_float(alloc_row.get("delta_pct"), 0.0)
+            edge = alloc_row.get("edge_score")
+            alloc_score = alloc_row.get("allocation_score")
+            score_val = _safe_float(alloc_score, conf * d_pct if conf and d_pct else conf)
+            row = {
+                "ticker": sym,
+                "opportunity_type": opp_type,
+                "effective_stance": stance or ("ADD" if action == "ADD" else "BUY"),
+                "effective_position_state": "LONG" if action == "ADD" else "FLAT",
+                "confidence": conf,
+                "delta_pct": d_pct,
+                "edge_score": edge,
+                "score": score_val,
+                "execution_blocked": False,
+                "execution_risk_flag": str(alloc_row.get("risk_flag") or "OK"),
+                "governed_allocation_source": True,
+                "recommended_action": action,
+                "allocation_score": alloc_score,
+            }
+            meta["enrichment_by_symbol"][sym] = "allocation_only"
+            meta["missing_opportunity_rows"].append(sym)
+
+        row = dict(row)
+        row["ticker"] = sym
+        row["governed_allocation_candidate"] = True
+        row["recommended_action"] = action
+        rows.append(row)
+
+    meta["considered_symbols"] = [_norm_sym(r.get("ticker")) for r in rows if r.get("ticker")]
+    if not rows:
+        meta["empty_governed_candidates"] = True
+        return pd.DataFrame(), meta
+    return pd.DataFrame(rows), meta
 
 
 def _opp_to_stance(row: pd.Series) -> Optional[str]:
@@ -4048,27 +4220,64 @@ def preview_planned_buy_symbols(
     verbose: bool = False,
     for_execute: bool = True,
     opportunities_path: Optional[Path] = None,
+    source: Optional[str] = None,
+    allowed_symbols: Optional[List[str]] = None,
+    governed_candidates: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[str], Dict[str, Any]]:
     """
     Planner-only preview of final BUY symbols after sector-cap / diversification filtering.
 
     Mirrors execute_trades planning through precap (and order discipline when for_execute=True)
     without writing plans or submitting orders.
+
+    When source=\"allocation\" or allowed_symbols is set, intake is restricted to governed
+    allocation candidates (portfolio_allocation_recommendations.csv) with optional
+    trade_opportunities enrichment.
     """
     meta: Dict[str, Any] = {"mode": mode, "for_execute": for_execute, "preview": True}
     cfg = load_execute_trades_config()
     op_path = opportunities_path or DEFAULT_OPPS
+
+    governed_mode = source == "allocation" or bool(allowed_symbols) or bool(governed_candidates)
+    if governed_candidates and not allowed_symbols:
+        allowed_symbols = [
+            _norm_sym(c.get("ticker") or c.get("symbol"))
+            for c in governed_candidates
+            if c.get("ticker") or c.get("symbol")
+        ]
+
+    if governed_mode:
+        meta["planner_input_mode"] = "allocation"
+        meta["allowed_symbols"] = sorted({_norm_sym(s) for s in (allowed_symbols or []) if s})
+        df, intake_meta = build_governed_allocation_opportunities_df(
+            list(allowed_symbols or []),
+            opportunities_path=op_path,
+        )
+        meta["governed_intake"] = intake_meta
+        meta["planner_considered_symbols"] = list(intake_meta.get("considered_symbols") or [])
+        if df.empty:
+            meta["empty_opportunities"] = True
+            meta["planner_selected_symbols"] = []
+            meta["planner_rejected_symbols"] = {}
+            return [], meta
+    else:
+        meta["planner_input_mode"] = "opportunities"
+        df = load_trade_opportunities(op_path)
+        if df.empty:
+            meta["empty_opportunities"] = True
+            return [], meta
 
     _lg = evaluate_lifecycle_gate(path=RESULTS / "signal_lifecycle_effective.csv")
     meta["lifecycle_status"] = _lg.status
     if _lg.status == "BLOCKED":
         meta["lifecycle_blocked"] = True
         meta["lifecycle_reason"] = _lg.reason
-        return [], meta
-
-    df = load_trade_opportunities(op_path)
-    if df.empty:
-        meta["empty_opportunities"] = True
+        if governed_mode:
+            considered = meta.get("planner_considered_symbols") or []
+            meta["planner_rejected_symbols"] = {
+                s: f"lifecycle blocked: {_lg.reason}" for s in considered
+            }
+            meta["planner_selected_symbols"] = []
         return [], meta
 
     positions, acct, broker = load_broker_state(mode)
@@ -4150,13 +4359,26 @@ def preview_planned_buy_symbols(
         enabled=bool(cfg.get("entry_guard_precap_buys", True)),
     )
 
-    symbols = sorted(
-        {
-            str(p.symbol).strip().upper()
-            for p in planned
-            if str(p.side or "").lower() == "buy" and str(p.symbol or "").strip()
-        }
+    considered = (
+        meta.get("planner_considered_symbols")
+        if governed_mode
+        else sorted({_norm_sym(r.get("ticker")) for _, r in df.iterrows() if r.get("ticker")})
     )
+    selected, rejected = _extract_planner_symbol_outcomes(
+        plan_lines, planned, list(considered or [])
+    )
+    symbols = selected
+
+    if governed_mode:
+        meta["planner_considered_symbols"] = list(considered or [])
+        meta["planner_selected_symbols"] = symbols
+        meta["planner_rejected_symbols"] = rejected
+        inflight = list(in_flight_meta.get("symbols") or [])
+        for sym in inflight:
+            ns = _norm_sym(sym)
+            if ns and ns not in symbols and ns not in rejected:
+                rejected[ns] = "duplicate/in-flight order"
+        meta["planner_rejected_symbols"] = rejected
 
     meta.update(
         {
@@ -4172,6 +4394,8 @@ def preview_planned_buy_symbols(
             "planner_ranked_rows": planner_core_meta.get("ranked_rows"),
             "in_flight_symbols": list(in_flight_meta.get("symbols") or []),
             "warnings": warnings,
+            "quality_summary": quality_summary,
+            "score_sizing_summary": score_sizing_summary,
         }
     )
     try:

@@ -409,8 +409,13 @@ def build_candidate_contract_rows() -> List[Dict[str, str]]:
     risk_flags = _load_risk_flags()
 
     entry_candidates, handoff = _load_governed_allocation_candidates()
+    eligible_alloc = handoff.get("eligible_entry_symbols") or []
     planner_symbols, planner_meta = preview_planned_buy_symbols(
-        "paper", verbose=False, for_execute=True
+        "paper",
+        verbose=False,
+        for_execute=True,
+        source="allocation",
+        allowed_symbols=list(eligible_alloc),
     )
     enrich_planner_preview_metadata(planner_symbols, planner_meta, alloc_summary=alloc)
 
@@ -507,14 +512,18 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
     cache = assess_controlled_candidates_cache()
     contract_rows = build_candidate_contract_rows()
     _, handoff = _load_governed_allocation_candidates()
+    eligible_alloc = handoff.get("eligible_entry_symbols") or []
 
     planner_symbols, planner_meta = preview_planned_buy_symbols(
-        "paper", verbose=False, for_execute=True
+        "paper",
+        verbose=False,
+        for_execute=True,
+        source="allocation",
+        allowed_symbols=list(eligible_alloc),
     )
     enrich_planner_preview_metadata(planner_symbols, planner_meta, alloc_summary=alloc)
 
     executable_rows = [r for r in contract_rows if r.get("executable_candidate") == "true"]
-    eligible_alloc = handoff.get("eligible_entry_symbols") or []
     planner_set = {_norm(s) for s in planner_symbols if s}
     contract_mismatch = bool(
         eligible_alloc and planner_set and not planner_set.issubset(set(eligible_alloc))
@@ -538,6 +547,10 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
         "eligible_allocation_symbols": list(eligible_alloc),
         "rejected_allocation_symbols": handoff.get("rejected_entry_symbols") or {},
         "governed_source": "portfolio_allocation_recommendations.csv",
+        "planner_input_mode": planner_meta.get("planner_input_mode"),
+        "planner_considered_symbols": planner_meta.get("planner_considered_symbols") or [],
+        "planner_selected_symbols": planner_meta.get("planner_selected_symbols") or planner_symbols,
+        "planner_rejected_symbols": planner_meta.get("planner_rejected_symbols") or {},
         "planner_preview_candidate": str(planner_meta.get("preview_candidate") or ""),
         "planner_preview_risk_flag": str(planner_meta.get("preview_candidate_risk_flag") or ""),
         "planner_preview_executable": bool(planner_meta.get("preview_candidate_executable")),
@@ -548,6 +561,7 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
         "final_selection_status": str(planner_meta.get("final_selection_status") or ""),
         "final_selection_block_reason": str(planner_meta.get("final_selection_block_reason") or ""),
         "contract_mismatch_detected": contract_mismatch,
+        "would_execute_if_market_open": could_order,
         "stale_candidate_cache": cache,
         "contract_rows": contract_rows,
         "executable_candidate_count": len(executable_rows),

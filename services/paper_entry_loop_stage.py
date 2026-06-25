@@ -463,6 +463,10 @@ def _flatten_audit_fields(
             "final_selection_status": checks.get("final_selection_status"),
             "final_selection_block_reason": checks.get("final_selection_block_reason"),
             "planner_preview_symbols": checks.get("planner_preview_symbols") or [],
+            "planner_input_mode": checks.get("planner_input_mode"),
+            "planner_considered_symbols": checks.get("planner_considered_symbols") or [],
+            "planner_selected_symbols": checks.get("planner_selected_symbols") or [],
+            "planner_rejected_symbols": checks.get("planner_rejected_symbols") or {},
             "contract_mismatch_detected": bool(checks.get("contract_mismatch_detected")),
         }
     )
@@ -489,9 +493,21 @@ def _risk_blocked_in_selection(symbols: List[str]) -> List[str]:
     return blocked
 
 
-def _preview_final_planned_symbols(*, verbose: bool = False) -> Tuple[List[str], Dict[str, Any]]:
+def _preview_final_planned_symbols(
+    *,
+    verbose: bool = False,
+    allowed_symbols: Optional[List[str]] = None,
+) -> Tuple[List[str], Dict[str, Any]]:
     from services.execute_trades import preview_planned_buy_symbols
 
+    if allowed_symbols:
+        return preview_planned_buy_symbols(
+            "paper",
+            verbose=verbose,
+            for_execute=True,
+            source="allocation",
+            allowed_symbols=allowed_symbols,
+        )
     return preview_planned_buy_symbols("paper", verbose=verbose, for_execute=True)
 
 
@@ -511,7 +527,10 @@ def _verify_final_selection_before_execute(
     sync_details: Dict[str, Any] = {
         "expected_symbols": sorted({_norm(s) for s in expected_symbols if s}),
     }
-    final_symbols, preview_meta = _preview_final_planned_symbols(verbose=verbose)
+    final_symbols, preview_meta = _preview_final_planned_symbols(
+        verbose=verbose,
+        allowed_symbols=list(sync_details["expected_symbols"]),
+    )
     sync_details["planner_preview"] = preview_meta
     sync_details["final_selected_symbols"] = final_symbols
 
@@ -677,12 +696,25 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
         )
 
     try:
-        final_symbols, preview_meta = _preview_final_planned_symbols(verbose=verbose)
-        details["planner_preview"] = preview_meta
         eligible_syms = list(handoff_reload.get("eligible_entry_symbols") or [])
+        final_symbols, preview_meta = _preview_final_planned_symbols(
+            verbose=verbose,
+            allowed_symbols=eligible_syms,
+        )
+        details["planner_preview"] = preview_meta
         details["checks"]["eligible_entry_symbols"] = eligible_syms
         details["checks"]["final_selected_symbols"] = final_symbols
         details["checks"]["planner_preview_symbols"] = final_symbols
+        details["checks"]["planner_input_mode"] = preview_meta.get("planner_input_mode")
+        details["checks"]["planner_considered_symbols"] = preview_meta.get(
+            "planner_considered_symbols"
+        )
+        details["checks"]["planner_selected_symbols"] = (
+            preview_meta.get("planner_selected_symbols") or final_symbols
+        )
+        details["checks"]["planner_rejected_symbols"] = (
+            preview_meta.get("planner_rejected_symbols") or {}
+        )
         details["checks"]["preview_candidate"] = preview_meta.get("preview_candidate")
         details["checks"]["preview_candidate_risk_flag"] = preview_meta.get(
             "preview_candidate_risk_flag"
