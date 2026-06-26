@@ -472,6 +472,17 @@ def _flatten_audit_fields(
             "planner_selected_symbols": checks.get("planner_selected_symbols") or [],
             "planner_rejected_symbols": checks.get("planner_rejected_symbols") or {},
             "contract_mismatch_detected": bool(checks.get("contract_mismatch_detected")),
+            "approval_match_mode": checks.get("approval_match_mode"),
+            "approval_covers_final_selection": checks.get("approval_covers_final_selection"),
+            "approval_request_id": details.get("approval_request_id"),
+            "selection_approval_sync": checks.get("selection_approval_sync"),
+            "governance_approval_present": checks.get("governance_approval_present"),
+            "governance_approval_present_after_auto": checks.get(
+                "governance_approval_present_after_auto"
+            ),
+            "final_selection_approval_gate_reason": checks.get(
+                "final_selection_approval_gate_reason"
+            ),
         }
     )
 
@@ -618,8 +629,10 @@ def _verify_final_selection_before_execute(
             "final": sorted(final_set),
         }
 
+    from services.execution_approval_workflow import find_approved_request_covering
+
     gov_ctx = _build_paper_approval_context({"paperMode": True, "liveMode": False})
-    approved = find_approved_request(
+    approved = find_approved_request_covering(
         "",
         "capital_deployment",
         symbols=final_symbols,
@@ -627,10 +640,15 @@ def _verify_final_selection_before_execute(
     )
     sync_details["approved_symbols"] = parse_approved_symbols(approved)
 
-    from services.auto_paper_approval import approval_symbols_exact_match
+    from services.auto_paper_approval import evaluate_approval_match
 
-    if approval_symbols_exact_match(approved, final_symbols):
+    covered, match_mode = evaluate_approval_match(approved, final_symbols)
+    sync_details["approval_match_mode"] = match_mode
+    sync_details["approval_covers_final_selection"] = covered
+
+    if covered:
         sync_details["selection_approval_sync"] = True
+        sync_details["approval_request_id"] = str((approved or {}).get("approval_id") or "")
         return True, "OK", sync_details
 
     ok, reason, gov_details = ensure_governance_approval_for_symbols(
@@ -850,10 +868,26 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
             gov_details.get("governance_approval_present")
         )
         details["checks"]["governance_approval_present_after_auto"] = bool(
-            gov_details.get("governance_approval_present")
+            gov_details.get("governance_approval_present_after_auto")
+            or (gov_details.get("auto_paper_approval") or {}).get(
+                "governance_approval_present_after_auto"
+            )
+            or gov_details.get("governance_approval_present")
         )
         details["checks"]["symbols_requested"] = final_symbols
         details["checks"]["approved_symbols"] = gov_details.get("approved_symbols") or []
+        details["checks"]["approved_symbol_sets"] = gov_details.get("approved_symbol_sets") or []
+        details["checks"]["approval_match_mode"] = gov_details.get("approval_match_mode")
+        details["checks"]["approval_covers_final_selection"] = bool(
+            gov_details.get("approval_covers_final_selection")
+        )
+        details["checks"]["approval_created_this_run"] = bool(
+            gov_details.get("approval_created_this_run")
+        )
+        details["checks"]["approval_expired"] = bool(gov_details.get("approval_expired"))
+        details["checks"]["final_selection_approval_gate_reason"] = str(
+            gov_details.get("final_selection_approval_gate_reason") or ""
+        )
         details["checks"]["selection_approval_sync"] = bool(
             gov_details.get("selection_approval_sync")
         )

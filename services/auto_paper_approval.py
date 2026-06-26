@@ -266,18 +266,43 @@ def _write_audit(
     return row
 
 
+def _load_allocation_actions() -> Dict[str, str]:
+    path = RESULTS / "portfolio_allocation_recommendations.csv"
+    out: Dict[str, str] = {}
+    if not path.is_file():
+        return out
+    try:
+        import pandas as pd
+
+        df = pd.read_csv(path, low_memory=False)
+        sym_col = "ticker" if "ticker" in df.columns else "symbol"
+        if sym_col not in df.columns:
+            return out
+        for _, row in df.iterrows():
+            sym = str(row.get(sym_col) or "").strip().upper()
+            action = str(row.get("recommended_action") or "").strip().upper()
+            if sym:
+                out[sym] = action
+    except Exception:
+        pass
+    return out
+
+
 def _duplicate_checks(symbols: Sequence[str]) -> Tuple[bool, str, Dict[str, str]]:
     from services.paper_entry_loop_stage import _load_held_symbols, _load_open_buy_keys
 
     held = _load_held_symbols()
     open_buy = _load_open_buy_keys()
     sym_set = set(_norm_symbols(symbols))
-    held_overlap = sym_set & held
+    alloc_actions = _load_allocation_actions()
+
+    open_new_syms = {s for s in sym_set if alloc_actions.get(s, "OPEN_NEW") not in ("ADD",)}
+    held_overlap_open_new = open_new_syms & held
     order_overlap = {s for s, side in open_buy if side in ("BUY", "B") and s in sym_set}
-    if held_overlap:
+    if held_overlap_open_new:
         return (
             False,
-            f"ALREADY_HELD:{','.join(sorted(held_overlap))}",
+            f"ALREADY_HELD:{','.join(sorted(held_overlap_open_new))}",
             {
                 "duplicate_order_check": "OK",
                 "duplicate_position_check": "FAIL",
@@ -397,7 +422,7 @@ def _ensure_pending_request(
 ) -> Tuple[Optional[Dict[str, Any]], str, Dict[str, Any]]:
     from services.execution_approval_workflow import (
         create_approval_request,
-        find_approved_request,
+        find_approved_request_covering,
     )
     from services.execution_governance_council import determine_authority_level
 
@@ -409,13 +434,14 @@ def _ensure_pending_request(
     if ctx.get("liveMode") is True:
         return None, "LIVE_CONTEXT_REFUSED", gate_info
 
-    existing = find_approved_request(
+    existing = find_approved_request_covering(
         "",
         "capital_deployment",
         symbols=symbols,
         context=ctx,
     )
-    if existing:
+    covered, _ = evaluate_approval_match(existing, symbols)
+    if existing and covered:
         gate_info["approval_request_match_status"] = "ALREADY_APPROVED"
         return existing, "ALREADY_APPROVED", gate_info
 
@@ -457,16 +483,17 @@ def _governance_visible(
     *,
     context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[Dict[str, Any]]]:
-    from services.execution_approval_workflow import find_approved_request
+    from services.execution_approval_workflow import find_approved_request_covering
 
     ctx = _build_paper_approval_context(context)
-    approved = find_approved_request(
+    approved = find_approved_request_covering(
         "",
         "capital_deployment",
         symbols=symbols,
         context=ctx,
     )
-    return approved is not None, approved
+    covered, _ = evaluate_approval_match(approved, symbols)
+    return covered and approved is not None, approved if covered else None
 
 
 def attempt_auto_paper_approval(
@@ -655,6 +682,54 @@ def approval_symbols_exact_match(
     return set(parse_approved_symbols(approved_req)) == set(_norm_symbols(symbols))
 
 
+def approval_symbols_subset_covered(
+    approved_req: Optional[Dict[str, Any]],
+    symbols: Sequence[str],
+) -> bool:
+    """True when every requested symbol is in the approved request (superset coverage)."""
+    if not approved_req:
+        return False
+    requested = set(_norm_symbols(symbols))
+    if not requested:
+        return False
+    approved_set = set(parse_approved_symbols(approved_req))
+    return requested.issubset(approved_set)
+
+
+def evaluate_approval_match(
+    approved_req: Optional[Dict[str, Any]],
+    symbols: Sequence[str],
+) -> Tuple[bool, str]:
+    """Return (covers_final_selection, match_mode)."""
+    if not approved_req:
+        return False, "NONE"
+    if approval_symbols_exact_match(approved_req, symbols):
+        return True, "EXACT"
+    if approval_symbols_subset_covered(approved_req, symbols):
+        return True, "SUBSET"
+    return False, "NONE"
+
+
+def _apply_approval_success_details(
+    details: Dict[str, Any],
+    approved: Dict[str, Any],
+    sym_list: List[str],
+    match_mode: str,
+) -> None:
+    approved_syms = parse_approved_symbols(approved)
+    details["approved_symbols"] = approved_syms
+    details["approved_symbol_sets"] = [approved_syms]
+    details["selection_approval_sync"] = True
+    details["governance_approval_present"] = True
+    details["approval_covers_final_selection"] = True
+    details["approval_match_mode"] = match_mode
+    details["approval_id"] = str(approved.get("approval_id") or "")
+    details["approval_request_id"] = details["approval_id"]
+    details["approval_expired"] = False
+    details["final_selection_approval_gate_reason"] = "OK"
+    details["symbols_requested"] = sym_list
+
+
 def ensure_governance_approval_for_symbols(
     symbols: Sequence[str],
     *,
@@ -663,32 +738,38 @@ def ensure_governance_approval_for_symbols(
     allow_auto_retry: bool = True,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
-    Ensure governance approval exists for the exact final symbol set.
+    Ensure governance approval exists for the final symbol set.
+    Accepts exact match or valid superset coverage (post-fill selection shrink).
     Optionally runs auto paper approval when enabled.
     """
-    from services.execution_approval_workflow import find_approved_request
+    from services.execution_approval_workflow import find_approved_request_covering
 
     sym_list = _norm_symbols(symbols)
     details: Dict[str, Any] = {
         "symbols_requested": sym_list,
         "approved_symbols": [],
+        "approved_symbol_sets": [],
         "selection_approval_sync": False,
+        "approval_covers_final_selection": False,
+        "approval_match_mode": "NONE",
+        "approval_created_this_run": False,
+        "approval_expired": False,
+        "final_selection_approval_gate_reason": "",
     }
     if not sym_list:
+        details["final_selection_approval_gate_reason"] = "NO_SYMBOLS"
         return False, "NO_SYMBOLS", details
 
     ctx = _build_paper_approval_context(context)
-    approved = find_approved_request(
+    approved = find_approved_request_covering(
         "",
         "capital_deployment",
         symbols=sym_list,
         context=ctx,
     )
-    if approval_symbols_exact_match(approved, sym_list):
-        details["approved_symbols"] = parse_approved_symbols(approved)
-        details["selection_approval_sync"] = True
-        details["governance_approval_present"] = True
-        details["approval_id"] = str((approved or {}).get("approval_id") or "")
+    covered, match_mode = evaluate_approval_match(approved, sym_list)
+    if covered and approved:
+        _apply_approval_success_details(details, approved, sym_list, match_mode)
         return True, "OK", details
 
     auto_enabled = (
@@ -702,22 +783,37 @@ def ensure_governance_approval_for_symbols(
             verbose=verbose,
         )
         details["auto_paper_approval"] = auto_details
-        approved = find_approved_request(
+        details["governance_approval_present_after_auto"] = bool(
+            auto_details.get("governance_approval_present_after_auto")
+        )
+        created = bool((auto_details.get("gate") or {}).get("approval_request_created"))
+        details["approval_created_this_run"] = created
+        approved = find_approved_request_covering(
             "",
             "capital_deployment",
             symbols=sym_list,
             context=ctx,
         )
-        if auto_ok and approval_symbols_exact_match(approved, sym_list):
-            details["approved_symbols"] = parse_approved_symbols(approved)
-            details["selection_approval_sync"] = True
-            details["governance_approval_present"] = True
-            details["approval_id"] = str((approved or {}).get("approval_id") or "")
+        covered, match_mode = evaluate_approval_match(approved, sym_list)
+        if auto_ok and covered and approved:
+            if created and match_mode == "EXACT":
+                match_mode = "FRESH_CREATED"
+            _apply_approval_success_details(details, approved, sym_list, match_mode)
+            details["governance_approval_present_after_auto"] = True
             return True, auto_reason, details
+        if auto_ok and not covered:
+            details["final_selection_approval_gate_reason"] = "AUTO_APPROVAL_PARTIAL_COVERAGE"
+            return False, "AUTO_APPROVAL_PARTIAL_COVERAGE", details
         if not auto_ok:
+            details["approved_symbols"] = parse_approved_symbols(approved)
+            details["final_selection_approval_gate_reason"] = auto_reason
             return False, auto_reason, details
 
     details["approved_symbols"] = parse_approved_symbols(approved)
-    if approved and not approval_symbols_exact_match(approved, sym_list):
+    if approved:
+        details["approved_symbol_sets"] = [details["approved_symbols"]]
+    if approved and not covered:
+        details["final_selection_approval_gate_reason"] = "FINAL_SELECTION_NOT_APPROVED"
         return False, "FINAL_SELECTION_NOT_APPROVED", details
+    details["final_selection_approval_gate_reason"] = "GOVERNANCE_APPROVAL_REQUIRED"
     return False, "GOVERNANCE_APPROVAL_REQUIRED", details

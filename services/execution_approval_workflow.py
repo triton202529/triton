@@ -276,6 +276,19 @@ def validate_paper_capital_deployment_approvable(
     return True, "OK"
 
 
+def _symbols_covering(req: Dict[str, Any], symbols: Optional[Sequence[str]]) -> bool:
+    """True only when every requested symbol is in the approval record."""
+    req_symbols = _parse_symbol_list(req.get("symbol(s)"))
+    if not req_symbols:
+        return False
+    if not symbols:
+        return True
+    caller = {str(s).strip().upper() for s in symbols if s}
+    if not caller:
+        return True
+    return caller.issubset(req_symbols)
+
+
 def _symbols_compatible(req: Dict[str, Any], symbols: Optional[Sequence[str]]) -> bool:
     req_symbols = _parse_symbol_list(req.get("symbol(s)"))
     if not req_symbols:
@@ -333,6 +346,46 @@ def find_approved_request(
         if not _context_compatible(req, context):
             continue
         if not _symbols_compatible(req, symbols):
+            continue
+        return req
+    return None
+
+
+def find_approved_request_covering(
+    execution_identifier: Optional[str],
+    path: str,
+    *,
+    symbols: Optional[Sequence[str]] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Find an APPROVED request whose symbol set fully covers all requested symbols.
+    Used by paper-entry final selection (post-fill subset must not false-match overlap).
+    """
+    now = datetime.now(timezone.utc)
+    call_id = str(execution_identifier or "").strip()
+    requested = {str(s).strip().upper() for s in (symbols or []) if str(s).strip()}
+
+    for req in reversed(_load_requests()):
+        if req.get("approval_status") != "APPROVED":
+            continue
+        if req.get("execution_path") != path:
+            continue
+        if _is_expired(req, now=now):
+            continue
+
+        req_id = str(req.get("execution_identifier") or "").strip()
+        if call_id and req_id:
+            if call_id == req_id:
+                return req
+            continue
+
+        if call_id and not req_id:
+            continue
+
+        if not _context_compatible(req, context):
+            continue
+        if requested and not _symbols_covering(req, symbols):
             continue
         return req
     return None
