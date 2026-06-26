@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -36,6 +38,8 @@ ALLOC_RECOMMENDATIONS = RESULTS / "portfolio_allocation_recommendations.csv"
 ALLOC_SUMMARY = RESULTS / "portfolio_allocation_summary.json"
 AUDIT_JSON = RESULTS / "paper_entry_loop_stage_audit.json"
 LAST_MARKET_DECISION_JSON = RESULTS / "paper_entry_loop_stage_last_market_decision.json"
+DISPATCH_CONTRACT_PATH = LIVE / "paper_entry_dispatch_contract.json"
+DISPATCH_CONTRACT_TTL_MINUTES = 15
 EXEC_TRADES_CFG = CONFIG / "execute_trades.json"
 GOVERNED_ALLOC_SOURCE = "portfolio_allocation_recommendations.csv"
 
@@ -478,6 +482,73 @@ def _write_stage_audit(audit: Dict[str, Any], *, market_open: bool) -> None:
         _atomic_write_json(LAST_MARKET_DECISION_JSON, audit)
 
 
+def _dispatch_contract_checksum(doc: Dict[str, Any]) -> str:
+    payload = {k: v for k, v in doc.items() if k != "checksum"}
+    canonical = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _write_paper_entry_dispatch_contract(
+    details: Dict[str, Any],
+    handoff: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Write governed dispatch contract before execute_trades subprocess."""
+    checks = details.get("checks") or {}
+    from services.paper_arm_status import classify_paper_arm_confirm_status
+
+    final_selected = list(
+        checks.get("planner_selected_symbols") or checks.get("final_selected_symbols") or []
+    )
+    allowed = list(
+        checks.get("eligible_entry_symbols") or handoff.get("eligible_entry_symbols") or []
+    )
+    approved = list(
+        details.get("symbols_approved") or checks.get("approved_symbols") or final_selected
+    )
+    rejected = dict(
+        checks.get("planner_rejected_symbols") or handoff.get("rejected_entry_symbols") or {}
+    )
+
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(minutes=DISPATCH_CONTRACT_TTL_MINUTES)
+    dispatch_id = uuid.uuid4().hex[:16]
+
+    try:
+        from services.arm_mode import is_paper_arm_confirm_valid, load_arm_config
+
+        paper_arm_valid = is_paper_arm_confirm_valid(load_arm_config())
+        paper_arm_status = "VALID" if paper_arm_valid else classify_paper_arm_confirm_status()
+    except Exception:
+        paper_arm_status = classify_paper_arm_confirm_status()
+
+    readiness = _load_json(EXEC_READINESS)
+
+    contract: Dict[str, Any] = {
+        "dispatch_id": dispatch_id,
+        "generated_at_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "paper_entry_loop_stage",
+        "mode": "paper",
+        "governed_source": GOVERNED_ALLOC_SOURCE,
+        "approved_symbols": sorted({_norm(s) for s in approved if s}),
+        "final_selected_symbols": sorted({_norm(s) for s in final_selected if s}),
+        "allowed_symbols": sorted({_norm(s) for s in allowed if s}),
+        "rejected_symbols": rejected,
+        "planner_input_mode": checks.get("planner_input_mode") or "allocation",
+        "approval_request_id": str(details.get("approval_request_id") or ""),
+        "paper_arm_status": paper_arm_status,
+        "execution_readiness_status": str(readiness.get("readiness_status") or "UNKNOWN"),
+        "market_open": bool(checks.get("market_open")),
+        "live_execution_permitted": False,
+        "contract_expires_at_utc": expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    contract["approved_symbols"] = sorted(contract["approved_symbols"])
+    contract["final_selected_symbols"] = sorted(contract["final_selected_symbols"])
+    contract["allowed_symbols"] = sorted(contract["allowed_symbols"])
+    contract["checksum"] = _dispatch_contract_checksum(contract)
+    _atomic_write_json(DISPATCH_CONTRACT_PATH, contract)
+    return contract
+
+
 def _risk_blocked_in_selection(symbols: List[str]) -> List[str]:
     from services.auto_paper_approval import _load_risk_flags
 
@@ -901,10 +972,29 @@ def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> in
         _write_stage_audit(audit, market_open=market_open)
         return 0
 
+    dispatch_contract = _write_paper_entry_dispatch_contract(details, handoff)
+    dispatch_symbols = list(dispatch_contract.get("final_selected_symbols") or [])
+    audit["dispatch_contract_path"] = str(DISPATCH_CONTRACT_PATH.relative_to(ROOT)).replace(
+        "\\", "/"
+    )
+    audit["dispatch_id"] = dispatch_contract.get("dispatch_id")
+    audit["dispatch_symbols"] = dispatch_symbols
+    audit["execute_trades_dispatch_mode"] = True
+
     _EXECUTE_INVOKED = True
     py = _python_exe()
-    cmd = [py, "-m", "services.execute_trades", "--mode", "paper", "--execute", "--verbose"]
-    print("[PAPER_ENTRY_EXECUTION] starting execute_trades paper --execute", flush=True)
+    cmd = [
+        py,
+        "-m",
+        "services.execute_trades",
+        "--mode",
+        "paper",
+        "--execute",
+        "--verbose",
+        "--dispatch-contract",
+        str(DISPATCH_CONTRACT_PATH),
+    ]
+    print("[PAPER_ENTRY_EXECUTION] starting execute_trades paper --execute (dispatch)", flush=True)
     if verbose:
         print(f"[PAPER_ENTRY_EXECUTION] CMD: {' '.join(cmd)}", flush=True)
 
@@ -917,10 +1007,21 @@ def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> in
         print(f"[PAPER_ENTRY_EXECUTION] error={e}", flush=True)
     dur = time.perf_counter() - t0
 
+    dispatch_audit = _load_json(RESULTS / "execute_trades_dispatch_audit.json")
+    exec_selected = list(dispatch_audit.get("execute_trades_selected_symbols") or [])
+    dispatch_mismatch = bool(dispatch_audit.get("dispatch_contract_mismatch"))
+    block_reason = str(dispatch_audit.get("block_reason") or "")
+    if not block_reason and rc == 2:
+        block_reason = "execute_trades_blocked"
+
     print(f"[PAPER_ENTRY_EXECUTION] completed exit_code={rc} duration_sec={dur:.1f}", flush=True)
     audit["executed"] = True
     audit["execute_exit_code"] = rc
     audit["duration_sec"] = round(dur, 3)
+    audit["execute_trades_selected_symbols"] = exec_selected
+    audit["dispatch_contract_mismatch"] = dispatch_mismatch
+    audit["broker_orders_submitted"] = bool(dispatch_audit.get("broker_orders_submitted"))
+    audit["execution_block_reason"] = block_reason
     _write_stage_audit(audit, market_open=market_open)
     return 0 if rc in (0, 2) else 1
 

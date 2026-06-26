@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -14,7 +15,7 @@ import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -54,6 +55,8 @@ RESULTS = ROOT / "data" / "results"
 LIVE = ROOT / "data" / "live"
 DEFAULT_OPPS = RESULTS / "trade_opportunities.csv"
 DEFAULT_ALLOC_RECOMMENDATIONS = RESULTS / "portfolio_allocation_recommendations.csv"
+DISPATCH_CONTRACT_DEFAULT_PATH = LIVE / "paper_entry_dispatch_contract.json"
+DISPATCH_AUDIT_PATH = RESULTS / "execute_trades_dispatch_audit.json"
 DEFAULT_ORDERS_TODAY = LIVE / "orders_today.csv"
 EXEC_PLAN_JSON = RESULTS / "execution_plan.json"
 EXEC_PLAN_CSV = RESULTS / "execution_plan.csv"
@@ -1060,6 +1063,148 @@ def build_governed_allocation_opportunities_df(
         meta["empty_governed_candidates"] = True
         return pd.DataFrame(), meta
     return pd.DataFrame(rows), meta
+
+
+def _parse_dispatch_dt(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        s = str(value).strip()
+        if not s:
+            return None
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def compute_dispatch_contract_checksum(doc: Dict[str, Any]) -> str:
+    payload = {k: v for k, v in doc.items() if k != "checksum"}
+    canonical = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def load_paper_entry_dispatch_contract(path: Path) -> Tuple[Optional[Dict[str, Any]], str]:
+    if not path.is_file():
+        return None, "dispatch contract file missing"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return None, f"dispatch contract unreadable: {exc}"
+    if not isinstance(doc, dict):
+        return None, "dispatch contract invalid shape"
+    expected = doc.get("checksum")
+    if expected:
+        actual = compute_dispatch_contract_checksum(doc)
+        if str(expected) != actual:
+            return None, "dispatch contract checksum mismatch"
+    return doc, ""
+
+
+def validate_paper_entry_dispatch_contract(
+    doc: Dict[str, Any],
+    *,
+    mode: str,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    meta: Dict[str, Any] = {"dispatch_id": doc.get("dispatch_id")}
+    if str(doc.get("source") or "") != "paper_entry_loop_stage":
+        return False, "DISPATCH_SOURCE_INVALID", meta
+    if str(doc.get("mode") or "").lower() != str(mode or "").lower():
+        return False, "DISPATCH_MODE_MISMATCH", meta
+    if bool(doc.get("live_execution_permitted")):
+        return False, "DISPATCH_LIVE_EXECUTION_FORBIDDEN", meta
+    exp = _parse_dispatch_dt(doc.get("contract_expires_at_utc"))
+    if exp is None:
+        return False, "DISPATCH_EXPIRY_MISSING", meta
+    if datetime.now(timezone.utc) > exp:
+        return False, "DISPATCH_CONTRACT_EXPIRED", meta
+    meta["contract_expires_at_utc"] = exp.isoformat()
+    final_syms = [_norm_sym(s) for s in (doc.get("final_selected_symbols") or []) if _norm_sym(s)]
+    approved = [_norm_sym(s) for s in (doc.get("approved_symbols") or []) if _norm_sym(s)]
+    allowed = [_norm_sym(s) for s in (doc.get("allowed_symbols") or []) if _norm_sym(s)]
+    if not final_syms:
+        return False, "DISPATCH_FINAL_SYMBOLS_EMPTY", meta
+    allowed_set = set(allowed) if allowed else set(final_syms)
+    outside = sorted(set(final_syms) - allowed_set)
+    if outside:
+        return False, f"DISPATCH_FINAL_OUTSIDE_ALLOWED:{','.join(outside)}", meta
+    meta["final_selected_symbols"] = final_syms
+    meta["approved_symbols"] = approved or final_syms
+    meta["allowed_symbols"] = sorted(allowed_set)
+    return True, "OK", meta
+
+
+def enforce_dispatch_plan_symbols(
+    planned: List[PlannedOrder],
+    contract: Dict[str, Any],
+) -> Tuple[bool, str, List[str], List[str]]:
+    dispatch_set = {
+        _norm_sym(s)
+        for s in (contract.get("final_selected_symbols") or contract.get("approved_symbols") or [])
+        if _norm_sym(s)
+    }
+    planned_syms = sorted(
+        {
+            _norm_sym(p.symbol)
+            for p in planned
+            if str(p.side or "").lower() == "buy" and _norm_sym(p.symbol)
+        }
+    )
+    outside = sorted(set(planned_syms) - dispatch_set)
+    if outside:
+        return (
+            False,
+            f"EXECUTION_DISPATCH_CONTRACT_MISMATCH:{','.join(outside)}",
+            planned_syms,
+            outside,
+        )
+    return True, "OK", planned_syms, []
+
+
+def write_execute_trades_dispatch_audit(payload: Dict[str, Any]) -> None:
+    try:
+        DISPATCH_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = DISPATCH_AUDIT_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        os.replace(tmp, DISPATCH_AUDIT_PATH)
+    except Exception:
+        pass
+
+
+def _dispatch_block_and_exit(
+    *,
+    reason: str,
+    mode: str,
+    contract: Optional[Dict[str, Any]],
+    dispatch_meta: Dict[str, Any],
+    dry_run: bool,
+    planned_syms: Optional[List[str]] = None,
+    outside_syms: Optional[List[str]] = None,
+) -> int:
+    audit = {
+        "timestamp": _utc_iso(),
+        "mode": mode,
+        "dry_run": dry_run,
+        "dispatch_mode": True,
+        "blocked": True,
+        "block_reason": reason,
+        "dispatch_id": (contract or {}).get("dispatch_id"),
+        "dispatch_contract_path": str(DISPATCH_CONTRACT_DEFAULT_PATH),
+        "final_selected_symbols": (contract or {}).get("final_selected_symbols"),
+        "allowed_symbols": (contract or {}).get("allowed_symbols"),
+        "execute_trades_selected_symbols": planned_syms or [],
+        "symbols_outside_dispatch": outside_syms or [],
+        "dispatch_contract_mismatch": bool(outside_syms),
+        "broker_orders_submitted": False,
+        **dispatch_meta,
+    }
+    write_execute_trades_dispatch_audit(audit)
+    print(f"[execute_trades] {reason}", flush=True)
+    return 2
 
 
 def _opp_to_stance(row: pd.Series) -> Optional[str]:
@@ -4426,6 +4571,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Override output orders_today.csv path (still writes plan).",
     )
     ap.add_argument("--opportunities-path", type=str, default=None)
+    ap.add_argument(
+        "--dispatch-contract",
+        type=str,
+        default=None,
+        help="Governed paper-entry dispatch contract JSON (restricts execution symbols).",
+    )
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--ignore-market-closed", action="store_true")
     args = ap.parse_args(argv)
@@ -4453,6 +4604,46 @@ def main(argv: Optional[List[str]] = None) -> int:
     op_path = Path(args.opportunities_path) if args.opportunities_path else DEFAULT_OPPS
     orders_path = Path(args.orders_path) if args.orders_path else DEFAULT_ORDERS_TODAY
 
+    dispatch_contract: Optional[Dict[str, Any]] = None
+    dispatch_meta: Dict[str, Any] = {"execute_trades_dispatch_mode": False}
+    dispatch_path: Optional[Path] = None
+    if args.dispatch_contract:
+        dispatch_path = Path(args.dispatch_contract)
+        doc, load_err = load_paper_entry_dispatch_contract(dispatch_path)
+        if load_err or doc is None:
+            return _dispatch_block_and_exit(
+                reason=f"DISPATCH_CONTRACT_INVALID:{load_err}",
+                mode=args.mode,
+                contract=None,
+                dispatch_meta={
+                    "execute_trades_dispatch_mode": True,
+                    "dispatch_contract_path": str(dispatch_path),
+                },
+                dry_run=dry_run,
+            )
+        ok, val_reason, val_meta = validate_paper_entry_dispatch_contract(doc, mode=args.mode)
+        dispatch_meta = {
+            "execute_trades_dispatch_mode": True,
+            "dispatch_contract_path": str(dispatch_path),
+            "dispatch_id": doc.get("dispatch_id"),
+            "planner_input_mode": doc.get("planner_input_mode"),
+            **val_meta,
+        }
+        if not ok:
+            return _dispatch_block_and_exit(
+                reason=val_reason,
+                mode=args.mode,
+                contract=doc,
+                dispatch_meta=dispatch_meta,
+                dry_run=dry_run,
+            )
+        dispatch_contract = doc
+        print(
+            f"[execute_trades] dispatch_mode=true dispatch_id={doc.get('dispatch_id')} "
+            f"final_selected={doc.get('final_selected_symbols')}",
+            flush=True,
+        )
+
     _lg = evaluate_lifecycle_gate(path=RESULTS / "signal_lifecycle_effective.csv")
     print(_lg.format_block())
     lifecycle_gate_blocked = _lg.status == "BLOCKED"
@@ -4462,6 +4653,28 @@ def main(argv: Optional[List[str]] = None) -> int:
             "no orders will be planned from lifecycle artifacts."
         )
         df = pd.DataFrame()
+    elif dispatch_contract:
+        dispatch_syms = list(
+            dispatch_meta.get("final_selected_symbols")
+            or dispatch_contract.get("final_selected_symbols")
+            or []
+        )
+        df, governed_intake = build_governed_allocation_opportunities_df(
+            dispatch_syms,
+            opportunities_path=op_path,
+        )
+        dispatch_meta["governed_intake"] = governed_intake
+        dispatch_meta["execute_trades_considered_symbols"] = (
+            governed_intake.get("considered_symbols") or dispatch_syms
+        )
+        if df.empty:
+            return _dispatch_block_and_exit(
+                reason="DISPATCH_GOVERNED_INTAKE_EMPTY",
+                mode=args.mode,
+                contract=dispatch_contract,
+                dispatch_meta=dispatch_meta,
+                dry_run=dry_run,
+            )
     else:
         df = load_trade_opportunities(op_path)
     positions, acct, broker = load_broker_state(args.mode)
@@ -4820,6 +5033,53 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"count={len(add_position_miss_symbols)}")
     print(f"symbols={add_position_miss_symbols}")
 
+    if dispatch_contract:
+        ok, mismatch_reason, planned_syms, outside = enforce_dispatch_plan_symbols(
+            planned, dispatch_contract
+        )
+        dispatch_meta["execute_trades_selected_symbols"] = planned_syms
+        dispatch_meta["symbols_outside_dispatch"] = outside
+        if not ok:
+            return _dispatch_block_and_exit(
+                reason=mismatch_reason,
+                mode=args.mode,
+                contract=dispatch_contract,
+                dispatch_meta=dispatch_meta,
+                dry_run=dry_run,
+                planned_syms=planned_syms,
+                outside_syms=outside,
+            )
+        if not planned_syms and not dry_run:
+            return _dispatch_block_and_exit(
+                reason="DISPATCH_EMPTY_EXECUTION_PLAN",
+                mode=args.mode,
+                contract=dispatch_contract,
+                dispatch_meta=dispatch_meta,
+                dry_run=dry_run,
+                planned_syms=[],
+            )
+        write_execute_trades_dispatch_audit(
+            {
+                "timestamp": _utc_iso(),
+                "mode": args.mode,
+                "dry_run": dry_run,
+                "dispatch_mode": True,
+                "blocked": False,
+                "block_reason": "",
+                "dispatch_id": dispatch_contract.get("dispatch_id"),
+                "dispatch_contract_path": str(dispatch_path or DISPATCH_CONTRACT_DEFAULT_PATH),
+                "final_selected_symbols": dispatch_contract.get("final_selected_symbols"),
+                "allowed_symbols": dispatch_contract.get("allowed_symbols"),
+                "execute_trades_considered_symbols": dispatch_meta.get(
+                    "execute_trades_considered_symbols"
+                ),
+                "execute_trades_selected_symbols": planned_syms,
+                "dispatch_contract_mismatch": False,
+                "broker_orders_submitted": False,
+                **{k: v for k, v in dispatch_meta.items() if k not in ("governed_intake",)},
+            }
+        )
+
     if dry_run:
         _emit_execution_drop_payload(
             drop_rows,
@@ -4863,11 +5123,49 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if rc == 2:
         print(f"[execute_trades] BLOCKED: {brs}")
+        if dispatch_contract:
+            write_execute_trades_dispatch_audit(
+                {
+                    "timestamp": _utc_iso(),
+                    "mode": args.mode,
+                    "dry_run": False,
+                    "dispatch_mode": True,
+                    "blocked": True,
+                    "block_reason": ",".join(brs) if brs else "MASTER_GATE_BLOCKED",
+                    "dispatch_id": dispatch_contract.get("dispatch_id"),
+                    "dispatch_contract_path": str(dispatch_path or DISPATCH_CONTRACT_DEFAULT_PATH),
+                    "execute_trades_selected_symbols": [
+                        _norm_sym(p.symbol) for p in planned if str(p.side or "").lower() == "buy"
+                    ],
+                    "broker_orders_submitted": False,
+                    "dispatch_contract_mismatch": False,
+                    **dispatch_meta,
+                }
+            )
         return 2
     if rc != 0:
         print(f"[execute_trades] placement rc={rc}")
         return rc if rc in (1, 2, 3) else 1
     print(f"[execute_trades] placement subprocess completed OK (planned={len(planned)})")
+    if dispatch_contract:
+        write_execute_trades_dispatch_audit(
+            {
+                "timestamp": _utc_iso(),
+                "mode": args.mode,
+                "dry_run": False,
+                "dispatch_mode": True,
+                "blocked": False,
+                "block_reason": "",
+                "dispatch_id": dispatch_contract.get("dispatch_id"),
+                "dispatch_contract_path": str(dispatch_path or DISPATCH_CONTRACT_DEFAULT_PATH),
+                "execute_trades_selected_symbols": [
+                    _norm_sym(p.symbol) for p in planned if str(p.side or "").lower() == "buy"
+                ],
+                "broker_orders_submitted": executed > 0,
+                "dispatch_contract_mismatch": False,
+                **dispatch_meta,
+            }
+        )
     return 0
 
 
