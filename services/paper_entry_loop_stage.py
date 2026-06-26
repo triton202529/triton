@@ -355,20 +355,9 @@ def _load_entry_candidates() -> Tuple[List[Dict[str, Any]], pd.DataFrame]:
 
 
 def _planner_rejection_detail(preview_meta: Dict[str, Any]) -> str:
-    if preview_meta.get("final_selection_block_reason"):
-        return str(preview_meta["final_selection_block_reason"])
-    skip = preview_meta.get("skip_reasons") or {}
-    if isinstance(skip, dict) and skip:
-        top = next(iter(skip.items()))
-        return f"planner_skip:{top[0]}={top[1]}"
-    if preview_meta.get("lifecycle_blocked"):
-        return f"lifecycle_blocked:{preview_meta.get('lifecycle_reason', '')}"
-    if preview_meta.get("empty_opportunities"):
-        return "not_in_planner_universe"
-    warnings = preview_meta.get("preview_warnings") or preview_meta.get("warnings") or []
-    if warnings:
-        return str(warnings[0])
-    return ""
+    from services.paper_entry_candidate_contract import format_planner_rejection_summary
+
+    return format_planner_rejection_summary(preview_meta)
 
 
 def _check_allocation_planner_contract(
@@ -376,41 +365,9 @@ def _check_allocation_planner_contract(
     final_symbols: List[str],
     preview_meta: Dict[str, Any],
 ) -> Tuple[bool, str, Dict[str, Any]]:
-    eligible_set = {_norm(s) for s in eligible_symbols if s}
-    final_set = {_norm(s) for s in final_symbols if s}
-    detail: Dict[str, Any] = {
-        "eligible_allocation_symbols": sorted(eligible_set),
-        "planner_preview_symbols": sorted(final_set),
-        "contract_mismatch_detected": False,
-        "planner_rejection_detail": _planner_rejection_detail(preview_meta),
-    }
+    from services.paper_entry_candidate_contract import evaluate_allocation_planner_contract
 
-    if not eligible_set:
-        detail["contract_status"] = "NO_ELIGIBLE_ALLOCATION"
-        return True, "OK", detail
-
-    if not final_set:
-        detail["contract_mismatch_detected"] = True
-        detail["contract_status"] = "PLANNER_EMPTY"
-        return (
-            False,
-            "CONTRACT_MISMATCH:allocation_eligible_but_planner_empty",
-            detail,
-        )
-
-    outside = sorted(final_set - eligible_set)
-    if outside:
-        detail["contract_mismatch_detected"] = True
-        detail["planner_symbols_outside_allocation"] = outside
-        detail["contract_status"] = "PLANNER_OUTSIDE_ALLOCATION"
-        return (
-            False,
-            f"CONTRACT_MISMATCH:planner={sorted(final_set)} outside allocation_eligible={sorted(eligible_set)}",
-            detail,
-        )
-
-    detail["contract_status"] = "ALIGNED"
-    return True, "OK", detail
+    return evaluate_allocation_planner_contract(eligible_symbols, final_symbols, preview_meta)
 
 
 def _merge_handoff_into_details(details: Dict[str, Any], handoff: Dict[str, Any]) -> None:
@@ -471,7 +428,22 @@ def _flatten_audit_fields(
             "planner_considered_symbols": checks.get("planner_considered_symbols") or [],
             "planner_selected_symbols": checks.get("planner_selected_symbols") or [],
             "planner_rejected_symbols": checks.get("planner_rejected_symbols") or {},
+            "contract_status": checks.get("contract_status"),
             "contract_mismatch_detected": bool(checks.get("contract_mismatch_detected")),
+            "no_executable_candidates": bool(checks.get("no_executable_candidates")),
+            "no_executable_reason": checks.get("no_executable_reason"),
+            "planner_empty_valid": bool(checks.get("planner_empty_valid")),
+            "planner_empty_rejection_coverage": checks.get("planner_empty_rejection_coverage"),
+            "rejected_symbols_by_reason": checks.get("rejected_symbols_by_reason") or {},
+            "planner_rejection_buckets": checks.get("planner_rejection_buckets") or {},
+            "considered_symbols_count": checks.get("considered_symbols_count"),
+            "selected_symbols_count": checks.get("selected_symbols_count"),
+            "outside_considered_symbols": checks.get("outside_considered_symbols") or [],
+            "outside_selected_symbols": checks.get("outside_selected_symbols") or [],
+            "final_gate_classification": checks.get("final_gate_classification"),
+            "broker_orders_submitted": bool(audit.get("broker_orders_submitted")),
+            "dispatch_contract_mismatch": audit.get("dispatch_contract_mismatch"),
+            "live_execution_permitted": checks.get("live_execution_permitted"),
             "approval_match_mode": checks.get("approval_match_mode"),
             "approval_covers_final_selection": checks.get("approval_covers_final_selection"),
             "approval_request_id": details.get("approval_request_id"),
@@ -828,10 +800,27 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
             preview_meta,
         )
         details["allocation_planner_contract"] = contract_detail
+        for key in (
+            "contract_status",
+            "contract_mismatch_detected",
+            "planner_empty_valid",
+            "no_executable_candidates",
+            "no_executable_reason",
+            "planner_empty_rejection_coverage",
+            "rejected_symbols_by_reason",
+            "planner_rejection_buckets",
+            "considered_symbols_count",
+            "selected_symbols_count",
+            "outside_considered_symbols",
+            "outside_selected_symbols",
+        ):
+            if key in contract_detail:
+                details["checks"][key] = contract_detail[key]
         details["checks"]["contract_mismatch_detected"] = contract_detail.get(
             "contract_mismatch_detected"
         )
         if not contract_ok:
+            details["checks"]["final_gate_classification"] = "CONTRACT_MISMATCH"
             return block(contract_reason, "contract_mismatch")
 
         blocked_risk = _risk_blocked_in_selection(final_symbols)
@@ -846,6 +835,17 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
             if preview_meta.get("lifecycle_blocked"):
                 return block(
                     f"planner lifecycle blocked: {preview_meta.get('lifecycle_reason', '')}",
+                    "planner_preview",
+                    safe=True,
+                )
+            if contract_detail.get("planner_empty_valid"):
+                details["checks"]["no_executable_candidates"] = True
+                details["checks"][
+                    "no_executable_reason"
+                ] = "NO_EXECUTABLE_CANDIDATES_AFTER_PLANNER_FILTERS"
+                details["checks"]["final_gate_classification"] = "NO_TRADE_PLANNER_FILTERS"
+                return block(
+                    "NO_EXECUTABLE_CANDIDATES_AFTER_PLANNER_FILTERS",
                     "planner_preview",
                     safe=True,
                 )

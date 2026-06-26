@@ -194,6 +194,185 @@ def is_risk_blocked_symbol(symbol: str, risk_flags: Optional[Dict[str, str]] = N
     return "BLOCK_NEW_BUY" in rs or "FORCE_EXIT" in rs
 
 
+def _bucket_from_skip_code(code: str) -> str:
+    c = str(code or "").strip().upper()
+    if c in ("ADD_BLOCKED_BY_SECTOR_SOFT", "BUY_BLOCKED_BY_SECTOR_SOFT"):
+        return "ADD_BLOCKED_BY_SECTOR_SOFT"
+    if c in ("ADD_BLOCKED_BY_SECTOR_HARD", "BUY_BLOCKED_BY_SECTOR_HARD"):
+        return "ADD_BLOCKED_BY_SECTOR_HARD"
+    if "SECTOR" in c:
+        return "ADD_BLOCKED_BY_SECTOR"
+    if c in (
+        "BELOW_MIN_SCORE",
+        "NEGATIVE_SCORE_BLOCK",
+        "ADD_BELOW_SCORE_THRESHOLD",
+        "LOW_CONFIDENCE",
+        "BELOW_MIN_CONFIDENCE",
+    ):
+        return "BELOW_MIN_SCORE"
+    if c in ("IN_FLIGHT_ALREADY_SATISFIED", "RECENT_FILL_COOLDOWN"):
+        return "RECENT_FILL_COOLDOWN"
+    if c in ("ALREADY_IN_PORTFOLIO", "ALREADY_LONG_SKIP", "ALREADY_LONG_LOW_CONFIDENCE_SKIP"):
+        return "RECENT_FILL_COOLDOWN"
+    return c or "OTHER"
+
+
+def _bucket_from_rejection_reason(reason: str) -> str:
+    r = str(reason or "").strip().lower()
+    if "sector soft" in r:
+        return "ADD_BLOCKED_BY_SECTOR_SOFT"
+    if "sector hard" in r:
+        return "ADD_BLOCKED_BY_SECTOR_HARD"
+    if "sector cap" in r or "sector" in r:
+        return "ADD_BLOCKED_BY_SECTOR"
+    if "final_score too low" in r or "score too low" in r:
+        return "BELOW_MIN_SCORE"
+    if "not in planner universe" in r:
+        return "NOT_IN_PLANNER_UNIVERSE"
+    if "cooldown" in r or "in-flight" in r or "duplicate" in r:
+        return "RECENT_FILL_COOLDOWN"
+    if "lifecycle blocked" in r:
+        return "LIFECYCLE_BLOCKED"
+    return "OTHER"
+
+
+def aggregate_planner_rejection_buckets(preview_meta: Dict[str, Any]) -> Dict[str, int]:
+    buckets: Dict[str, int] = {}
+    rejected = preview_meta.get("planner_rejected_symbols") or {}
+    if rejected:
+        for reason in rejected.values():
+            bucket = _bucket_from_rejection_reason(str(reason))
+            buckets[bucket] = buckets.get(bucket, 0) + 1
+    else:
+        for code, count in (preview_meta.get("skip_reasons") or {}).items():
+            bucket = _bucket_from_skip_code(str(code))
+            buckets[bucket] = buckets.get(bucket, 0) + int(count or 0)
+    return {k: v for k, v in sorted(buckets.items()) if v > 0}
+
+
+def format_planner_rejection_summary(preview_meta: Dict[str, Any]) -> str:
+    buckets = aggregate_planner_rejection_buckets(preview_meta)
+    if buckets:
+        return "planner_skip:" + ";".join(f"{k}={v}" for k, v in buckets.items())
+    if preview_meta.get("final_selection_block_reason"):
+        return str(preview_meta["final_selection_block_reason"])
+    skip = preview_meta.get("skip_reasons") or {}
+    if isinstance(skip, dict) and skip:
+        top = next(iter(skip.items()))
+        return f"planner_skip:{top[0]}={top[1]}"
+    return ""
+
+
+def build_planner_rejection_audit_fields(preview_meta: Dict[str, Any]) -> Dict[str, Any]:
+    considered = [_norm(s) for s in (preview_meta.get("planner_considered_symbols") or []) if s]
+    selected = [
+        _norm(s)
+        for s in (preview_meta.get("planner_selected_symbols") or preview_meta.get("symbols") or [])
+        if s
+    ]
+    rejected = preview_meta.get("planner_rejected_symbols") or {}
+    rejected_syms = {_norm(k) for k in rejected if k}
+    considered_set = set(considered)
+    coverage = len(considered_set & rejected_syms) / len(considered_set) if considered_set else 0.0
+    return {
+        "rejected_symbols_by_reason": dict(rejected),
+        "planner_rejection_buckets": aggregate_planner_rejection_buckets(preview_meta),
+        "considered_symbols_count": len(considered_set),
+        "selected_symbols_count": len(set(selected)),
+        "planner_empty_rejection_coverage": round(coverage, 4),
+    }
+
+
+def evaluate_allocation_planner_contract(
+    eligible_symbols: List[str],
+    final_symbols: List[str],
+    preview_meta: Dict[str, Any],
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Classify allocation-to-planner contract alignment.
+
+    Valid planner-empty (all governed candidates filtered) is NOT a contract mismatch.
+    """
+    eligible_set = {_norm(s) for s in eligible_symbols if s}
+    final_set = {_norm(s) for s in final_symbols if s}
+    considered_set = {_norm(s) for s in (preview_meta.get("planner_considered_symbols") or []) if s}
+    selected_set = {
+        _norm(s) for s in (preview_meta.get("planner_selected_symbols") or final_symbols) if s
+    }
+    rejected = preview_meta.get("planner_rejected_symbols") or {}
+    rejected_syms = {_norm(k) for k in rejected if k}
+
+    rejection_fields = build_planner_rejection_audit_fields(preview_meta)
+    detail: Dict[str, Any] = {
+        "eligible_allocation_symbols": sorted(eligible_set),
+        "planner_preview_symbols": sorted(final_set),
+        "planner_considered_symbols": sorted(considered_set),
+        "planner_selected_symbols": sorted(selected_set),
+        "contract_mismatch_detected": False,
+        "planner_empty_valid": False,
+        "no_executable_candidates": False,
+        "planner_rejection_detail": format_planner_rejection_summary(preview_meta),
+        **rejection_fields,
+    }
+    outside_considered = sorted(considered_set - eligible_set)
+    outside_selected = sorted(selected_set - eligible_set)
+    detail["outside_considered_symbols"] = outside_considered
+    detail["outside_selected_symbols"] = outside_selected
+
+    if not eligible_set:
+        detail["contract_status"] = "NO_ELIGIBLE_ALLOCATION"
+        return True, "OK", detail
+
+    if outside_selected:
+        detail["contract_mismatch_detected"] = True
+        detail["contract_status"] = "PLANNER_OUTSIDE_ALLOCATION"
+        return (
+            False,
+            f"CONTRACT_MISMATCH:planner_selected={sorted(selected_set)} "
+            f"outside allocation_eligible={sorted(eligible_set)}",
+            detail,
+        )
+
+    if outside_considered:
+        detail["contract_mismatch_detected"] = True
+        detail["contract_status"] = "PLANNER_CONSIDERED_OUTSIDE_ALLOCATION"
+        return (
+            False,
+            f"CONTRACT_MISMATCH:planner_considered={sorted(considered_set)} "
+            f"outside allocation_eligible={sorted(eligible_set)}",
+            detail,
+        )
+
+    outside_final = sorted(final_set - eligible_set)
+    if outside_final:
+        detail["contract_mismatch_detected"] = True
+        detail["planner_symbols_outside_allocation"] = outside_final
+        detail["contract_status"] = "PLANNER_OUTSIDE_ALLOCATION"
+        return (
+            False,
+            f"CONTRACT_MISMATCH:planner={sorted(final_set)} "
+            f"outside allocation_eligible={sorted(eligible_set)}",
+            detail,
+        )
+
+    if not final_set and not selected_set:
+        full_rejection_coverage = bool(considered_set) and considered_set <= rejected_syms
+        if considered_set and considered_set <= eligible_set and full_rejection_coverage:
+            detail["contract_status"] = "PLANNER_EMPTY_VALID"
+            detail["planner_empty_valid"] = True
+            detail["no_executable_candidates"] = True
+            detail["no_executable_reason"] = "NO_EXECUTABLE_CANDIDATES_AFTER_PLANNER_FILTERS"
+            detail["contract_mismatch_detected"] = False
+            return True, "OK", detail
+
+        detail["contract_mismatch_detected"] = True
+        detail["contract_status"] = "PLANNER_EMPTY"
+        return False, "CONTRACT_MISMATCH:allocation_eligible_but_planner_empty", detail
+
+    detail["contract_status"] = "ALIGNED"
+    return True, "OK", detail
+
+
 def assess_controlled_candidates_cache() -> Dict[str, Any]:
     """Return staleness assessment for legacy 195Y candidates CSV."""
     result: Dict[str, Any] = {
@@ -326,6 +505,10 @@ def enrich_planner_preview_metadata(
     meta["allocation_action"] = _load_alloc_action(raw_top) if raw_top else ""
     meta["final_selection_status"] = final_status
     meta["final_selection_block_reason"] = final_reason
+    if not raw_top:
+        summary = format_planner_rejection_summary(meta)
+        if summary:
+            meta["final_selection_block_reason"] = summary
     meta["governed_preview_note"] = (
         "Raw planner rank may include risk-blocked symbols; "
         "governed_executable_preview_candidate excludes BLOCK_NEW_BUY/FORCE_EXIT."
@@ -525,9 +708,12 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
 
     executable_rows = [r for r in contract_rows if r.get("executable_candidate") == "true"]
     planner_set = {_norm(s) for s in planner_symbols if s}
-    contract_mismatch = bool(
-        eligible_alloc and planner_set and not planner_set.issubset(set(eligible_alloc))
+    _, _, contract_eval = evaluate_allocation_planner_contract(
+        list(eligible_alloc),
+        list(planner_symbols),
+        planner_meta,
     )
+    contract_mismatch = bool(contract_eval.get("contract_mismatch_detected"))
     could_order = bool(
         executable_rows
         and not contract_mismatch
