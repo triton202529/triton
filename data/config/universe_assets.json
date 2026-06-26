@@ -1,8 +1,16 @@
 {
-  "framework": "Phase-195A",
+  "framework": "Phase-195A/197A",
   "authority": "data/config/tickers.txt",
   "description": "Optional metadata overlay; membership authority is tickers.txt only.",
   "assets": {
+    "MU": {
+      "ticker": "MU",
+      "name": "Micron Technology",
+      "asset_class": "US Equity",
+      "exchange": "NASDAQ",
+      "sector": "Technology / Semiconductors",
+      "status": "ACTIVE"
+    },
     "SPCX": {
       "ticker": "SPCX",
       "name": "SpaceX",

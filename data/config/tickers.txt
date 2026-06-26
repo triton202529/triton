@@ -50,6 +50,7 @@ KO
 MA
 MRK
 MS
+MU
 PEP
 PFE
 PG
