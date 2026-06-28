@@ -2,6 +2,7 @@ import pandas as pd
 import os
 
 DATA_DIR = "data/results"
+PROCESSED_DIR = "data/processed"
 FUND_FILE = os.path.join(DATA_DIR, "fundamentals.csv")
 SCORED_FILE = os.path.join(DATA_DIR, "stock_scores.csv")
 
@@ -10,10 +11,21 @@ print("📊 Scoring stocks using individual ticker files...")
 fund = pd.read_csv(FUND_FILE)
 fund["ticker"] = fund["ticker"].str.upper()
 
-# Ensure all tickers in results dir exist in fundamentals
-all_tickers = [
-    f.replace(".parquet", "").upper() for f in os.listdir(DATA_DIR) if f.endswith(".parquet")
-]
+# Discover parquets from processed (preferred) and results (legacy fallback).
+parquet_sources: dict[str, str] = {}
+for directory in (PROCESSED_DIR, DATA_DIR):
+    if not os.path.isdir(directory):
+        continue
+    for file in os.listdir(directory):
+        if not file.endswith(".parquet"):
+            continue
+        ticker = file.replace(".parquet", "").upper()
+        if ticker in ("STOCK_DATA", "STOCK_DATA_MERGED"):
+            continue
+        if ticker not in parquet_sources:
+            parquet_sources[ticker] = os.path.join(directory, file)
+
+all_tickers = sorted(parquet_sources.keys())
 for t in all_tickers:
     if t not in fund["ticker"].values:
         fund = pd.concat(
@@ -38,19 +50,16 @@ for t in all_tickers:
 
 # Calculate momentum
 momentum = {}
-for file in os.listdir(DATA_DIR):
-    if file.endswith(".parquet"):
-        ticker = file.replace(".parquet", "").upper()
-        path = os.path.join(DATA_DIR, file)
-        try:
-            df = pd.read_parquet(path).sort_values("date")
-            if len(df) >= 2:
-                mom = (df.iloc[-1]["close"] - df.iloc[0]["close"]) / df.iloc[0]["close"]
-            else:
-                mom = 0
-            momentum[ticker] = mom
-        except:
-            momentum[ticker] = 0
+for ticker, path in parquet_sources.items():
+    try:
+        df = pd.read_parquet(path).sort_values("date")
+        if len(df) >= 2:
+            mom = (df.iloc[-1]["close"] - df.iloc[0]["close"]) / df.iloc[0]["close"]
+        else:
+            mom = 0
+        momentum[ticker] = mom
+    except Exception:
+        momentum[ticker] = 0
 
 momentum_df = pd.DataFrame(list(momentum.items()), columns=["ticker", "momentum"])
 merged = pd.merge(fund, momentum_df, on="ticker", how="left").fillna({"momentum": 0})
