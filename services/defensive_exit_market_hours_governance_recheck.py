@@ -5,18 +5,13 @@ Phase 197O — Market-hours governance observation recheck (read-only, no execut
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
-LIVE = ROOT / "data" / "live"
 GOVERNANCE = ROOT / "data" / "governance"
-REAL_APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
-OPEN_ORDERS_JSON = RESULTS / "open_orders_snapshot.csv"
-GUARD_PATHS = [RESULTS / "guard_snapshot.json", LIVE / "guard_snapshot.json"]
 
 RECHECK_WAITING = "MARKET_HOURS_RECHECK_WAITING_FOR_MARKET_OPEN"
 RECHECK_READY = "MARKET_HOURS_RECHECK_READY_FOR_OPERATOR_DECISION"
@@ -25,9 +20,6 @@ RECHECK_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_READINESS"
 RECHECK_GOV_AND_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_GOVERNANCE_AND_READINESS"
 RECHECK_OPEN_ORDERS = "MARKET_HOURS_RECHECK_BLOCKED_BY_OPEN_ORDERS"
 RECHECK_LIVE_REGRESSION = "MARKET_HOURS_RECHECK_BLOCKED_BY_LIVE_BLOCK_REGRESSION"
-
-DEFAULT_GUARD_MAX_AGE_MINUTES = 30.0
-DEFAULT_OPEN_ORDERS_MAX_AGE_MINUTES = 120.0
 
 
 def _utc_now() -> datetime:
@@ -38,41 +30,28 @@ def _utc_now_iso() -> str:
     return _utc_now().isoformat()
 
 
-def _file_age_minutes(path: Path) -> Optional[float]:
-    if not path.is_file():
-        return None
-    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-    return (_utc_now() - mtime).total_seconds() / 60.0
+def _order_guard_authority_fields(
+    *,
+    broker_snapshot_ok: bool,
+    open_orders_count: Optional[int] = None,
+) -> Dict[str, Any]:
+    from services.order_guard_snapshot_authority import evaluate_order_guard_authority
 
-
-def _resolve_guard_path() -> Optional[Path]:
-    existing = [p for p in GUARD_PATHS if p.is_file()]
-    if not existing:
-        return None
-    return max(existing, key=lambda p: p.stat().st_mtime)
-
-
-def _guard_freshness() -> Dict[str, Any]:
-    path = _resolve_guard_path()
-    age = _file_age_minutes(path) if path else None
-    fresh = age is not None and age <= DEFAULT_GUARD_MAX_AGE_MINUTES
-    oo_age = _file_age_minutes(OPEN_ORDERS_JSON)
-    oo_fresh = oo_age is not None and oo_age <= DEFAULT_OPEN_ORDERS_MAX_AGE_MINUTES
-    note = ""
-    if path and age is not None and not fresh:
-        note = (
-            "guard_snapshot stale; open_orders snapshot authoritative when open_orders=0 "
-            "(guard not refreshed by snapshot_live_orders)"
-        )
-    elif not path:
-        note = "guard_snapshot missing; diagnostic only unless live mode requires guard"
+    authority = evaluate_order_guard_authority(
+        broker_snapshot_ok=broker_snapshot_ok,
+        open_orders_count=open_orders_count,
+        refresh_guard_if_eligible=False,
+        mode="paper",
+    )
     return {
-        "guard_snapshot_path": str(path.relative_to(ROOT)).replace("\\", "/") if path else None,
-        "guard_snapshot_age_minutes": round(age, 2) if age is not None else None,
-        "guard_snapshot_fresh": fresh if path else None,
-        "open_orders_snapshot_age_minutes": round(oo_age, 2) if oo_age is not None else None,
-        "open_orders_snapshot_fresh": oo_fresh if OPEN_ORDERS_JSON.is_file() else None,
-        "gate_freshness_note": note,
+        "order_guard_authority_state": authority.get("order_guard_authority_state"),
+        "order_guard_authority_reason": authority.get("order_guard_authority_reason"),
+        "guard_snapshot_path": authority.get("guard_snapshot_path"),
+        "guard_snapshot_age_minutes": authority.get("guard_snapshot_age_minutes"),
+        "guard_snapshot_fresh": authority.get("guard_snapshot_fresh"),
+        "open_orders_snapshot_age_minutes": authority.get("open_orders_snapshot_age_minutes"),
+        "open_orders_snapshot_fresh": authority.get("open_orders_snapshot_fresh"),
+        "gate_freshness_note": authority.get("gate_freshness_note"),
     }
 
 
@@ -148,7 +127,10 @@ def run_market_hours_governance_recheck(
         gates["gate_ok"], gates["gate_reason"], gates["gate_details"]
     )
     master_gate = MasterExecutionGate(project_root=ROOT).evaluate(mode="paper", verbose=False)
-    freshness = _guard_freshness()
+    freshness = _order_guard_authority_fields(
+        broker_snapshot_ok=broker_snapshot_ok,
+        open_orders_count=int(criteria.get("open_orders_count") or 0),
+    )
 
     base = {
         "timestamp": _utc_now_iso(),

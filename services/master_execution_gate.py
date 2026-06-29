@@ -382,18 +382,52 @@ class MasterExecutionGate:
 
         if age is not None and age > max_age:
             sub["stale"] = True
-            sub["operator_note"] = (
-                "guard_snapshot.json is not updated by snapshot_live_orders; "
-                "refresh via guard / reconcile / pipeline that writes this file."
-            )
-            print(
-                f"[GATE_FRESHNESS] guard snapshot source={path} age_minutes={age:.1f} max={max_age} "
-                f"(not refreshed by snapshot_live_orders — see operator_note in gate details)",
-                file=sys.stderr,
-            )
+            authority_override = False
+            if mode == "paper":
+                from services.order_guard_snapshot_authority import (
+                    ORDER_GUARD_STALE_BUT_BROKER_ZERO_OPEN_ORDERS,
+                    classify_order_guard_authority,
+                )
+
+                oo_path = self.results / "open_orders_snapshot.csv"
+                oo_n = self._csv_body_row_count(oo_path)
+                oo_age = _file_age_minutes(oo_path)
+                oo_fresh = (
+                    oo_path.is_file()
+                    and oo_age is not None
+                    and oo_age <= float(self.cfg.get("max_open_orders_age_minutes") or 120)
+                )
+                auth_state, auth_reason, _ = classify_order_guard_authority(
+                    broker_snapshot_ok=oo_fresh,
+                    open_orders_count=oo_n,
+                )
+                sub["order_guard_authority_state"] = auth_state
+                sub["order_guard_authority_reason"] = auth_reason
+                if auth_state == ORDER_GUARD_STALE_BUT_BROKER_ZERO_OPEN_ORDERS:
+                    authority_override = True
+                    sub["stale_authority_override"] = True
+                    sub["operator_note"] = (
+                        "guard_snapshot timestamp stale; broker open-orders snapshot fresh with "
+                        "zero open orders — broker authority acceptable for paper observation"
+                    )
+                    print(
+                        "[GATE_FRESHNESS] guard snapshot stale; broker open-orders snapshot "
+                        "authoritative with zero open orders (197P order guard authority)",
+                        file=sys.stderr,
+                    )
+            if not authority_override:
+                sub["operator_note"] = (
+                    "guard_snapshot.json is not updated by snapshot_live_orders; "
+                    "refresh via guard / reconcile / pipeline that writes this file."
+                )
+                print(
+                    f"[GATE_FRESHNESS] guard snapshot source={path} age_minutes={age:.1f} max={max_age} "
+                    f"(not refreshed by snapshot_live_orders — see operator_note in gate details)",
+                    file=sys.stderr,
+                )
             if mode == "live":
                 reasons.append("STALE_GUARD_SNAPSHOT")
-            else:
+            elif not authority_override:
                 warnings.append("STALE_GUARD_SNAPSHOT")
 
         if self._guard_bad(doc):

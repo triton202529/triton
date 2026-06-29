@@ -6,6 +6,7 @@
 #   data/results/open_orders_snapshot.csv (open orders snapshot)   ✅ FIXED
 #   data/results/recent_orders.csv        (recent/all orders)
 #   data/results/positions_snapshot.csv   (positions)
+#   data/results/guard_snapshot.json      (197P: optional broker-authority refresh when safe)
 #
 # execute_trades may invoke this module once before placement when CSV snapshots are stale
 # (see snapshot_hygiene_* in execute_trades config) — does not replace MasterExecutionGate checks.
@@ -234,6 +235,24 @@ def main() -> Dict[str, Any]:
 
         _auto_heal_contracts()
 
+        guard_refresh: Dict[str, Any] = {"updated": False, "reason": "not_paper_mode"}
+        if args.mode == "paper":
+            from services.order_guard_snapshot_authority import (
+                refresh_guard_snapshot_from_broker_authority,
+            )
+
+            updated, refresh_reason, guard_path = refresh_guard_snapshot_from_broker_authority(
+                broker_snapshot_ok=True,
+                open_orders_count=int(len(open_orders)),
+                mode="paper",
+                broker_orders_submitted=False,
+            )
+            guard_refresh = {
+                "updated": updated,
+                "reason": refresh_reason,
+                "path": str(guard_path) if guard_path else None,
+            }
+
         return {
             "ok": True,
             "mode": args.mode,
@@ -246,6 +265,7 @@ def main() -> Dict[str, Any]:
                 "recent_orders": str(RECENT_ORDERS_PATH),
                 "positions": str(POSITIONS_PATH),
             },
+            "guard_snapshot_refresh": guard_refresh,
             "errors": [],
         }
     except AlpacaAuthError as exc:
