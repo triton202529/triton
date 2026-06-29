@@ -7,6 +7,7 @@
 #   B. Manage open orders     (smart reprice / cancellations)
 #   C. Poll order status      (re-poll after adjustments)
 #   D. Snapshot live state    (broker positions + open orders)
+#   E0. Universe hydration preflight (stranded symbol sync; no orders)
 #   E. Rebuild intelligence   (outcomes, pnl, perf, risk overlay, allocation)
 #   F. Run position management (drives exits / rotation)
 #
@@ -102,6 +103,10 @@ try {
     # ── D. Snapshot broker / live state ──────────────────────────────────
     Run-Step -Label "D. SNAPSHOT LIVE ORDERS" `
              -PyArgs @("-m","services.snapshot_live_orders","--mode","paper")
+
+    # ── E0. Universe hydration preflight (before allocation; no broker orders) ─
+    Run-Step -Label "E0. UNIVERSE HYDRATION PREFLIGHT" `
+             -PyArgs @("-m","services.runtime_universe_hydration_preflight","--verbose")
 
     # ── E. Rebuild intelligence layers (5 read-only analytics builders) ──
     Run-Step -Label "E1. BUILD TRADE OUTCOMES" `
