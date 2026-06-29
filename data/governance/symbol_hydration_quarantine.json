@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-06-29T01:12:17.019575+00:00",
+  "framework": "Phase-197D",
+  "symbols": {
+    "SPCX": {
+      "classification": "QUARANTINED_IPO_EDGE",
+      "reason": "insufficient_history raw_rows=8 processed_rows=5 train_min_rows=30",
+      "details": {
+        "symbol": "SPCX",
+        "universe_metadata": {
+          "ticker": "SPCX",
+          "name": "SpaceX",
+          "asset_class": "US Equity",
+          "exchange": "NASDAQ",
+          "sector": "Aerospace / Space Technology",
+          "status": "ACTIVE"
+        },
+        "raw_rows": 8,
+        "processed_rows": 5,
+        "train_min_rows": 30
+      }
+    }
+  }
+}

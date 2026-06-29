@@ -108,7 +108,12 @@ def run_phase_197c_validation(*, verbose: bool = True) -> Dict[str, Any]:
 
     status = "PASS"
     mu_not_stranded = TARGET not in (gaps.get("stranded_symbols") or [])
-    preflight_ok = preflight.get("status") in ("SKIPPED_NO_GAPS", "GAPS_DETECTED")
+    preflight_ok = preflight.get("status") in (
+        "SKIPPED_NO_GAPS",
+        "GAPS_DETECTED",
+        "QUARANTINED_GAPS",
+        "PARTIAL_WITH_QUARANTINE",
+    )
     if not preflight_ok:
         status = "FAIL"
         notes.append(f"unexpected preflight status {preflight.get('status')}")
@@ -148,8 +153,8 @@ def run_phase_197c_validation(*, verbose: bool = True) -> Dict[str, Any]:
             "detail": "E0 step in run_market_open.ps1",
         },
         {
-            "check": "skipped_no_gaps",
-            "pass": str(preflight.get("status") == "SKIPPED_NO_GAPS").lower(),
+            "check": "preflight_status_ok",
+            "pass": str(preflight_ok).lower(),
             "detail": str(preflight.get("status")),
         },
         {
@@ -195,6 +200,7 @@ def run_phase_197c_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "lifecycle_symbol_count": gaps.get("lifecycle_symbol_count"),
         "allocation_symbol_count": gaps.get("allocation_symbol_count"),
         "stranded_symbols": gaps.get("stranded_symbols") or [],
+        "quarantined_symbols": gaps.get("quarantined_symbols") or [],
         "mu_hydrated": bool(mu_state.get("hydrated")),
         "mu_in_allocation": bool(mu_state.get("in_allocation")),
         "hydration_needed": bool(preflight.get("hydration_needed")),

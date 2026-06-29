@@ -1,6 +1,6 @@
 """
 runtime_universe_hydration_preflight.py
-Phase 197C — Fast runtime check for stranded governed-universe symbols.
+Phase 197C/197D — Fast runtime check for stranded governed-universe symbols.
 
 Runs before allocation/paper-entry in the market-open sequence.
 Never submits broker orders or changes execution authorization.
@@ -21,7 +21,7 @@ RESULTS = ROOT / "data" / "results"
 PROCESSED = ROOT / "data" / "processed"
 AUDIT_JSON = RESULTS / "runtime_universe_hydration_preflight.json"
 
-PREVIOUS_PHASE = "197B"
+PREVIOUS_PHASE = "197D"
 
 
 def _utc_now_iso() -> str:
@@ -67,6 +67,7 @@ def _processed_ticker_set() -> Set[str]:
 def detect_hydration_gaps(
     *,
     tradable: Optional[Sequence[str]] = None,
+    apply_quarantine: bool = True,
 ) -> Dict[str, Any]:
     """Fast set-based gap scan (no per-symbol subprocess)."""
     from services.universe_pipeline_hydration import load_tradable_universe_tickers
@@ -97,7 +98,7 @@ def detect_hydration_gaps(
         s for s in configured if s in lifecycle_set and s in signals_set and s not in allocation_set
     )
 
-    return {
+    gaps: Dict[str, Any] = {
         "configured_symbols": configured,
         "configured_symbol_count": len(configured),
         "processed_symbol_count": len(processed_set & configured_set),
@@ -107,10 +108,23 @@ def detect_hydration_gaps(
         "missing_lifecycle_symbols": missing_lifecycle,
         "missing_allocation_symbols": missing_allocation,
         "missing_signals_symbols": missing_signals,
+        "raw_stranded_symbols": list(critical),
         "stranded_symbols": critical,
         "allocation_refresh_only_symbols": allocation_only,
+        "quarantined_symbols": [],
+        "quarantine_reasons_by_symbol": {},
+        "actionable_stranded_symbols": critical,
+        "no_actionable_hydration_needed": not critical,
         "hydration_needed": bool(critical),
     }
+
+    if apply_quarantine and critical:
+        from services.symbol_hydration_quarantine import apply_quarantine_to_gaps
+
+        gaps = apply_quarantine_to_gaps(gaps)
+        gaps["raw_stranded_symbols"] = list(critical)
+
+    return gaps
 
 
 def _market_open() -> bool:
@@ -135,6 +149,20 @@ def _allow_expensive_during_market_open() -> bool:
     )
 
 
+def _finalize_quarantine_audit(audit: Dict[str, Any], gaps: Dict[str, Any]) -> None:
+    audit["quarantined_symbols"] = list(gaps.get("quarantined_symbols") or [])
+    audit["quarantine_reasons_by_symbol"] = dict(gaps.get("quarantine_reasons_by_symbol") or {})
+    audit["actionable_stranded_symbols"] = list(gaps.get("actionable_stranded_symbols") or [])
+    audit["no_actionable_hydration_needed"] = bool(gaps.get("no_actionable_hydration_needed"))
+    audit["stranded_symbols"] = list(gaps.get("stranded_symbols") or [])
+    audit["hydration_needed"] = bool(gaps.get("hydration_needed"))
+    details = gaps.get("quarantine_details_by_symbol") or {}
+    if details:
+        from services.symbol_hydration_quarantine import persist_quarantine_registry
+
+        persist_quarantine_registry(details)
+
+
 def run_runtime_hydration_preflight(
     *,
     verbose: bool = False,
@@ -148,14 +176,15 @@ def run_runtime_hydration_preflight(
     )
     from services.portfolio_history_sync import load_live_execution_flag
 
-    gaps = detect_hydration_gaps()
+    gaps = detect_hydration_gaps(apply_quarantine=True)
     market_open = _market_open()
+    quarantined = list(gaps.get("quarantined_symbols") or [])
 
     audit: Dict[str, Any] = {
-        "phase": "197C",
+        "phase": "197D",
         "timestamp": _utc_now_iso(),
         "framework": "runtime_universe_hydration_preflight",
-        **gaps,
+        **{k: v for k, v in gaps.items() if k != "quarantine_details_by_symbol"},
         "market_open": market_open,
         "hydration_attempted": False,
         "hydrated_symbols": [],
@@ -168,15 +197,20 @@ def run_runtime_hydration_preflight(
     }
 
     if not gaps["hydration_needed"]:
-        audit["status"] = "SKIPPED_NO_GAPS"
-        audit["reason"] = "all configured tradable symbols hydrated in processed/signals/lifecycle"
+        if quarantined:
+            audit["status"] = "QUARANTINED_GAPS"
+            audit["reason"] = "unsupported_or_insufficient_history_symbols_quarantined"
+        else:
+            audit["status"] = "SKIPPED_NO_GAPS"
+            audit["reason"] = (
+                "all configured tradable symbols hydrated in processed/signals/lifecycle"
+            )
+        _finalize_quarantine_audit(audit, gaps)
         _atomic_write_json(AUDIT_JSON, audit)
         if verbose:
             print(
-                f"[RUNTIME_HYDRATION_PREFLIGHT] status=SKIPPED_NO_GAPS "
-                f"configured={gaps['configured_symbol_count']} "
-                f"processed={gaps['processed_symbol_count']} "
-                f"lifecycle={gaps['lifecycle_symbol_count']}",
+                f"[RUNTIME_HYDRATION_PREFLIGHT] status={audit['status']} "
+                f"quarantined={quarantined} configured={gaps['configured_symbol_count']}",
                 flush=True,
             )
         return audit
@@ -186,10 +220,15 @@ def run_runtime_hydration_preflight(
 
     if check_only:
         audit["status"] = "GAPS_DETECTED"
-        audit["reason"] = f"stranded={','.join(stranded)}"
+        audit["reason"] = f"actionable_stranded={','.join(stranded)}"
+        _finalize_quarantine_audit(audit, gaps)
         _atomic_write_json(AUDIT_JSON, audit)
         if verbose:
-            print(f"[RUNTIME_HYDRATION_PREFLIGHT] check_only stranded={stranded}", flush=True)
+            print(
+                f"[RUNTIME_HYDRATION_PREFLIGHT] check_only actionable={stranded} "
+                f"quarantined={quarantined}",
+                flush=True,
+            )
         return audit
 
     needs_expensive = any(
@@ -211,16 +250,27 @@ def run_runtime_hydration_preflight(
         if s in gaps["missing_processed_symbols"] or not (PROCESSED / f"{s}.parquet").is_file()
     ]
     if cheap_targets:
-        ok_raw, _ = ensure_raw_data(cheap_targets, verbose=verbose)
+        ensure_raw_data(cheap_targets, verbose=verbose)
         ok_pre, pre_detail = preprocess_symbols(cheap_targets, verbose=verbose)
         written = list(pre_detail.get("written") or [])
         hydrated.extend(written)
         for sym in cheap_targets:
-            if sym not in written and (sym in (pre_detail.get("errors") or []) or not ok_pre):
-                failed.append(sym)
+            if sym not in written:
+                from services.symbol_hydration_quarantine import classify_symbol_quarantine
+
+                q_class, q_reason, _ = classify_symbol_quarantine(sym)
+                if q_class:
+                    if sym not in quarantined:
+                        quarantined.append(sym)
+                    gaps.setdefault("quarantine_reasons_by_symbol", {})[
+                        sym
+                    ] = f"{q_class}:{q_reason}"
+                else:
+                    failed.append(sym)
         if verbose:
             print(
-                f"[RUNTIME_HYDRATION_PREFLIGHT] cheap_hydration written={written}",
+                f"[RUNTIME_HYDRATION_PREFLIGHT] cheap_hydration written={written} "
+                f"failed={failed} quarantined={quarantined}",
                 flush=True,
             )
 
@@ -250,41 +300,74 @@ def run_runtime_hydration_preflight(
                 if sym not in hydrated:
                     hydrated.append(sym)
             else:
-                failed.append(sym)
+                from services.symbol_hydration_quarantine import classify_symbol_quarantine
+
+                q_class, q_reason, _ = classify_symbol_quarantine(sym)
+                if q_class:
+                    if sym not in quarantined:
+                        quarantined.append(sym)
+                    gaps.setdefault("quarantine_reasons_by_symbol", {})[
+                        sym
+                    ] = f"{q_class}:{q_reason}"
+                else:
+                    failed.append(sym)
         if result.get("ok"):
             audit["status"] = "HYDRATED"
             audit["reason"] = f"hydrated={','.join(sorted(set(hydrated)))}"
+        elif hydrated and quarantined:
+            audit["status"] = "PARTIAL_WITH_QUARANTINE"
+            audit["reason"] = (
+                f"hydrated={','.join(sorted(set(hydrated)))} "
+                f"quarantined={','.join(sorted(set(quarantined)))}"
+            )
         elif hydrated:
             audit["status"] = "PARTIAL"
             audit["reason"] = (
                 f"partial_hydration hydrated={','.join(sorted(set(hydrated)))} "
                 f"failed={','.join(sorted(set(failed)))}"
             )
+        elif quarantined and not failed:
+            audit["status"] = "QUARANTINED_GAPS"
+            audit["reason"] = "unsupported_or_insufficient_history_symbols_quarantined"
         else:
             audit["status"] = "HYDRATION_INCOMPLETE"
             audit["reason"] = str(result.get("reason") or "hydration_incomplete")
     elif cheap_targets and not signal_chain_targets:
-        audit["status"] = "PREPROCESSED_ONLY"
-        audit["reason"] = f"processed={','.join(hydrated)}; signal chain not required"
+        if quarantined and not failed:
+            audit["status"] = "QUARANTINED_GAPS"
+            audit["reason"] = "unsupported_or_insufficient_history_symbols_quarantined"
+        else:
+            audit["status"] = "PREPROCESSED_ONLY"
+            audit["reason"] = f"processed={','.join(hydrated)}; signal chain not required"
     elif not signal_chain_targets and not cheap_targets:
         audit["status"] = "SKIPPED_NO_GAPS"
         audit["reason"] = "no actionable hydration targets"
+    elif quarantined and not failed:
+        audit["status"] = "QUARANTINED_GAPS"
+        audit["reason"] = "unsupported_or_insufficient_history_symbols_quarantined"
     else:
         audit["status"] = "HYDRATION_INCOMPLETE"
         audit["reason"] = "hydration produced no symbols"
+
+    gaps["quarantined_symbols"] = sorted(set(quarantined))
+    gaps["stranded_symbols"] = failed
+    gaps["hydration_needed"] = bool(failed)
+    gaps["no_actionable_hydration_needed"] = not failed
 
     audit["hydrated_symbols"] = sorted(set(hydrated))
     audit["deferred_symbols"] = sorted(set(deferred))
     audit["failed_symbols"] = sorted(set(failed))
 
-    post = detect_hydration_gaps()
+    post = detect_hydration_gaps(apply_quarantine=True)
     audit["postflight"] = {
         "processed_symbol_count": post["processed_symbol_count"],
         "lifecycle_symbol_count": post["lifecycle_symbol_count"],
         "allocation_symbol_count": post["allocation_symbol_count"],
         "stranded_symbols": post["stranded_symbols"],
+        "quarantined_symbols": post["quarantined_symbols"],
     }
 
+    _finalize_quarantine_audit(audit, post)
     _atomic_write_json(AUDIT_JSON, audit)
     if verbose:
         print(
@@ -311,12 +394,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     status = str(audit.get("status") or "")
     non_fatal = {
         "SKIPPED_NO_GAPS",
+        "QUARANTINED_GAPS",
+        "PARTIAL_WITH_QUARANTINE",
         "HYDRATED",
         "PREPROCESSED_ONLY",
         "DEFERRED_MARKET_OPEN",
         "GAPS_DETECTED",
         "PARTIAL",
-        "HYDRATION_INCOMPLETE",
     }
     if status in non_fatal:
         return 0
