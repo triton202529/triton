@@ -3539,6 +3539,32 @@ def maybe_execute_management(
             if not dec.ok:
                 rs = list(dec.reasons)
                 print(f"[MANAGE_BLOCK] execution blocked by master gate: {', '.join(rs)}")
+                from services.manage_positions_handoff_diagnostic import (
+                    build_handoff_diagnostic,
+                    write_handoff_audit,
+                )
+
+                diag = build_handoff_diagnostic(
+                    placement_output=f"MASTER_GATE_BLOCK reasons={rs}",
+                    exec_meta={**meta, "manage_block": True, "block_reason": ",".join(rs)},
+                    mode=mode,
+                )
+                if str(diag.get("readiness_status") or "") in ("PARTIALLY_READY", "NOT_READY"):
+                    diag["handoff_status"] = "HANDOFF_BLOCKED_BY_READINESS"
+                    diag["handoff_block_reason"] = (
+                        f"execution_readiness={diag.get('readiness_status')}"
+                    )
+                else:
+                    diag["handoff_status"] = "HANDOFF_BLOCKED_BY_GOVERNANCE"
+                    diag["handoff_block_reason"] = ",".join(rs)
+                diag["batch_empty_explained"] = True
+                write_handoff_audit(diag)
+                print(
+                    f"[MANAGE_HANDOFF] status={diag.get('handoff_status')} "
+                    f"reason={diag.get('handoff_block_reason')}",
+                    flush=True,
+                )
+                meta["handoff_diagnostic"] = diag
                 return 2, 0, rs, "", meta
         except Exception as e:
             return 1, 0, [str(e)], "", meta
@@ -3668,10 +3694,29 @@ def maybe_execute_management(
         if _placement_subprocess_is_batch_empty(rc, out):
             meta["batch_empty_noop"] = True
             planned_n = int(len(allowed))
+            from services.manage_positions_handoff_diagnostic import (
+                build_handoff_diagnostic,
+                write_handoff_audit,
+            )
+
+            diag = build_handoff_diagnostic(placement_output=out, exec_meta=meta, mode=mode)
+            write_handoff_audit(diag)
+            handoff_status = str(diag.get("handoff_status") or "")
+            handoff_reason = str(diag.get("handoff_block_reason") or "")
             print(
                 "[MANAGE_NOOP] reason=BATCH_EMPTY_AFTER_FILTERS",
                 flush=True,
             )
+            if handoff_status and handoff_status not in ("HANDOFF_FILTERED_TO_EMPTY", "OK"):
+                print(
+                    f"[MANAGE_HANDOFF] status={handoff_status} reason={handoff_reason}", flush=True
+                )
+            elif diag.get("batch_empty_explained"):
+                print(
+                    f"[MANAGE_HANDOFF] batch_empty_explained=true status={handoff_status} "
+                    f"reason={handoff_reason}",
+                    flush=True,
+                )
             print(f"planned={planned_n}", flush=True)
             print("executed=0", flush=True)
             print(
@@ -3680,6 +3725,7 @@ def maybe_execute_management(
                 flush=True,
             )
             _print_manage_block_summary({**meta, "executed": 0})
+            meta["handoff_diagnostic"] = diag
             return 0, 0, [], session_id, meta
         ex = len(allowed) if rc == 0 else 0
         if rc == 0:

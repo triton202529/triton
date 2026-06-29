@@ -98,6 +98,7 @@ IDEMPOTENCY_STATE_PATH = ROOT / "data" / "live" / "idempotency_state.json"
 SIGNAL_STATE_PATH = ROOT / "data" / "results" / "signal_state.json"
 
 ACTIONABLE_STANCES = {"BUY", "ADD", "TRIM", "EXIT", "ROTATE_EXIT"}
+OPPORTUNITY_TYPE_TO_STANCE = {"ENTRY": "BUY", "ADD": "ADD", "EXIT": "EXIT", "TRIM": "TRIM"}
 
 # Cap exploratory rows from trade_opportunities.csv only (strict + lifecycle paths unchanged).
 MAX_EXPLORATION_POSITIONS = 3
@@ -660,6 +661,9 @@ def resolve_execution_source(cli_path: Path) -> Tuple[Path, str]:
     if name == "orders_today.csv" or "orders_today" in name:
         return cli_path, "execution_handoff"
 
+    if name == "manage_orders.csv":
+        return cli_path, "manage_handoff"
+
     if cli_path != EFFECTIVE_LIFECYCLE_PATH and cli_path != TRADE_OPPORTUNITIES_PATH:
         return cli_path, "execution_handoff"
 
@@ -777,17 +781,27 @@ def _stance_from_row(row: pd.Series) -> str:
 def _placement_stance_from_row(row: pd.Series) -> str:
     """
     Stance for order mapping. ROTATE_EXIT (managed rotation partial/full exit) must be sell —
-    detect from stance, lifecycle_action, management_action, action, or effective_stance.
+    detect from stance, lifecycle_action, management_action, action, effective_stance,
+    or opportunity_type (manage_positions / trade_opportunities handoff).
     """
-    for col in ("stance", "lifecycle_action", "management_action", "action", "effective_stance"):
+    for col in (
+        "stance",
+        "lifecycle_action",
+        "management_action",
+        "action",
+        "effective_stance",
+        "opportunity_type",
+    ):
         if col not in row.index:
             continue
         v = row.get(col)
         if v is None or (isinstance(v, float) and pd.isna(v)):
             continue
         s = str(v).strip().upper()
-        if s == "ROTATE_EXIT":
-            return "ROTATE_EXIT"
+        if s in ACTIONABLE_STANCES:
+            return s
+        if col == "opportunity_type" and s in OPPORTUNITY_TYPE_TO_STANCE:
+            return OPPORTUNITY_TYPE_TO_STANCE[s]
     return _stance_from_row(row)
 
 
@@ -1753,6 +1767,8 @@ def main() -> None:
     _PLACE_DIAG_ROWS.extend(lifecycle_diag)
     if exec_source == "derived_trade_opps":
         print("[EXECUTION] source: trade_opportunities.csv (DERIVED non-authoritative)")
+    elif exec_source == "manage_handoff":
+        print("[EXECUTION] source: manage_positions handoff (data/live/manage_orders.csv)")
     elif exec_source == "execution_handoff":
         print("[EXECUTION] source: execution handoff (orders_today / execute_trades plan)")
     else:
@@ -2110,11 +2126,27 @@ def main() -> None:
             return
         try:
             if orders_path.resolve() == DEFAULT_MANAGE_ORDERS_CSV.resolve():
-                print(
-                    "[PLACE_MANAGE_ORDERS] BATCH_EMPTY source=manage_orders.csv "
-                    f"lifecycle_rows={len(rows)} planned=0 in_flight_sat={in_flight_sat} "
-                    f"illegal_sells={illegal_sells} -- see manage_positions plan CSV and [MANAGE_SUMMARY]"
+                input_rows = len(rows)
+                handoff_rows = 0
+                try:
+                    handoff_rows = len(pd.read_csv(orders_path))
+                except Exception:
+                    pass
+                detail = (
+                    f"lifecycle_rows={input_rows} planned=0 in_flight_sat={in_flight_sat} "
+                    f"illegal_sells={illegal_sells} handoff_csv_rows={handoff_rows}"
                 )
+                if handoff_rows > 0 and input_rows == 0:
+                    print(
+                        "[PLACE_MANAGE_ORDERS] HANDOFF_CONTRACT_MISMATCH "
+                        f"source=manage_orders.csv {detail} "
+                        "-- handoff rows present but zero mapped; check effective_stance/opportunity_type"
+                    )
+                else:
+                    print(
+                        "[PLACE_MANAGE_ORDERS] BATCH_EMPTY source=manage_orders.csv "
+                        f"{detail} -- see manage_positions plan CSV and [MANAGE_SUMMARY]"
+                    )
         except Exception:
             pass
         die("[BATCH_EMPTY] Nothing to place (all skipped or invalid).")
