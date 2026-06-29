@@ -345,21 +345,27 @@ def validate_operator_approval_contract(
     configured_cap: Optional[float] = None,
     broker_snapshot_ok: bool = True,
     live_execution_blocked: Optional[bool] = None,
+    contract_path: Optional[Path] = None,
+    open_sell_symbols_override: Optional[Set[str]] = None,
 ) -> Tuple[str, str, Dict[str, Any]]:
     """
     Validate operator paper defensive exit approval contract.
     Returns (approval_status, reason, details).
+
+    contract_path: optional override for dry-run fixture validation (197K).
+    open_sell_symbols_override: optional in-flight sell set for simulation (197K).
     """
+    path = contract_path or APPROVAL_CONTRACT_PATH
     details: Dict[str, Any] = {
-        "contract_path": str(APPROVAL_CONTRACT_PATH.relative_to(ROOT)).replace("\\", "/"),
-        "contract_exists": APPROVAL_CONTRACT_PATH.is_file(),
+        "contract_path": str(path.relative_to(ROOT)).replace("\\", "/"),
+        "contract_exists": path.is_file(),
         "checks": {},
     }
 
-    if not APPROVAL_CONTRACT_PATH.is_file():
+    if not path.is_file():
         return APPROVAL_STATUS_REQUIRED, "approval_contract_missing", details
 
-    contract = _read_json(APPROVAL_CONTRACT_PATH)
+    contract = _read_json(path)
     missing = sorted(REQUIRED_CONTRACT_FIELDS - set(contract.keys()))
     details["checks"]["required_fields_present"] = not missing
     if missing:
@@ -452,7 +458,7 @@ def validate_operator_approval_contract(
             details,
         )
 
-    overlap = sorted(approved_set & _open_sell_symbols())
+    overlap = sorted(approved_set & (open_sell_symbols_override or _open_sell_symbols()))
     if overlap:
         return (
             APPROVAL_STATUS_INVALID,
