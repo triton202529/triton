@@ -21,6 +21,7 @@ GOVERNANCE_AUTH_JSON = RESULTS / "governance_authorization.json"
 HUMAN_QUEUE_JSON = RESULTS / "human_approval_queue.json"
 OPEN_ORDERS_JSON = RESULTS / "open_orders_snapshot.csv"
 OPERATOR_PACKET_JSON = RESULTS / "defensive_exit_operator_approval_packet.json"
+APPROVAL_CONTRACT_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
 
 DEFENSIVE_APPROVAL_ACTIONS = frozenset(
     {
@@ -203,8 +204,58 @@ def build_defensive_exit_approval_sync(*, cap_context: str = "runtime") -> Dict[
         approval_block_reason = ""
         approval_source = "governance_authorization.json+execution_readiness.json"
 
+    from services.defensive_exit_operator_paper_approval import (
+        APPROVAL_STATUS_REQUIRED,
+        APPROVAL_STATUS_VALID,
+        OPERATOR_DECISION_REJECT,
+        validate_operator_approval_contract,
+    )
+
+    preview_hash = None
+    try:
+        from services.defensive_exit_operator_paper_approval import compute_capped_preview_hash
+
+        preview_hash = compute_capped_preview_hash(
+            preview_doc,
+            capped_symbols=capped_symbols,
+            deferred_symbols=deferred_symbols,
+            capped_notional=capped_notional,
+            configured_cap=configured_cap,
+        )
+    except Exception:
+        pass
+
+    op_paper_status, op_paper_reason, op_paper_details = validate_operator_approval_contract(
+        preview_hash=preview_hash,
+        capped_symbols=capped_symbols,
+        configured_cap=configured_cap,
+    )
+    contract_doc = _read_json(APPROVAL_CONTRACT_PATH) if APPROVAL_CONTRACT_PATH.is_file() else {}
+    contract_decision = str(contract_doc.get("decision") or "").upper()
+
+    if contract_decision == OPERATOR_DECISION_REJECT:
+        approval_sync_status = "CAPPED_DEFENSIVE_BATCH_REJECTED_BY_OPERATOR"
+        approval_block_reason = "operator_rejected_capped_paper_defensive_batch"
+        approval_source = "operator_paper_defensive_exit_approval.json"
+    elif op_paper_status == APPROVAL_STATUS_VALID and approval_sync_status == (
+        "CAPPED_DEFENSIVE_BATCH_APPROVED"
+    ):
+        approval_sync_status = "CAPPED_DEFENSIVE_BATCH_APPROVED_FOR_PAPER"
+        approval_block_reason = ""
+        approval_source = "operator_paper_defensive_exit_approval.json"
+    elif op_paper_status == APPROVAL_STATUS_REQUIRED and approval_sync_status not in (
+        "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_GOVERNANCE",
+        "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_READINESS",
+        "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_NOTIONAL_CAP",
+        "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_IN_FLIGHT_ORDERS",
+        "CAPPED_DEFENSIVE_BATCH_REJECTED_BY_OPERATOR",
+    ):
+        approval_block_reason = approval_block_reason or "operator_paper_approval_required"
+        approval_source = approval_source or "operator_paper_defensive_exit_approval.json"
+
     eligible_for_paper_execution = (
-        approval_sync_status == "CAPPED_DEFENSIVE_BATCH_APPROVED"
+        approval_sync_status == "CAPPED_DEFENSIVE_BATCH_APPROVED_FOR_PAPER"
+        and op_paper_status == APPROVAL_STATUS_VALID
         and paper_permitted
         and not live_permitted
         and bool(capped_symbols)
@@ -212,7 +263,7 @@ def build_defensive_exit_approval_sync(*, cap_context: str = "runtime") -> Dict[
 
     return {
         "timestamp": _utc_now_iso(),
-        "phase": "197I",
+        "phase": "197J",
         "preview_exists": preview_exists,
         "partial_batch_authorized": partial_authorized,
         "capped_preview_symbols": capped_symbols,
@@ -236,68 +287,35 @@ def build_defensive_exit_approval_sync(*, cap_context: str = "runtime") -> Dict[
         "approval_source": approval_source,
         "eligible_for_paper_execution": eligible_for_paper_execution,
         "execution_eligibility_note": (
-            "eligible_for_paper_execution requires READY readiness, governance authorized, "
-            "operator approval for capped symbols, paper permitted, live blocked"
+            "eligible_for_paper_execution requires CAPPED_DEFENSIVE_BATCH_APPROVED_FOR_PAPER, "
+            "OPERATOR_APPROVAL_VALID_PAPER_ONLY, READY readiness, governance authorized, "
+            "paper permitted, live blocked"
         ),
         "in_flight_sell_overlap": in_flight_overlap,
         "open_orders_count_assumed_from_snapshot": OPEN_ORDERS_JSON.is_file(),
         "preview_path": str(PREVIEW_JSON.relative_to(ROOT)).replace("\\", "/"),
         "handoff_status_197h": preview_doc.get("handoff_status"),
+        "operator_paper_approval_status": op_paper_status,
+        "operator_paper_approval_reason": op_paper_reason,
+        "operator_paper_approval_details": op_paper_details,
+        "approval_contract_path": str(APPROVAL_CONTRACT_PATH.relative_to(ROOT)).replace("\\", "/"),
+        "approval_contract_exists": APPROVAL_CONTRACT_PATH.is_file(),
+        "source_preview_hash": preview_hash,
     }
 
 
 def build_operator_approval_packet(sync: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    from services.defensive_exit_operator_paper_approval import (
+        build_formal_operator_approval_packet,
+    )
+
     sync = sync or build_defensive_exit_approval_sync()
-    capped = list(sync.get("capped_preview_symbols") or [])
-    deferred = list(sync.get("deferred_symbols") or [])
-    queue = _read_json(HUMAN_QUEUE_JSON)
-    related_requests = []
-    capped_set = {s.upper() for s in capped}
-    for req in queue.get("requests") or []:
-        subject = str(req.get("subject") or "").strip().upper()
-        if subject in capped_set or subject in {d.upper() for d in deferred}:
-            related_requests.append(
-                {
-                    "request_id": req.get("request_id"),
-                    "subject": subject,
-                    "candidate_action": req.get("candidate_action"),
-                    "status": req.get("status"),
-                    "execution_permitted": req.get("execution_permitted"),
-                    "reason": req.get("reason"),
-                }
-            )
-    packet = {
-        "generated_at": _utc_now_iso(),
-        "phase": "197I",
-        "disclaimer": ("Read-only operator approval packet. Does not approve or submit orders."),
-        "approval_sync_status": sync.get("approval_sync_status"),
-        "approval_block_reason": sync.get("approval_block_reason"),
-        "capped_preview_symbols": capped,
-        "deferred_symbols": deferred,
-        "capped_preview_notional": sync.get("capped_preview_notional"),
-        "configured_cap": sync.get("configured_cap"),
-        "would_require": [
-            "governance_authorized=true",
-            "execution_readiness=READY",
-            "operator approval for capped defensive exit symbols",
-            "paper_execution_permitted=true",
-            "live_execution_permitted=false",
-            "no in-flight duplicate sell orders",
-            "batch within configured notional cap",
-        ],
-        "current_blockers": (
-            [sync.get("approval_block_reason")] if sync.get("approval_block_reason") else []
-        ),
-        "related_human_approval_requests": related_requests,
-        "operator_action_required": sync.get("approval_sync_status")
-        == "CAPPED_DEFENSIVE_BATCH_AWAITING_OPERATOR_APPROVAL",
-    }
-    return packet
+    return build_formal_operator_approval_packet(sync=sync)
 
 
 def write_operator_approval_packet(packet: Dict[str, Any]) -> Path:
-    OPERATOR_PACKET_JSON.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OPERATOR_PACKET_JSON.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(packet, indent=2, default=str), encoding="utf-8")
-    os.replace(tmp, OPERATOR_PACKET_JSON)
-    return OPERATOR_PACKET_JSON
+    from services.defensive_exit_operator_paper_approval import (
+        write_operator_approval_packet as _write,
+    )
+
+    return _write(packet)
