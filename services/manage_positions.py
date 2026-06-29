@@ -3484,6 +3484,13 @@ def _empty_manage_exec_meta() -> Dict[str, Any]:
     }
 
 
+def _placement_subprocess_is_batch_notional_block(rc: int, combined_output: str) -> bool:
+    if int(rc) != 2:
+        return False
+    s = combined_output or ""
+    return "BATCH_NOTIONAL_BLOCK" in s or "HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED" in s
+
+
 def _placement_subprocess_is_batch_empty(rc: int, combined_output: str) -> bool:
     """
     place_live_orders uses die(..., 2) for many paths; only BATCH_EMPTY is downgraded to no-op.
@@ -3691,6 +3698,32 @@ def maybe_execute_management(
         if out.strip():
             print(out.rstrip(), flush=True)
         rc = int(proc.returncode)
+        if _placement_subprocess_is_batch_notional_block(rc, out):
+            from services.defensive_exit_sizing_cap import (
+                analyze_defensive_exit_sizing,
+                write_capped_batch_preview,
+            )
+
+            sizing = analyze_defensive_exit_sizing(placement_output=out, use_cli_default_cap=False)
+            write_capped_batch_preview(sizing)
+            meta["batch_notional_block"] = True
+            print(
+                "[MANAGE_HANDOFF] status=HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED "
+                f"batch_notional={sizing.get('batch_notional_estimate')} "
+                f"cap={sizing.get('configured_batch_cap_manage_positions')} "
+                f"excess={sizing.get('cap_excess_amount')}",
+                flush=True,
+            )
+            preview = sizing.get("capped_preview_runtime_cap") or sizing.get("capped_preview") or {}
+            if preview.get("capped_preview_symbols"):
+                print(
+                    f"[MANAGE_HANDOFF] capped_preview_symbols={preview.get('capped_preview_symbols')} "
+                    f"deferred_symbols={preview.get('deferred_symbols')}",
+                    flush=True,
+                )
+            meta["handoff_diagnostic"] = sizing
+            _print_manage_block_summary({**meta, "executed": 0})
+            return 0, 0, [], session_id, meta
         if _placement_subprocess_is_batch_empty(rc, out):
             meta["batch_empty_noop"] = True
             planned_n = int(len(allowed))

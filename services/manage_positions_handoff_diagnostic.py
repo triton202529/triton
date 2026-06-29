@@ -82,6 +82,8 @@ def _parse_placement_output(output: str) -> Dict[str, Any]:
         "illegal_sells": None,
         "handoff_contract_mismatch": "HANDOFF_CONTRACT_MISMATCH" in text,
         "batch_empty": "BATCH_EMPTY" in text,
+        "batch_notional_block": "BATCH_NOTIONAL_BLOCK" in text,
+        "handoff_notional_blocked": "HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED" in text,
         "master_gate_block": "MASTER_GATE" in text or "MASTER_GATE_BLOCK" in text,
         "exec_gate_block": "EXEC_GATE" in text or "EXEC_GATE_BLOCK" in text,
         "manage_block": "[MANAGE_BLOCK]" in text,
@@ -91,10 +93,13 @@ def _parse_placement_output(output: str) -> Dict[str, Any]:
         ("planned_rows", r"planned=(\d+)"),
         ("in_flight_sat", r"in_flight_sat=(\d+)"),
         ("illegal_sells", r"illegal_sells=(\d+)"),
+        ("batch_notional_estimate", r"est_batch_notional=([\d.]+)"),
+        ("configured_batch_cap", r"exceeds max ([\d.]+)"),
     ):
         m = re.search(pattern, text)
         if m:
-            parsed[key] = int(m.group(1))
+            val = m.group(1)
+            parsed[key] = float(val) if "." in str(val) else int(val)
     return parsed
 
 
@@ -184,9 +189,23 @@ def build_handoff_diagnostic(
             handoff_block_reason = "batch_empty_after_filters"
             batch_empty_explained = True
     elif planned_exits and handoff_exit_rows:
-        handoff_status = "HANDOFF_ROWS_PRESENT"
-        if placement.get("planned_rows", 0) and placement.get("planned_rows", 0) > 0:
-            handoff_status = "HANDOFF_EXECUTABLE"
+        from services.defensive_exit_sizing_cap import analyze_defensive_exit_sizing
+
+        sizing = analyze_defensive_exit_sizing(placement_output=placement_output)
+        if placement.get("batch_notional_block") or sizing.get("cap_excess_amount"):
+            handoff_status = str(
+                sizing.get("handoff_status") or "HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED"
+            )
+            handoff_block_reason = (
+                f"batch_notional={sizing.get('batch_notional_estimate')} "
+                f"cap={sizing.get('configured_batch_cap_effective')} "
+                f"excess={sizing.get('cap_excess_amount')}"
+            )
+            batch_empty_explained = True
+        else:
+            handoff_status = "HANDOFF_ROWS_PRESENT"
+            if placement.get("planned_rows", 0) and placement.get("planned_rows", 0) > 0:
+                handoff_status = "HANDOFF_EXECUTABLE"
 
     missing_from_handoff = sorted(set(planned_symbols) - set(handoff_symbols))
     extra_in_handoff = sorted(set(handoff_symbols) - set(planned_symbols))
@@ -229,6 +248,15 @@ def build_handoff_diagnostic(
         "rows_blocked_by_invalid_qty": int(placement.get("illegal_sells") or 0),
         "rows_blocked_by_in_flight": int(placement.get("in_flight_sat") or 0),
     }
+    if planned_exits and handoff_exit_rows:
+        try:
+            from services.defensive_exit_sizing_cap import analyze_defensive_exit_sizing
+
+            audit["sizing_cap_analysis"] = analyze_defensive_exit_sizing(
+                placement_output=placement_output
+            )
+        except Exception:
+            pass
     return audit
 
 

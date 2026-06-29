@@ -2195,6 +2195,17 @@ def main() -> None:
                 session=placement_session,
             )
         )
+        try:
+            if orders_path.resolve() == DEFAULT_MANAGE_ORDERS_CSV.resolve() and len(planned) > 0:
+                print(
+                    "[HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED] "
+                    f"mapped_exit_rows={len(planned)} est_batch_notional={cap_compare_notional:.2f} "
+                    f"max_batch_notional={float(args.max_batch_notional):.2f} "
+                    f"excess={cap_compare_notional - float(args.max_batch_notional):.2f}",
+                    flush=True,
+                )
+        except Exception:
+            pass
         die(
             f"[BATCH_NOTIONAL_BLOCK] est_batch_notional={cap_compare_notional:.2f} "
             f"(excl FORCE_EXIT {fx_notional_excluded:.2f}) "
