@@ -106,8 +106,10 @@ def run_phase_197i_validation(*, verbose: bool = True) -> Dict[str, Any]:
         build_operator_approval_packet,
         write_operator_approval_packet,
     )
-    from services.paper_entry_loop_stage import evaluate_paper_entry_gates
-    from services.portfolio_history_sync import load_live_execution_flag
+    from services.live_block_classifier import (
+        apply_defensive_exit_validator_gate_checks,
+        defensive_exit_phase_validator_gates,
+    )
 
     sync = build_defensive_exit_approval_sync(cap_context="runtime")
     packet = build_operator_approval_packet(sync)
@@ -153,9 +155,10 @@ def run_phase_197i_validation(*, verbose: bool = True) -> Dict[str, Any]:
     except Exception:
         pass
 
-    gate_ok, gate_reason, gate_details = evaluate_paper_entry_gates(verbose=False)
-    checks = gate_details.get("checks") or {}
-    live_permitted = bool(checks.get("live_execution_permitted", True))
+    gates = defensive_exit_phase_validator_gates(verbose=False)
+    gate_ok = gates["gate_ok"]
+    gate_reason = gates["gate_reason"]
+    gate_details = gates["gate_details"]
 
     approval_status = str(sync.get("approval_sync_status") or "")
     explicit_statuses = {
@@ -193,12 +196,9 @@ def run_phase_197i_validation(*, verbose: bool = True) -> Dict[str, Any]:
         notes.append("approval_block_reason empty for blocked state")
     if sync.get("eligible_for_paper_execution"):
         notes.append("unexpected eligible_for_paper_execution=true during validation")
-    if live_permitted or load_live_execution_flag():
-        status = "FAIL"
-        notes.append("live execution must remain blocked")
-    if gate_ok and str(checks.get("execution_readiness_status")) != "READY":
-        status = "FAIL"
-        notes.append("paper entry gate unexpectedly passed under non-READY readiness")
+    status = apply_defensive_exit_validator_gate_checks(
+        status=status, notes=notes, gates=gates, fail_on_gate_open=True
+    )
 
     payload: Dict[str, Any] = {
         "phase": "197I",
@@ -216,7 +216,8 @@ def run_phase_197i_validation(*, verbose: bool = True) -> Dict[str, Any]:
             "readiness, operator queue, in-flight orders, and notional cap without executing."
         ),
         "broker_snapshot_ok": snapshot_ok,
-        "live_blocked": not live_permitted,
+        "live_blocked": gates["live_blocked"],
+        "live_block_reason": gates["live_block_reason"],
         "paper_mode": True,
         "positions_count": _count_positions(),
         "open_orders_count": _count_open_orders(),
@@ -238,6 +239,7 @@ def run_phase_197i_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "placement_maps_exit_rows": placement_maps_exit_rows,
         "paper_entry_gate_ok": gate_ok,
         "paper_entry_gate_reason": gate_reason,
+        "paper_entry_gate_classification": gates["gate_classification"],
         "broker_orders_submitted": False,
         "operator_approval_packet_path": "data/results/defensive_exit_operator_approval_packet.json",
         "approval_sync": sync,

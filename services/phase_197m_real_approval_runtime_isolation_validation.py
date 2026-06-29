@@ -119,8 +119,10 @@ def run_phase_197m_validation(*, verbose: bool = True) -> Dict[str, Any]:
         validate_operator_approval_contract,
     )
     from services.master_execution_gate import MasterExecutionGate
-    from services.paper_entry_loop_stage import evaluate_paper_entry_gates
-    from services.portfolio_history_sync import load_live_execution_flag
+    from services.live_block_classifier import (
+        apply_defensive_exit_validator_gate_checks,
+        defensive_exit_phase_validator_gates,
+    )
 
     packet = {}
     if OPERATOR_PACKET_JSON.is_file():
@@ -168,9 +170,9 @@ def run_phase_197m_validation(*, verbose: bool = True) -> Dict[str, Any]:
         operator_contract_path=ISOLATED_APPROVAL_PATH,
     )
 
-    gate_ok, gate_reason, gate_details = evaluate_paper_entry_gates(verbose=False)
-    checks = gate_details.get("checks") or {}
-    live_permitted = bool(checks.get("live_execution_permitted", True))
+    gates = defensive_exit_phase_validator_gates(verbose=False)
+    gate_ok = gates["gate_ok"]
+    gate_reason = gates["gate_reason"]
 
     master_gate = MasterExecutionGate(project_root=ROOT).evaluate(mode="paper", verbose=False)
     preview_doc = {}
@@ -244,12 +246,9 @@ def run_phase_197m_validation(*, verbose: bool = True) -> Dict[str, Any]:
     if real_sync.get("eligible_for_paper_execution"):
         status = "FAIL"
         notes.append("real eligible_for_paper_execution must be false")
-    if gate_ok:
-        status = "FAIL"
-        notes.append("paper entry gate unexpectedly passed")
-    if live_permitted or load_live_execution_flag():
-        status = "FAIL"
-        notes.append("live execution must remain blocked")
+    status = apply_defensive_exit_validator_gate_checks(
+        status=status, notes=notes, gates=gates, fail_on_gate_open=True
+    )
     if broker_orders_submitted:
         status = "FAIL"
         notes.append("broker orders may have been submitted")
@@ -271,6 +270,7 @@ def run_phase_197m_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "readiness_failed_checks": real_sync.get("readiness_failed_checks"),
         "paper_entry_gate_ok": gate_ok,
         "paper_entry_gate_reason": gate_reason,
+        "paper_entry_gate_classification": gates["gate_classification"],
         "master_execution_gate_ok": bool(master_gate.ok),
         "master_execution_gate_status": master_gate.status,
         "master_execution_gate_summary": master_gate.summary,
@@ -322,7 +322,8 @@ def run_phase_197m_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "positions_count": _count_positions(),
         "positions_count_before": positions_before,
         "broker_snapshot_ok": snapshot_ok,
-        "live_blocked": not live_permitted,
+        "live_blocked": gates["live_blocked"],
+        "live_block_reason": gates["live_block_reason"],
         "broker_orders_submitted": False,
         "eligible_for_paper_execution_real_runtime": bool(
             real_sync.get("eligible_for_paper_execution")

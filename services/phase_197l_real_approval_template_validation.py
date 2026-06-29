@@ -99,8 +99,10 @@ def run_phase_197l_validation(*, verbose: bool = True) -> Dict[str, Any]:
         validate_operator_approval_contract,
     )
     from services.operator_paper_defensive_exit_approval_builder import run_approval_builder
-    from services.paper_entry_loop_stage import evaluate_paper_entry_gates
-    from services.portfolio_history_sync import load_live_execution_flag
+    from services.live_block_classifier import (
+        apply_defensive_exit_validator_gate_checks,
+        defensive_exit_phase_validator_gates,
+    )
 
     snapshot_ok = False
     try:
@@ -211,9 +213,9 @@ def run_phase_197l_validation(*, verbose: bool = True) -> Dict[str, Any]:
         configured_cap=float(packet.get("configured_cap") or 0.0),
     )
     sync = build_defensive_exit_approval_sync(cap_context="runtime")
-    gate_ok, gate_reason, gate_details = evaluate_paper_entry_gates(verbose=False)
-    checks = gate_details.get("checks") or {}
-    live_permitted = bool(checks.get("live_execution_permitted", True))
+    gates = defensive_exit_phase_validator_gates(verbose=False)
+    gate_ok = gates["gate_ok"]
+    gate_reason = gates["gate_reason"]
 
     if not builder_cli_ok:
         status = "FAIL"
@@ -242,12 +244,9 @@ def run_phase_197l_validation(*, verbose: bool = True) -> Dict[str, Any]:
     if not write_blocked_without_flag:
         status = "FAIL"
         notes.append("write-real-approval without approved-by was not blocked")
-    if live_permitted or load_live_execution_flag():
-        status = "FAIL"
-        notes.append("live execution must remain blocked")
-    if gate_ok:
-        status = "FAIL"
-        notes.append("paper entry gate unexpectedly passed")
+    status = apply_defensive_exit_validator_gate_checks(
+        status=status, notes=notes, gates=gates, fail_on_gate_open=True
+    )
     if sync.get("eligible_for_paper_execution"):
         status = "FAIL"
         notes.append("eligible_for_paper_execution must remain false")
@@ -285,9 +284,11 @@ def run_phase_197l_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "open_orders_count": _count_open_orders(),
         "positions_count": _count_positions(),
         "positions_count_before": positions_before,
-        "live_blocked": not live_permitted,
+        "live_blocked": gates["live_blocked"],
+        "live_block_reason": gates["live_block_reason"],
         "paper_entry_gate_ok": gate_ok,
         "paper_entry_gate_reason": gate_reason,
+        "paper_entry_gate_classification": gates["gate_classification"],
         "broker_orders_submitted": False,
         "approval_status_real_runtime": real_status,
         "readiness_status": sync.get("readiness_status"),

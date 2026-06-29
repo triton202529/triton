@@ -212,6 +212,9 @@ def build_formal_operator_approval_packet(
     preview_doc = _read_json(PREVIEW_JSON)
     readiness = _read_json(READINESS_JSON)
     auth = _read_json(GOVERNANCE_AUTH_JSON)
+    from services.live_block_classifier import evaluate_live_block_status
+
+    live_block = evaluate_live_block_status(paper_mode=True)
 
     capped = list(sync.get("capped_preview_symbols") or [])
     deferred = list(sync.get("deferred_symbols") or [])
@@ -248,7 +251,8 @@ def build_formal_operator_approval_packet(
             "Operator must intentionally create data/governance/operator_paper_defensive_exit_approval.json."
         ),
         "paper_only": True,
-        "live_blocked": not bool(sync.get("live_execution_permitted")),
+        "live_blocked": bool(live_block.get("live_blocked")),
+        "live_block_reason": live_block.get("live_block_reason"),
         "current_governance_status": {
             "governance_authorized": bool(sync.get("governance_authorized")),
             "approval_sync_status": sync.get("approval_sync_status"),
@@ -477,12 +481,11 @@ def validate_operator_approval_contract(
         return APPROVAL_STATUS_INVALID, "broker_snapshot_not_ok", details
 
     if live_execution_blocked is None:
-        from services.portfolio_history_sync import load_live_execution_flag
+        from services.live_block_classifier import evaluate_live_block_status
 
-        readiness = _read_json(READINESS_JSON)
-        live_execution_blocked = not bool(readiness.get("live_execution_permitted", False))
-        if load_live_execution_flag():
-            live_execution_blocked = False
+        live_execution_blocked = bool(
+            evaluate_live_block_status(paper_mode=True).get("live_blocked")
+        )
 
     if not live_execution_blocked:
         return APPROVAL_STATUS_INVALID, "live_execution_not_blocked", details
