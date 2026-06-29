@@ -356,8 +356,12 @@ def validate_operator_approval_contract(
     open_sell_symbols_override: optional in-flight sell set for simulation (197K).
     """
     path = contract_path or APPROVAL_CONTRACT_PATH
+    try:
+        contract_path_display = str(path.relative_to(ROOT)).replace("\\", "/")
+    except ValueError:
+        contract_path_display = str(path)
     details: Dict[str, Any] = {
-        "contract_path": str(path.relative_to(ROOT)).replace("\\", "/"),
+        "contract_path": contract_path_display,
         "contract_exists": path.is_file(),
         "checks": {},
     }
@@ -366,6 +370,9 @@ def validate_operator_approval_contract(
         return APPROVAL_STATUS_REQUIRED, "approval_contract_missing", details
 
     contract = _read_json(path)
+    if bool(contract.get("template_only")):
+        return APPROVAL_STATUS_INVALID, "template_only_not_runtime_authority", details
+
     missing = sorted(REQUIRED_CONTRACT_FIELDS - set(contract.keys()))
     details["checks"]["required_fields_present"] = not missing
     if missing:
