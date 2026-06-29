@@ -195,44 +195,74 @@ def main() -> Dict[str, Any]:
 
     ts = _iso_utc()
 
-    from services.broker_alpaca import AlpacaBroker  # type: ignore
+    from services.broker_alpaca import AlpacaAuthError, AlpacaBroker  # type: ignore
+    from services.triton_env_loader import alpaca_env_diagnostics
 
-    broker = AlpacaBroker(mode=args.mode)
+    try:
+        broker = AlpacaBroker(mode=args.mode)
+    except AlpacaAuthError as exc:
+        diag = alpaca_env_diagnostics(mode=args.mode)
+        return {
+            "ok": False,
+            "status": "SAFE_AUTH_BLOCK",
+            "mode": args.mode,
+            "ts": ts,
+            "reason": "broker_auth_failed",
+            "message": str(exc),
+            "diagnostics": diag,
+            "open_orders_written": 0,
+            "recent_orders_written": 0,
+            "positions_written": 0,
+            "errors": ["broker_auth_failed"],
+        }
 
-    # Open orders snapshot ✅ to open_orders_snapshot.csv
-    open_orders = broker.list_orders(status="open", nested=True, limit=500) or []
-    df_open = _to_df(open_orders, ts)
-    _write_csv(OPEN_ORDERS_PATH, df_open)
+    try:
+        open_orders = broker.list_orders(status="open", nested=True, limit=500) or []
+        df_open = _to_df(open_orders, ts)
+        _write_csv(OPEN_ORDERS_PATH, df_open)
 
-    # Recent/all orders
-    recent_orders = (
-        broker.list_orders(status="all", nested=True, limit=int(args.recent_limit)) or []
-    )
-    df_recent = _to_df(recent_orders, ts)
-    _write_csv(RECENT_ORDERS_PATH, df_recent)
+        recent_orders = (
+            broker.list_orders(status="all", nested=True, limit=int(args.recent_limit)) or []
+        )
+        df_recent = _to_df(recent_orders, ts)
+        _write_csv(RECENT_ORDERS_PATH, df_recent)
 
-    # Positions (contract-correct snapshot)
-    positions = broker.get_positions() or []
-    df_pos = _to_df(positions, ts)
-    df_pos = _ensure_positions_contract(df_pos)
-    _write_csv(POSITIONS_PATH, df_pos)
+        positions = broker.get_positions() or []
+        df_pos = _to_df(positions, ts)
+        df_pos = _ensure_positions_contract(df_pos)
+        _write_csv(POSITIONS_PATH, df_pos)
 
-    _auto_heal_contracts()
+        _auto_heal_contracts()
 
-    return {
-        "ok": True,
-        "mode": args.mode,
-        "ts": ts,
-        "open_orders_written": int(len(open_orders)),
-        "recent_orders_written": int(len(recent_orders)),
-        "positions_written": int(len(df_pos)) if df_pos is not None else 0,
-        "paths": {
-            "open_orders": str(OPEN_ORDERS_PATH),
-            "recent_orders": str(RECENT_ORDERS_PATH),
-            "positions": str(POSITIONS_PATH),
-        },
-        "errors": [],
-    }
+        return {
+            "ok": True,
+            "mode": args.mode,
+            "ts": ts,
+            "open_orders_written": int(len(open_orders)),
+            "recent_orders_written": int(len(recent_orders)),
+            "positions_written": int(len(df_pos)) if df_pos is not None else 0,
+            "paths": {
+                "open_orders": str(OPEN_ORDERS_PATH),
+                "recent_orders": str(RECENT_ORDERS_PATH),
+                "positions": str(POSITIONS_PATH),
+            },
+            "errors": [],
+        }
+    except AlpacaAuthError as exc:
+        diag = alpaca_env_diagnostics(mode=args.mode)
+        return {
+            "ok": False,
+            "status": "SAFE_AUTH_BLOCK",
+            "mode": args.mode,
+            "ts": ts,
+            "reason": "broker_auth_failed",
+            "message": str(exc),
+            "diagnostics": diag,
+            "open_orders_written": 0,
+            "recent_orders_written": 0,
+            "positions_written": 0,
+            "errors": ["broker_auth_failed"],
+        }
 
 
 if __name__ == "__main__":

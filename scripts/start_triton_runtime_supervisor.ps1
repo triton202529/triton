@@ -16,6 +16,8 @@ if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
 $RepoRoot = ((Resolve-Path -LiteralPath $RepoRoot).Path).TrimEnd('\', '/')
 Set-Location $RepoRoot
 
+. (Join-Path $RepoRoot "scripts\triton_env_bootstrap.ps1") -RepoRoot $RepoRoot
+
 $scriptDir = Join-Path $RepoRoot "scripts"
 . (Join-Path $scriptDir "loop_lock_utils.ps1")
 

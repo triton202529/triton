@@ -10,6 +10,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
 
+. (Join-Path $scriptDir "triton_env_bootstrap.ps1") -RepoRoot $repoRoot
+
 . (Join-Path $scriptDir "loop_lock_utils.ps1")
 
 $loopLogDir = "data\results\continuous_loop"

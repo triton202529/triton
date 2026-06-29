@@ -11,7 +11,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
@@ -90,15 +90,53 @@ def _skipped_ticker_reason(symbol: str) -> str:
         return ""
 
 
+def _pipeline_symbol_sets() -> Tuple[Set[str], Set[str]]:
+    lifecycle: Set[str] = set()
+    signals: Set[str] = set()
+    for path, target in (
+        (RESULTS / "signal_lifecycle_effective.csv", lifecycle),
+        (RESULTS / "signals_with_rationale.csv", signals),
+        (RESULTS / "signals.csv", signals),
+    ):
+        if not path.is_file():
+            continue
+        try:
+            import pandas as pd
+
+            df = pd.read_csv(path, low_memory=False)
+            col = (
+                "ticker"
+                if "ticker" in df.columns
+                else ("symbol" if "symbol" in df.columns else None)
+            )
+            if not col:
+                continue
+            target.update(
+                str(x).strip().upper()
+                for x in df[col].dropna().astype(str)
+                if str(x).strip() and str(x).strip().upper() not in ("NAN", "NONE")
+            )
+        except Exception:
+            continue
+    return lifecycle, signals
+
+
 def classify_symbol_quarantine(symbol: str) -> Tuple[Optional[str], str, Dict[str, Any]]:
     """
     Return (classification, reason, details).
-    classification is None when symbol is actionable for hydration.
+    classification is None when symbol is actionable for hydration/repair.
     """
     sym = str(symbol or "").strip().upper()
     details: Dict[str, Any] = {"symbol": sym}
     meta = _load_universe_meta(sym)
     details["universe_metadata"] = meta
+    lifecycle_set, signals_set = _pipeline_symbol_sets()
+    details["in_lifecycle"] = sym in lifecycle_set
+    details["in_signals"] = sym in signals_set
+
+    if sym in lifecycle_set or sym in signals_set:
+        details["artifact_gap"] = "PIPELINE_ARTIFACT_MISSING"
+        return None, "", details
 
     raw_rows = _raw_row_count(sym)
     proc_rows = _processed_row_count(sym)
@@ -120,16 +158,13 @@ def classify_symbol_quarantine(symbol: str) -> Tuple[Optional[str], str, Dict[st
             details,
         )
 
-    if raw_rows < TRAIN_MIN_ROWS or proc_rows < TRAIN_MIN_ROWS:
-        if raw_rows <= IPO_HISTORY_MAX_ROWS:
-            return (
-                "QUARANTINED_IPO_EDGE",
-                f"insufficient_history raw_rows={raw_rows} processed_rows={proc_rows} "
-                f"train_min_rows={TRAIN_MIN_ROWS}",
-                details,
-            )
+    if raw_rows >= TRAIN_MIN_ROWS:
+        details["artifact_gap"] = "PIPELINE_ARTIFACT_MISSING"
+        return None, "", details
+
+    if raw_rows <= IPO_HISTORY_MAX_ROWS:
         return (
-            "QUARANTINED_INSUFFICIENT_HISTORY",
+            "QUARANTINED_IPO_EDGE",
             f"insufficient_history raw_rows={raw_rows} processed_rows={proc_rows} "
             f"train_min_rows={TRAIN_MIN_ROWS}",
             details,
@@ -151,16 +186,12 @@ def classify_symbol_quarantine(symbol: str) -> Tuple[Optional[str], str, Dict[st
                 details,
             )
 
-    pred_path = PREDICTIONS / f"{sym}_predictions.parquet"
-    if proc_rows >= TRAIN_MIN_ROWS and not pred_path.is_file():
-        # Processed history exists but signal chain never produced predictions.
-        return (
-            "QUARANTINED_PENDING_DATA",
-            "processed_history_present_predictions_missing",
-            details,
-        )
-
-    return None, "", details
+    return (
+        "QUARANTINED_INSUFFICIENT_HISTORY",
+        f"insufficient_history raw_rows={raw_rows} processed_rows={proc_rows} "
+        f"train_min_rows={TRAIN_MIN_ROWS}",
+        details,
+    )
 
 
 def evaluate_quarantine_for_symbols(symbols: Sequence[str]) -> Dict[str, Any]:

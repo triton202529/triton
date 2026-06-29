@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-29T01:12:17.019575+00:00",
+  "generated_at": "2026-06-29T12:17:06.252911+00:00",
   "framework": "Phase-197D",
   "symbols": {
     "SPCX": {
@@ -15,6 +15,8 @@
           "sector": "Aerospace / Space Technology",
           "status": "ACTIVE"
         },
+        "in_lifecycle": false,
+        "in_signals": false,
         "raw_rows": 8,
         "processed_rows": 5,
         "train_min_rows": 30

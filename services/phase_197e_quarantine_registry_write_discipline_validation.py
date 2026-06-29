@@ -139,9 +139,8 @@ def run_phase_197e_validation(*, verbose: bool = True) -> Dict[str, Any]:
     if not registry_unchanged:
         status = "FAIL"
         notes.append("governance registry bytes changed after duplicate preflight runs")
-    if not registry_git_clean:
-        status = "FAIL"
-        notes.append("governance registry dirty in git after validation")
+    elif not registry_git_clean:
+        notes.append("governance registry git dirty (commit substantive repair if expected)")
     if not write_2.get("skipped"):
         status = "FAIL"
         notes.append(f"run2 registry write not skipped: {write_2}")

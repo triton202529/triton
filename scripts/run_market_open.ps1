@@ -43,6 +43,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot  = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $repoRoot
 
+. (Join-Path $scriptDir "triton_env_bootstrap.ps1") -RepoRoot $repoRoot
+
 # ── Set up per-run log file under data/results/scheduled_runs ────────
 # Start-Transcript mirrors host output (Write-Host + native-command
 # stdout/stderr) into the file while leaving the terminal stream

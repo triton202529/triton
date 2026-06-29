@@ -1,17 +1,8 @@
 # services/broker_alpaca.py
-from dotenv import load_dotenv
 import os
+import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Force load .env file (project root; works regardless of cwd / IDE terminal settings)
-load_dotenv(os.path.join(ROOT, ".env"))
-load_dotenv(os.path.join(ROOT, "config", ".env"))
-
-from services.credential_mask import format_env_key_status, mask_api_key
-
-print(format_env_key_status("ALPACA_KEY_ID", os.getenv("ALPACA_KEY_ID")))
-print(format_env_key_status("APCA_API_KEY_ID", os.getenv("APCA_API_KEY_ID")))
 
 import json
 import contextvars
@@ -21,13 +12,27 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-ALPACA_PAPER_BASE = "https://paper-api.alpaca.markets"
-ALPACA_LIVE_BASE = "https://api.alpaca.markets"
+from services.triton_env_loader import (
+    ALPACA_LIVE_BASE,
+    ALPACA_PAPER_BASE,
+    format_auth_failure_diagnostic,
+    load_triton_local_env,
+    resolve_alpaca_credentials,
+)
+
 ALPACA_DATA_BASE = "https://data.alpaca.markets"
 
 
 class AlpacaError(RuntimeError):
     pass
+
+
+class AlpacaAuthError(AlpacaError):
+    """Raised on 401 unauthorized with safe diagnostic metadata (no secrets)."""
+
+    def __init__(self, message: str, *, diagnostics: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
 
 
 class BrokerAuthorizationRequired(AlpacaError):
@@ -60,53 +65,17 @@ def _ts() -> str:
 
 
 def _load_env_files() -> None:
-    """
-    Best-effort env loader:
+    """Backward-compatible entry: load ignored local env + normalize aliases."""
+    load_triton_local_env()
 
-    - Use already-set env vars if present
-    - Else try ROOT/.env, ROOT/config/.env, ROOT/config/alpaca.json
-    - Support both ALPACA_* and APCA_* keys
-    """
-    have_keys = (os.getenv("ALPACA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID")) and (
-        os.getenv("ALPACA_API_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
-    )
-    if have_keys:
+
+def _log_env_diagnostics(mode: str) -> None:
+    if os.environ.get("TRITON_BROKER_ENV_VERBOSE", "").strip() not in ("1", "true", "yes"):
         return
-
-    def _load_env_file_plain(path: str) -> None:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    k, v = line.split("=", 1)
-                    k = k.strip()
-                    v = v.strip().strip('"').strip("'")
-                    if k and v and os.getenv(k) is None:
-                        os.environ[k] = v
-        except FileNotFoundError:
-            pass
-
-    def load_json(path: str) -> None:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for k in ("ALPACA_API_KEY_ID", "APCA_API_KEY_ID"):
-                if k in data and os.getenv(k) is None:
-                    os.environ[k] = str(data[k])
-            for k in ("ALPACA_API_SECRET_KEY", "APCA_API_SECRET_KEY"):
-                if k in data and os.getenv(k) is None:
-                    os.environ[k] = str(data[k])
-        except FileNotFoundError:
-            pass
-        except Exception:
-            # ignore malformed JSON
-            pass
-
-    _load_env_file_plain(os.path.join(ROOT, ".env"))
-    _load_env_file_plain(os.path.join(ROOT, "config", ".env"))
-    load_json(os.path.join(ROOT, "config", "alpaca.json"))
+    creds = resolve_alpaca_credentials(mode=mode)
+    diag = creds.get("diagnostics") or {}
+    for line in diag.get("env_check_lines") or []:
+        print(line, flush=True, file=sys.stderr)
 
 
 class AlpacaBroker:
@@ -117,11 +86,24 @@ class AlpacaBroker:
 
     def __init__(self, mode: str = "paper", timeout: int = 20):
         _load_env_files()
-        self.key = os.getenv("ALPACA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID")
-        self.secret = os.getenv("ALPACA_API_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY")
-        if not self.key or not self.secret:
-            raise AlpacaError("Missing Alpaca API credentials in env.")
-        self.base = ALPACA_PAPER_BASE if mode.lower() == "paper" else ALPACA_LIVE_BASE
+        creds = resolve_alpaca_credentials(mode=mode)
+        if not creds.get("ok"):
+            diag = creds.get("diagnostics") or {}
+            raise AlpacaAuthError(
+                format_auth_failure_diagnostic(
+                    mode=str(mode),
+                    status_code=0,
+                    diagnostics=diag,
+                    response_text=str(creds.get("reason") or "missing_credentials"),
+                ),
+                diagnostics=diag,
+            )
+        _log_env_diagnostics(mode)
+        self.key = str(creds["key"])
+        self.secret = str(creds["secret"])
+        self.key_alias_used = creds.get("key_alias_used")
+        self.secret_alias_used = creds.get("secret_alias_used")
+        self.base = str(creds["base_url"])
         self.data_base = ALPACA_DATA_BASE
         self.session = requests.Session()
         self.session.headers.update(
@@ -134,11 +116,23 @@ class AlpacaBroker:
         )
         self.timeout = timeout
         self.mode = mode.lower()
+        self._auth_diagnostics = creds.get("diagnostics") or {}
+
+    def _raise_auth_error(self, method: str, path: str, status_code: int, text: str) -> None:
+        msg = format_auth_failure_diagnostic(
+            mode=self.mode,
+            status_code=status_code,
+            diagnostics=self._auth_diagnostics,
+            response_text=text,
+        )
+        raise AlpacaAuthError(msg, diagnostics=self._auth_diagnostics)
 
     # ---------- HTTP helpers ----------
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         url = f"{self.base}{path}"
         r = self.session.get(url, params=params, timeout=self.timeout)
+        if r.status_code == 401:
+            self._raise_auth_error("GET", path, r.status_code, r.text)
         if r.status_code >= 300:
             raise AlpacaError(f"GET {path} failed {r.status_code}: {r.text}")
         return r.json()
@@ -151,6 +145,8 @@ class AlpacaBroker:
             )
         url = f"{self.base}{path}"
         r = self.session.post(url, data=json.dumps(payload), timeout=self.timeout)
+        if r.status_code == 401:
+            self._raise_auth_error("POST", path, r.status_code, r.text)
         if r.status_code >= 300:
             raise AlpacaError(f"POST {path} failed {r.status_code}: {r.text}")
         return r.json()
@@ -163,6 +159,8 @@ class AlpacaBroker:
     def _delete(self, path: str) -> Any:
         url = f"{self.base}{path}"
         r = self.session.delete(url, timeout=self.timeout)
+        if r.status_code == 401:
+            self._raise_auth_error("DELETE", path, r.status_code, r.text)
         if r.status_code >= 300:
             raise AlpacaError(f"DELETE {path} failed {r.status_code}: {r.text}")
         if r.text:

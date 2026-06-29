@@ -89,10 +89,17 @@ def detect_hydration_gaps(
     missing_signals = sorted(configured_set - signals_set)
 
     critical: List[str] = []
+    artifact_regression: List[str] = []
     for sym in configured:
-        if sym not in processed_set or sym not in lifecycle_set or sym not in signals_set:
+        missing_lifecycle = sym not in lifecycle_set
+        missing_signals = sym not in signals_set
+        missing_processed = sym not in processed_set
+        if missing_lifecycle or missing_signals:
             critical.append(sym)
+        elif missing_processed:
+            artifact_regression.append(sym)
     critical = sorted(set(critical))
+    artifact_regression = sorted(set(artifact_regression))
 
     allocation_only = sorted(
         s for s in configured if s in lifecycle_set and s in signals_set and s not in allocation_set
@@ -110,6 +117,8 @@ def detect_hydration_gaps(
         "missing_signals_symbols": missing_signals,
         "raw_stranded_symbols": list(critical),
         "stranded_symbols": critical,
+        "artifact_regression_symbols": artifact_regression,
+        "pipeline_artifact_missing_symbols": artifact_regression,
         "allocation_refresh_only_symbols": allocation_only,
         "quarantined_symbols": [],
         "quarantine_reasons_by_symbol": {},
