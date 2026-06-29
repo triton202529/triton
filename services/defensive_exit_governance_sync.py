@@ -117,7 +117,31 @@ def _operator_approval_for_symbols(symbols: List[str]) -> Tuple[bool, List[str],
     return covered, pending, {"matches": details, "approved_subjects": sorted(set(approved))}
 
 
-def build_defensive_exit_approval_sync(*, cap_context: str = "runtime") -> Dict[str, Any]:
+def classify_valid_approval_runtime_block(
+    *,
+    isolated_approval_valid: bool,
+    governance_authorized: bool,
+    readiness_status: str,
+) -> str:
+    """Classify why a valid isolated approval still cannot execute (197M)."""
+    if not isolated_approval_valid:
+        return "ISOLATED_APPROVAL_NOT_VALID"
+    gov_block = not governance_authorized
+    readiness_block = str(readiness_status or "") != "READY"
+    if gov_block and readiness_block:
+        return "VALID_APPROVAL_STILL_BLOCKED_BY_GOVERNANCE_AND_READINESS"
+    if gov_block:
+        return "VALID_APPROVAL_STILL_BLOCKED_BY_GOVERNANCE"
+    if readiness_block:
+        return "VALID_APPROVAL_STILL_BLOCKED_BY_READINESS"
+    return "VALID_APPROVAL_NOT_BLOCKED_BY_GOVERNANCE_OR_READINESS"
+
+
+def build_defensive_exit_approval_sync(
+    *,
+    cap_context: str = "runtime",
+    operator_contract_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     """
     Classify capped defensive batch against governance/readiness/operator gates.
     Read-only — never approves or submits orders.
@@ -229,8 +253,10 @@ def build_defensive_exit_approval_sync(*, cap_context: str = "runtime") -> Dict[
         preview_hash=preview_hash,
         capped_symbols=capped_symbols,
         configured_cap=configured_cap,
+        contract_path=operator_contract_path,
     )
-    contract_doc = _read_json(APPROVAL_CONTRACT_PATH) if APPROVAL_CONTRACT_PATH.is_file() else {}
+    contract_read_path = operator_contract_path or APPROVAL_CONTRACT_PATH
+    contract_doc = _read_json(contract_read_path) if contract_read_path.is_file() else {}
     contract_decision = str(contract_doc.get("decision") or "").upper()
 
     if contract_decision == OPERATOR_DECISION_REJECT:
@@ -298,8 +324,15 @@ def build_defensive_exit_approval_sync(*, cap_context: str = "runtime") -> Dict[
         "operator_paper_approval_status": op_paper_status,
         "operator_paper_approval_reason": op_paper_reason,
         "operator_paper_approval_details": op_paper_details,
-        "approval_contract_path": str(APPROVAL_CONTRACT_PATH.relative_to(ROOT)).replace("\\", "/"),
-        "approval_contract_exists": APPROVAL_CONTRACT_PATH.is_file(),
+        "approval_contract_path": str(
+            (operator_contract_path or APPROVAL_CONTRACT_PATH).relative_to(ROOT)
+        ).replace("\\", "/"),
+        "approval_contract_exists": (operator_contract_path or APPROVAL_CONTRACT_PATH).is_file(),
+        "operator_contract_path_override": (
+            str(operator_contract_path.relative_to(ROOT)).replace("\\", "/")
+            if operator_contract_path
+            else None
+        ),
         "source_preview_hash": preview_hash,
     }
 
