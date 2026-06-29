@@ -160,7 +160,13 @@ def _finalize_quarantine_audit(audit: Dict[str, Any], gaps: Dict[str, Any]) -> N
     if details:
         from services.symbol_hydration_quarantine import persist_quarantine_registry
 
-        persist_quarantine_registry(details)
+        audit["quarantine_registry_write"] = persist_quarantine_registry(details)
+    else:
+        audit["quarantine_registry_write"] = {
+            "written": False,
+            "skipped": True,
+            "skip_reason": "no_quarantine_details",
+        }
 
 
 def run_runtime_hydration_preflight(

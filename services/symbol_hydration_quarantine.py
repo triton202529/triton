@@ -202,13 +202,72 @@ def apply_quarantine_to_gaps(gaps: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def persist_quarantine_registry(quarantine_details: Dict[str, Dict[str, Any]]) -> None:
+REGISTRY_FRAMEWORK = "Phase-197D"
+
+
+def load_quarantine_registry() -> Dict[str, Any]:
+    if not QUARANTINE_REGISTRY.is_file():
+        return {}
+    try:
+        return json.loads(QUARANTINE_REGISTRY.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _normalize_symbols_for_compare(symbols: Dict[str, Any]) -> str:
+    return json.dumps(symbols or {}, sort_keys=True, default=str)
+
+
+def registry_substance_unchanged(
+    existing: Dict[str, Any],
+    quarantine_details: Dict[str, Dict[str, Any]],
+) -> bool:
+    """True when symbol quarantine content matches existing registry (ignores generated_at)."""
+    if not existing:
+        return False
+    if str(existing.get("framework") or "") != REGISTRY_FRAMEWORK:
+        return False
+    return _normalize_symbols_for_compare(
+        existing.get("symbols")
+    ) == _normalize_symbols_for_compare(quarantine_details)
+
+
+def persist_quarantine_registry(quarantine_details: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Write governance registry only when substantive quarantine content changes.
+    Runtime timestamps belong in runtime_universe_hydration_preflight.json, not here.
+    """
+    rel_path = str(QUARANTINE_REGISTRY.relative_to(ROOT)).replace("\\", "/")
+    existing = load_quarantine_registry()
+    if registry_substance_unchanged(existing, quarantine_details):
+        return {
+            "written": False,
+            "skipped": True,
+            "skip_reason": "unchanged_substance",
+            "path": rel_path,
+        }
+
     doc = {
         "generated_at": _utc_now_iso(),
-        "framework": "Phase-197D",
+        "framework": REGISTRY_FRAMEWORK,
         "symbols": quarantine_details,
     }
     QUARANTINE_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(doc, indent=2, default=str)
+    if QUARANTINE_REGISTRY.is_file():
+        prior = QUARANTINE_REGISTRY.read_bytes()
+        ends_with_newline = prior.endswith(b"\n") or prior.endswith(b"\r\n")
+    else:
+        ends_with_newline = True
+    if ends_with_newline and not payload.endswith("\n"):
+        payload += "\n"
     tmp = QUARANTINE_REGISTRY.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(doc, indent=2, default=str), encoding="utf-8")
+    tmp.write_text(payload, encoding="utf-8", newline="\n")
     os.replace(tmp, QUARANTINE_REGISTRY)
+    return {
+        "written": True,
+        "skipped": False,
+        "skip_reason": None,
+        "reason": "substantive_quarantine_change",
+        "path": rel_path,
+    }
