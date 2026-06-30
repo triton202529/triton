@@ -21,12 +21,13 @@ GOVERNANCE = ROOT / "data" / "governance"
 OUTPUT_JSON = RESULTS / "phase_197w_fix_post_approval_validator_repair.json"
 APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
 SOAK_JSON = RESULTS / "phase_197t_safe_continuous_observation_soak.json"
-PREVIOUS_COMMIT = "00c38f4a"
-PREVIOUS_PHASE = "197W"
+PREVIOUS_COMMIT = "26a14f97"
+PREVIOUS_PHASE = "197W-FIX"
 
 FINAL_VALID_CURRENT = "PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN"
 FINAL_EXPIRED_CLEANUP = "PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED"
 FINAL_INVALID_CLEANUP = "PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED"
+FINAL_ABSENT_OPERATOR_REQUIRED = "PAPER_OPERATOR_APPROVAL_ABSENT_OPERATOR_APPROVAL_REQUIRED"
 
 
 def _utc_now_iso() -> str:
@@ -107,22 +108,28 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
     from services.defensive_exit_governance_review_criteria import (
         GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL,
         GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL,
+        GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
+        GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
         GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
         evaluate_governance_review_criteria,
     )
     from services.defensive_exit_market_hours_governance_recheck import (
         RECHECK_BLOCKED_BY_EXPIRED_APPROVAL,
         RECHECK_BLOCKED_BY_INVALID_APPROVAL,
+        RECHECK_BLOCKED_BY_OPERATOR_APPROVAL,
         RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION,
+        RECHECK_WAITING,
         run_market_hours_governance_recheck,
     )
     from services.paper_operator_approval_artifact_state import (
+        PAPER_APPROVAL_ABSENT,
         PAPER_APPROVAL_EXPIRED,
         PAPER_APPROVAL_VALID_CURRENT,
         classify_paper_operator_approval_artifact,
         paper_approval_cleanup_required,
     )
     from services.phase_197u_paper_runtime_governance_packet_refresh import (
+        GOV_PACKET_CURRENT_OPERATOR_REVIEW_REQUIRED,
         GOV_PACKET_CURRENT_PAPER_APPROVAL_PRESENT,
         GOV_PACKET_REFRESH_BLOCKED_APPROVAL_EXPIRED,
         GOV_PACKET_REFRESH_BLOCKED_APPROVAL_INVALID,
@@ -185,8 +192,20 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
     )
 
     paper_gate_status, paper_gate_reason = _run_paper_entry_dry_run()
+    market_open = bool(criteria.get("market_open"))
 
-    if approval_expired:
+    if ap_state == PAPER_APPROVAL_ABSENT:
+        final_state = FINAL_ABSENT_OPERATOR_REQUIRED
+        expected_197u = GOV_PACKET_CURRENT_OPERATOR_REVIEW_REQUIRED
+        if market_open:
+            expected_197n = GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED
+            expected_197o = RECHECK_BLOCKED_BY_OPERATOR_APPROVAL
+            expected_paper_reason = "operator_approval_required"
+        else:
+            expected_197n = GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED
+            expected_197o = RECHECK_WAITING
+            expected_paper_reason = "market is closed"
+    elif approval_expired:
         final_state = FINAL_EXPIRED_CLEANUP
         expected_paper_reason = "approval_expired"
         expected_197u = GOV_PACKET_REFRESH_BLOCKED_APPROVAL_EXPIRED
@@ -206,7 +225,7 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
         expected_197o = RECHECK_BLOCKED_BY_INVALID_APPROVAL
 
     status = "PASS"
-    if approval_expired:
+    if approval_expired or ap_state == PAPER_APPROVAL_ABSENT:
         status = "PASS_SAFE_BLOCKED"
 
     if broker_orders_submitted or exits_executed or trims_executed:
@@ -243,7 +262,7 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
         notes.append("generic readiness block with approval present")
 
     payload: Dict[str, Any] = {
-        "phase": "197W-FIX",
+        "phase": "197W-FIX2",
         "generated_at": _utc_now_iso(),
         "status": status,
         "previous_phase": PREVIOUS_PHASE,
