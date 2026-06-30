@@ -3662,9 +3662,12 @@ def maybe_execute_management(
 
     if str(mode).lower() == "paper":
         from services.defensive_exit_dispatch_interlock import (
+            SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED,
             evaluate_defensive_exit_dispatch_interlock,
             format_dispatch_interlock_block,
             is_defensive_exit_manage_handoff,
+            is_dispatch_approval_safe_block_state,
+            print_dispatch_approval_safe_block,
         )
 
         if is_defensive_exit_manage_handoff(allowed):
@@ -3702,6 +3705,17 @@ def maybe_execute_management(
                 write_handoff_audit(diag)
                 meta["handoff_diagnostic"] = diag
                 meta["dispatch_interlock"] = interlock
+                meta["eligible_for_execution"] = False
+                meta["broker_orders_submitted"] = False
+                if is_dispatch_approval_safe_block_state(
+                    str(interlock.get("dispatch_interlock_state") or "")
+                ):
+                    print_dispatch_approval_safe_block(interlock)
+                    meta["safe_block"] = True
+                    meta["safe_block_state"] = SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED
+                    meta["safe_block_reason"] = "DISPATCH_APPROVAL_REQUIRED"
+                    _print_manage_block_summary({**meta, "executed": 0})
+                    return 0, 0, rs, "", meta
                 _print_manage_block_summary({**meta, "executed": 0})
                 return 2, 0, rs, "", meta
 
@@ -4305,7 +4319,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     placement_rc = rc
     summary.orders_executed = executed
-    summary.blocked = rc == 2
+    summary.blocked = rc == 2 or bool(exec_meta.get("safe_block"))
     summary.block_reasons = brs
     try:
         with PLAN_JSON.open("w", encoding="utf-8") as f:
@@ -4332,7 +4346,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"[manage_positions] capital_reallocation skipped: {e}")
 
     ex_n, tr_n, fr_n, ad_n = _count_planned_actions(planned)
-    blocked_n = len(brs) if rc == 2 else 0
+    blocked_n = len(brs) if rc == 2 else (1 if exec_meta.get("safe_block") else 0)
     ex_pl: List[ManagementPlannedOrder] = list(
         exec_meta.get("executed_planned") or (planned if (rc == 0 and executed > 0) else [])
     )

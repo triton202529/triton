@@ -28,6 +28,10 @@ PREVIOUS_PHASE = "197R"
 
 POST_INTERLOCK_RUNTIME_NOT_OBSERVED_YET = "POST_INTERLOCK_RUNTIME_NOT_OBSERVED_YET"
 POST_INTERLOCK_RUNTIME_VERIFIED = "POST_INTERLOCK_RUNTIME_VERIFIED"
+POST_INTERLOCK_RUNTIME_VERIFIED_SAFE_BLOCK = "POST_INTERLOCK_RUNTIME_VERIFIED_SAFE_BLOCK"
+POST_INTERLOCK_RUNTIME_FAIL_SEQUENCE_ABORT_WITHOUT_SAFE_BLOCK = (
+    "POST_INTERLOCK_RUNTIME_FAIL_SEQUENCE_ABORT_WITHOUT_SAFE_BLOCK"
+)
 POST_INTERLOCK_RUNTIME_FAIL_NOTIONAL_CAP_LAST_LINE = (
     "POST_INTERLOCK_RUNTIME_FAIL_NOTIONAL_CAP_LAST_LINE"
 )
@@ -177,6 +181,10 @@ def parse_runtime_logs(
     interlock_marker = "[DISPATCH_INTERLOCK]"
     dispatch_seen = interlock_marker in market_text
     dispatch_state = _first_match(market_text, r"\[DISPATCH_INTERLOCK\] status=(DISPATCH_[A-Z_]+)")
+    dispatch_stage = _first_match(market_text, r"\[DISPATCH_INTERLOCK\][^\n]*stage=(\w+)")
+    safe_block_marker_present = "[SAFE_BLOCK]" in market_text
+    market_sequence_abort = "[ABORT] Market-open sequence aborted" in market_text
+    market_sequence_complete = "=== TRITON MARKET OPEN SEQUENCE COMPLETE ===" in market_text
     placement_after = False
     notional_after = False
     pre_197r_placement_reached = False
@@ -195,6 +203,10 @@ def parse_runtime_logs(
         "cycle_start_timestamp": _cycle_start_timestamp(continuous_text),
         "dispatch_interlock_seen": dispatch_seen,
         "dispatch_interlock_state": dispatch_state,
+        "dispatch_interlock_stage": dispatch_stage,
+        "safe_block_marker_present": safe_block_marker_present,
+        "market_sequence_abort": market_sequence_abort,
+        "market_sequence_complete": market_sequence_complete,
         "placement_proceeded_after_interlock": placement_after,
         "notional_cap_block_seen_after_interlock": notional_after,
         "pre_197r_placement_reached": pre_197r_placement_reached,
@@ -253,6 +265,16 @@ def classify_post_interlock_runtime(
                 POST_INTERLOCK_RUNTIME_FAIL_BROKER_ORDERS_SUBMITTED,
                 f"exits_executed={exits_executed}",
             )
+        if parsed.get("market_sequence_abort") and not parsed.get("safe_block_marker_present"):
+            return (
+                POST_INTERLOCK_RUNTIME_FAIL_SEQUENCE_ABORT_WITHOUT_SAFE_BLOCK,
+                "market_open_sequence_aborted_without_safe_block_marker",
+            )
+        if parsed.get("safe_block_marker_present") or parsed.get("market_sequence_complete"):
+            return (
+                POST_INTERLOCK_RUNTIME_VERIFIED_SAFE_BLOCK,
+                "dispatch_interlock_safe_block_no_broker_orders",
+            )
         return (
             POST_INTERLOCK_RUNTIME_VERIFIED,
             "dispatch_interlock_blocked_before_placement_no_broker_orders",
@@ -305,6 +327,8 @@ def run_phase_197s_verification(*, verbose: bool = True) -> Dict[str, Any]:
 
     if runtime_state == POST_INTERLOCK_RUNTIME_VERIFIED:
         status = "PASS"
+    elif runtime_state == POST_INTERLOCK_RUNTIME_VERIFIED_SAFE_BLOCK:
+        status = "PASS_SAFE_BLOCK"
     elif runtime_state == POST_INTERLOCK_RUNTIME_NOT_OBSERVED_YET:
         status = "PASS_SAFE_WAIT"
         notes.append(
@@ -376,6 +400,10 @@ def run_phase_197s_verification(*, verbose: bool = True) -> Dict[str, Any]:
         "cycle_completed": parsed.get("cycle_completed"),
         "dispatch_interlock_seen": parsed.get("dispatch_interlock_seen"),
         "dispatch_interlock_state": dispatch_state,
+        "dispatch_interlock_stage": parsed.get("dispatch_interlock_stage"),
+        "safe_block_marker_present": parsed.get("safe_block_marker_present"),
+        "market_sequence_abort": parsed.get("market_sequence_abort"),
+        "market_sequence_complete": parsed.get("market_sequence_complete"),
         "placement_proceeded_after_interlock": parsed.get("placement_proceeded_after_interlock"),
         "notional_cap_block_seen_after_interlock": parsed.get(
             "notional_cap_block_seen_after_interlock"
@@ -418,7 +446,7 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     result = run_phase_197s_verification(verbose=not args.quiet)
-    return 0 if result.get("status") in ("PASS", "PASS_SAFE_WAIT") else 1
+    return 0 if result.get("status") in ("PASS", "PASS_SAFE_WAIT", "PASS_SAFE_BLOCK") else 1
 
 
 if __name__ == "__main__":

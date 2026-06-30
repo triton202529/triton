@@ -26,6 +26,8 @@ DISPATCH_BLOCKED_ORDER_GUARD = "DISPATCH_BLOCKED_ORDER_GUARD"
 DISPATCH_BLOCKED_LIVE_BLOCK = "DISPATCH_BLOCKED_LIVE_BLOCK"
 DISPATCH_BLOCKED_OPEN_ORDERS = "DISPATCH_BLOCKED_OPEN_ORDERS"
 
+SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED = "SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED"
+
 SAFE_ORDER_GUARD_STATES = frozenset(
     {
         "ORDER_GUARD_FRESH",
@@ -200,6 +202,28 @@ def assert_defensive_exit_dispatch_permitted(
             result,
         )
     return result
+
+
+def is_dispatch_approval_safe_block_state(state: str) -> bool:
+    """True when missing-operator-approval block is an expected no-execution safe block."""
+    return str(state or "") == DISPATCH_BLOCKED_APPROVAL_REQUIRED
+
+
+def print_dispatch_approval_safe_block(interlock: Dict[str, Any]) -> None:
+    """Emit stable safe-block markers for expected dispatch-approval no-execution."""
+    import sys
+
+    print(
+        f"[SAFE_BLOCK] state={SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED} reason=DISPATCH_APPROVAL_REQUIRED",
+        flush=True,
+    )
+    print("broker_orders_submitted=false", flush=True)
+    print("eligible_for_execution=false", flush=True)
+    print(
+        f"dispatch_interlock_state={interlock.get('dispatch_interlock_state')}",
+        flush=True,
+    )
+    sys.stdout.flush()
 
 
 def format_dispatch_interlock_block(result: Dict[str, Any], *, stage: Optional[str] = None) -> str:

@@ -1774,6 +1774,8 @@ def main() -> None:
                 DispatchInterlockBlocked,
                 assert_defensive_exit_dispatch_permitted,
                 format_dispatch_interlock_block,
+                is_dispatch_approval_safe_block_state,
+                print_dispatch_approval_safe_block,
             )
 
             try:
@@ -1789,6 +1791,9 @@ def main() -> None:
                     format_dispatch_interlock_block(details, stage="place_live_orders"),
                     flush=True,
                 )
+                if is_dispatch_approval_safe_block_state(blocked.state):
+                    print_dispatch_approval_safe_block(details)
+                    raise SystemExit(0)
                 die(
                     format_dispatch_interlock_block(details, stage="place_live_orders")
                     + " (blocked before manage handoff placement mapping)",
