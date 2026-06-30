@@ -118,19 +118,28 @@ def _preview_fields() -> Dict[str, Any]:
 
 def detect_runtime_loop_status() -> Dict[str, Any]:
     """Read process and lock status for continuous/watchdog loops."""
-    from services.dashboard_status_sync import audit_reconciled_runtime_locks, detect_loop_processes
+    from services.runtime_process_detector import detect_runtime_loop_processes
 
-    loops = detect_loop_processes()
-    lock_audit = audit_reconciled_runtime_locks()
+    detected = detect_runtime_loop_processes()
     return {
-        "continuous_loop_running": bool(loops.get("continuous_process_running")),
-        "watchdog_loop_running": bool(loops.get("watchdog_process_running")),
-        "continuous_lock_exists": CONTINUOUS_LOCK.is_file(),
-        "watchdog_lock_exists": WATCHDOG_LOCK.is_file(),
-        "continuous_lock_classification": lock_audit.get("continuous_lock_classification"),
-        "watchdog_lock_classification": lock_audit.get("watchdog_lock_classification"),
-        "watchdog_lock_healthy": lock_audit.get("watchdog_lock_healthy"),
-        "continuous_lock_healthy": lock_audit.get("continuous_lock_healthy"),
+        "continuous_loop_running": bool(detected.get("continuous_loop_running")),
+        "watchdog_loop_running": bool(detected.get("watchdog_loop_running")),
+        "continuous_lock_exists": detected.get("continuous_lock_exists"),
+        "watchdog_lock_exists": detected.get("watchdog_lock_exists"),
+        "detected_continuous_process_ids": detected.get("detected_continuous_process_ids"),
+        "detected_watchdog_process_ids": detected.get("detected_watchdog_process_ids"),
+        "continuous_detection_method": detected.get("continuous_detection_method"),
+        "watchdog_detection_method": detected.get("watchdog_detection_method"),
+        "process_detection_confidence": detected.get("process_detection_confidence"),
+        "process_detection_warnings": detected.get("process_detection_warnings"),
+        "continuous_runtime_process_lock_state": detected.get(
+            "continuous_runtime_process_lock_state"
+        ),
+        "watchdog_runtime_process_lock_state": detected.get("watchdog_runtime_process_lock_state"),
+        "continuous_lock_classification": detected.get("continuous_lock_classification"),
+        "watchdog_lock_classification": detected.get("watchdog_lock_classification"),
+        "watchdog_lock_healthy": detected.get("watchdog_lock_healthy"),
+        "continuous_lock_healthy": detected.get("continuous_lock_healthy"),
     }
 
 
@@ -292,6 +301,16 @@ def run_runtime_reentry_observation(
         "broker_orders_submitted": broker_orders_submitted,
         "watchdog_lock_classification": runtime.get("watchdog_lock_classification"),
         "continuous_lock_classification": runtime.get("continuous_lock_classification"),
+        "detected_continuous_process_ids": runtime.get("detected_continuous_process_ids"),
+        "detected_watchdog_process_ids": runtime.get("detected_watchdog_process_ids"),
+        "continuous_detection_method": runtime.get("continuous_detection_method"),
+        "watchdog_detection_method": runtime.get("watchdog_detection_method"),
+        "process_detection_confidence": runtime.get("process_detection_confidence"),
+        "process_detection_warnings": runtime.get("process_detection_warnings"),
+        "continuous_runtime_process_lock_state": runtime.get(
+            "continuous_runtime_process_lock_state"
+        ),
+        "watchdog_runtime_process_lock_state": runtime.get("watchdog_runtime_process_lock_state"),
     }
 
     state, reason = classify_runtime_reentry(base)

@@ -171,6 +171,13 @@ def run_phase_197q_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "watchdog_loop_running": observation.get("watchdog_loop_running"),
         "continuous_lock_exists": observation.get("continuous_lock_exists"),
         "watchdog_lock_exists": observation.get("watchdog_lock_exists"),
+        "detected_continuous_process_ids": observation.get("detected_continuous_process_ids"),
+        "detected_watchdog_process_ids": observation.get("detected_watchdog_process_ids"),
+        "continuous_runtime_process_lock_state": observation.get(
+            "continuous_runtime_process_lock_state"
+        ),
+        "process_detection_confidence": observation.get("process_detection_confidence"),
+        "process_detection_warnings": observation.get("process_detection_warnings"),
         "live_blocked": observation.get("live_blocked"),
         "live_block_reason": observation.get("live_block_reason"),
         "order_guard_authority_state": observation.get("order_guard_authority_state"),

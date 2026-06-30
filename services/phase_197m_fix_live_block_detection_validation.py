@@ -93,6 +93,9 @@ def run_phase_197m_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
         validator_paper_gate_acceptable,
     )
     from services.paper_entry_loop_stage import evaluate_paper_entry_gates
+    from services.triton_env_loader import load_cli_validation_env
+
+    env_authority = load_cli_validation_env()
 
     live_block_ok, live_payload = validator_live_block_check(paper_mode=True)
     gate_ok, gate_reason, gate_details = evaluate_paper_entry_gates(verbose=False)
@@ -136,6 +139,9 @@ def run_phase_197m_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
     if live_payload.get("valid_live_confirm_count", 0) != 0:
         status = "FAIL"
         notes.append("valid live confirm must not authorize in current state")
+    if env_authority.get("live_execution_enabled") or env_authority.get("live_force_enabled"):
+        status = "FAIL"
+        notes.append("live execution env must remain disabled in validation")
     if REAL_APPROVAL_PATH.is_file():
         status = "FAIL"
         notes.append("real approval artifact exists")
@@ -179,6 +185,11 @@ def run_phase_197m_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "paper_entry_gate_ok": gate_ok,
         "paper_entry_gate_reason": gate_reason,
         "paper_entry_gate_acceptable": gate_acceptable,
+        "env_authority_state": env_authority.get("env_authority_state"),
+        "env_source": env_authority.get("env_source"),
+        "cli_validation_env_loaded": env_authority.get("cli_validation_env_loaded"),
+        "paper_execution_enabled": env_authority.get("paper_execution_enabled"),
+        "live_execution_enabled": env_authority.get("live_execution_enabled"),
         "broker_snapshot_ok": snapshot_ok,
         "open_orders_count": _count_open_orders(),
         "positions_count": _count_positions(),

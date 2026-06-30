@@ -249,3 +249,112 @@ def format_auth_failure_diagnostic(
         "(.env.local / .env.paper.local / config/local/runtime_env.local)"
     )
     return "\n".join(lines)
+
+
+PAPER_ENV_AUTHORITY_SUPERVISOR_ONLY = "PAPER_ENV_AUTHORITY_SUPERVISOR_ONLY"
+PAPER_ENV_AUTHORITY_CLI_LOADED = "PAPER_ENV_AUTHORITY_CLI_LOADED"
+PAPER_ENV_AUTHORITY_SHARED_BOOTSTRAP = "PAPER_ENV_AUTHORITY_SHARED_BOOTSTRAP"
+PAPER_ENV_AUTHORITY_MISSING = "PAPER_ENV_AUTHORITY_MISSING"
+PAPER_ENV_AUTHORITY_CONFLICT = "PAPER_ENV_AUTHORITY_CONFLICT"
+
+PAPER_EXECUTION_ENV = "TRITON_ENABLE_PAPER_EXECUTION"
+AUTO_PAPER_ENTRIES_ENV = "TRITON_ENABLE_AUTO_PAPER_ENTRIES"
+AUTO_PAPER_APPROVAL_ENV = "TRITON_ENABLE_AUTO_PAPER_APPROVAL"
+LIVE_EXECUTION_ENV = "TRITON_ENABLE_LIVE_EXECUTION"
+LIVE_FORCE_ENV = "TRITON_FORCE_LIVE"
+
+
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip() == "1"
+
+
+def _broker_paper_env_present() -> bool:
+    diag = alpaca_env_diagnostics(mode="paper")
+    return bool(diag.get("credentials_complete"))
+
+
+def _broker_live_env_present_or_unknown() -> bool:
+    key_alias, key_val = _first_env(KEY_ALIASES)
+    secret_alias, secret_val = _first_env(SECRET_ALIASES)
+    base_alias, base_val = _first_env(BASE_URL_ALIASES)
+    if not key_val or not secret_val:
+        return False
+    if base_val and ALPACA_LIVE_BASE in base_val.lower():
+        return True
+    if base_val and ALPACA_PAPER_BASE in base_val.lower():
+        return False
+    return bool(key_val and secret_val)
+
+
+def evaluate_paper_env_authority(
+    *,
+    load_local_env: bool = False,
+    cli_validation: bool = False,
+) -> Dict[str, Any]:
+    """
+    Report paper/live env authority for validators. Never enables live execution.
+    Optionally loads git-ignored local env files (credentials only unless present in files).
+    """
+    env_source = "process_environment"
+    loaded_files: List[str] = []
+    if load_local_env or cli_validation:
+        loaded_files = load_triton_local_env()
+        env_source = "triton_env_loader"
+
+    paper_enabled = _env_truthy(PAPER_EXECUTION_ENV)
+    auto_entries = _env_truthy(AUTO_PAPER_ENTRIES_ENV)
+    auto_approval = _env_truthy(AUTO_PAPER_APPROVAL_ENV)
+    live_enabled = _env_truthy(LIVE_EXECUTION_ENV)
+    live_force = _env_truthy(LIVE_FORCE_ENV)
+
+    if live_enabled or live_force:
+        state = PAPER_ENV_AUTHORITY_CONFLICT
+        reason = "live_execution_env_enabled"
+    elif paper_enabled and auto_entries and auto_approval:
+        if loaded_files and cli_validation:
+            state = PAPER_ENV_AUTHORITY_CLI_LOADED
+            reason = "cli_loaded_paper_flags_present"
+        elif loaded_files:
+            state = PAPER_ENV_AUTHORITY_SHARED_BOOTSTRAP
+            reason = "bootstrap_files_loaded_paper_flags_present"
+        else:
+            state = PAPER_ENV_AUTHORITY_SUPERVISOR_ONLY
+            reason = "supervisor_runtime_paper_flags_present"
+    elif paper_enabled or auto_entries or auto_approval:
+        state = PAPER_ENV_AUTHORITY_CONFLICT
+        reason = "partial_paper_env_flags"
+    elif loaded_files and cli_validation:
+        state = PAPER_ENV_AUTHORITY_CLI_LOADED
+        reason = "cli_loaded_credentials_only_paper_flags_missing"
+    elif loaded_files:
+        state = PAPER_ENV_AUTHORITY_SHARED_BOOTSTRAP
+        reason = "bootstrap_loaded_paper_flags_missing"
+    else:
+        state = PAPER_ENV_AUTHORITY_MISSING
+        reason = "paper_env_not_armed"
+
+    broker_diag = alpaca_env_diagnostics(mode="paper")
+    return {
+        "env_authority_state": state,
+        "env_authority_reason": reason,
+        "env_source": env_source,
+        "loaded_local_env_files": loaded_files,
+        "cli_validation_env_loaded": bool(loaded_files) if cli_validation else False,
+        "paper_execution_enabled": paper_enabled,
+        "auto_paper_entries_enabled": auto_entries,
+        "auto_paper_approval_enabled": auto_approval,
+        "live_execution_enabled": live_enabled,
+        "live_force_enabled": live_force,
+        "broker_paper_env_present": bool(broker_diag.get("credentials_complete")),
+        "broker_live_env_present_or_unknown": _broker_live_env_present_or_unknown(),
+        "secrets_masked": True,
+        "broker_env_check_lines": broker_diag.get("env_check_lines") or [],
+        "key_masked": broker_diag.get("key_masked"),
+    }
+
+
+def load_cli_validation_env(*, verbose: bool = False) -> Dict[str, Any]:
+    """Read-only CLI validation env load: local credentials, never arms live execution."""
+    if _env_truthy(LIVE_EXECUTION_ENV) or _env_truthy(LIVE_FORCE_ENV):
+        return evaluate_paper_env_authority(load_local_env=True, cli_validation=True)
+    return evaluate_paper_env_authority(load_local_env=True, cli_validation=True)

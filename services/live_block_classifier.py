@@ -281,6 +281,8 @@ def classify_paper_entry_gate_for_validation(
         return "PASS_SAFE_BLOCKED"
     if failed == "execution_readiness" or "execution_readiness=" in str(gate_reason):
         return "PASS_SAFE_BLOCKED"
+    if failed in ("paper_execution_env", "auto_paper_entries_env"):
+        return "SAFE_BLOCK_PAPER_ENV_NOT_ARMED"
     if "live_execution_permitted" in str(gate_reason):
         return "FAIL_LIVE_BLOCK_REGRESSION"
     return "FAIL_PAPER_ENTRY_GATE"
@@ -310,6 +312,7 @@ def validator_paper_gate_acceptable(
         "PASS_GATE_OPEN",
         "SAFE_BLOCK_MARKET_CLOSED",
         "PASS_SAFE_BLOCKED",
+        "SAFE_BLOCK_PAPER_ENV_NOT_ARMED",
     )
     return acceptable, classification
 

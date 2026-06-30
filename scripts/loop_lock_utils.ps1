@@ -13,8 +13,18 @@ function Test-LoopProcessRunning {
     }
 
     foreach ($proc in @($procs)) {
+        if ($proc.ProcessId -eq $PID) {
+            continue
+        }
         $cmd = $proc.CommandLine
-        if ($cmd -and $cmd -like "*$ScriptName*") {
+        if (-not $cmd) {
+            continue
+        }
+        if ($cmd -match 'Get-CimInstance Win32_Process|Where-Object') {
+            continue
+        }
+        $scriptPattern = '(?:-File\s+["'']?[^\s"'']*[/\\])?' + [regex]::Escape($ScriptName) + '(?:\s|$|"|''|-)'
+        if ($cmd -match $scriptPattern) {
             return $true
         }
     }

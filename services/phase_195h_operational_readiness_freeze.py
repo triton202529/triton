@@ -280,25 +280,9 @@ def _parse_lock(path: Path) -> Dict[str, Any]:
 
 
 def _find_ps_processes(script_fragment: str) -> Tuple[bool, List[int]]:
-    if sys.platform != "win32":
-        return False, []
-    ps = (
-        "Get-CimInstance Win32_Process -Filter \"Name = 'powershell.exe' OR Name = 'pwsh.exe'\" "
-        f"| Where-Object {{ $_.CommandLine -like '*{script_fragment}*' }} "
-        "| Select-Object -ExpandProperty ProcessId"
-    )
-    try:
-        r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps],
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        pids = [int(x.strip()) for x in (r.stdout or "").splitlines() if x.strip().isdigit()]
-        return len(pids) > 0, pids
-    except (subprocess.SubprocessError, OSError):
-        return False, []
+    from services.runtime_process_detector import find_ps_loop_processes
+
+    return find_ps_loop_processes(script_fragment)
 
 
 def _classify_lock(

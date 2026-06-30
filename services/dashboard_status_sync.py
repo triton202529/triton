@@ -134,22 +134,20 @@ def load_runtime_heartbeat() -> Dict[str, Any]:
 
 
 def detect_loop_processes() -> Dict[str, Any]:
-    watchdog_running = False
-    continuous_running = False
-    try:
-        from services.phase_195h_operational_readiness_freeze import _find_ps_processes
+    from services.runtime_process_detector import detect_runtime_loop_processes
 
-        watchdog_running, _ = _find_ps_processes("run_watchdog_loop.ps1")
-        continuous_running, _ = _find_ps_processes("run_continuous_loop.ps1")
-    except Exception:
-        pass
+    detected = detect_runtime_loop_processes()
     return {
-        "watchdog_process_running": watchdog_running,
-        "continuous_process_running": continuous_running,
+        "watchdog_process_running": detected.get("watchdog_loop_running"),
+        "continuous_process_running": detected.get("continuous_loop_running"),
         "watchdog_lock_present": WATCHDOG_LOCK_PATH.is_file(),
         "continuous_lock_present": CONTINUOUS_LOCK_PATH.is_file(),
         "watchdog_lock_fresh": _lock_fresh(WATCHDOG_LOCK_PATH),
         "continuous_lock_fresh": _lock_fresh(CONTINUOUS_LOCK_PATH),
+        "detected_watchdog_process_ids": detected.get("detected_watchdog_process_ids"),
+        "detected_continuous_process_ids": detected.get("detected_continuous_process_ids"),
+        "process_detection_confidence": detected.get("process_detection_confidence"),
+        "process_detection_warnings": detected.get("process_detection_warnings"),
     }
 
 
