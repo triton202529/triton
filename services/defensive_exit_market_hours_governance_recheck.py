@@ -20,6 +20,8 @@ RECHECK_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_READINESS"
 RECHECK_GOV_AND_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_GOVERNANCE_AND_READINESS"
 RECHECK_BLOCKED_BY_STALE_PACKET = "MARKET_HOURS_RECHECK_BLOCKED_BY_STALE_PACKET"
 RECHECK_BLOCKED_BY_OPERATOR_APPROVAL = "MARKET_HOURS_RECHECK_BLOCKED_BY_OPERATOR_APPROVAL"
+RECHECK_BLOCKED_BY_EXPIRED_APPROVAL = "MARKET_HOURS_RECHECK_BLOCKED_BY_EXPIRED_APPROVAL"
+RECHECK_BLOCKED_BY_INVALID_APPROVAL = "MARKET_HOURS_RECHECK_BLOCKED_BY_INVALID_APPROVAL"
 RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION = (
     "MARKET_HOURS_RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION"
 )
@@ -91,20 +93,23 @@ def classify_market_hours_recheck(payload: Dict[str, Any]) -> Tuple[str, str]:
             ),
         )
 
-    from services.defensive_exit_operator_paper_approval import (
-        APPROVAL_STATUS_VALID,
-        validate_operator_approval_contract,
+    from services.paper_operator_approval_artifact_state import (
+        PAPER_APPROVAL_EXPIRED,
+        PAPER_APPROVAL_VALID_CURRENT,
+        classify_paper_operator_approval_artifact,
     )
 
-    ap_status, ap_reason, _ = validate_operator_approval_contract(
+    ap_state, ap_reason, _ = classify_paper_operator_approval_artifact(
         broker_snapshot_ok=bool(payload.get("broker_snapshot_ok")),
     )
-    if ap_status == APPROVAL_STATUS_VALID:
+    if ap_state == PAPER_APPROVAL_VALID_CURRENT:
         return (
             RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION,
             "paper_operator_approval_present_broker_execution_separate",
         )
-    return RECHECK_BLOCKED_BY_OPERATOR_APPROVAL, f"approval_contract_invalid={ap_reason}"
+    if ap_state == PAPER_APPROVAL_EXPIRED:
+        return RECHECK_BLOCKED_BY_EXPIRED_APPROVAL, ap_reason
+    return RECHECK_BLOCKED_BY_INVALID_APPROVAL, ap_reason
 
 
 def run_market_hours_governance_recheck(

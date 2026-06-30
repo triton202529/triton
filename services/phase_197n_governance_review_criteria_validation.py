@@ -64,6 +64,8 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
     git_clean_before = _git_clean()
 
     from services.defensive_exit_governance_review_criteria import (
+        GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL,
+        GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL,
         GOV_REVIEW_BLOCKED_BY_LIVE_BLOCK_REGRESSION,
         GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
         GOV_REVIEW_BLOCKED_BY_READINESS,
@@ -74,9 +76,6 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
         GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
         GOV_REVIEW_REQUIRED,
         evaluate_governance_review_criteria,
-    )
-    from services.defensive_exit_operator_paper_approval import (
-        is_valid_paper_only_defensive_exit_approval,
     )
     from services.live_block_classifier import (
         classify_paper_entry_gate_for_validation,
@@ -113,6 +112,8 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
         GOV_REVIEW_REQUIRED,
         GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
         GOV_REVIEW_BLOCKED_BY_READINESS,
+        GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL,
+        GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL,
         GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
         GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
         GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED,
@@ -136,10 +137,23 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
         status = "FAIL"
         notes.append("operator packet missing")
     if REAL_APPROVAL_PATH.is_file():
-        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
-        if not valid:
+        from services.paper_operator_approval_artifact_state import (
+            PAPER_APPROVAL_EXPIRED,
+            PAPER_APPROVAL_VALID_CURRENT,
+            classify_paper_operator_approval_artifact,
+        )
+
+        ap_state, ap_reason, _ = classify_paper_operator_approval_artifact()
+        if (
+            ap_state
+            not in (
+                PAPER_APPROVAL_VALID_CURRENT,
+                PAPER_APPROVAL_EXPIRED,
+            )
+            and gov_state != GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL
+        ):
             status = "FAIL"
-            notes.append(f"invalid approval artifact: {reason}")
+            notes.append(f"invalid approval artifact: {ap_reason}")
     if criteria.get("eligible_for_execution"):
         status = "FAIL"
         notes.append("eligible_for_execution must be false")

@@ -35,6 +35,9 @@ GOV_PACKET_REFRESH_BLOCKED_LIVE_NOT_BLOCKED = "GOV_PACKET_REFRESH_BLOCKED_LIVE_N
 GOV_PACKET_REFRESH_BLOCKED_APPROVAL_ARTIFACT_PRESENT = (
     "GOV_PACKET_REFRESH_BLOCKED_APPROVAL_ARTIFACT_PRESENT"
 )
+GOV_PACKET_CURRENT_PAPER_APPROVAL_PRESENT = "GOV_PACKET_CURRENT_PAPER_APPROVAL_PRESENT"
+GOV_PACKET_REFRESH_BLOCKED_APPROVAL_EXPIRED = "GOV_PACKET_REFRESH_BLOCKED_APPROVAL_EXPIRED"
+GOV_PACKET_REFRESH_BLOCKED_APPROVAL_INVALID = "GOV_PACKET_REFRESH_BLOCKED_APPROVAL_INVALID"
 GOV_PACKET_REFRESH_BLOCKED_EXECUTION_DETECTED = "GOV_PACKET_REFRESH_BLOCKED_EXECUTION_DETECTED"
 
 SAFE_BLOCK_STATE = "SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED"
@@ -209,20 +212,18 @@ def classify_packet_refresh_state(
     packet_refreshed: bool,
 ) -> Tuple[str, str]:
     if real_approval_exists:
-        from services.defensive_exit_operator_paper_approval import (
-            is_valid_paper_only_defensive_exit_approval,
+        from services.paper_operator_approval_artifact_state import (
+            PAPER_APPROVAL_EXPIRED,
+            PAPER_APPROVAL_VALID_CURRENT,
+            classify_paper_operator_approval_artifact,
         )
 
-        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
-        if valid:
-            return (
-                GOV_PACKET_CURRENT_OPERATOR_REVIEW_REQUIRED,
-                "valid_paper_approval_present_post_197W",
-            )
-        return (
-            GOV_PACKET_REFRESH_BLOCKED_APPROVAL_ARTIFACT_PRESENT,
-            f"invalid_approval_artifact={reason}",
-        )
+        ap_state, ap_reason, _ = classify_paper_operator_approval_artifact()
+        if ap_state == PAPER_APPROVAL_VALID_CURRENT:
+            return GOV_PACKET_CURRENT_PAPER_APPROVAL_PRESENT, "valid_paper_approval_present"
+        if ap_state == PAPER_APPROVAL_EXPIRED:
+            return GOV_PACKET_REFRESH_BLOCKED_APPROVAL_EXPIRED, ap_reason
+        return GOV_PACKET_REFRESH_BLOCKED_APPROVAL_INVALID, ap_reason
     if not live_blocked:
         return GOV_PACKET_REFRESH_BLOCKED_LIVE_NOT_BLOCKED, "live_blocked=false"
     if open_orders_count > 0:
@@ -332,20 +333,35 @@ def run_phase_197u_refresh(*, verbose: bool = True) -> Dict[str, Any]:
     )
 
     status = "PASS"
-    if final_state.startswith("GOV_PACKET_REFRESH_BLOCKED"):
+    blocked_approval_states = {
+        GOV_PACKET_REFRESH_BLOCKED_APPROVAL_EXPIRED,
+        GOV_PACKET_REFRESH_BLOCKED_APPROVAL_INVALID,
+    }
+    if final_state.startswith("GOV_PACKET_REFRESH_BLOCKED") and final_state not in (
+        blocked_approval_states
+    ):
         status = "FAIL"
         notes.append(final_reason)
+    if final_state in blocked_approval_states:
+        notes.append(f"approval artifact lifecycle: {final_reason}")
     if real_approval_exists:
-        from services.defensive_exit_operator_paper_approval import (
-            is_valid_paper_only_defensive_exit_approval,
+        from services.paper_operator_approval_artifact_state import (
+            PAPER_APPROVAL_EXPIRED,
+            PAPER_APPROVAL_VALID_CURRENT,
+            INVALID_STATES,
+            classify_paper_operator_approval_artifact,
         )
 
-        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
-        if not valid:
-            status = "FAIL"
-            notes.append(f"invalid approval artifact: {reason}")
+        ap_state, ap_reason, _ = classify_paper_operator_approval_artifact()
+        if ap_state == PAPER_APPROVAL_VALID_CURRENT:
+            notes.append("valid_paper_approval_present")
+        elif ap_state == PAPER_APPROVAL_EXPIRED:
+            notes.append(f"expired_approval: {ap_reason}")
+        elif ap_state in INVALID_STATES:
+            notes.append(f"invalid_approval: {ap_reason}")
         else:
-            notes.append("valid_paper_approval_present_post_197W")
+            status = "FAIL"
+            notes.append(f"unexpected approval artifact state: {ap_state} ({ap_reason})")
     if not live_blocked:
         status = "FAIL"
         notes.append("live must remain blocked")

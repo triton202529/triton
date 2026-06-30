@@ -33,6 +33,8 @@ GOV_REVIEW_BLOCKED_BY_OPEN_ORDERS = "GOV_REVIEW_BLOCKED_BY_OPEN_ORDERS"
 GOV_REVIEW_BLOCKED_BY_STALE_PACKET = "GOV_REVIEW_BLOCKED_BY_STALE_PACKET"
 GOV_REVIEW_BLOCKED_BY_MISSING_PREVIEW = "GOV_REVIEW_BLOCKED_BY_MISSING_PREVIEW"
 GOV_REVIEW_BLOCKED_BY_READINESS = "GOV_REVIEW_BLOCKED_BY_READINESS"
+GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL = "GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL"
+GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL = "GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL"
 GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED = "GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED"
 
 REQUIRED_EVIDENCE_KEYS = (
@@ -272,23 +274,23 @@ def classify_governance_review_state(evidence_payload: Dict[str, Any]) -> Tuple[
     readiness_status = str(evidence_payload.get("readiness_status") or "")
 
     if real_approval_exists:
-        from services.defensive_exit_operator_paper_approval import (
-            APPROVAL_STATUS_VALID,
-            validate_operator_approval_contract,
+        from services.paper_operator_approval_artifact_state import (
+            PAPER_APPROVAL_EXPIRED,
+            PAPER_APPROVAL_VALID_CURRENT,
+            classify_paper_operator_approval_artifact,
         )
 
-        ap_status, ap_reason, _ = validate_operator_approval_contract(
+        ap_state, ap_reason, _ = classify_paper_operator_approval_artifact(
             broker_snapshot_ok=bool(evidence_payload.get("broker_snapshot_ok")),
         )
-        if ap_status == APPROVAL_STATUS_VALID:
+        if ap_state == PAPER_APPROVAL_VALID_CURRENT:
             return (
                 GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
                 "paper_operator_approval_valid_broker_execution_separate",
             )
-        return (
-            GOV_REVIEW_BLOCKED_BY_READINESS,
-            f"approval_contract_invalid={ap_reason}",
-        )
+        if ap_state == PAPER_APPROVAL_EXPIRED:
+            return GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL, ap_reason
+        return GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL, ap_reason
 
     if not real_approval_exists:
         if evidence_payload.get("management_review_required") or not evidence_payload.get(
@@ -355,6 +357,8 @@ def evaluate_governance_review_criteria(
             GOV_REVIEW_BLOCKED_BY_STALE_PACKET,
             GOV_REVIEW_BLOCKED_BY_MISSING_PREVIEW,
             GOV_REVIEW_BLOCKED_BY_READINESS,
+            GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL,
+            GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL,
             GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
         ],
     }

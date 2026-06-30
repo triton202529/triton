@@ -40,6 +40,15 @@ EXECUTION_WARNING = "This artifact does not submit orders. Broker execution requ
 PAPER_OPERATOR_APPROVAL_CREATED_EXECUTION_NOT_RUN = (
     "PAPER_OPERATOR_APPROVAL_CREATED_EXECUTION_NOT_RUN"
 )
+PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN = (
+    "PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN"
+)
+PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED = (
+    "PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED"
+)
+PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED = (
+    "PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED"
+)
 PAPER_OPERATOR_APPROVAL_BLOCKED_EXISTING_ARTIFACT = (
     "PAPER_OPERATOR_APPROVAL_BLOCKED_EXISTING_ARTIFACT"
 )
@@ -146,16 +155,20 @@ def validate_creation_preconditions(
     reasons: List[str] = []
 
     if REAL_APPROVAL_PATH.is_file():
-        from services.defensive_exit_operator_paper_approval import (
-            is_valid_paper_only_defensive_exit_approval,
+        from services.paper_operator_approval_artifact_state import (
+            PAPER_APPROVAL_EXPIRED,
+            PAPER_APPROVAL_VALID_CURRENT,
+            classify_paper_operator_approval_artifact,
         )
 
-        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
-        if valid:
-            return PAPER_OPERATOR_APPROVAL_BLOCKED_EXISTING_ARTIFACT, [
+        ap_state, ap_reason, _ = classify_paper_operator_approval_artifact()
+        if ap_state == PAPER_APPROVAL_VALID_CURRENT:
+            return PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN, [
                 "valid_approval_already_exists"
             ]
-        reasons.append(f"existing_approval_invalid={reason}")
+        if ap_state == PAPER_APPROVAL_EXPIRED:
+            return PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED, [ap_reason]
+        return PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED, [ap_reason]
 
     if v197.get("status") != "PASS":
         reasons.append(f"197V_status={v197.get('status')}")
@@ -306,8 +319,10 @@ def _run_paper_entry_dry_run() -> Tuple[str, str]:
                 gate = line.split("status=", 1)[-1].split()[0]
             if "reason=" in line:
                 reason = line.split("reason=", 1)[-1].strip()
-        if "[PAPER_ENTRY_EXECUTION_BLOCKED]" in line and "reason=" in line:
+        elif "[PAPER_ENTRY_EXECUTION_BLOCKED]" in line and "reason=" in line and not reason:
             reason = line.split("reason=", 1)[-1].strip()
+    if reason.endswith(" (SAFE_BLOCK)"):
+        reason = reason[: -len(" (SAFE_BLOCK)")]
     return gate, reason
 
 
@@ -326,7 +341,6 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
     )
     from services.defensive_exit_operator_paper_approval import (
         APPROVAL_STATUS_VALID,
-        is_valid_paper_only_defensive_exit_approval,
         validate_operator_approval_contract,
         write_paper_only_defensive_exit_approval,
     )
@@ -361,8 +375,17 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
 
     approval_created = False
     approval_valid = False
+    approval_expired = False
+    cleanup_required = False
+    approval_artifact_state = None
     approval_status = None
     contract: Dict[str, Any] = {}
+
+    existing_states = {
+        PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN,
+        PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED,
+        PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED,
+    }
 
     if final_state == PAPER_OPERATOR_APPROVAL_CREATED_EXECUTION_NOT_RUN:
         contract = build_paper_approval_artifact(
@@ -385,25 +408,45 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
             final_state = PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH
             block_reasons.append(f"post_write_validation_failed={ap_reason}")
             notes.append(ap_reason)
-    elif final_state == PAPER_OPERATOR_APPROVAL_BLOCKED_EXISTING_ARTIFACT:
-        valid, reason, details = is_valid_paper_only_defensive_exit_approval()
-        approval_valid = valid
-        approval_status = details.get("approval_status")
-        contract = _read_json(REAL_APPROVAL_PATH)
-        approval_created = False
-        notes.append(reason)
+    elif final_state in existing_states:
+        from services.paper_operator_approval_artifact_state import (
+            classify_paper_operator_approval_artifact,
+        )
+
+        approval_artifact_state, _, ap_details = classify_paper_operator_approval_artifact()
+        contract = ap_details.get("contract") or _read_json(REAL_APPROVAL_PATH)
+        approval_valid = final_state == PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN
+        approval_expired = final_state == PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED
+        cleanup_required = final_state in (
+            PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED,
+            PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED,
+        )
+        approval_status = contract.get("approval_status")
+        notes.extend(block_reasons)
     else:
         notes.extend(block_reasons)
 
     paper_gate_status, paper_gate_reason = _run_paper_entry_dry_run()
     criteria_after = evaluate_governance_review_criteria(broker_snapshot_ok=True)
 
+    if approval_artifact_state is None and REAL_APPROVAL_PATH.is_file():
+        from services.paper_operator_approval_artifact_state import (
+            classify_paper_operator_approval_artifact,
+        )
+
+        approval_artifact_state, _, _ = classify_paper_operator_approval_artifact()
+
     status = "PASS"
-    if final_state != PAPER_OPERATOR_APPROVAL_CREATED_EXECUTION_NOT_RUN:
+    if final_state == PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED:
+        status = "PASS_SAFE_BLOCKED"
+    elif final_state == PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED:
         status = "FAIL"
-    if not approval_created:
-        status = "FAIL"
-    if not approval_valid:
+    elif final_state != PAPER_OPERATOR_APPROVAL_CREATED_EXECUTION_NOT_RUN:
+        if final_state == PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN:
+            status = "PASS"
+        else:
+            status = "FAIL"
+    if approval_created and not approval_valid:
         status = "FAIL"
         notes.append("approval artifact not valid after write")
     if criteria_after.get("eligible_for_execution"):
@@ -431,6 +474,9 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
             else None
         ),
         "approval_artifact_valid": approval_valid,
+        "approval_artifact_state": approval_artifact_state,
+        "approval_expired": approval_expired,
+        "cleanup_required": cleanup_required,
         "approval_status": approval_status or contract.get("approval_status"),
         "approval_action": contract.get("approval_action"),
         "approval_scope": contract.get("approval_scope"),
@@ -480,7 +526,7 @@ def main(argv: List[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
     result = run_phase_197w_create(verbose=not args.quiet, force=args.force)
-    return 0 if result.get("status") == "PASS" else 1
+    return 0 if result.get("status") in ("PASS", "PASS_SAFE_BLOCKED") else 1
 
 
 if __name__ == "__main__":

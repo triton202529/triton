@@ -690,6 +690,30 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     details["checks"]["paper_execution_permitted"] = paper_permitted
     details["checks"]["readiness_failed_checks"] = failed_checks
     if readiness_status != "READY":
+        try:
+            from services.paper_operator_approval_artifact_state import (
+                PAPER_APPROVAL_ABSENT,
+                PAPER_APPROVAL_EXPIRED,
+                PAPER_APPROVAL_VALID_CURRENT,
+                INVALID_STATES,
+                classify_paper_operator_approval_artifact,
+            )
+
+            ap_state, ap_reason, ap_details = classify_paper_operator_approval_artifact()
+            details["checks"]["paper_operator_approval_state"] = ap_state
+            details["checks"]["paper_operator_approval_reason"] = ap_reason
+            if ap_state == PAPER_APPROVAL_EXPIRED:
+                return block("approval_expired", "paper_operator_approval", safe=True)
+            if ap_state in INVALID_STATES:
+                return block("approval_invalid", "paper_operator_approval", safe=True)
+            if ap_state == PAPER_APPROVAL_VALID_CURRENT:
+                return block(
+                    "explicit_broker_execution_phase_required",
+                    "paper_operator_approval",
+                    safe=True,
+                )
+        except Exception:
+            pass
         if failed_checks == ["governance"]:
             try:
                 from services.defensive_exit_governance_review_criteria import (
