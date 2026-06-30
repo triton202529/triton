@@ -202,10 +202,17 @@ def assert_defensive_exit_dispatch_permitted(
     return result
 
 
-def format_dispatch_interlock_block(result: Dict[str, Any]) -> str:
-    return (
-        f"[DISPATCH_INTERLOCK] status={result.get('dispatch_interlock_state')} "
-        f"reason={result.get('dispatch_interlock_reason')} "
-        f"real_approval={result.get('real_approval_artifact_exists')} "
-        f"operator_status={result.get('operator_approval_status')}"
+def format_dispatch_interlock_block(result: Dict[str, Any], *, stage: Optional[str] = None) -> str:
+    parts = [
+        f"[DISPATCH_INTERLOCK] status={result.get('dispatch_interlock_state')}",
+        f"reason={result.get('dispatch_interlock_reason')}",
+    ]
+    if stage:
+        parts.append(f"stage={stage}")
+    parts.extend(
+        [
+            f"real_approval={result.get('real_approval_artifact_exists')}",
+            f"operator_status={result.get('operator_approval_status')}",
+        ]
     )
+    return " ".join(parts)

@@ -34,6 +34,13 @@ POST_INTERLOCK_RUNTIME_FAIL_NOTIONAL_CAP_LAST_LINE = (
 POST_INTERLOCK_RUNTIME_FAIL_BROKER_ORDERS_SUBMITTED = (
     "POST_INTERLOCK_RUNTIME_FAIL_BROKER_ORDERS_SUBMITTED"
 )
+POST_INTERLOCK_RUNTIME_FAIL_INTERLOCK_IMPORT_ERROR = (
+    "POST_INTERLOCK_RUNTIME_FAIL_INTERLOCK_IMPORT_ERROR"
+)
+
+INTERLOCK_IMPORT_CRASH_SIGNATURE = (
+    "NameError: name 'is_defensive_exit_manage_handoff' is not defined"
+)
 
 OBSERVATION_COMMAND = (
     "powershell -NoProfile -ExecutionPolicy Bypass -File "
@@ -147,6 +154,14 @@ def _cycle_start_timestamp(continuous_text: str) -> Optional[str]:
     return line[:80] if line else None
 
 
+def _detect_runtime_crash(text: str) -> Tuple[bool, Optional[str]]:
+    if INTERLOCK_IMPORT_CRASH_SIGNATURE in text:
+        return True, INTERLOCK_IMPORT_CRASH_SIGNATURE
+    if "is_defensive_exit_manage_handoff" in text and "NameError" in text:
+        return True, "NameError:is_defensive_exit_manage_handoff"
+    return False, None
+
+
 def parse_runtime_logs(
     continuous_text: str,
     market_text: str,
@@ -158,6 +173,7 @@ def parse_runtime_logs(
 
     continuous = parse_continuous_log(continuous_text)
     market = parse_market_open_log(market_text)
+    crash_detected, crash_signature = _detect_runtime_crash(market_text)
     interlock_marker = "[DISPATCH_INTERLOCK]"
     dispatch_seen = interlock_marker in market_text
     dispatch_state = _first_match(market_text, r"\[DISPATCH_INTERLOCK\] status=(DISPATCH_[A-Z_]+)")
@@ -182,6 +198,8 @@ def parse_runtime_logs(
         "placement_proceeded_after_interlock": placement_after,
         "notional_cap_block_seen_after_interlock": notional_after,
         "pre_197r_placement_reached": pre_197r_placement_reached,
+        "runtime_crash_detected": crash_detected,
+        "runtime_crash_signature": crash_signature,
     }
 
 
@@ -193,6 +211,12 @@ def classify_post_interlock_runtime(
     real_approval_exists: bool,
 ) -> Tuple[str, str]:
     """Return (post_interlock_runtime_state, reason)."""
+    if parsed.get("runtime_crash_detected"):
+        return (
+            POST_INTERLOCK_RUNTIME_FAIL_INTERLOCK_IMPORT_ERROR,
+            str(parsed.get("runtime_crash_signature") or "interlock_import_name_error"),
+        )
+
     if broker_orders_submitted:
         return (
             POST_INTERLOCK_RUNTIME_FAIL_BROKER_ORDERS_SUBMITTED,
@@ -286,6 +310,11 @@ def run_phase_197s_verification(*, verbose: bool = True) -> Dict[str, Any]:
         notes.append(
             "Post-197R interlock not yet observed in runtime logs; "
             "restart continuous for observation and re-run verification."
+        )
+    elif runtime_state == POST_INTERLOCK_RUNTIME_FAIL_INTERLOCK_IMPORT_ERROR:
+        status = "FAIL"
+        notes.append(
+            "runtime crash from missing dispatch interlock import — repair and re-run cycle"
         )
     else:
         status = "FAIL"

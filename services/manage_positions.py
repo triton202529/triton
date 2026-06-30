@@ -3660,43 +3660,50 @@ def maybe_execute_management(
         )
     _write_management_orders_subset(allowed, orders_path)
 
-    if str(mode).lower() == "paper" and is_defensive_exit_manage_handoff(allowed):
+    if str(mode).lower() == "paper":
         from services.defensive_exit_dispatch_interlock import (
             evaluate_defensive_exit_dispatch_interlock,
             format_dispatch_interlock_block,
+            is_defensive_exit_manage_handoff,
         )
 
-        interlock = evaluate_defensive_exit_dispatch_interlock(
-            mode=mode,
-            broker_snapshot_ok=True,
-            require_market_open=True,
-            planned_count=len(allowed),
-        )
-        if not interlock.get("dispatch_permitted"):
-            rs = [str(interlock.get("dispatch_interlock_state") or "DISPATCH_BLOCKED")]
-            print(format_dispatch_interlock_block(interlock), flush=True)
-            from services.manage_positions_handoff_diagnostic import (
-                build_handoff_diagnostic,
-                write_handoff_audit,
-            )
-
-            diag = build_handoff_diagnostic(
-                placement_output=format_dispatch_interlock_block(interlock),
-                exec_meta={
-                    **meta,
-                    "manage_block": True,
-                    "block_reason": interlock.get("dispatch_interlock_reason"),
-                    "dispatch_interlock_state": interlock.get("dispatch_interlock_state"),
-                },
+        if is_defensive_exit_manage_handoff(allowed):
+            interlock = evaluate_defensive_exit_dispatch_interlock(
                 mode=mode,
+                broker_snapshot_ok=True,
+                require_market_open=True,
+                planned_count=len(allowed),
             )
-            diag["handoff_status"] = str(interlock.get("dispatch_interlock_state") or "")
-            diag["handoff_block_reason"] = str(interlock.get("dispatch_interlock_reason") or "")
-            write_handoff_audit(diag)
-            meta["handoff_diagnostic"] = diag
-            meta["dispatch_interlock"] = interlock
-            _print_manage_block_summary({**meta, "executed": 0})
-            return 2, 0, rs, "", meta
+            if not interlock.get("dispatch_permitted"):
+                rs = [str(interlock.get("dispatch_interlock_state") or "DISPATCH_BLOCKED")]
+                print(
+                    format_dispatch_interlock_block(interlock, stage="manage_positions"),
+                    flush=True,
+                )
+                from services.manage_positions_handoff_diagnostic import (
+                    build_handoff_diagnostic,
+                    write_handoff_audit,
+                )
+
+                diag = build_handoff_diagnostic(
+                    placement_output=format_dispatch_interlock_block(
+                        interlock, stage="manage_positions"
+                    ),
+                    exec_meta={
+                        **meta,
+                        "manage_block": True,
+                        "block_reason": interlock.get("dispatch_interlock_reason"),
+                        "dispatch_interlock_state": interlock.get("dispatch_interlock_state"),
+                    },
+                    mode=mode,
+                )
+                diag["handoff_status"] = str(interlock.get("dispatch_interlock_state") or "")
+                diag["handoff_block_reason"] = str(interlock.get("dispatch_interlock_reason") or "")
+                write_handoff_audit(diag)
+                meta["handoff_diagnostic"] = diag
+                meta["dispatch_interlock"] = interlock
+                _print_manage_block_summary({**meta, "executed": 0})
+                return 2, 0, rs, "", meta
 
     session_id = (
         placement_session or f"manage_pos_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"

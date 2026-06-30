@@ -1784,10 +1784,14 @@ def main() -> None:
                     planned_count=0,
                 )
             except DispatchInterlockBlocked as blocked:
-                print(format_dispatch_interlock_block(blocked.details or {}), flush=True)
+                details = blocked.details or {}
+                print(
+                    format_dispatch_interlock_block(details, stage="place_live_orders"),
+                    flush=True,
+                )
                 die(
-                    f"[DISPATCH_INTERLOCK] {blocked.state} reason={blocked.reason} "
-                    "(blocked before manage handoff placement mapping)",
+                    format_dispatch_interlock_block(details, stage="place_live_orders")
+                    + " (blocked before manage handoff placement mapping)",
                     2,
                 )
     elif exec_source == "execution_handoff":
