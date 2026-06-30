@@ -1769,6 +1769,27 @@ def main() -> None:
         print("[EXECUTION] source: trade_opportunities.csv (DERIVED non-authoritative)")
     elif exec_source == "manage_handoff":
         print("[EXECUTION] source: manage_positions handoff (data/live/manage_orders.csv)")
+        if not args.dry_run:
+            from services.defensive_exit_dispatch_interlock import (
+                DispatchInterlockBlocked,
+                assert_defensive_exit_dispatch_permitted,
+                format_dispatch_interlock_block,
+            )
+
+            try:
+                assert_defensive_exit_dispatch_permitted(
+                    mode=mode,
+                    broker_snapshot_ok=True,
+                    require_market_open=not bool(args.ignore_market_closed),
+                    planned_count=0,
+                )
+            except DispatchInterlockBlocked as blocked:
+                print(format_dispatch_interlock_block(blocked.details or {}), flush=True)
+                die(
+                    f"[DISPATCH_INTERLOCK] {blocked.state} reason={blocked.reason} "
+                    "(blocked before manage handoff placement mapping)",
+                    2,
+                )
     elif exec_source == "execution_handoff":
         print("[EXECUTION] source: execution handoff (orders_today / execute_trades plan)")
     else:
