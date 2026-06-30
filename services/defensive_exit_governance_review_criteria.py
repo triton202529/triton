@@ -26,6 +26,7 @@ GOV_REVIEW_REQUIRED = "GOV_REVIEW_REQUIRED"
 GOV_REVIEW_READY_FOR_OPERATOR_DECISION = "GOV_REVIEW_READY_FOR_OPERATOR_DECISION"
 GOV_REVIEW_READY_FOR_OPERATOR_REVIEW = "GOV_REVIEW_READY_FOR_OPERATOR_REVIEW"
 GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED = "GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED"
+GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT = "GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT"
 GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED = "GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED"
 GOV_REVIEW_BLOCKED_BY_LIVE_BLOCK_REGRESSION = "GOV_REVIEW_BLOCKED_BY_LIVE_BLOCK_REGRESSION"
 GOV_REVIEW_BLOCKED_BY_OPEN_ORDERS = "GOV_REVIEW_BLOCKED_BY_OPEN_ORDERS"
@@ -270,6 +271,25 @@ def classify_governance_review_state(evidence_payload: Dict[str, Any]) -> Tuple[
     real_approval_exists = bool(evidence_payload.get("real_approval_artifact_exists"))
     readiness_status = str(evidence_payload.get("readiness_status") or "")
 
+    if real_approval_exists:
+        from services.defensive_exit_operator_paper_approval import (
+            APPROVAL_STATUS_VALID,
+            validate_operator_approval_contract,
+        )
+
+        ap_status, ap_reason, _ = validate_operator_approval_contract(
+            broker_snapshot_ok=bool(evidence_payload.get("broker_snapshot_ok")),
+        )
+        if ap_status == APPROVAL_STATUS_VALID:
+            return (
+                GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
+                "paper_operator_approval_valid_broker_execution_separate",
+            )
+        return (
+            GOV_REVIEW_BLOCKED_BY_READINESS,
+            f"approval_contract_invalid={ap_reason}",
+        )
+
     if not real_approval_exists:
         if evidence_payload.get("management_review_required") or not evidence_payload.get(
             "governance_authorized"
@@ -295,22 +315,6 @@ def classify_governance_review_state(evidence_payload: Dict[str, Any]) -> Tuple[
             GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
             "operator_paper_defensive_exit_approval_required",
         )
-
-    if readiness_status != "READY":
-        return GOV_REVIEW_BLOCKED_BY_READINESS, f"execution_readiness={readiness_status}"
-
-    if evidence_payload.get("management_review_required") or not evidence_payload.get(
-        "governance_authorized"
-    ):
-        return (
-            GOV_REVIEW_REQUIRED,
-            str(evidence_payload.get("management_review_reason") or "MANAGEMENT_REVIEW_REQUIRED"),
-        )
-
-    if evidence_payload.get("evidence_complete"):
-        return GOV_REVIEW_READY_FOR_OPERATOR_DECISION, "governance_evidence_complete"
-
-    return GOV_REVIEW_REQUIRED, "evidence_incomplete_pending_management_review"
 
 
 def evaluate_governance_review_criteria(
@@ -344,6 +348,7 @@ def evaluate_governance_review_criteria(
             GOV_REVIEW_READY_FOR_OPERATOR_DECISION,
             GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
             GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
+            GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
             GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED,
             GOV_REVIEW_BLOCKED_BY_LIVE_BLOCK_REGRESSION,
             GOV_REVIEW_BLOCKED_BY_OPEN_ORDERS,

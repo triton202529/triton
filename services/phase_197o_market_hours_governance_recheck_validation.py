@@ -68,10 +68,14 @@ def run_phase_197o_validation(*, verbose: bool = True) -> Dict[str, Any]:
         RECHECK_GOV_AND_READINESS,
         RECHECK_LIVE_REGRESSION,
         RECHECK_OPEN_ORDERS,
+        RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION,
         RECHECK_READINESS,
         RECHECK_READY,
         RECHECK_WAITING,
         run_market_hours_governance_recheck,
+    )
+    from services.defensive_exit_operator_paper_approval import (
+        is_valid_paper_only_defensive_exit_approval,
     )
     from services.live_block_classifier import validator_live_block_check
 
@@ -106,6 +110,7 @@ def run_phase_197o_validation(*, verbose: bool = True) -> Dict[str, Any]:
         RECHECK_GOV_AND_READINESS,
         RECHECK_BLOCKED_BY_STALE_PACKET,
         RECHECK_BLOCKED_BY_OPERATOR_APPROVAL,
+        RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION,
         RECHECK_OPEN_ORDERS,
         RECHECK_LIVE_REGRESSION,
     }
@@ -117,8 +122,10 @@ def run_phase_197o_validation(*, verbose: bool = True) -> Dict[str, Any]:
         status = "FAIL"
         notes.append("market hours recheck live regression")
     if REAL_APPROVAL_PATH.is_file():
-        status = "FAIL"
-        notes.append("real approval artifact exists")
+        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
+        if not valid:
+            status = "FAIL"
+            notes.append(f"invalid approval artifact: {reason}")
     if recheck.get("eligible_for_execution"):
         status = "FAIL"
         notes.append("eligible_for_execution must be false")
@@ -142,6 +149,13 @@ def run_phase_197o_validation(*, verbose: bool = True) -> Dict[str, Any]:
     else:
         if not recheck.get("operator_packet_current"):
             expected = RECHECK_BLOCKED_BY_STALE_PACKET
+        elif recheck.get("real_approval_artifact_exists"):
+            valid, _, _ = is_valid_paper_only_defensive_exit_approval()
+            expected = (
+                RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION
+                if valid
+                else RECHECK_BLOCKED_BY_OPERATOR_APPROVAL
+            )
         elif not recheck.get("real_approval_artifact_exists"):
             expected = RECHECK_BLOCKED_BY_OPERATOR_APPROVAL
         else:

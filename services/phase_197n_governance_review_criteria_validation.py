@@ -70,9 +70,13 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
         GOV_REVIEW_BLOCKED_BY_STALE_PACKET,
         GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED,
         GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
+        GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
         GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
         GOV_REVIEW_REQUIRED,
         evaluate_governance_review_criteria,
+    )
+    from services.defensive_exit_operator_paper_approval import (
+        is_valid_paper_only_defensive_exit_approval,
     )
     from services.live_block_classifier import (
         classify_paper_entry_gate_for_validation,
@@ -110,6 +114,7 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
         GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
         GOV_REVIEW_BLOCKED_BY_READINESS,
         GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
+        GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
         GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED,
         GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
     }
@@ -131,8 +136,10 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
         status = "FAIL"
         notes.append("operator packet missing")
     if REAL_APPROVAL_PATH.is_file():
-        status = "FAIL"
-        notes.append("real approval artifact exists")
+        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
+        if not valid:
+            status = "FAIL"
+            notes.append(f"invalid approval artifact: {reason}")
     if criteria.get("eligible_for_execution"):
         status = "FAIL"
         notes.append("eligible_for_execution must be false")

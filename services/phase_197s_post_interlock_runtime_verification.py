@@ -351,8 +351,16 @@ def run_phase_197s_verification(*, verbose: bool = True) -> Dict[str, Any]:
         status = "FAIL"
         notes.append("exits_executed must be 0")
     if real_approval_exists:
-        status = "FAIL"
-        notes.append("real approval artifact exists")
+        from services.defensive_exit_operator_paper_approval import (
+            is_valid_paper_only_defensive_exit_approval,
+        )
+
+        valid, _, _ = is_valid_paper_only_defensive_exit_approval()
+        if not valid:
+            status = "FAIL"
+            notes.append("real approval artifact invalid")
+        else:
+            notes.append("valid_paper_approval_present_post_197W")
     if not interlock.get("live_blocked"):
         status = "FAIL"
         notes.append("live block regression")

@@ -309,7 +309,14 @@ def classify_soak_state(
     open_orders_count: int,
 ) -> Tuple[str, str]:
     if real_approval_exists:
-        return SOAK_FAIL_APPROVAL_ARTIFACT_PRESENT, "real_approval_artifact_present"
+        from services.defensive_exit_operator_paper_approval import (
+            is_valid_paper_only_defensive_exit_approval,
+        )
+
+        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
+        if not valid:
+            return SOAK_FAIL_APPROVAL_ARTIFACT_PRESENT, f"invalid_approval_artifact={reason}"
+
     if not live_blocked:
         return SOAK_FAIL_LIVE_NOT_BLOCKED, "live_blocked=false"
     if eligible_for_execution:
@@ -401,8 +408,16 @@ def run_phase_197t_soak(*, cycles: int = DEFAULT_CYCLES, verbose: bool = True) -
         notes.append(soak_reason)
 
     if real_approval_exists:
-        status = "FAIL"
-        notes.append("real approval artifact must not exist")
+        from services.defensive_exit_operator_paper_approval import (
+            is_valid_paper_only_defensive_exit_approval,
+        )
+
+        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
+        if not valid:
+            status = "FAIL"
+            notes.append(f"invalid approval artifact: {reason}")
+        else:
+            notes.append("valid_paper_approval_present_post_197W")
     if not live_blocked:
         status = "FAIL"
         notes.append("live must remain blocked")

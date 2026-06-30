@@ -20,6 +20,9 @@ RECHECK_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_READINESS"
 RECHECK_GOV_AND_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_GOVERNANCE_AND_READINESS"
 RECHECK_BLOCKED_BY_STALE_PACKET = "MARKET_HOURS_RECHECK_BLOCKED_BY_STALE_PACKET"
 RECHECK_BLOCKED_BY_OPERATOR_APPROVAL = "MARKET_HOURS_RECHECK_BLOCKED_BY_OPERATOR_APPROVAL"
+RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION = (
+    "MARKET_HOURS_RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION"
+)
 RECHECK_OPEN_ORDERS = "MARKET_HOURS_RECHECK_BLOCKED_BY_OPEN_ORDERS"
 RECHECK_LIVE_REGRESSION = "MARKET_HOURS_RECHECK_BLOCKED_BY_LIVE_BLOCK_REGRESSION"
 
@@ -88,37 +91,20 @@ def classify_market_hours_recheck(payload: Dict[str, Any]) -> Tuple[str, str]:
             ),
         )
 
-    governance_authorized = bool(payload.get("governance_authorized"))
-    readiness_status = str(payload.get("readiness_status") or "")
-    readiness_ready = readiness_status == "READY"
+    from services.defensive_exit_operator_paper_approval import (
+        APPROVAL_STATUS_VALID,
+        validate_operator_approval_contract,
+    )
 
-    if not governance_authorized and not readiness_ready:
+    ap_status, ap_reason, _ = validate_operator_approval_contract(
+        broker_snapshot_ok=bool(payload.get("broker_snapshot_ok")),
+    )
+    if ap_status == APPROVAL_STATUS_VALID:
         return (
-            RECHECK_GOV_AND_READINESS,
-            f"governance_authorized=false readiness={readiness_status}",
+            RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION,
+            "paper_operator_approval_present_broker_execution_separate",
         )
-    if not governance_authorized and readiness_ready:
-        return (
-            RECHECK_GOV,
-            str(payload.get("management_review_reason") or "MANAGEMENT_REVIEW_REQUIRED"),
-        )
-    if governance_authorized and not readiness_ready:
-        return RECHECK_READINESS, f"execution_readiness={readiness_status}"
-
-    preview_ok = bool(payload.get("capped_preview_exists"))
-    packet_ok = bool(payload.get("operator_packet_current"))
-    no_real_approval = not bool(payload.get("real_approval_artifact_exists"))
-
-    if (
-        preview_ok
-        and packet_ok
-        and no_real_approval
-        and payload.get("live_blocked")
-        and open_orders == 0
-    ):
-        return RECHECK_READY, "ready_for_human_operator_decision_not_execution"
-
-    return RECHECK_READINESS, "operator_decision_prerequisites_incomplete"
+    return RECHECK_BLOCKED_BY_OPERATOR_APPROVAL, f"approval_contract_invalid={ap_reason}"
 
 
 def run_market_hours_governance_recheck(

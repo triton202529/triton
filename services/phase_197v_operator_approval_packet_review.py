@@ -29,6 +29,7 @@ PREVIOUS_COMMIT = "f4c34dc9"
 PREVIOUS_PHASE = "197U"
 
 OPERATOR_REVIEW_READY_APPROVAL_REQUIRED = "OPERATOR_REVIEW_READY_APPROVAL_REQUIRED"
+OPERATOR_REVIEW_POST_197W_APPROVAL_PRESENT = "OPERATOR_REVIEW_POST_197W_APPROVAL_PRESENT"
 OPERATOR_REVIEW_BLOCKED_PACKET_STALE = "OPERATOR_REVIEW_BLOCKED_PACKET_STALE"
 OPERATOR_REVIEW_BLOCKED_SAFETY_EVIDENCE_MISSING = "OPERATOR_REVIEW_BLOCKED_SAFETY_EVIDENCE_MISSING"
 OPERATOR_REVIEW_BLOCKED_OPEN_ORDERS = "OPERATOR_REVIEW_BLOCKED_OPEN_ORDERS"
@@ -263,9 +264,19 @@ def classify_review_state(
     trims_executed: int,
 ) -> Tuple[str, str]:
     if real_approval_exists:
+        from services.defensive_exit_operator_paper_approval import (
+            is_valid_paper_only_defensive_exit_approval,
+        )
+
+        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
+        if valid:
+            return (
+                OPERATOR_REVIEW_POST_197W_APPROVAL_PRESENT,
+                "valid_paper_approval_artifact_present_post_197W",
+            )
         return (
             OPERATOR_REVIEW_BLOCKED_APPROVAL_ARTIFACT_PRESENT,
-            "real_approval_artifact_present",
+            f"invalid_approval_artifact={reason}",
         )
     if not live_blocked:
         return OPERATOR_REVIEW_BLOCKED_LIVE_NOT_BLOCKED, "live_blocked=false"
@@ -413,12 +424,22 @@ def run_phase_197v_review(*, verbose: bool = True) -> Dict[str, Any]:
         trims_executed=trims_executed,
     )
 
-    status = "PASS" if review_state == OPERATOR_REVIEW_READY_APPROVAL_REQUIRED else "FAIL"
+    status = (
+        "PASS"
+        if review_state
+        in (
+            OPERATOR_REVIEW_READY_APPROVAL_REQUIRED,
+            OPERATOR_REVIEW_POST_197W_APPROVAL_PRESENT,
+        )
+        else "FAIL"
+    )
+    if review_state == OPERATOR_REVIEW_POST_197W_APPROVAL_PRESENT:
+        notes.append("valid paper approval artifact present post-197W")
     if review_state != OPERATOR_REVIEW_READY_APPROVAL_REQUIRED:
         notes.append(review_reason)
-    if real_approval_exists:
+    if real_approval_exists and review_state != OPERATOR_REVIEW_POST_197W_APPROVAL_PRESENT:
         status = "FAIL"
-        notes.append("real approval artifact must not exist")
+        notes.append("real approval artifact must not exist for pre-197W review")
     if not live_blocked:
         status = "FAIL"
         notes.append("live must remain blocked")

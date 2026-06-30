@@ -569,3 +569,25 @@ def approval_contract_schema_example() -> Dict[str, Any]:
         "acknowledgement_paper_only": True,
         "decision": OPERATOR_DECISION_APPROVE,
     }
+
+
+def is_valid_paper_only_defensive_exit_approval(
+    *,
+    contract_path: Optional[Path] = None,
+    broker_snapshot_ok: bool = True,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """Return (valid, reason, details) for runtime paper-only defensive exit approval."""
+    status, reason, details = validate_operator_approval_contract(
+        broker_snapshot_ok=broker_snapshot_ok,
+        contract_path=contract_path,
+    )
+    return status == APPROVAL_STATUS_VALID, reason, {**details, "approval_status": status}
+
+
+def write_paper_only_defensive_exit_approval(contract: Dict[str, Any]) -> Path:
+    """Atomically write paper-only operator approval contract to governance path."""
+    APPROVAL_CONTRACT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = APPROVAL_CONTRACT_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(contract, indent=2, default=str), encoding="utf-8")
+    os.replace(tmp, APPROVAL_CONTRACT_PATH)
+    return APPROVAL_CONTRACT_PATH

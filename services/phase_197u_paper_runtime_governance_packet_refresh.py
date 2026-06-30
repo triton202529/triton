@@ -209,9 +209,19 @@ def classify_packet_refresh_state(
     packet_refreshed: bool,
 ) -> Tuple[str, str]:
     if real_approval_exists:
+        from services.defensive_exit_operator_paper_approval import (
+            is_valid_paper_only_defensive_exit_approval,
+        )
+
+        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
+        if valid:
+            return (
+                GOV_PACKET_CURRENT_OPERATOR_REVIEW_REQUIRED,
+                "valid_paper_approval_present_post_197W",
+            )
         return (
             GOV_PACKET_REFRESH_BLOCKED_APPROVAL_ARTIFACT_PRESENT,
-            "real_approval_artifact_present",
+            f"invalid_approval_artifact={reason}",
         )
     if not live_blocked:
         return GOV_PACKET_REFRESH_BLOCKED_LIVE_NOT_BLOCKED, "live_blocked=false"
@@ -326,8 +336,16 @@ def run_phase_197u_refresh(*, verbose: bool = True) -> Dict[str, Any]:
         status = "FAIL"
         notes.append(final_reason)
     if real_approval_exists:
-        status = "FAIL"
-        notes.append("real approval artifact must not exist")
+        from services.defensive_exit_operator_paper_approval import (
+            is_valid_paper_only_defensive_exit_approval,
+        )
+
+        valid, reason, _ = is_valid_paper_only_defensive_exit_approval()
+        if not valid:
+            status = "FAIL"
+            notes.append(f"invalid approval artifact: {reason}")
+        else:
+            notes.append("valid_paper_approval_present_post_197W")
     if not live_blocked:
         status = "FAIL"
         notes.append("live must remain blocked")
