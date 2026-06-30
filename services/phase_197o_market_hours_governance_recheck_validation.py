@@ -62,6 +62,8 @@ def run_phase_197o_validation(*, verbose: bool = True) -> Dict[str, Any]:
     git_clean_before = _git_clean()
 
     from services.defensive_exit_market_hours_governance_recheck import (
+        RECHECK_BLOCKED_BY_OPERATOR_APPROVAL,
+        RECHECK_BLOCKED_BY_STALE_PACKET,
         RECHECK_GOV,
         RECHECK_GOV_AND_READINESS,
         RECHECK_LIVE_REGRESSION,
@@ -102,6 +104,8 @@ def run_phase_197o_validation(*, verbose: bool = True) -> Dict[str, Any]:
         RECHECK_GOV,
         RECHECK_READINESS,
         RECHECK_GOV_AND_READINESS,
+        RECHECK_BLOCKED_BY_STALE_PACKET,
+        RECHECK_BLOCKED_BY_OPERATOR_APPROVAL,
         RECHECK_OPEN_ORDERS,
         RECHECK_LIVE_REGRESSION,
     }
@@ -136,23 +140,28 @@ def run_phase_197o_validation(*, verbose: bool = True) -> Dict[str, Any]:
             status = "FAIL"
             notes.append(f"market closed expected {RECHECK_WAITING} got {state}")
     else:
-        gov = bool(recheck.get("governance_authorized"))
-        readiness = str(recheck.get("readiness_status") or "")
-        expected = RECHECK_GOV_AND_READINESS
-        if not gov and readiness != "READY":
+        if not recheck.get("operator_packet_current"):
+            expected = RECHECK_BLOCKED_BY_STALE_PACKET
+        elif not recheck.get("real_approval_artifact_exists"):
+            expected = RECHECK_BLOCKED_BY_OPERATOR_APPROVAL
+        else:
+            gov = bool(recheck.get("governance_authorized"))
+            readiness = str(recheck.get("readiness_status") or "")
             expected = RECHECK_GOV_AND_READINESS
-        elif not gov and readiness == "READY":
-            expected = RECHECK_GOV
-        elif gov and readiness != "READY":
-            expected = RECHECK_READINESS
-        elif (
-            gov
-            and readiness == "READY"
-            and recheck.get("capped_preview_exists")
-            and recheck.get("operator_packet_current")
-            and not recheck.get("real_approval_artifact_exists")
-        ):
-            expected = RECHECK_READY
+            if not gov and readiness != "READY":
+                expected = RECHECK_GOV_AND_READINESS
+            elif not gov and readiness == "READY":
+                expected = RECHECK_GOV
+            elif gov and readiness != "READY":
+                expected = RECHECK_READINESS
+            elif (
+                gov
+                and readiness == "READY"
+                and recheck.get("capped_preview_exists")
+                and recheck.get("operator_packet_current")
+                and not recheck.get("real_approval_artifact_exists")
+            ):
+                expected = RECHECK_READY
         if state != expected:
             status = "FAIL"
             notes.append(f"market open expected {expected} got {state}")

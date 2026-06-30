@@ -66,6 +66,11 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
     from services.defensive_exit_governance_review_criteria import (
         GOV_REVIEW_BLOCKED_BY_LIVE_BLOCK_REGRESSION,
         GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
+        GOV_REVIEW_BLOCKED_BY_READINESS,
+        GOV_REVIEW_BLOCKED_BY_STALE_PACKET,
+        GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED,
+        GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
+        GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
         GOV_REVIEW_REQUIRED,
         evaluate_governance_review_criteria,
     )
@@ -103,8 +108,15 @@ def run_phase_197n_validation(*, verbose: bool = True) -> Dict[str, Any]:
     acceptable_states = {
         GOV_REVIEW_REQUIRED,
         GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
-        "GOV_REVIEW_BLOCKED_BY_READINESS",
+        GOV_REVIEW_BLOCKED_BY_READINESS,
+        GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
+        GOV_REVIEW_CURRENT_BUT_READINESS_BLOCKED,
+        GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
     }
+
+    if gov_state == GOV_REVIEW_BLOCKED_BY_STALE_PACKET:
+        status = "FAIL"
+        notes.append("governance packet stale — run phase_197u refresh")
 
     if not criteria.get("live_blocked"):
         status = "FAIL"

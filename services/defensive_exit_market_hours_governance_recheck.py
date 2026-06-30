@@ -18,6 +18,8 @@ RECHECK_READY = "MARKET_HOURS_RECHECK_READY_FOR_OPERATOR_DECISION"
 RECHECK_GOV = "MARKET_HOURS_RECHECK_BLOCKED_BY_GOVERNANCE"
 RECHECK_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_READINESS"
 RECHECK_GOV_AND_READINESS = "MARKET_HOURS_RECHECK_BLOCKED_BY_GOVERNANCE_AND_READINESS"
+RECHECK_BLOCKED_BY_STALE_PACKET = "MARKET_HOURS_RECHECK_BLOCKED_BY_STALE_PACKET"
+RECHECK_BLOCKED_BY_OPERATOR_APPROVAL = "MARKET_HOURS_RECHECK_BLOCKED_BY_OPERATOR_APPROVAL"
 RECHECK_OPEN_ORDERS = "MARKET_HOURS_RECHECK_BLOCKED_BY_OPEN_ORDERS"
 RECHECK_LIVE_REGRESSION = "MARKET_HOURS_RECHECK_BLOCKED_BY_LIVE_BLOCK_REGRESSION"
 
@@ -69,6 +71,22 @@ def classify_market_hours_recheck(payload: Dict[str, Any]) -> Tuple[str, str]:
 
     if not payload.get("market_open"):
         return RECHECK_WAITING, "market_closed_observation_only"
+
+    if not payload.get("operator_packet_current"):
+        return (
+            RECHECK_BLOCKED_BY_STALE_PACKET,
+            str(payload.get("governance_review_reason") or "operator_packet_stale"),
+        )
+
+    if not payload.get("real_approval_artifact_exists"):
+        return (
+            RECHECK_BLOCKED_BY_OPERATOR_APPROVAL,
+            str(
+                payload.get("management_review_reason")
+                or payload.get("governance_review_reason")
+                or "operator_paper_defensive_exit_approval_required"
+            ),
+        )
 
     governance_authorized = bool(payload.get("governance_authorized"))
     readiness_status = str(payload.get("readiness_status") or "")

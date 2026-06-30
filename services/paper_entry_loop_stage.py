@@ -690,6 +690,26 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     details["checks"]["paper_execution_permitted"] = paper_permitted
     details["checks"]["readiness_failed_checks"] = failed_checks
     if readiness_status != "READY":
+        if failed_checks == ["governance"]:
+            try:
+                from services.defensive_exit_governance_review_criteria import (
+                    GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
+                    GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
+                    evaluate_governance_review_criteria,
+                )
+
+                gov = evaluate_governance_review_criteria(broker_snapshot_ok=True)
+                if gov.get("operator_packet_current") and gov.get("governance_review_state") in (
+                    GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
+                    GOV_REVIEW_READY_FOR_OPERATOR_REVIEW,
+                ):
+                    return block(
+                        "operator_approval_required",
+                        "operator_approval_required",
+                        safe=True,
+                    )
+            except Exception:
+                pass
         stale_hint = ""
         if "lifecycle" in failed_checks or "signals" in failed_checks:
             stale_hint = " (stale lifecycle/signals — run phase_196a --repair)"
