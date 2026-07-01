@@ -1774,7 +1774,7 @@ def main() -> None:
                 DispatchInterlockBlocked,
                 assert_defensive_exit_dispatch_permitted,
                 format_dispatch_interlock_block,
-                is_dispatch_approval_safe_block_state,
+                is_dispatch_interlock_safe_block,
                 print_dispatch_approval_safe_block,
             )
 
@@ -1791,7 +1791,7 @@ def main() -> None:
                     format_dispatch_interlock_block(details, stage="place_live_orders"),
                     flush=True,
                 )
-                if is_dispatch_approval_safe_block_state(blocked.state):
+                if is_dispatch_interlock_safe_block(details):
                     print_dispatch_approval_safe_block(details)
                     raise SystemExit(0)
                 die(

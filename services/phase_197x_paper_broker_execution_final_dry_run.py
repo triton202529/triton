@@ -385,6 +385,13 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
     return payload
 
 
+def get_approved_execution_scope_symbols() -> Tuple[List[str], str, bool]:
+    """Expose 197W/197X approved execution scope for loop dispatch authority."""
+    from services.defensive_exit_dispatch_interlock import load_paper_approved_execution_scope
+
+    return load_paper_approved_execution_scope()
+
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Phase 197X paper broker execution final dry-run")
     ap.add_argument("--quiet", action="store_true")

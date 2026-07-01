@@ -27,6 +27,11 @@ DISPATCH_BLOCKED_LIVE_BLOCK = "DISPATCH_BLOCKED_LIVE_BLOCK"
 DISPATCH_BLOCKED_OPEN_ORDERS = "DISPATCH_BLOCKED_OPEN_ORDERS"
 
 SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED = "SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED"
+SAFE_BLOCK_EXPLICIT_BROKER_EXECUTION_PHASE_REQUIRED = (
+    "SAFE_BLOCK_EXPLICIT_BROKER_EXECUTION_PHASE_REQUIRED"
+)
+EXPLICIT_BROKER_EXECUTION_REASON = "paper_operator_approval_valid_broker_execution_separate"
+PROJECTED_ORDERS_CSV = RESULTS / "phase_197x_projected_paper_orders.csv"
 
 SAFE_ORDER_GUARD_STATES = frozenset(
     {
@@ -204,21 +209,136 @@ def assert_defensive_exit_dispatch_permitted(
     return result
 
 
-def is_dispatch_approval_safe_block_state(state: str) -> bool:
-    """True when missing-operator-approval block is an expected no-execution safe block."""
+def is_dispatch_approval_safe_block_state(state: str, *, reason: str = "") -> bool:
+    """True when dispatch block is an expected no-execution safe block."""
+    state_s = str(state or "")
+    reason_s = str(reason or "")
+    if state_s == DISPATCH_BLOCKED_APPROVAL_REQUIRED:
+        return True
+    if state_s == DISPATCH_BLOCKED_GOVERNANCE and reason_s == EXPLICIT_BROKER_EXECUTION_REASON:
+        return True
+    return False
+
+
+def is_dispatch_interlock_safe_block(interlock: Dict[str, Any]) -> bool:
+    """True when interlock result is an intentional safe-block (no broker submission)."""
+    return is_dispatch_approval_safe_block_state(
+        str(interlock.get("dispatch_interlock_state") or ""),
+        reason=str(interlock.get("dispatch_interlock_reason") or ""),
+    )
+
+
+def resolve_dispatch_safe_block_state(interlock: Dict[str, Any]) -> str:
+    reason = str(interlock.get("dispatch_interlock_reason") or "")
+    if reason == EXPLICIT_BROKER_EXECUTION_REASON:
+        return SAFE_BLOCK_EXPLICIT_BROKER_EXECUTION_PHASE_REQUIRED
+    return SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED
+
+
+def load_paper_approved_execution_scope() -> Tuple[List[str], str, bool]:
+    """
+    Approved capped batch symbols for execution scope (197W/197X authority).
+    Returns (symbols, source, approval_valid_current).
+    """
+    from services.paper_operator_approval_artifact_state import (
+        PAPER_APPROVAL_VALID_CURRENT,
+        classify_paper_operator_approval_artifact,
+    )
+
+    ap_state, _, ap_details = classify_paper_operator_approval_artifact()
+    approval_valid = ap_state == PAPER_APPROVAL_VALID_CURRENT
+    if not approval_valid:
+        return [], "approval_not_valid_current", False
+
+    contract = ap_details.get("contract") or {}
+    approved = sorted(
+        {str(s).strip().upper() for s in (contract.get("approved_symbols") or []) if str(s).strip()}
+    )
+    if PROJECTED_ORDERS_CSV.is_file():
+        try:
+            import csv
+
+            csv_symbols: List[str] = []
+            with PROJECTED_ORDERS_CSV.open(encoding="utf-8", newline="") as fh:
+                for row in csv.DictReader(fh):
+                    sym = str(row.get("symbol") or "").strip().upper()
+                    if sym:
+                        csv_symbols.append(sym)
+            csv_symbols = sorted(set(csv_symbols))
+            if csv_symbols and set(csv_symbols).issubset(set(approved)):
+                return csv_symbols, "phase_197x_projected_paper_orders", True
+        except Exception:
+            pass
+    return approved, "operator_paper_defensive_exit_approval", True
+
+
+def constrain_handoff_to_approved_paper_scope(
+    planned: Sequence[Any],
+) -> Tuple[List[Any], Dict[str, Any]]:
+    """
+    When valid paper-only approval exists, restrict sell-side defensive handoff
+    to the approved 197W/197X capped batch. Broader candidates remain diagnosed
+    upstream; they are excluded from execution-eligible handoff only.
+    """
+    symbols, source, valid = load_paper_approved_execution_scope()
+    meta: Dict[str, Any] = {
+        "paper_scope_constrained": False,
+        "paper_scope_source": source,
+        "paper_scope_approval_valid": valid,
+    }
+    if not valid or not symbols:
+        return list(planned), meta
+
+    approved_set = set(symbols)
+    kept: List[Any] = []
+    excluded: List[str] = []
+    for item in planned:
+        sym = str(getattr(item, "symbol", "") or "").strip().upper()
+        action = str(getattr(item, "management_action", "") or "").upper()
+        side = str(getattr(item, "side", "") or "").lower()
+        is_defensive_sell = action in DEFENSIVE_SELL_ACTIONS or side == "sell"
+        if is_defensive_sell and sym and sym not in approved_set:
+            excluded.append(sym)
+            continue
+        kept.append(item)
+
+    meta.update(
+        {
+            "paper_scope_constrained": True,
+            "paper_scope_approved_symbols": symbols,
+            "paper_scope_excluded_symbols": sorted(set(excluded)),
+            "paper_scope_kept_count": len(kept),
+            "paper_scope_excluded_count": len(set(excluded)),
+        }
+    )
+    if excluded:
+        print(
+            f"[MANAGE_SCOPE] excluded {len(set(excluded))} sell(s) outside approved "
+            f"197W/197X batch: {sorted(set(excluded))}",
+            flush=True,
+        )
+    return kept, meta
+
+
+def is_dispatch_approval_safe_block_state_legacy(state: str) -> bool:
+    """Backward-compatible state-only check (approval-required safe block)."""
     return str(state or "") == DISPATCH_BLOCKED_APPROVAL_REQUIRED
 
 
 def print_dispatch_approval_safe_block(interlock: Dict[str, Any]) -> None:
-    """Emit stable safe-block markers for expected dispatch-approval no-execution."""
+    """Emit stable safe-block markers for expected dispatch no-execution blocks."""
     import sys
 
-    print(
-        f"[SAFE_BLOCK] state={SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED} reason=DISPATCH_APPROVAL_REQUIRED",
-        flush=True,
-    )
+    safe_state = resolve_dispatch_safe_block_state(interlock)
+    reason = str(interlock.get("dispatch_interlock_reason") or "DISPATCH_APPROVAL_REQUIRED")
+    print(f"[SAFE_BLOCK] state={safe_state} reason={reason}", flush=True)
     print("broker_orders_submitted=false", flush=True)
+    print("exits_executed=0", flush=True)
+    print("trims_executed=0", flush=True)
+    print("operator_execution_required=true", flush=True)
+    print("explicit_broker_execution_phase_required=true", flush=True)
     print("eligible_for_execution=false", flush=True)
+    print("cycle_should_continue=true", flush=True)
     print(
         f"dispatch_interlock_state={interlock.get('dispatch_interlock_state')}",
         flush=True,

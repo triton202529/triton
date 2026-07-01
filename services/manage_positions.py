@@ -3662,13 +3662,17 @@ def maybe_execute_management(
 
     if str(mode).lower() == "paper":
         from services.defensive_exit_dispatch_interlock import (
-            SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED,
+            constrain_handoff_to_approved_paper_scope,
             evaluate_defensive_exit_dispatch_interlock,
             format_dispatch_interlock_block,
             is_defensive_exit_manage_handoff,
-            is_dispatch_approval_safe_block_state,
+            is_dispatch_interlock_safe_block,
             print_dispatch_approval_safe_block,
+            resolve_dispatch_safe_block_state,
         )
+
+        allowed, scope_meta = constrain_handoff_to_approved_paper_scope(allowed)
+        meta.update(scope_meta)
 
         if is_defensive_exit_manage_handoff(allowed):
             interlock = evaluate_defensive_exit_dispatch_interlock(
@@ -3707,13 +3711,16 @@ def maybe_execute_management(
                 meta["dispatch_interlock"] = interlock
                 meta["eligible_for_execution"] = False
                 meta["broker_orders_submitted"] = False
-                if is_dispatch_approval_safe_block_state(
-                    str(interlock.get("dispatch_interlock_state") or "")
-                ):
+                if is_dispatch_interlock_safe_block(interlock):
                     print_dispatch_approval_safe_block(interlock)
                     meta["safe_block"] = True
-                    meta["safe_block_state"] = SAFE_BLOCK_DISPATCH_APPROVAL_REQUIRED
-                    meta["safe_block_reason"] = "DISPATCH_APPROVAL_REQUIRED"
+                    meta["safe_block_state"] = resolve_dispatch_safe_block_state(interlock)
+                    meta["safe_block_reason"] = str(
+                        interlock.get("dispatch_interlock_reason") or "DISPATCH_APPROVAL_REQUIRED"
+                    )
+                    meta["operator_execution_required"] = True
+                    meta["explicit_broker_execution_phase_required"] = True
+                    meta["cycle_should_continue"] = True
                     _print_manage_block_summary({**meta, "executed": 0})
                     return 0, 0, rs, "", meta
                 _print_manage_block_summary({**meta, "executed": 0})
