@@ -143,6 +143,11 @@ def evaluate_defensive_exit_dispatch_interlock(
         "broker_orders_submitted": False,
     }
 
+    state: Optional[str] = None
+    reason: Optional[str] = None
+    paper_execution_gate: Optional[Dict[str, Any]] = None
+    gate_ready = False
+
     if not live_payload.get("live_blocked"):
         state, reason = DISPATCH_BLOCKED_LIVE_BLOCK, str(
             live_payload.get("live_block_reason") or "live_blocked=false"
@@ -160,30 +165,73 @@ def evaluate_defensive_exit_dispatch_interlock(
             if not real_approval_exists
             else f"operator_approval_status={operator_status}"
         )
-    elif not governance_authorized:
-        state, reason = (
-            DISPATCH_BLOCKED_GOVERNANCE,
-            str(criteria.get("governance_review_reason") or "governance_authorized=false"),
-        )
-    elif readiness_status != "READY":
-        state, reason = DISPATCH_BLOCKED_READINESS, f"execution_readiness={readiness_status}"
-    elif require_market_open and not market_open:
-        state, reason = DISPATCH_BLOCKED_MARKET_CLOSED, "market_closed"
-    elif batch_notional_status == "EXCEEDS_CAP":
-        state, reason = (
-            DISPATCH_BLOCKED_BATCH_NOTIONAL_CAP,
-            f"batch_notional={batch_notional:.2f} cap={configured_cap:.2f}",
-        )
     else:
-        state, reason = DISPATCH_READY, "all_dispatch_gates_satisfied"
+        from services.paper_operator_approval_artifact_state import (
+            PAPER_APPROVAL_VALID_CURRENT,
+            classify_paper_operator_approval_artifact,
+        )
+
+        ap_state, _, _ = classify_paper_operator_approval_artifact(
+            broker_snapshot_ok=broker_snapshot_ok
+        )
+        if ap_state == PAPER_APPROVAL_VALID_CURRENT:
+            from services.phase_197y_loop_mediated_paper_execution_gate import (
+                GATE_READY_LOOP_MEDIATED,
+                evaluate_loop_mediated_paper_execution_gate,
+                map_gate_state_to_dispatch,
+            )
+
+            paper_execution_gate = evaluate_loop_mediated_paper_execution_gate(
+                broker_snapshot_ok=broker_snapshot_ok,
+                open_orders_count=open_orders,
+                live_blocked=bool(live_payload.get("live_blocked")),
+                market_open=market_open,
+            )
+            gate_state = str(paper_execution_gate.get("final_state") or "")
+            if gate_state == GATE_READY_LOOP_MEDIATED:
+                gate_ready = True
+            else:
+                state, reason = map_gate_state_to_dispatch(gate_state)
+        elif not governance_authorized:
+            state, reason = (
+                DISPATCH_BLOCKED_GOVERNANCE,
+                str(criteria.get("governance_review_reason") or "governance_authorized=false"),
+            )
+
+    if state is None:
+        if not gate_ready and not governance_authorized:
+            state, reason = (
+                DISPATCH_BLOCKED_GOVERNANCE,
+                str(criteria.get("governance_review_reason") or "governance_authorized=false"),
+            )
+        elif readiness_status != "READY":
+            state, reason = DISPATCH_BLOCKED_READINESS, f"execution_readiness={readiness_status}"
+        elif require_market_open and not market_open:
+            state, reason = DISPATCH_BLOCKED_MARKET_CLOSED, "market_closed"
+        elif batch_notional_status == "EXCEEDS_CAP":
+            state, reason = (
+                DISPATCH_BLOCKED_BATCH_NOTIONAL_CAP,
+                f"batch_notional={batch_notional:.2f} cap={configured_cap:.2f}",
+            )
+        else:
+            state, reason = DISPATCH_READY, (
+                "all_dispatch_gates_satisfied_including_197y"
+                if gate_ready
+                else "all_dispatch_gates_satisfied"
+            )
 
     dispatch_permitted = state == DISPATCH_READY
-    return {
+    result_payload = {
         **base,
         "dispatch_interlock_state": state,
         "dispatch_interlock_reason": reason,
         "dispatch_permitted": dispatch_permitted,
+        "paper_execution_gate_ready": gate_ready,
     }
+    if paper_execution_gate is not None:
+        result_payload["paper_execution_gate"] = paper_execution_gate
+        result_payload["paper_execution_gate_state"] = paper_execution_gate.get("final_state")
+    return result_payload
 
 
 def assert_defensive_exit_dispatch_permitted(
