@@ -44,6 +44,19 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+# Windows cp1252 consoles cannot encode emoji in status prints without UTF-8.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    try:
+        import io
+
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from services.artifacts_writer import write_heartbeat  # noqa: E402
 
 PREDICTIONS_DIR = "data/predictions"
