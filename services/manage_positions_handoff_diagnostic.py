@@ -135,6 +135,18 @@ def build_handoff_diagnostic(
         "NOT_READY",
         "BLOCKED",
     )
+    if str(mode).lower() == "paper" and blocked_by_readiness:
+        try:
+            from services.paper_loop_mediated_execution_readiness_bridge import (
+                evaluate_paper_loop_mediated_execution_readiness_bridge,
+            )
+
+            bridge = evaluate_paper_loop_mediated_execution_readiness_bridge(mode="paper")
+            if bridge.get("bridge_active"):
+                blocked_by_readiness = False
+                readiness_status = str(bridge.get("effective_readiness_status") or readiness_status)
+        except Exception:
+            pass
     blocked_by_governance = readiness.get("governance_authorized") is False
 
     handoff_status = "OK"

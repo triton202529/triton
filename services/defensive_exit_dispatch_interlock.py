@@ -198,13 +198,33 @@ def evaluate_defensive_exit_dispatch_interlock(
                 str(criteria.get("governance_review_reason") or "governance_authorized=false"),
             )
 
+    readiness_bridge: Optional[Dict[str, Any]] = None
     if state is None:
+        from services.paper_loop_mediated_execution_readiness_bridge import (
+            evaluate_paper_loop_mediated_execution_readiness_bridge,
+            is_paper_loop_mediated_readiness_satisfied,
+        )
+
+        readiness_bridge = evaluate_paper_loop_mediated_execution_readiness_bridge(
+            mode=mode,
+            broker_snapshot_ok=broker_snapshot_ok,
+            open_orders_count=open_orders,
+            live_blocked=bool(live_payload.get("live_blocked")),
+            market_open=market_open,
+        )
+        readiness_satisfied = is_paper_loop_mediated_readiness_satisfied(
+            readiness_status,
+            mode=mode,
+            broker_snapshot_ok=broker_snapshot_ok,
+            open_orders_count=open_orders,
+            bridge=readiness_bridge,
+        )
         if not gate_ready and not governance_authorized:
             state, reason = (
                 DISPATCH_BLOCKED_GOVERNANCE,
                 str(criteria.get("governance_review_reason") or "governance_authorized=false"),
             )
-        elif readiness_status != "READY":
+        elif not readiness_satisfied:
             state, reason = DISPATCH_BLOCKED_READINESS, f"execution_readiness={readiness_status}"
         elif require_market_open and not market_open:
             state, reason = DISPATCH_BLOCKED_MARKET_CLOSED, "market_closed"
@@ -231,6 +251,14 @@ def evaluate_defensive_exit_dispatch_interlock(
     if paper_execution_gate is not None:
         result_payload["paper_execution_gate"] = paper_execution_gate
         result_payload["paper_execution_gate_state"] = paper_execution_gate.get("final_state")
+    if readiness_bridge is not None:
+        result_payload["paper_loop_mediated_readiness_bridge"] = readiness_bridge
+        result_payload["execution_readiness_bridged"] = bool(
+            readiness_bridge.get("execution_readiness_bridged")
+        )
+        result_payload["effective_readiness_status"] = readiness_bridge.get(
+            "effective_readiness_status"
+        )
     return result_payload
 
 
