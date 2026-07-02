@@ -59,6 +59,7 @@ def _run_snapshot() -> Tuple[int, Dict[str, Any]]:
 def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
     notes: List[str] = []
     from services.defensive_exit_dispatch_interlock import (
+        DISPATCH_BLOCKED_BATCH_NOTIONAL_CAP,
         DISPATCH_BLOCKED_READINESS,
         DISPATCH_READY,
         evaluate_defensive_exit_dispatch_interlock,
@@ -118,6 +119,11 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         if master.status != "READY" or not master.ok:
             status = "FAIL"
             notes.append(f"master_gate_status={master.status} reasons={master.reasons}")
+        if dispatch_state == DISPATCH_BLOCKED_BATCH_NOTIONAL_CAP:
+            cap_diag = interlock.get("batch_notional_cap_diagnostics") or {}
+            if cap_diag.get("cap_passed"):
+                status = "FAIL"
+                notes.append("dispatch_blocked_by_cap_despite_scope_cap_passed")
         if not gate.get("eligible_for_execution"):
             status = "FAIL"
             notes.append("197y_eligible_for_execution=false")
@@ -163,6 +169,9 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "dispatch_interlock_reason": dispatch_reason,
         "dispatch_permitted": bool(interlock.get("dispatch_permitted")),
         "dispatch_blocked_readiness": dispatch_state == DISPATCH_BLOCKED_READINESS,
+        "dispatch_blocked_batch_notional_cap": dispatch_state
+        == DISPATCH_BLOCKED_BATCH_NOTIONAL_CAP,
+        "batch_notional_cap_diagnostics": interlock.get("batch_notional_cap_diagnostics"),
         "approved_scope_symbols": scope_symbols,
         "approved_scope_source": scope_source,
         "approved_scope_valid": scope_valid,

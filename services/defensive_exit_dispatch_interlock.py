@@ -65,6 +65,123 @@ def is_defensive_exit_manage_handoff(planned: Sequence[Any]) -> bool:
     return False
 
 
+def _runtime_capped_preview_block(preview_doc: Dict[str, Any]) -> Dict[str, Any]:
+    return dict(
+        preview_doc.get("capped_preview_runtime_cap")
+        or preview_doc.get("capped_preview")
+        or preview_doc.get("capped_preview_cli_cap")
+        or {}
+    )
+
+
+def _load_197x_projected_order_rows() -> List[Dict[str, Any]]:
+    if not PROJECTED_ORDERS_CSV.is_file():
+        return []
+    try:
+        import csv
+
+        rows: List[Dict[str, Any]] = []
+        with PROJECTED_ORDERS_CSV.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                sym = str(row.get("symbol") or "").strip().upper()
+                if sym:
+                    rows.append(dict(row))
+        return rows
+    except Exception:
+        return []
+
+
+def compute_dispatch_batch_notional_cap_context(
+    *,
+    preview_doc: Dict[str, Any],
+    use_approved_197x_scope: bool,
+) -> Dict[str, Any]:
+    """
+    Compute batch notional cap context for dispatch interlock.
+    When paper loop-mediated execution is authorized, cap applies only to the
+    final approved 197X projected order batch, not the wider pre-scope universe.
+    """
+    runtime_block = _runtime_capped_preview_block(preview_doc)
+    pre_scope_planned_notional = float(
+        preview_doc.get("batch_notional_estimate")
+        or runtime_block.get("batch_notional_full")
+        or 0.0
+    )
+    configured_cap = float(
+        preview_doc.get("configured_batch_cap_manage_positions")
+        or preview_doc.get("configured_batch_cap_effective")
+        or 50000.0
+    )
+
+    approved_symbols, scope_source, scope_valid = load_paper_approved_execution_scope()
+    approved_set = set(approved_symbols)
+    excluded_symbols: List[str] = []
+    excluded_outside_197x_scope_notional = 0.0
+    approved_scope_notional = float(runtime_block.get("batch_notional_capped_preview") or 0.0)
+    cap_basis = "defensive_exit_capped_batch_preview_full"
+
+    preview_orders = list(runtime_block.get("capped_preview_orders") or [])
+    if preview_orders and approved_set:
+        for order in preview_orders:
+            sym = str(order.get("symbol") or "").strip().upper()
+            if not sym or sym in approved_set:
+                continue
+            excluded_symbols.append(sym)
+            excluded_outside_197x_scope_notional += float(
+                order.get("notional")
+                or order.get("notional_estimate")
+                or order.get("estimated_notional")
+                or 0.0
+            )
+        excluded_symbols = sorted(set(excluded_symbols))
+        excluded_outside_197x_scope_notional = round(excluded_outside_197x_scope_notional, 2)
+
+    projected_rows = _load_197x_projected_order_rows()
+    projected_symbols = sorted(
+        {str(r.get("symbol") or "").strip().upper() for r in projected_rows if r.get("symbol")}
+    )
+    projected_notional = round(
+        sum(float(r.get("notional_estimate") or 0.0) for r in projected_rows),
+        2,
+    )
+
+    use_scope_cap = bool(use_approved_197x_scope and scope_valid and projected_rows)
+    if use_scope_cap:
+        approved_scope_notional = projected_notional
+        cap_basis = "phase_197x_projected_paper_orders"
+        if (
+            not excluded_outside_197x_scope_notional
+            and pre_scope_planned_notional > projected_notional
+        ):
+            excluded_outside_197x_scope_notional = round(
+                pre_scope_planned_notional - projected_notional,
+                2,
+            )
+    elif approved_scope_notional <= 0:
+        approved_scope_notional = pre_scope_planned_notional
+
+    final_cap_checked_notional = (
+        approved_scope_notional if use_scope_cap else pre_scope_planned_notional
+    )
+    cap_passed = final_cap_checked_notional <= configured_cap if configured_cap > 0 else True
+    batch_notional_status = "WITHIN_CAP" if cap_passed else "EXCEEDS_CAP"
+
+    return {
+        "cap_basis": cap_basis,
+        "use_approved_197x_scope": use_scope_cap,
+        "approved_scope_source": scope_source,
+        "approved_scope_symbols": projected_symbols if use_scope_cap else approved_symbols,
+        "pre_scope_planned_notional": round(pre_scope_planned_notional, 2),
+        "excluded_outside_197x_scope_notional": excluded_outside_197x_scope_notional,
+        "approved_scope_notional": round(approved_scope_notional, 2),
+        "final_cap_checked_notional": round(final_cap_checked_notional, 2),
+        "batch_notional_cap": round(configured_cap, 2),
+        "cap_passed": cap_passed,
+        "batch_notional_status": batch_notional_status,
+        "excluded_symbols": excluded_symbols,
+    }
+
+
 def evaluate_defensive_exit_dispatch_interlock(
     *,
     mode: str = "paper",
@@ -112,15 +229,11 @@ def evaluate_defensive_exit_dispatch_interlock(
             preview_doc = json.loads(PREVIEW_JSON.read_text(encoding="utf-8"))
         except Exception:
             preview_doc = {}
-    batch_notional = float(preview_doc.get("batch_notional_estimate") or 0.0)
-    configured_cap = float(
-        preview_doc.get("configured_batch_cap_manage_positions")
-        or preview_doc.get("configured_batch_cap_effective")
-        or 50000.0
-    )
+
+    cap_context: Dict[str, Any] = {}
+    batch_notional = 0.0
+    configured_cap = 50000.0
     batch_notional_status = "WITHIN_CAP"
-    if batch_notional > configured_cap > 0:
-        batch_notional_status = "EXCEEDS_CAP"
 
     base = {
         "timestamp": _utc_now_iso(),
@@ -136,9 +249,10 @@ def evaluate_defensive_exit_dispatch_interlock(
         "operator_approval_status": operator_status,
         "governance_authorized": governance_authorized,
         "readiness_status": readiness_status,
-        "batch_notional": round(batch_notional, 2),
+        "batch_notional": batch_notional,
         "batch_notional_cap": configured_cap,
         "batch_notional_status": batch_notional_status,
+        "batch_notional_cap_diagnostics": cap_context,
         "eligible_for_execution": False,
         "broker_orders_submitted": False,
     }
@@ -219,6 +333,19 @@ def evaluate_defensive_exit_dispatch_interlock(
             open_orders_count=open_orders,
             bridge=readiness_bridge,
         )
+        bridge_active = bool(readiness_bridge.get("bridge_active"))
+        use_scope_cap = bool(gate_ready or bridge_active)
+        cap_context = compute_dispatch_batch_notional_cap_context(
+            preview_doc=preview_doc,
+            use_approved_197x_scope=use_scope_cap,
+        )
+        batch_notional = float(cap_context.get("final_cap_checked_notional") or 0.0)
+        configured_cap = float(cap_context.get("batch_notional_cap") or 50000.0)
+        batch_notional_status = str(cap_context.get("batch_notional_status") or "WITHIN_CAP")
+        base["batch_notional"] = round(batch_notional, 2)
+        base["batch_notional_cap"] = configured_cap
+        base["batch_notional_status"] = batch_notional_status
+        base["batch_notional_cap_diagnostics"] = cap_context
         if not gate_ready and not governance_authorized:
             state, reason = (
                 DISPATCH_BLOCKED_GOVERNANCE,
@@ -231,7 +358,8 @@ def evaluate_defensive_exit_dispatch_interlock(
         elif batch_notional_status == "EXCEEDS_CAP":
             state, reason = (
                 DISPATCH_BLOCKED_BATCH_NOTIONAL_CAP,
-                f"batch_notional={batch_notional:.2f} cap={configured_cap:.2f}",
+                f"batch_notional={batch_notional:.2f} cap={configured_cap:.2f} "
+                f"basis={cap_context.get('cap_basis')}",
             )
         else:
             state, reason = DISPATCH_READY, (
