@@ -20,14 +20,33 @@ RESULTS = ROOT / "data" / "results"
 GOVERNANCE = ROOT / "data" / "governance"
 OUTPUT_JSON = RESULTS / "phase_197w_fix_post_approval_validator_repair.json"
 APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
+EXEC_AUTH_PATH = GOVERNANCE / "operator_paper_broker_execution_authorization.json"
 SOAK_JSON = RESULTS / "phase_197t_safe_continuous_observation_soak.json"
-PREVIOUS_COMMIT = "26a14f97"
-PREVIOUS_PHASE = "197W-FIX"
+W197_CREATE_JSON = RESULTS / "phase_197w_create_paper_operator_approval_artifact.json"
+X197_JSON = RESULTS / "phase_197x_paper_broker_execution_final_dry_run.json"
+PREVIOUS_COMMIT = "a4d11c7e"
+PREVIOUS_PHASE = "197Z-CAP"
 
 FINAL_VALID_CURRENT = "PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN"
 FINAL_EXPIRED_CLEANUP = "PAPER_OPERATOR_APPROVAL_EXPIRED_CLEANUP_REQUIRED"
 FINAL_INVALID_CLEANUP = "PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED"
 FINAL_ABSENT_OPERATOR_REQUIRED = "PAPER_OPERATOR_APPROVAL_ABSENT_OPERATOR_APPROVAL_REQUIRED"
+
+ACCEPTABLE_PAPER_REASON_WHEN_APPROVAL_VALID = frozenset(
+    {"explicit_broker_execution_phase_required"}
+)
+ACCEPTABLE_197N_WHEN_APPROVAL_VALID = frozenset(
+    {
+        "GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT",
+        "GOV_REVIEW_BLOCKED_BY_STALE_PACKET",
+    }
+)
+ACCEPTABLE_197O_WHEN_APPROVAL_VALID = frozenset(
+    {
+        "MARKET_HOURS_RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION",
+        "MARKET_HOURS_RECHECK_BLOCKED_BY_STALE_PACKET",
+    }
+)
 
 
 def _utc_now_iso() -> str:
@@ -101,6 +120,94 @@ def _run_paper_entry_dry_run() -> Tuple[str, str]:
     return gate, reason
 
 
+def _read_json(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
+def _validate_downstream_chain(
+    *,
+    approval_valid: bool,
+    open_orders: int,
+    live_blocked: bool,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Read-only downstream chain checks for 197X/197Z/197Y without broker submission."""
+    chain_failures: List[str] = []
+    chain_observations: List[str] = []
+    from services.paper_broker_execution_authorization_state import (
+        PAPER_BROKER_EXECUTION_AUTH_ABSENT,
+        classify_paper_broker_execution_authorization,
+    )
+    from services.phase_197y_loop_mediated_paper_execution_gate import (
+        GATE_BLOCKED_EXECUTION_AUTH_REQUIRED,
+        evaluate_loop_mediated_paper_execution_gate,
+    )
+    from services.phase_197z_paper_broker_execution_authorization_creator import run_creator
+
+    w197_create = _read_json(W197_CREATE_JSON)
+    x197 = _read_json(X197_JSON)
+    z197 = run_creator(create=False, verbose=False)
+    y197 = evaluate_loop_mediated_paper_execution_gate(write_output=False)
+    exec_state, _, _ = classify_paper_broker_execution_authorization(open_orders_count=open_orders)
+    exec_auth_exists = EXEC_AUTH_PATH.is_file()
+
+    chain: Dict[str, Any] = {
+        "197w_create_status": w197_create.get("status"),
+        "197w_create_final_state": w197_create.get("final_state"),
+        "197x_dry_run_status": x197.get("status"),
+        "197x_projected_order_count": x197.get("projected_order_count"),
+        "197z_creator_status": z197.get("status"),
+        "197z_would_create_authorization": z197.get("would_create_authorization"),
+        "197z_real_authorization_created": z197.get("real_authorization_created"),
+        "197y_gate_final_state": y197.get("final_state"),
+        "197y_eligible_for_execution": bool(y197.get("eligible_for_execution")),
+        "execution_authorization_state": exec_state,
+        "execution_authorization_artifact_exists": exec_auth_exists,
+    }
+
+    if approval_valid and w197_create.get("status") not in (None, "PASS", "PASS_SAFE_BLOCKED"):
+        chain_failures.append(f"197w_create_status={w197_create.get('status')}")
+    if approval_valid and x197.get("status") not in (None, "PASS", "PASS_SAFE_BLOCKED"):
+        chain_failures.append(f"197x_dry_run_status={x197.get('status')}")
+    if z197.get("real_authorization_created"):
+        chain_failures.append("197z_creator_must_not_create_real_authorization_in_validation")
+    if z197.get("status") not in ("PASS_DRY_RUN", "PASS_SAFE_BLOCKED", "PASS"):
+        chain_failures.append(f"197z_creator_status={z197.get('status')}")
+    if not exec_auth_exists and exec_state == PAPER_BROKER_EXECUTION_AUTH_ABSENT:
+        if str(y197.get("final_state") or "") != GATE_BLOCKED_EXECUTION_AUTH_REQUIRED:
+            chain_failures.append(
+                f"197y_expected_execution_auth_required got {y197.get('final_state')}"
+            )
+    elif exec_auth_exists:
+        chain_observations.append("execution_authorization_present_197y_gate_may_be_ready")
+
+    chain["chain_failures"] = chain_failures
+    chain["chain_observations"] = chain_observations
+    chain["chain_ok"] = not chain_failures
+    return chain, chain_failures
+
+
+def _validate_197w_contract_safety(
+    contract: Dict[str, Any],
+) -> Tuple[bool, List[str]]:
+    reasons: List[str] = []
+    scope = str(contract.get("approval_scope") or contract.get("approval_mode") or "").upper()
+    if scope != "PAPER_ONLY":
+        reasons.append(f"approval_scope={scope}")
+    if contract.get("broker_execution_authorized") is True:
+        reasons.append("broker_execution_authorized=true")
+    if contract.get("live_authorized") is True:
+        reasons.append("live_authorized=true")
+    if contract.get("raw_execution_authorized") is True:
+        reasons.append("raw_execution_authorized=true")
+    return not reasons, reasons
+
+
 def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
     notes: List[str] = []
     git_clean_before = _git_clean()
@@ -109,18 +216,22 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
         GOV_REVIEW_BLOCKED_BY_EXPIRED_APPROVAL,
         GOV_REVIEW_BLOCKED_BY_INVALID_APPROVAL,
         GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED,
+        GOV_REVIEW_BLOCKED_BY_STALE_PACKET,
         GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED,
         GOV_REVIEW_CURRENT_PAPER_APPROVAL_PRESENT,
         evaluate_governance_review_criteria,
     )
+    from services.defensive_exit_dispatch_interlock import load_paper_approved_execution_scope
     from services.defensive_exit_market_hours_governance_recheck import (
         RECHECK_BLOCKED_BY_EXPIRED_APPROVAL,
         RECHECK_BLOCKED_BY_INVALID_APPROVAL,
         RECHECK_BLOCKED_BY_OPERATOR_APPROVAL,
+        RECHECK_BLOCKED_BY_STALE_PACKET,
         RECHECK_OPERATOR_APPROVAL_PRESENT_NO_EXECUTION,
         RECHECK_WAITING,
         run_market_hours_governance_recheck,
     )
+    from services.live_block_classifier import scan_live_confirm_artifacts
     from services.paper_operator_approval_artifact_state import (
         PAPER_APPROVAL_ABSENT,
         PAPER_APPROVAL_EXPIRED,
@@ -171,9 +282,14 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
     ap_state, ap_reason, ap_details = classify_paper_operator_approval_artifact(
         broker_snapshot_ok=snapshot_ok
     )
+    contract = ap_details.get("contract") or {}
     approval_valid = ap_state == PAPER_APPROVAL_VALID_CURRENT
     approval_expired = ap_state == PAPER_APPROVAL_EXPIRED
     cleanup_required = paper_approval_cleanup_required(broker_snapshot_ok=snapshot_ok)
+    contract_safe, contract_failures = _validate_197w_contract_safety(contract)
+    scope_symbols, scope_source, scope_valid = load_paper_approved_execution_scope()
+    confirm_scan = scan_live_confirm_artifacts()
+    valid_live_confirm_count = int(confirm_scan.get("valid_live_confirm_count") or 0)
 
     live_blocked = bool(criteria.get("live_blocked"))
     open_orders = int(criteria.get("open_orders_count") or 0)
@@ -227,6 +343,8 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
     status = "PASS"
     if approval_expired or ap_state == PAPER_APPROVAL_ABSENT:
         status = "PASS_SAFE_BLOCKED"
+    elif approval_valid:
+        status = "PASS_SAFE_BLOCKED"
 
     if broker_orders_submitted or exits_executed or trims_executed:
         status = "FAIL"
@@ -240,29 +358,77 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
     if criteria.get("eligible_for_execution"):
         status = "FAIL"
         notes.append("eligible_for_execution must be false")
+    if valid_live_confirm_count > 0:
+        status = "FAIL"
+        notes.append(f"valid_live_confirm_count={valid_live_confirm_count}")
 
-    if gov_197n != expected_197n:
-        status = "FAIL"
-        notes.append(f"197N expected {expected_197n} got {gov_197n}")
-    if gov_197o != expected_197o:
-        status = "FAIL"
-        notes.append(f"197O expected {expected_197o} got {gov_197o}")
-    if u197_state != expected_197u:
-        status = "FAIL"
-        notes.append(f"197U expected {expected_197u} got {u197_state}")
-    if paper_gate_reason != expected_paper_reason:
-        status = "FAIL"
-        notes.append(f"paper_entry expected reason={expected_paper_reason} got {paper_gate_reason}")
-    if paper_gate_status != "SAFE_BLOCK":
-        status = "FAIL"
-        notes.append(f"paper_entry expected SAFE_BLOCK got {paper_gate_status}")
+    if approval_valid:
+        if not contract_safe:
+            status = "FAIL"
+            notes.extend(contract_failures)
+        if not scope_valid or not scope_symbols:
+            status = "FAIL"
+            notes.append(f"approved_scope_invalid source={scope_source}")
+        if paper_gate_status != "SAFE_BLOCK":
+            status = "FAIL"
+            notes.append(f"paper_entry expected SAFE_BLOCK got {paper_gate_status}")
+        if paper_gate_reason not in ACCEPTABLE_PAPER_REASON_WHEN_APPROVAL_VALID:
+            status = "FAIL"
+            notes.append(
+                f"paper_entry expected one of {sorted(ACCEPTABLE_PAPER_REASON_WHEN_APPROVAL_VALID)} "
+                f"got {paper_gate_reason}"
+            )
+        if gov_197n not in ACCEPTABLE_197N_WHEN_APPROVAL_VALID:
+            status = "FAIL"
+            notes.append(f"197N unexpected state {gov_197n}")
+        elif gov_197n == GOV_REVIEW_BLOCKED_BY_STALE_PACKET:
+            notes.append("197N_stale_packet_observation_only")
+        if gov_197o not in ACCEPTABLE_197O_WHEN_APPROVAL_VALID:
+            status = "FAIL"
+            notes.append(f"197O unexpected state {gov_197o}")
+        elif gov_197o == RECHECK_BLOCKED_BY_STALE_PACKET:
+            notes.append("197O_stale_packet_observation_only")
+        if u197_state != expected_197u:
+            status = "FAIL"
+            notes.append(f"197U expected {expected_197u} got {u197_state}")
+        if final_state != FINAL_VALID_CURRENT:
+            status = "FAIL"
+            notes.append(f"final_state_expected={FINAL_VALID_CURRENT}")
+    else:
+        if gov_197n != expected_197n:
+            status = "FAIL"
+            notes.append(f"197N expected {expected_197n} got {gov_197n}")
+        if gov_197o != expected_197o:
+            status = "FAIL"
+            notes.append(f"197O expected {expected_197o} got {gov_197o}")
+        if u197_state != expected_197u:
+            status = "FAIL"
+            notes.append(f"197U expected {expected_197u} got {u197_state}")
+        if paper_gate_reason != expected_paper_reason:
+            status = "FAIL"
+            notes.append(
+                f"paper_entry expected reason={expected_paper_reason} got {paper_gate_reason}"
+            )
+        if paper_gate_status != "SAFE_BLOCK":
+            status = "FAIL"
+            notes.append(f"paper_entry expected SAFE_BLOCK got {paper_gate_status}")
 
     if gov_197n == "GOV_REVIEW_BLOCKED_BY_READINESS" and APPROVAL_PATH.is_file():
         status = "FAIL"
         notes.append("generic readiness block with approval present")
 
+    downstream_chain, chain_failures = _validate_downstream_chain(
+        approval_valid=approval_valid,
+        open_orders=open_orders,
+        live_blocked=live_blocked,
+    )
+    if approval_valid and chain_failures:
+        status = "FAIL"
+        notes.extend(chain_failures)
+    notes.extend(downstream_chain.get("chain_observations") or [])
+
     payload: Dict[str, Any] = {
-        "phase": "197W-FIX2",
+        "phase": "197W-VF",
         "generated_at": _utc_now_iso(),
         "status": status,
         "previous_phase": PREVIOUS_PHASE,
@@ -283,6 +449,13 @@ def run_phase_197w_fix_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "paper_entry_dry_run_status": paper_gate_status,
         "paper_entry_dry_run_reason": paper_gate_reason,
         "final_state": final_state,
+        "contract_safe": contract_safe,
+        "contract_failures": contract_failures,
+        "approved_scope_symbols": scope_symbols,
+        "approved_scope_source": scope_source,
+        "approved_scope_valid": scope_valid,
+        "valid_live_confirm_count": valid_live_confirm_count,
+        "downstream_chain": downstream_chain,
         "cleanup_guidance": (
             "python -m services.phase_197w_fix_expired_approval_cleanup --execute"
             if cleanup_required
