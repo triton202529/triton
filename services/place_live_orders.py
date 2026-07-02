@@ -1750,6 +1750,34 @@ def main() -> None:
         lc_df = load_signal_lifecycle_csv(orders_path)
         lc_df = validate_authoritative_lifecycle(lc_df, source_kind=exec_source)
 
+    if exec_source == "manage_handoff" and mode == "paper":
+        from services.paper_execution_handoff_scope import filter_handoff_lifecycle_dataframe
+
+        lc_df, handoff_scope_diag = filter_handoff_lifecycle_dataframe(
+            lc_df,
+            mode=mode,
+            batch_notional_cap=float(args.max_batch_notional),
+        )
+        if handoff_scope_diag.get("enforced"):
+            print(
+                "[PLACE_HANDOFF_SCOPE] "
+                f"pre_symbols={handoff_scope_diag.get('pre_handoff_symbols')} "
+                f"final_symbols={handoff_scope_diag.get('final_handoff_symbols')} "
+                f"excluded={handoff_scope_diag.get('excluded_from_handoff_symbols')} "
+                f"final_notional={handoff_scope_diag.get('final_handoff_notional')} "
+                f"cap={handoff_scope_diag.get('batch_notional_cap')} "
+                f"cap_passed={handoff_scope_diag.get('cap_passed')}",
+                flush=True,
+            )
+            if handoff_scope_diag.get("forbidden_symbols_in_final_handoff"):
+                die(
+                    "[PLACE_HANDOFF_SCOPE] outside-scope symbols reached placement: "
+                    f"{handoff_scope_diag.get('forbidden_symbols_in_final_handoff')}",
+                    2,
+                )
+        if lc_df is None or lc_df.empty:
+            die("[PLACE_HANDOFF_SCOPE] no rows remain after approved 197X scope filter")
+
     sig_state = read_json(SIGNAL_STATE_PATH) or {}
     if not isinstance(sig_state, dict):
         sig_state = {}
@@ -1765,6 +1793,21 @@ def main() -> None:
         session=placement_session,
     )
     _PLACE_DIAG_ROWS.extend(lifecycle_diag)
+    if exec_source == "manage_handoff" and mode == "paper":
+        from services.paper_execution_handoff_scope import filter_order_rows_to_approved_197x_scope
+
+        rows, row_scope_diag = filter_order_rows_to_approved_197x_scope(rows, mode=mode)
+        if row_scope_diag.get("enforced") and row_scope_diag.get("excluded_from_handoff_symbols"):
+            print(
+                "[PLACE_ORDER_ROWS_SCOPE] excluded="
+                f"{row_scope_diag.get('excluded_from_handoff_symbols')}",
+                flush=True,
+            )
+        if row_scope_diag.get("outside_scope_rows_reached_placement"):
+            die(
+                "[PLACE_ORDER_ROWS_SCOPE] outside-scope order rows reached placement",
+                2,
+            )
     if exec_source == "derived_trade_opps":
         print("[EXECUTION] source: trade_opportunities.csv (DERIVED non-authoritative)")
     elif exec_source == "manage_handoff":

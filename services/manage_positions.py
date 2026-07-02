@@ -3658,7 +3658,6 @@ def maybe_execute_management(
             f"[MANAGE_BLOCK] {len(blocked_rows)} symbol(s) skipped by guard; "
             f"placing {len(allowed)}/{len(planned)} — codes={_guard_codes_for_display(_bd)}"
         )
-    _write_management_orders_subset(allowed, orders_path)
 
     if str(mode).lower() == "paper":
         from services.defensive_exit_dispatch_interlock import (
@@ -3670,10 +3669,43 @@ def maybe_execute_management(
             print_dispatch_approval_safe_block,
             resolve_dispatch_safe_block_state,
         )
+        from services.paper_execution_handoff_scope import build_handoff_scope_diagnostics
 
+        pre_handoff_symbols = sorted(
+            {
+                str(getattr(p, "symbol", "") or "").strip().upper()
+                for p in allowed
+                if str(getattr(p, "symbol", "") or "").strip()
+            }
+        )
+        pre_planned = list(allowed)
         allowed, scope_meta = constrain_handoff_to_approved_paper_scope(allowed)
         meta.update(scope_meta)
+        mbn = cfg.get("max_batch_notional")
+        try:
+            batch_cap = float(mbn) if mbn is not None else 50000.0
+        except Exception:
+            batch_cap = 50000.0
+        handoff_scope_diag = build_handoff_scope_diagnostics(
+            pre_handoff_symbols=pre_handoff_symbols,
+            final_planned=allowed,
+            scope_meta=scope_meta,
+            pre_planned=pre_planned,
+            batch_notional_cap=batch_cap,
+        )
+        meta["handoff_scope_diagnostics"] = handoff_scope_diag
+        if handoff_scope_diag.get("excluded_from_handoff_symbols"):
+            print(
+                "[MANAGE_HANDOFF_SCOPE] excluded "
+                f"{len(handoff_scope_diag.get('excluded_from_handoff_symbols') or [])} "
+                f"symbol(s) outside approved 197X batch: "
+                f"{handoff_scope_diag.get('excluded_from_handoff_symbols')}",
+                flush=True,
+            )
 
+    _write_management_orders_subset(allowed, orders_path)
+
+    if str(mode).lower() == "paper":
         if is_defensive_exit_manage_handoff(allowed):
             interlock = evaluate_defensive_exit_dispatch_interlock(
                 mode=mode,
