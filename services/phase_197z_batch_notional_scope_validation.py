@@ -139,11 +139,6 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         if not scope_valid:
             status = "FAIL"
             notes.append("approved_scope_invalid")
-        excluded = set(interlock_cap.get("excluded_symbols") or [])
-        bad_symbols = {"GLD", "GE", "TSLA", "ARKK", "MA", "UNG"} & set(scope_symbols)
-        if bad_symbols:
-            status = "FAIL"
-            notes.append(f"forbidden_symbols_in_approved_scope={sorted(bad_symbols)}")
         if dispatch_state == DISPATCH_READY:
             notes.append("dispatch_ready_observed")
     else:

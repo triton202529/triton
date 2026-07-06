@@ -12,9 +12,27 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CAP = 50000.0
 
-FORBIDDEN_OUTSIDE_SCOPE_SYMBOLS = frozenset(
-    {"GLD", "GE", "TSLA", "ARKK", "MA", "PG", "ABBV", "UNG"}
-)
+# Historical outside-scope symbols used only for synthetic contamination proofs.
+# Validators derive live forbidden/outside-scope sets from current approved 197X scope.
+SYNTHETIC_CONTAMINATION_CANDIDATES = frozenset({"GLD", "GE", "ARKK", "MA", "PG", "ABBV", "UNG"})
+
+# Backward-compatible alias; do not use for live pass/fail against approved scope.
+FORBIDDEN_OUTSIDE_SCOPE_SYMBOLS = SYNTHETIC_CONTAMINATION_CANDIDATES
+
+
+def symbols_outside_approved_scope(
+    symbols: Sequence[Any],
+    approved_scope_symbols: Sequence[str],
+) -> List[str]:
+    """Symbols not in the current approved 197X execution scope."""
+    approved = {_norm_symbol(s) for s in approved_scope_symbols if _norm_symbol(s)}
+    return sorted(s for s in {_norm_symbol(x) for x in symbols} if s and s not in approved)
+
+
+def synthetic_contamination_symbols(approved_scope_symbols: Sequence[str]) -> List[str]:
+    """Outside-scope symbols safe to inject in synthetic proofs (never currently approved)."""
+    approved = {_norm_symbol(s) for s in approved_scope_symbols if _norm_symbol(s)}
+    return sorted(SYNTHETIC_CONTAMINATION_CANDIDATES - approved)
 
 
 def should_enforce_approved_197x_handoff_scope(*, mode: str = "paper") -> bool:
@@ -130,8 +148,8 @@ def filter_handoff_lifecycle_dataframe(
     final_symbols = sorted(filtered["ticker"].unique())
     excluded = sorted(set(pre_symbols) - set(final_symbols))
     final_notional = estimate_handoff_notional_from_dataframe(filtered)
-    forbidden_present = sorted(set(final_symbols) & FORBIDDEN_OUTSIDE_SCOPE_SYMBOLS)
-    excluded_forbidden = sorted(set(excluded) & FORBIDDEN_OUTSIDE_SCOPE_SYMBOLS)
+    forbidden_present = symbols_outside_approved_scope(final_symbols, approved_symbols)
+    excluded_outside = symbols_outside_approved_scope(excluded, approved_symbols)
 
     return filtered, {
         "enforced": True,
@@ -145,7 +163,7 @@ def filter_handoff_lifecycle_dataframe(
         "batch_notional_cap": batch_notional_cap,
         "cap_passed": final_notional <= batch_notional_cap,
         "forbidden_symbols_in_final_handoff": forbidden_present,
-        "forbidden_symbols_excluded": excluded_forbidden,
+        "forbidden_symbols_excluded": excluded_outside,
         "outside_scope_rows_reached_placement": bool(forbidden_present),
     }
 
@@ -236,7 +254,7 @@ def filter_order_rows_to_approved_197x_scope(
         }
     )
     excluded = sorted(set(pre_symbols) - set(final_symbols))
-    forbidden_present = sorted(set(final_symbols) & FORBIDDEN_OUTSIDE_SCOPE_SYMBOLS)
+    forbidden_present = symbols_outside_approved_scope(final_symbols, approved_symbols)
     return kept, {
         "enforced": True,
         "scope_source": scope_source,

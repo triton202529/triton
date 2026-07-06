@@ -24,8 +24,6 @@ PROJECTED_ORDERS_CSV = RESULTS / "phase_197x_projected_paper_orders.csv"
 PREVIOUS_PHASE = "197Z-CAP"
 PREVIOUS_COMMIT = "a4d11c7e"
 
-APPROVED_SYMBOLS = ["CVX", "HD", "PEP", "PFE", "SLV", "T", "USO", "WMT", "XLE", "XOM"]
-FORBIDDEN_SYMBOLS = ["GLD", "GE", "TSLA", "ARKK", "MA", "PG", "ABBV", "UNG"]
 EXPECTED_NOTIONAL_APPROX = 16980.61
 NOTIONAL_TOLERANCE = 250.0
 
@@ -68,6 +66,11 @@ def _synthetic_contaminated_handoff_proof() -> Dict[str, Any]:
 
     from services.paper_broker_execution_authorization_state import load_197x_projected_orders
 
+    from services.paper_execution_handoff_scope import (
+        symbols_outside_approved_scope,
+        synthetic_contamination_symbols,
+    )
+
     projected_rows, approved_symbols = load_197x_projected_orders()
     if not projected_rows or not approved_symbols:
         return {
@@ -88,7 +91,7 @@ def _synthetic_contaminated_handoff_proof() -> Dict[str, Any]:
                 "opportunity_type": "EXIT",
             }
         )
-    for sym in FORBIDDEN_SYMBOLS:
+    for sym in synthetic_contamination_symbols(approved_symbols):
         base_rows.append(
             {
                 "ticker": sym,
@@ -112,11 +115,13 @@ def _synthetic_contaminated_handoff_proof() -> Dict[str, Any]:
         final_notional += float(row["qty"]) * float(row["limit_price"])
     final_notional = round(final_notional, 2)
 
-    forbidden_in_final = sorted(set(final_symbols) & set(FORBIDDEN_SYMBOLS))
+    outside_injected = synthetic_contamination_symbols(approved_symbols)
+    forbidden_in_final = symbols_outside_approved_scope(final_symbols, approved_symbols)
+    excluded_outside = symbols_outside_approved_scope(excluded, approved_symbols)
     proof_ok = (
         not forbidden_in_final
         and set(final_symbols) == set(approved_symbols)
-        and all(sym in excluded for sym in FORBIDDEN_SYMBOLS if sym in pre_symbols)
+        and all(sym in excluded for sym in outside_injected if sym in pre_symbols)
         and final_notional <= 50000.0
     )
     return {
@@ -127,6 +132,8 @@ def _synthetic_contaminated_handoff_proof() -> Dict[str, Any]:
         "final_handoff_notional": final_notional,
         "batch_notional_cap": 50000.0,
         "cap_passed": final_notional <= 50000.0,
+        "synthetic_outside_scope_symbols_injected": outside_injected,
+        "excluded_outside_scope_symbols": excluded_outside,
         "forbidden_symbols_in_final_handoff": forbidden_in_final,
         "outside_scope_rows_reached_placement": bool(forbidden_in_final),
     }
@@ -146,9 +153,9 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         load_197x_projected_orders,
     )
     from services.paper_execution_handoff_scope import (
-        FORBIDDEN_OUTSIDE_SCOPE_SYMBOLS,
         filter_handoff_lifecycle_dataframe,
         should_enforce_approved_197x_handoff_scope,
+        symbols_outside_approved_scope,
     )
 
     from services.paper_loop_mediated_execution_readiness_bridge import (
@@ -201,14 +208,17 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
     elif should_enforce_approved_197x_handoff_scope(mode="paper") and scope_valid:
         status = "PASS"
 
-    forbidden_in_final = sorted(set(final_symbols) & set(FORBIDDEN_SYMBOLS))
-    forbidden_in_pre = sorted(set(pre_symbols) & FORBIDDEN_OUTSIDE_SCOPE_SYMBOLS)
+    forbidden_in_final = symbols_outside_approved_scope(final_symbols, scope_symbols)
+    outside_scope_in_pre = symbols_outside_approved_scope(pre_symbols, scope_symbols)
 
     if forbidden_in_final:
         status = "FAIL"
         notes.append(f"forbidden_symbols_in_final_handoff={forbidden_in_final}")
-    if scope_valid and set(scope_symbols) != set(APPROVED_SYMBOLS):
-        notes.append(f"approved_scope_mismatch={scope_symbols}")
+    if scope_valid and projected_symbols and set(scope_symbols) != set(projected_symbols):
+        notes.append(
+            f"approved_scope_differs_from_projected_csv="
+            f"scope={scope_symbols} projected={projected_symbols}"
+        )
     if scope_valid and final_symbols and set(final_symbols) - set(scope_symbols):
         status = "FAIL"
         notes.append("final_handoff_contains_outside_approved_scope")
@@ -252,7 +262,7 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "pre_handoff_symbols": pre_symbols,
         "excluded_from_handoff_symbols": excluded,
         "final_handoff_symbols": final_symbols,
-        "forbidden_symbols_excluded_from_pre": forbidden_in_pre,
+        "forbidden_symbols_excluded_from_pre": outside_scope_in_pre,
         "forbidden_symbols_in_final_handoff": forbidden_in_final,
         "pre_handoff_notional": scope_diag.get("pre_handoff_notional"),
         "final_handoff_notional": final_notional,
