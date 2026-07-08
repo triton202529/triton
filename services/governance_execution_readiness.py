@@ -432,6 +432,7 @@ def compute_execution_readiness(
     queue_doc: Dict[str, Any],
     policy_doc: Dict[str, Any],
     gov_doc: Dict[str, Any],
+    cpe_doc: Optional[Dict[str, Any]] = None,
     cpi_doc: Dict[str, Any],
     watchdog_status: str,
     watchdog_ts: str,
@@ -519,8 +520,21 @@ def compute_execution_readiness(
         ),
     }
     from services.execution_readiness import finalize_readiness_with_lifecycle_diagnostics
+    from services.governance_degraded_mode import enrich_execution_readiness
 
-    return finalize_readiness_with_lifecycle_diagnostics(doc, results_dir)
+    doc = finalize_readiness_with_lifecycle_diagnostics(doc, results_dir)
+    cpe = (
+        cpe_doc
+        if cpe_doc is not None
+        else _read_json(results_dir / "capital_preservation_escalation.json")
+    )
+    return enrich_execution_readiness(
+        doc,
+        gov_doc=gov_doc,
+        cpe_doc=cpe,
+        auth_doc=auth_doc,
+        results_dir=results_dir,
+    )
 
 
 def _safe_float(x: Any, default: Optional[float] = None) -> Optional[float]:
@@ -704,6 +718,7 @@ def persist_governance_execution_readiness(
         queue_doc=queue_doc,
         policy_doc=policy_doc,
         gov_doc=gov_doc,
+        cpe_doc=cpe_doc,
         cpi_doc=cpi_doc,
         watchdog_status=watchdog_status,
         watchdog_ts=watchdog_ts,
@@ -755,6 +770,7 @@ def main() -> int:
         queue_doc=queue_doc,
         policy_doc=policy_doc,
         gov_doc=gov_doc,
+        cpe_doc=cpe_doc,
         cpi_doc=cpi_doc,
         watchdog_status=str(status_doc.get("watchdog_status") or "OK"),
         watchdog_ts=str(status_doc.get("timestamp") or _iso_utc()),

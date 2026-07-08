@@ -647,10 +647,22 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     details["candidates"] = candidates
     _merge_handoff_into_details(details, handoff)
 
-    def block(reason: str, check: str, *, safe: bool = False) -> Tuple[bool, str, Dict[str, Any]]:
+    def block(
+        reason: str,
+        check: str,
+        *,
+        safe: bool = False,
+        degraded: bool = False,
+    ) -> Tuple[bool, str, Dict[str, Any]]:
         details["failed_check"] = check
-        details["safe_block"] = safe
-        label = "SAFE_BLOCK" if safe else "FAIL"
+        details["safe_block"] = safe or degraded
+        details["degraded_block"] = degraded
+        if degraded:
+            label = "SAFE_DEGRADED"
+        elif safe:
+            label = "SAFE_BLOCK"
+        else:
+            label = "FAIL"
         if verbose:
             print(f"[PAPER_ENTRY_GATE] status={label} reason={reason}", flush=True)
         return False, reason, details
@@ -689,6 +701,10 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     details["checks"]["live_execution_permitted"] = live_permitted
     details["checks"]["paper_execution_permitted"] = paper_permitted
     details["checks"]["readiness_failed_checks"] = failed_checks
+    details["checks"]["governance_mode"] = readiness.get("governance_mode")
+    details["checks"]["risk_increasing_actions_blocked"] = readiness.get(
+        "risk_increasing_actions_blocked"
+    )
     if readiness_status != "READY":
         try:
             from services.paper_operator_approval_artifact_state import (
@@ -734,6 +750,24 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
                     )
             except Exception:
                 pass
+        from services.governance_degraded_mode import classify_paper_entry_readiness_outcome
+
+        gate_label, gate_reason, gate_safe = classify_paper_entry_readiness_outcome(
+            readiness, failed_checks
+        )
+        if gate_label == "SAFE_DEGRADED":
+            details["checks"][
+                "final_gate_classification"
+            ] = "ORANGE_DEGRADED_RISK_INCREASING_BLOCKED"
+            if verbose:
+                print(
+                    "[PAPER_ENTRY_GATE] status=SAFE_DEGRADED "
+                    "reason=orange_governance_concentration_risk",
+                    flush=True,
+                )
+            return block(gate_reason, "execution_readiness", degraded=True)
+        if gate_label == "FAIL":
+            return block(gate_reason, "execution_readiness")
         stale_hint = ""
         if "lifecycle" in failed_checks or "signals" in failed_checks:
             stale_hint = " (stale lifecycle/signals — run phase_196a --repair)"
@@ -1016,6 +1050,8 @@ def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> in
             print("[PAPER_ENTRY_EXECUTION_BLOCKED] reason=MARKET_CLOSED", flush=True)
         elif safe:
             print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_BLOCK)", flush=True)
+        elif details.get("degraded_block"):
+            print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_DEGRADED)", flush=True)
         else:
             print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason}", flush=True)
         _write_stage_audit(audit, market_open=market_open)

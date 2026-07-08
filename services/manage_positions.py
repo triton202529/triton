@@ -3332,6 +3332,38 @@ def _partition_planned_by_guard(
     return allowed, blocked, None
 
 
+def _log_governance_risk_reducing_plans(planned: List[ManagementPlannedOrder]) -> None:
+    """Classify and log risk-reducing planned actions (read-only; no dispatch bypass)."""
+    try:
+        from services.governance_degraded_mode import (
+            ACTION_RISK_REDUCING,
+            classify_management_action_risk,
+            is_orange_degraded_context,
+            log_risk_reducing_lane,
+        )
+
+        readiness = _load_json(RESULTS / "execution_readiness.json") or {}
+        degraded = is_orange_degraded_context(readiness)
+        for p in planned:
+            lane = classify_management_action_risk(
+                management_action=str(p.management_action or ""),
+                force_exit_override=bool(getattr(p, "force_exit_override", False)),
+                perf_force_exit_active=bool(getattr(p, "perf_force_exit_active", False)),
+                high_drag_forced=bool(getattr(p, "high_drag_forced", False)),
+                trim_priority=bool(getattr(p, "trim_priority_active", False)),
+            )
+            if lane != ACTION_RISK_REDUCING:
+                continue
+            log_risk_reducing_lane(
+                symbol=str(p.symbol or ""),
+                action=str(p.management_action or ""),
+                eligible_for_controlled_paper_handling=degraded or True,
+                dispatch_approval_required=True,
+            )
+    except Exception:
+        pass
+
+
 def write_manage_artifacts(
     planned: List[ManagementPlannedOrder],
     plan_rows: List[PlanRow],
@@ -4287,6 +4319,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     csv_planned = planned if planned else planned_after_build
+    _log_governance_risk_reducing_plans(csv_planned)
     write_manage_artifacts(
         planned, plan_lines, summary, cfg, orders_path, orders_for_csv=csv_planned
     )

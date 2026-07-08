@@ -71,6 +71,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 
 from services.effective_lifecycle import load_exit_logic_config
+from services.governance_degraded_mode import classify_portfolio_action_risk
 
 # -----------------------------------------------------------
 # Paths
@@ -152,6 +153,7 @@ OUTPUT_COLUMNS = [
     "performance_bucket",
     "allocation_score",
     "recommended_action",
+    "action_risk_lane",
     "reason",
 ]
 
@@ -814,6 +816,12 @@ def build_recommendations(
         )
 
         band = _allocation_band(weight_pct, has_position=is_held)
+        action_risk_lane = classify_portfolio_action_risk(
+            recommended_action=action,
+            risk_flag=risk_flag_str,
+            reason=reason,
+            symbol=sym,
+        )
 
         rows.append(
             {
@@ -835,6 +843,7 @@ def build_recommendations(
                 "performance_bucket": perf_bucket,
                 "allocation_score": alloc_score,
                 "recommended_action": action,
+                "action_risk_lane": action_risk_lane,
                 "reason": reason,
             }
         )
@@ -863,6 +872,15 @@ def build_recommendations(
     block_n = _count_action(ACTION_BLOCK)
     watch_n = _count_action(ACTION_WATCH)
     hold_n = _count_action(ACTION_HOLD)
+
+    def _lane_count(lane: str) -> int:
+        if df.empty or "action_risk_lane" not in df.columns:
+            return 0
+        return int((df["action_risk_lane"] == lane).sum())
+
+    risk_increasing_n = _lane_count("RISK_INCREASING")
+    risk_reducing_n = _lane_count("RISK_REDUCING")
+    neutral_lane_n = _lane_count("NEUTRAL")
 
     current_positions = int(len(held_df))
     available_slots = max(0, int(max_positions) - current_positions)
@@ -998,6 +1016,21 @@ def build_recommendations(
         # high_risk_positions kept for backward-compat with prior consumers.
         "high_risk_positions": sorted(
             set(_flag_symbols(RISK_FLAG_FORCE_EXIT) + _flag_symbols(RISK_FLAG_TRIM_PRIORITY))
+        ),
+        "risk_increasing_candidates": risk_increasing_n,
+        "risk_reducing_candidates": risk_reducing_n,
+        "neutral_action_candidates": neutral_lane_n,
+        "risk_increasing_symbols": (
+            sorted(
+                df.loc[df["action_risk_lane"] == "RISK_INCREASING", "ticker"].astype(str).tolist()
+            )
+            if not df.empty and "action_risk_lane" in df.columns
+            else []
+        ),
+        "risk_reducing_symbols": (
+            sorted(df.loc[df["action_risk_lane"] == "RISK_REDUCING", "ticker"].astype(str).tolist())
+            if not df.empty and "action_risk_lane" in df.columns
+            else []
         ),
         # Diagnostics
         "allocation_diagnostics": {

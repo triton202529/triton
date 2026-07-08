@@ -80,6 +80,7 @@ def main() -> int:
         queue_doc=queue_doc,
         policy_doc=policy_doc,
         gov_doc=gov_doc,
+        cpe_doc=cpe_doc,
         cpi_doc=cpi_doc,
         watchdog_status=str(status_doc.get("watchdog_status") or "OK"),
         watchdog_ts=str(status_doc.get("timestamp") or _iso_utc()),
