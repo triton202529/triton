@@ -83,12 +83,23 @@ def _count_open_orders() -> int:
 
 
 def _handoff_exit_rows() -> int:
-    if not HANDOFF_CSV.is_file():
+    try:
+        from services.defensive_exit_preview_handoff import (
+            count_preview_handoff_exit_rows,
+            ensure_defensive_exit_preview_handoff,
+            resolve_defensive_handoff_orders_path,
+        )
+
+        ensure_defensive_exit_preview_handoff(mode="paper")
+        path, _source = resolve_defensive_handoff_orders_path()
+    except Exception:
+        path = HANDOFF_CSV
+    if not path.is_file():
         return 0
     try:
         import pandas as pd
 
-        df = pd.read_csv(HANDOFF_CSV, low_memory=False)
+        df = pd.read_csv(path, low_memory=False)
         if df.empty:
             return 0
         opp = df.get("opportunity_type", df.get("effective_stance", ""))
@@ -111,6 +122,41 @@ def run_phase_197i_validation(*, verbose: bool = True) -> Dict[str, Any]:
         defensive_exit_phase_validator_gates,
     )
 
+    from services.defensive_exit_preview_handoff import (
+        ensure_defensive_exit_preview_handoff,
+        resolve_defensive_handoff_orders_path,
+    )
+
+    preview_meta = ensure_defensive_exit_preview_handoff(mode="paper")
+    handoff_path, handoff_source = resolve_defensive_handoff_orders_path()
+
+    from services.defensive_exit_sizing_cap import (
+        analyze_defensive_exit_sizing,
+        write_capped_batch_preview,
+    )
+
+    placement_proc_pre = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "services.place_live_orders",
+            "--mode",
+            "paper",
+            "--orders",
+            str(handoff_path),
+            "--dry-run",
+        ],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    placement_pre_out = (placement_proc_pre.stdout or "") + (placement_proc_pre.stderr or "")
+    sizing_pre = analyze_defensive_exit_sizing(
+        placement_output=placement_pre_out, use_cli_default_cap=True
+    )
+    write_capped_batch_preview(sizing_pre)
+
     sync = build_defensive_exit_approval_sync(cap_context="runtime")
     packet = build_operator_approval_packet(sync)
     write_operator_approval_packet(packet)
@@ -123,7 +169,7 @@ def run_phase_197i_validation(*, verbose: bool = True) -> Dict[str, Any]:
             "--mode",
             "paper",
             "--orders",
-            str(HANDOFF_CSV),
+            str(handoff_path),
             "--dry-run",
             "--max-batch-notional",
             "50000",

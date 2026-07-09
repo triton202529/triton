@@ -146,6 +146,8 @@ def build_defensive_exit_approval_sync(
     Classify capped defensive batch against governance/readiness/operator gates.
     Read-only — never approves or submits orders.
     """
+    from services.defensive_exit_preview_handoff import is_orange_degraded_preview_only_block
+
     preview_doc = _load_preview()
     capped_block = _runtime_capped_preview(preview_doc)
     if cap_context == "cli":
@@ -204,19 +206,43 @@ def build_defensive_exit_approval_sync(
         approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_IN_FLIGHT_ORDERS"
         approval_block_reason = f"in_flight_sell_orders symbols={','.join(in_flight_overlap)}"
     elif not governance_authorized or "governance" in failed_checks:
-        approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_GOVERNANCE"
-        approval_block_reason = str(
-            auth.get("gate_reasons", {}).get("governance")
-            or readiness.get("check_details", {}).get("governance")
-            or "governance_authorized=false"
-        )
-        approval_source = "governance_authorization.json"
+        if is_orange_degraded_preview_only_block(readiness) and preview_exists:
+            if op_pending and not op_ok:
+                approval_sync_status = "CAPPED_DEFENSIVE_BATCH_AWAITING_OPERATOR_APPROVAL"
+                approval_block_reason = (
+                    f"pending_operator_review subjects={','.join(sorted(set(op_pending)))}"
+                )
+                approval_source = "human_approval_queue.json"
+            else:
+                approval_sync_status = "CAPPED_DEFENSIVE_BATCH_AVAILABLE"
+                approval_block_reason = "operator_paper_approval_required"
+                approval_source = "defensive_exit_preview_handoff.json"
+        else:
+            approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_GOVERNANCE"
+            approval_block_reason = str(
+                auth.get("gate_reasons", {}).get("governance")
+                or readiness.get("check_details", {}).get("governance")
+                or "governance_authorized=false"
+            )
+            approval_source = "governance_authorization.json"
     elif readiness_status != "READY":
-        approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_READINESS"
-        approval_block_reason = f"execution_readiness={readiness_status}"
-        if failed_checks:
-            approval_block_reason += f" failed_checks={','.join(failed_checks)}"
-        approval_source = "execution_readiness.json"
+        if is_orange_degraded_preview_only_block(readiness) and preview_exists:
+            if op_pending and not op_ok:
+                approval_sync_status = "CAPPED_DEFENSIVE_BATCH_AWAITING_OPERATOR_APPROVAL"
+                approval_block_reason = (
+                    f"pending_operator_review subjects={','.join(sorted(set(op_pending)))}"
+                )
+                approval_source = "human_approval_queue.json"
+            else:
+                approval_sync_status = "CAPPED_DEFENSIVE_BATCH_AVAILABLE"
+                approval_block_reason = "operator_paper_approval_required"
+                approval_source = "execution_readiness.json+defensive_exit_preview"
+        else:
+            approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_READINESS"
+            approval_block_reason = f"execution_readiness={readiness_status}"
+            if failed_checks:
+                approval_block_reason += f" failed_checks={','.join(failed_checks)}"
+            approval_source = "execution_readiness.json"
     elif op_pending and not op_ok:
         approval_sync_status = "CAPPED_DEFENSIVE_BATCH_AWAITING_OPERATOR_APPROVAL"
         approval_block_reason = (
@@ -312,6 +338,10 @@ def build_defensive_exit_approval_sync(
         "approval_block_reason": approval_block_reason,
         "approval_source": approval_source,
         "eligible_for_paper_execution": eligible_for_paper_execution,
+        "preview_generation_allowed": (
+            is_orange_degraded_preview_only_block(readiness) if preview_exists else False
+        ),
+        "execution_allowed": eligible_for_paper_execution,
         "execution_eligibility_note": (
             "eligible_for_paper_execution requires CAPPED_DEFENSIVE_BATCH_APPROVED_FOR_PAPER, "
             "OPERATOR_APPROVAL_VALID_PAPER_ONLY, READY readiness, governance authorized, "

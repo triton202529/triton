@@ -20,6 +20,7 @@ HANDOFF_CSV = LIVE / "manage_orders.csv"
 REPRICE_CSV = RESULTS / "manage_orders.csv"
 READINESS_JSON = RESULTS / "execution_readiness.json"
 HANDOFF_AUDIT_JSON = RESULTS / "manage_positions_handoff_audit.json"
+PREVIEW_CSV = RESULTS / "defensive_exit_preview_handoff.csv"
 
 
 def _utc_now_iso() -> str:
@@ -67,7 +68,11 @@ def _readiness_status() -> Dict[str, Any]:
         return {
             "readiness_status": str(doc.get("readiness_status") or "UNKNOWN"),
             "live_execution_permitted": bool(doc.get("live_execution_permitted", True)),
+            "paper_execution_permitted": bool(doc.get("paper_execution_permitted", False)),
             "governance_authorized": doc.get("governance_authorized"),
+            "governance_mode": doc.get("governance_mode"),
+            "risk_reducing_paper_actions_allowed": doc.get("risk_reducing_paper_actions_allowed"),
+            "failed_checks": list(doc.get("failed_checks") or []),
         }
     except Exception:
         return {"readiness_status": "UNKNOWN", "live_execution_permitted": True}
@@ -98,7 +103,7 @@ def _parse_placement_output(output: str) -> Dict[str, Any]:
     ):
         m = re.search(pattern, text)
         if m:
-            val = m.group(1)
+            val = m.group(1).rstrip(".")
             parsed[key] = float(val) if "." in str(val) else int(val)
     return parsed
 
@@ -117,6 +122,35 @@ def build_handoff_diagnostic(
 
     handoff_all = _load_csv(HANDOFF_CSV)
     handoff_exit_rows = _handoff_rows(handoff_all)
+    handoff_source = "exec_handoff"
+    preview_meta: Dict[str, Any] = {}
+
+    if not handoff_exit_rows:
+        try:
+            from services.defensive_exit_preview_handoff import (
+                ensure_defensive_exit_preview_handoff,
+                load_defensive_handoff_orders_for_analysis,
+            )
+
+            preview_meta = ensure_defensive_exit_preview_handoff(mode=mode)
+            preview_orders, preview_source = load_defensive_handoff_orders_for_analysis()
+            if preview_orders and preview_source == "preview_handoff":
+                handoff_exit_rows = [
+                    {
+                        "ticker": o["symbol"],
+                        "symbol": o["symbol"],
+                        "opportunity_type": o.get("opportunity_type"),
+                        "effective_stance": o.get("effective_stance"),
+                        "qty": o.get("qty"),
+                        "limit_price": o.get("limit_price"),
+                        "preview_only": True,
+                    }
+                    for o in preview_orders
+                ]
+                handoff_source = "preview_handoff"
+        except Exception:
+            pass
+
     handoff_symbols = sorted(
         {
             str(r.get("ticker") or r.get("symbol") or "").strip().upper()
@@ -129,6 +163,17 @@ def build_handoff_diagnostic(
     readiness_status = str(readiness.get("readiness_status") or "UNKNOWN")
     placement = _parse_placement_output(placement_output)
     meta = dict(exec_meta or {})
+
+    preview_generation_allowed = False
+    execution_allowed = False
+    try:
+        from services.defensive_exit_preview_handoff import evaluate_defensive_preview_eligibility
+
+        preview_elig = evaluate_defensive_preview_eligibility(readiness)
+        preview_generation_allowed = bool(preview_elig.get("preview_generation_allowed"))
+        execution_allowed = bool(preview_elig.get("execution_allowed"))
+    except Exception:
+        preview_elig = {}
 
     blocked_by_readiness = readiness_status in (
         "PARTIALLY_READY",
@@ -145,8 +190,12 @@ def build_handoff_diagnostic(
             if bridge.get("bridge_active"):
                 blocked_by_readiness = False
                 readiness_status = str(bridge.get("effective_readiness_status") or readiness_status)
+                execution_allowed = True
         except Exception:
             pass
+    if preview_generation_allowed and handoff_source == "preview_handoff" and handoff_exit_rows:
+        blocked_by_readiness = False
+        execution_allowed = False
     blocked_by_governance = readiness.get("governance_authorized") is False
 
     handoff_status = "OK"
@@ -155,6 +204,15 @@ def build_handoff_diagnostic(
 
     if not planned_exits:
         handoff_status = "NO_PLANNED_EXITS"
+    elif (
+        preview_generation_allowed
+        and handoff_exit_rows
+        and handoff_source == "preview_handoff"
+        and not execution_allowed
+    ):
+        handoff_status = "HANDOFF_PREVIEW_ROWS_PRESENT"
+        handoff_block_reason = "preview_only_orange_degraded_governance; execution_blocked"
+        batch_empty_explained = True
     elif blocked_by_readiness and not handoff_exit_rows:
         handoff_status = "HANDOFF_BLOCKED_BY_READINESS"
         handoff_block_reason = f"execution_readiness={readiness_status}"
@@ -244,6 +302,15 @@ def build_handoff_diagnostic(
         "readiness_status": readiness_status,
         "governance_authorized": readiness.get("governance_authorized"),
         "live_execution_permitted": readiness.get("live_execution_permitted"),
+        "preview_generation_allowed": preview_generation_allowed,
+        "execution_allowed": execution_allowed,
+        "handoff_source": handoff_source,
+        "preview_handoff_path": (
+            str(PREVIEW_CSV.relative_to(ROOT)).replace("\\", "/")
+            if handoff_source == "preview_handoff"
+            else None
+        ),
+        "preview_meta": preview_meta or None,
         "placement_parse": placement,
         "exec_meta": {
             k: meta.get(k)

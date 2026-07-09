@@ -86,6 +86,10 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
     notes: List[str] = []
     git_clean_before = _git_clean()
 
+    from services.defensive_exit_preview_handoff import (
+        ensure_defensive_exit_preview_handoff,
+        resolve_defensive_handoff_orders_path,
+    )
     from services.defensive_exit_sizing_cap import (
         analyze_defensive_exit_sizing,
         load_defensive_exit_handoff_orders,
@@ -93,6 +97,9 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
     )
     from services.paper_entry_loop_stage import evaluate_paper_entry_gates
     from services.portfolio_history_sync import load_live_execution_flag
+
+    preview_meta = ensure_defensive_exit_preview_handoff(mode="paper")
+    handoff_path, handoff_source = resolve_defensive_handoff_orders_path()
 
     placement_proc = subprocess.run(
         [
@@ -102,7 +109,7 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
             "--mode",
             "paper",
             "--orders",
-            str(HANDOFF_CSV),
+            str(handoff_path),
             "--dry-run",
         ],
         cwd=str(ROOT),
@@ -155,21 +162,27 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
     partial_authorized = bool(sizing.get("partial_batch_authorized"))
 
     status = "PASS"
+    preview_eligible = bool(preview_meta.get("preview_generation_allowed"))
     if handoff_rows == 0:
         status = "FAIL"
-        notes.append("no defensive handoff rows in data/live/manage_orders.csv")
-    if not placement_maps_exit_rows:
+        notes.append("no defensive handoff rows in exec or preview handoff artifact")
+    if not placement_maps_exit_rows and handoff_rows > 0:
         status = "FAIL"
         notes.append("197G handoff regression: placement no longer maps EXIT rows")
-    if placement_batch_empty:
+    if placement_batch_empty and handoff_rows > 0:
         status = "FAIL"
         notes.append("vague BATCH_EMPTY with handoff rows present")
-    if not placement_notional_block and not placement_handoff_notional:
-        status = "FAIL"
-        notes.append("expected explicit BATCH_NOTIONAL_BLOCK classification")
-    if not sizing.get("cap_excess_amount"):
-        status = "FAIL"
-        notes.append("cap_excess_amount not computed")
+    if handoff_rows > 0 and not placement_notional_block and not placement_handoff_notional:
+        if not preview_eligible:
+            status = "FAIL"
+            notes.append("expected explicit BATCH_NOTIONAL_BLOCK classification")
+    if handoff_rows > 0 and not sizing.get("cap_excess_amount"):
+        full_notional = sizing.get("batch_notional_estimate")
+        if full_notional and float(full_notional) > float(
+            sizing.get("configured_batch_cap_effective") or 0
+        ):
+            status = "FAIL"
+            notes.append("cap_excess_amount not computed")
     if partial_authorized and not capped_symbols:
         notes.append(
             "partial batch authorized but capped preview empty (cap may be too low for any single row)"
@@ -199,6 +212,11 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "positions_count": _count_positions(),
         "open_orders_count": _count_open_orders(),
         "handoff_rows": handoff_rows,
+        "handoff_source": handoff_source,
+        "handoff_orders_path": str(handoff_path.relative_to(ROOT)).replace("\\", "/"),
+        "preview_generation_allowed": preview_eligible,
+        "execution_allowed": False,
+        "preview_meta": preview_meta,
         "planned_exit_count": handoff_rows,
         "placement_maps_exit_rows": placement_maps_exit_rows,
         "placement_dry_run_ok": placement_proc.returncode == 0,

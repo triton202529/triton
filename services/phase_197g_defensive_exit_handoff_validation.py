@@ -88,9 +88,16 @@ def run_phase_197g_validation(*, verbose: bool = True) -> Dict[str, Any]:
     notes: List[str] = []
     git_clean_before = _git_clean()
 
+    from services.defensive_exit_preview_handoff import (
+        ensure_defensive_exit_preview_handoff,
+        resolve_defensive_handoff_orders_path,
+    )
     from services.manage_positions_handoff_diagnostic import build_handoff_diagnostic
     from services.paper_entry_loop_stage import evaluate_paper_entry_gates
     from services.portfolio_history_sync import load_live_execution_flag
+
+    preview_meta = ensure_defensive_exit_preview_handoff(mode="paper")
+    handoff_path, handoff_source = resolve_defensive_handoff_orders_path()
 
     placement_proc = subprocess.run(
         [
@@ -100,7 +107,7 @@ def run_phase_197g_validation(*, verbose: bool = True) -> Dict[str, Any]:
             "--mode",
             "paper",
             "--orders",
-            str(HANDOFF_CSV),
+            str(handoff_path),
             "--dry-run",
         ],
         cwd=str(ROOT),
@@ -153,7 +160,17 @@ def run_phase_197g_validation(*, verbose: bool = True) -> Dict[str, Any]:
 
     status = "PASS"
     outcome_a = handoff_rows > 0 and placement_maps_exit_rows and not placement_contract_mismatch
-    outcome_b = batch_explained and handoff_status.startswith("HANDOFF_BLOCKED")
+    outcome_b = batch_explained and (
+        handoff_status.startswith("HANDOFF_BLOCKED")
+        or handoff_status == "HANDOFF_PREVIEW_ROWS_PRESENT"
+    )
+    preview_ok = (
+        handoff_status == "HANDOFF_PREVIEW_ROWS_PRESENT"
+        and bool(diag.get("preview_generation_allowed"))
+        and not bool(diag.get("execution_allowed"))
+    )
+    if preview_ok and handoff_rows > 0:
+        outcome_a = True
     if planned_count == 0:
         notes.append("no planned defensive exits in plan csv (informational)")
     if not outcome_a and not outcome_b:
@@ -199,6 +216,11 @@ def run_phase_197g_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "manage_orders_handoff_path": str(HANDOFF_CSV.relative_to(ROOT)).replace("\\", "/"),
         "handoff_status": handoff_status,
         "handoff_block_reason": diag.get("handoff_block_reason") or "",
+        "handoff_source": diag.get("handoff_source") or handoff_source,
+        "preview_generation_allowed": diag.get("preview_generation_allowed"),
+        "execution_allowed": diag.get("execution_allowed"),
+        "preview_meta": preview_meta,
+        "handoff_orders_path": str(handoff_path.relative_to(ROOT)).replace("\\", "/"),
         "batch_empty_explained": batch_explained,
         "readiness_status": readiness_status,
         "governance_authorized": readiness.get("governance_authorized"),

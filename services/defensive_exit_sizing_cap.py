@@ -98,6 +98,16 @@ def _load_plan_priority() -> Dict[str, Dict[str, Any]]:
 
 
 def load_defensive_exit_handoff_orders() -> List[Dict[str, Any]]:
+    try:
+        from services.defensive_exit_preview_handoff import (
+            load_defensive_handoff_orders_for_analysis,
+        )
+
+        orders, _source = load_defensive_handoff_orders_for_analysis()
+        if orders:
+            return orders
+    except Exception:
+        pass
     if not HANDOFF_CSV.is_file():
         return []
     try:
