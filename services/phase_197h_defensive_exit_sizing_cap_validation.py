@@ -157,8 +157,18 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
     live_permitted = bool(readiness.get("live_execution_permitted", True))
 
     preview = sizing.get("capped_preview_cli_cap") or sizing.get("capped_preview") or {}
+    runtime_preview = sizing.get("capped_preview_runtime_cap") or {}
     capped_symbols = list(preview.get("capped_preview_symbols") or [])
-    deferred_symbols = list(preview.get("deferred_symbols") or [])
+    deferred_symbols = list(
+        runtime_preview.get("deferred_symbols") or preview.get("deferred_symbols") or []
+    )
+    if not capped_symbols:
+        capped_symbols = list(runtime_preview.get("capped_preview_symbols") or [])
+    if sizing.get("partial_preview_available") and sizing.get("partial_preview_symbol"):
+        if str(sizing.get("partial_preview_symbol")).upper() not in {
+            str(s).upper() for s in capped_symbols
+        }:
+            capped_symbols = list(capped_symbols) + [str(sizing.get("partial_preview_symbol"))]
     partial_authorized = bool(sizing.get("partial_batch_authorized"))
 
     status = "PASS"
@@ -183,7 +193,7 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
         ):
             status = "FAIL"
             notes.append("cap_excess_amount not computed")
-    if partial_authorized and not capped_symbols:
+    if partial_authorized and not capped_symbols and not sizing.get("partial_preview_available"):
         notes.append(
             "partial batch authorized but capped preview empty (cap may be too low for any single row)"
         )
@@ -229,9 +239,21 @@ def run_phase_197h_validation(*, verbose: bool = True) -> Dict[str, Any]:
             "configured_batch_cap_manage_positions"
         ),
         "cap_excess_amount": sizing.get("cap_excess_amount"),
-        "capped_preview_available": bool(capped_symbols),
+        "capped_preview_available": bool(capped_symbols)
+        or bool(sizing.get("partial_preview_available")),
         "capped_preview_symbols": capped_symbols,
         "deferred_symbols": deferred_symbols,
+        "partial_preview_available": bool(sizing.get("partial_preview_available")),
+        "partial_preview_symbol": sizing.get("partial_preview_symbol"),
+        "partial_preview_qty": sizing.get("partial_preview_qty"),
+        "partial_preview_notional": sizing.get("partial_preview_notional"),
+        "partial_preview_classification": sizing.get("partial_preview_classification"),
+        "full_exit_notional": sizing.get("full_exit_notional"),
+        "full_exit_deferred_reason": sizing.get("full_exit_deferred_reason"),
+        "partial_preview_requires_operator_approval": bool(
+            sizing.get("partial_preview_requires_operator_approval")
+        ),
+        "partial_preview_analysis_only": True,
         "partial_batch_authorized": partial_authorized,
         "partial_batch_status": sizing.get("partial_batch_status"),
         "broker_orders_submitted": False,

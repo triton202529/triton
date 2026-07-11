@@ -296,7 +296,7 @@ def analyze_defensive_exit_sizing(
         else {}
     )
 
-    return {
+    analysis = {
         "timestamp": _utc_now_iso(),
         "phase": "197H",
         "handoff_rows": len(orders),
@@ -322,7 +322,18 @@ def analyze_defensive_exit_sizing(
         "capped_preview_cli_cap": cli_preview,
         "capped_preview_runtime_cap": runtime_preview,
         "placement_parse": block,
+        "broker_orders_submitted": False,
     }
+    try:
+        from services.partial_defensive_exit_preview import (
+            enrich_sizing_analysis_with_partial_preview,
+        )
+
+        analysis = enrich_sizing_analysis_with_partial_preview(analysis)
+    except Exception:
+        analysis.setdefault("partial_preview_available", False)
+        analysis.setdefault("partial_preview_analysis_only", True)
+    return analysis
 
 
 def write_capped_batch_preview(analysis: Dict[str, Any]) -> Path:

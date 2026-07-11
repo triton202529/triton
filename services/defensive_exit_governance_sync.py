@@ -165,6 +165,23 @@ def build_defensive_exit_approval_sync(
         or 0.0
     )
     partial_authorized = bool(preview_doc.get("partial_batch_authorized"))
+    partial_preview_available = bool(preview_doc.get("partial_preview_available")) or bool(
+        capped_block.get("partial_defensive_exit_preview")
+    )
+    if not capped_symbols and partial_preview_available:
+        # Prefer runtime-enriched symbols / top-level partial fields.
+        sym = preview_doc.get("partial_preview_symbol") or (
+            (preview_doc.get("partial_defensive_exit_preview") or {}).get("partial_preview_symbol")
+        )
+        if sym:
+            capped_symbols = [str(sym).upper()]
+            capped_notional = float(
+                preview_doc.get("partial_preview_notional")
+                or (preview_doc.get("partial_defensive_exit_preview") or {}).get(
+                    "partial_preview_notional"
+                )
+                or capped_notional
+            )
 
     readiness = _read_json(READINESS_JSON)
     auth = _read_json(GOVERNANCE_AUTH_JSON)
@@ -186,7 +203,9 @@ def build_defensive_exit_approval_sync(
     approval_block_reason = ""
     approval_source = "none"
 
-    preview_exists = bool(preview_doc) and bool(capped_symbols or deferred_symbols)
+    preview_exists = bool(preview_doc) and bool(
+        capped_symbols or deferred_symbols or partial_preview_available
+    )
 
     if not preview_exists:
         approval_sync_status = "CAPPED_DEFENSIVE_BATCH_AVAILABLE"
@@ -197,11 +216,16 @@ def build_defensive_exit_approval_sync(
             preview_doc.get("partial_batch_status") or "partial_defensive_batch_not_authorized"
         )
     elif not capped_symbols:
-        approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_NOTIONAL_CAP"
-        approval_block_reason = (
-            f"no_symbols_fit_cap cap={configured_cap} full_batch="
-            f"{preview_doc.get('batch_notional_estimate')}"
-        )
+        if partial_preview_available:
+            approval_sync_status = "CAPPED_DEFENSIVE_BATCH_AVAILABLE"
+            approval_block_reason = "operator_paper_approval_required_partial_defensive_exit"
+            approval_source = "partial_defensive_exit_preview"
+        else:
+            approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_NOTIONAL_CAP"
+            approval_block_reason = (
+                f"no_symbols_fit_cap cap={configured_cap} full_batch="
+                f"{preview_doc.get('batch_notional_estimate')}"
+            )
     elif in_flight_overlap:
         approval_sync_status = "CAPPED_DEFENSIVE_BATCH_BLOCKED_BY_IN_FLIGHT_ORDERS"
         approval_block_reason = f"in_flight_sell_orders symbols={','.join(in_flight_overlap)}"
@@ -338,6 +362,20 @@ def build_defensive_exit_approval_sync(
         "approval_block_reason": approval_block_reason,
         "approval_source": approval_source,
         "eligible_for_paper_execution": eligible_for_paper_execution,
+        "partial_preview_available": partial_preview_available,
+        "partial_preview_symbol": preview_doc.get("partial_preview_symbol"),
+        "partial_preview_qty": preview_doc.get("partial_preview_qty"),
+        "partial_preview_notional": preview_doc.get("partial_preview_notional"),
+        "partial_preview_classification": preview_doc.get("partial_preview_classification"),
+        "full_exit_notional": preview_doc.get("full_exit_notional"),
+        "full_exit_deferred_reason": preview_doc.get("full_exit_deferred_reason"),
+        "partial_preview_requires_operator_approval": (
+            True
+            if partial_preview_available
+            else bool(preview_doc.get("partial_preview_requires_operator_approval"))
+        ),
+        "partial_preview_analysis_only": True,
+        "broker_orders_submitted": False,
         "preview_generation_allowed": (
             is_orange_degraded_preview_only_block(readiness) if preview_exists else False
         ),
