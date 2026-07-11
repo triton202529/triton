@@ -151,6 +151,9 @@ def validate_creation_preconditions(
     broker_orders_submitted: bool,
     exits_executed: int,
     trims_executed: int,
+    partial_mode: bool = False,
+    partial_symbols: Optional[List[str]] = None,
+    dry_run: bool = False,
 ) -> Tuple[str, List[str]]:
     reasons: List[str] = []
 
@@ -176,15 +179,29 @@ def validate_creation_preconditions(
         reasons.append(f"197V_review_state={v197.get('review_state')}")
     if u197.get("status") != "PASS":
         reasons.append(f"197U_status={u197.get('status')}")
-    if v197.get("governance_review_state_197n") not in (
+
+    allowed_197n = {
         "GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED",
         None,
-    ):
-        reasons.append(f"197N_state={v197.get('governance_review_state_197n')}")
-    if v197.get("market_hours_recheck_state_197o") not in (
+    }
+    allowed_197o = {
         "MARKET_HOURS_RECHECK_BLOCKED_BY_OPERATOR_APPROVAL",
         None,
-    ):
+    }
+    # Dry-run / after-hours contract validation may see market-closed review states.
+    if dry_run:
+        allowed_197n |= {
+            "GOV_REVIEW_BLOCKED_BY_MARKET_CLOSED",
+            "GOV_REVIEW_CURRENT_OPERATOR_APPROVAL_REQUIRED",
+        }
+        allowed_197o |= {
+            "MARKET_HOURS_RECHECK_WAITING_FOR_MARKET_OPEN",
+            "MARKET_HOURS_RECHECK_BLOCKED_BY_OPERATOR_APPROVAL",
+        }
+
+    if v197.get("governance_review_state_197n") not in allowed_197n:
+        reasons.append(f"197N_state={v197.get('governance_review_state_197n')}")
+    if v197.get("market_hours_recheck_state_197o") not in allowed_197o:
         reasons.append(f"197O_state={v197.get('market_hours_recheck_state_197o')}")
     if soak.get("status") != "PASS":
         reasons.append(f"197T_status={soak.get('status')}")
@@ -213,18 +230,36 @@ def validate_creation_preconditions(
     if preview_hash != str(v197.get("source_preview_hash") or ""):
         return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + ["preview_hash_mismatch"]
 
-    packet_symbols = _norm_symbols(packet.get("capped_symbols"))
     review_norm = _norm_symbols(review_symbols)
-    if packet_symbols != review_norm:
-        return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + [
-            "capped_symbols_mismatch"
-        ]
-
     deferred_norm = _norm_symbols(deferred_symbols)
-    if set(review_norm) & set(deferred_norm):
-        return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + [
-            "deferred_symbols_in_approved_set"
-        ]
+    partial_norm = _norm_symbols(partial_symbols or [])
+
+    if partial_mode:
+        expected_partial = _norm_symbols(
+            packet.get("partial_approved_symbols")
+            or list((packet.get("approved_quantities") or {}).keys())
+            or partial_norm
+        )
+        if review_norm != expected_partial:
+            return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + [
+                f"partial_symbols_mismatch review={review_norm} expected={expected_partial}"
+            ]
+        # Full-exit deferred symbols may overlap the partial approval symbol.
+        overlap = set(review_norm) & set(deferred_norm)
+        if overlap - set(partial_norm or review_norm):
+            return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + [
+                "unexpected_deferred_overlap"
+            ]
+    else:
+        packet_symbols = _norm_symbols(packet.get("capped_symbols"))
+        if packet_symbols != review_norm:
+            return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + [
+                "capped_symbols_mismatch"
+            ]
+        if set(review_norm) & set(deferred_norm):
+            return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + [
+                "deferred_symbols_in_approved_set"
+            ]
 
     if batch_notional > batch_cap:
         return PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH, reasons + [
@@ -248,16 +283,19 @@ def build_paper_approval_artifact(
     full_handoff_notional: float,
     open_orders_count: int,
     live_blocked: bool,
+    partial_fields: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     from services.defensive_exit_operator_paper_approval import OPERATOR_DECISION_APPROVE
+    from services.partial_defensive_exit_preview import PREVIEW_TYPE
 
     now = _utc_now()
     expires = now + timedelta(minutes=TTL_MINUTES)
     packet_id = str(packet.get("packet_id") or "")
     preview_hash = str(packet.get("source_preview_hash") or "")
     max_notional = min(float(batch_notional), float(batch_cap))
+    partial_fields = partial_fields or {}
 
-    contract = {
+    contract: Dict[str, Any] = {
         "approval_id": str(uuid.uuid4()),
         "approved_at": now.isoformat(),
         "expires_at": expires.isoformat(),
@@ -295,6 +333,24 @@ def build_paper_approval_artifact(
         "warning": EXECUTION_WARNING,
         "phase": "197W",
     }
+    if partial_fields.get("partial_preview_available"):
+        contract.update(
+            {
+                "preview_type": PREVIEW_TYPE,
+                "approved_action": "PARTIAL_EXIT",
+                "approved_quantities": partial_fields.get("approved_quantities")
+                or {str(approved_symbols[0]): int(partial_fields.get("partial_qty") or 0)},
+                "partial_qty": partial_fields.get("partial_qty"),
+                "full_qty": partial_fields.get("full_qty"),
+                "remaining_qty_after_preview": partial_fields.get("remaining_qty_after_preview"),
+                "full_exit_deferred": True,
+                "full_exit_deferred_reason": partial_fields.get("full_exit_deferred_reason"),
+                "acknowledgement_partial_exit": True,
+                "acknowledgement_full_exit_deferred": True,
+                "acknowledgement_no_broker_authorization": True,
+                "test_only": False,
+            }
+        )
     return contract
 
 
@@ -326,7 +382,12 @@ def _run_paper_entry_dry_run() -> Tuple[str, str]:
     return gate, reason
 
 
-def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[str, Any]:
+def run_phase_197w_create(
+    *,
+    verbose: bool = True,
+    force: bool = False,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
     notes: List[str] = []
     git_clean_before = _git_clean()
 
@@ -335,6 +396,7 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
     soak = _read_json(SOAK_JSON)
     s197 = _read_json(S197_JSON)
     packet = _read_json(OPERATOR_PACKET_JSON)
+    preview_doc = _read_json(PREVIEW_JSON)
 
     from services.defensive_exit_governance_review_criteria import (
         evaluate_governance_review_criteria,
@@ -344,17 +406,37 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         validate_operator_approval_contract,
         write_paper_only_defensive_exit_approval,
     )
+    from services.partial_defensive_exit_preview import extract_partial_approval_contract_fields
 
     criteria = evaluate_governance_review_criteria(broker_snapshot_ok=True)
     live_blocked = bool(criteria.get("live_blocked"))
     open_orders_count = int(criteria.get("open_orders_count") or 0)
     exits_executed, trims_executed, broker_orders_submitted = _soak_execution(soak)
 
-    approved_symbols = _norm_symbols(v197.get("symbols_to_exit") or packet.get("capped_symbols"))
-    deferred_symbols = _norm_symbols(v197.get("deferred_symbols") or packet.get("deferred_symbols"))
-    batch_notional = float(v197.get("batch_notional") or packet.get("capped_notional") or 0.0)
-    batch_cap = float(v197.get("batch_notional_cap") or packet.get("configured_cap") or 0.0)
-    full_handoff = float(v197.get("batch_notional_full") or 0.0)
+    partial_fields = extract_partial_approval_contract_fields(preview_doc)
+    partial_mode = bool(partial_fields.get("partial_preview_available"))
+
+    if partial_mode:
+        approved_symbols = _norm_symbols(partial_fields.get("approved_symbols"))
+        deferred_symbols = _norm_symbols(
+            list(packet.get("deferred_symbols") or v197.get("deferred_symbols") or [])
+            + ([partial_fields.get("symbol")] if partial_fields.get("symbol") else [])
+        )
+        batch_notional = float(partial_fields.get("estimated_notional") or 0.0)
+        batch_cap = float(v197.get("batch_notional_cap") or packet.get("configured_cap") or 0.0)
+        full_handoff = float(
+            partial_fields.get("full_exit_notional") or v197.get("batch_notional_full") or 0.0
+        )
+    else:
+        approved_symbols = _norm_symbols(
+            v197.get("symbols_to_exit") or packet.get("capped_symbols")
+        )
+        deferred_symbols = _norm_symbols(
+            v197.get("deferred_symbols") or packet.get("deferred_symbols")
+        )
+        batch_notional = float(v197.get("batch_notional") or packet.get("capped_notional") or 0.0)
+        batch_cap = float(v197.get("batch_notional_cap") or packet.get("configured_cap") or 0.0)
+        full_handoff = float(v197.get("batch_notional_full") or 0.0)
 
     final_state, block_reasons = validate_creation_preconditions(
         v197=v197,
@@ -371,6 +453,9 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         broker_orders_submitted=broker_orders_submitted,
         exits_executed=exits_executed,
         trims_executed=trims_executed,
+        partial_mode=partial_mode,
+        partial_symbols=approved_symbols,
+        dry_run=dry_run,
     )
 
     approval_created = False
@@ -380,6 +465,8 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
     approval_artifact_state = None
     approval_status = None
     contract: Dict[str, Any] = {}
+    dry_run_validated = False
+    temp_contract_path: Optional[Path] = None
 
     existing_states = {
         PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN,
@@ -398,16 +485,53 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
             full_handoff_notional=full_handoff,
             open_orders_count=open_orders_count,
             live_blocked=live_blocked,
+            partial_fields=partial_fields if partial_mode else None,
         )
-        write_paper_only_defensive_exit_approval(contract)
-        approval_created = True
-        ap_status, ap_reason, _ = validate_operator_approval_contract(broker_snapshot_ok=True)
-        approval_valid = ap_status == APPROVAL_STATUS_VALID
-        approval_status = ap_status
-        if not approval_valid:
-            final_state = PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH
-            block_reasons.append(f"post_write_validation_failed={ap_reason}")
-            notes.append(ap_reason)
+        if dry_run:
+            # Validate via temp fixture path; never leave governance approval artifact.
+            RESULTS.mkdir(parents=True, exist_ok=True)
+            temp_contract_path = RESULTS / "phase_197w_partial_approval_dry_run_contract.json"
+            contract = dict(contract)
+            contract["test_only"] = True
+            contract["dry_run"] = True
+            temp_contract_path.write_text(
+                json.dumps(contract, indent=2, default=str), encoding="utf-8"
+            )
+            ap_status, ap_reason, _ = validate_operator_approval_contract(
+                broker_snapshot_ok=True,
+                contract_path=temp_contract_path,
+            )
+            approval_valid = ap_status == APPROVAL_STATUS_VALID
+            approval_status = ap_status
+            dry_run_validated = approval_valid
+            approval_created = False
+            try:
+                temp_contract_path.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except TypeError:
+                if temp_contract_path.is_file():
+                    temp_contract_path.unlink()
+            except Exception:
+                pass
+            if REAL_APPROVAL_PATH.is_file():
+                status_note = "dry_run_left_real_approval_present"
+                notes.append(status_note)
+                final_state = PAPER_OPERATOR_APPROVAL_BLOCKED_EXISTING_ARTIFACT
+            if not approval_valid:
+                final_state = PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH
+                block_reasons.append(f"dry_run_validation_failed={ap_reason}")
+                notes.append(ap_reason)
+            else:
+                notes.append("dry_run_partial_contract_validated_no_artifact_written")
+        else:
+            write_paper_only_defensive_exit_approval(contract)
+            approval_created = True
+            ap_status, ap_reason, _ = validate_operator_approval_contract(broker_snapshot_ok=True)
+            approval_valid = ap_status == APPROVAL_STATUS_VALID
+            approval_status = ap_status
+            if not approval_valid:
+                final_state = PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH
+                block_reasons.append(f"post_write_validation_failed={ap_reason}")
+                notes.append(ap_reason)
     elif final_state in existing_states:
         from services.paper_operator_approval_artifact_state import (
             classify_paper_operator_approval_artifact,
@@ -441,6 +565,13 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         status = "PASS_SAFE_BLOCKED"
     elif final_state == PAPER_OPERATOR_APPROVAL_INVALID_CLEANUP_REQUIRED:
         status = "FAIL"
+    elif (
+        dry_run
+        and dry_run_validated
+        and final_state == PAPER_OPERATOR_APPROVAL_CREATED_EXECUTION_NOT_RUN
+    ):
+        status = "PASS"
+        final_state = "PAPER_OPERATOR_APPROVAL_DRY_RUN_VALIDATED_EXECUTION_NOT_RUN"
     elif final_state != PAPER_OPERATOR_APPROVAL_CREATED_EXECUTION_NOT_RUN:
         if final_state == PAPER_OPERATOR_APPROVAL_VALID_CURRENT_EXECUTION_NOT_RUN:
             status = "PASS"
@@ -449,6 +580,12 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
     if approval_created and not approval_valid:
         status = "FAIL"
         notes.append("approval artifact not valid after write")
+    if (
+        dry_run
+        and not dry_run_validated
+        and final_state.startswith("PAPER_OPERATOR_APPROVAL_CREATED")
+    ):
+        status = "FAIL"
     if criteria_after.get("eligible_for_execution"):
         status = "FAIL"
         notes.append("eligible_for_execution must remain false")
@@ -458,6 +595,9 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         status = "FAIL"
     if broker_orders_submitted or exits_executed != 0 or trims_executed != 0:
         status = "FAIL"
+    if dry_run and REAL_APPROVAL_PATH.is_file():
+        status = "FAIL"
+        notes.append("dry_run_must_not_leave_approval_artifact")
 
     payload: Dict[str, Any] = {
         "phase": "197W",
@@ -467,6 +607,11 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         "block_reasons": block_reasons,
         "previous_phase": PREVIOUS_PHASE,
         "previous_commit": PREVIOUS_COMMIT,
+        "dry_run": dry_run,
+        "dry_run_validated": dry_run_validated,
+        "partial_mode": partial_mode,
+        "preview_type": contract.get("preview_type") if partial_mode else None,
+        "approved_quantities": contract.get("approved_quantities") if partial_mode else None,
         "approval_artifact_created": approval_created,
         "approval_artifact_path": (
             str(REAL_APPROVAL_PATH.relative_to(ROOT)).replace("\\", "/")
@@ -488,11 +633,12 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         "batch_notional": batch_notional,
         "batch_notional_cap": batch_cap,
         "full_handoff_notional": full_handoff,
+        "full_exit_deferred": bool(partial_mode),
         "expires_at": contract.get("expires_at"),
         "ttl_minutes": TTL_MINUTES,
         "open_orders_count": open_orders_count,
         "live_blocked": live_blocked,
-        "broker_orders_submitted": broker_orders_submitted,
+        "broker_orders_submitted": False,
         "exits_executed": exits_executed,
         "trims_executed": trims_executed,
         "eligible_for_execution": bool(criteria_after.get("eligible_for_execution")),
@@ -502,6 +648,7 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         "operator_authorization_phrase": OPERATOR_AUTHORIZATION_PHRASE,
         "required_next_phase_for_execution": REQUIRED_NEXT_PHASE,
         "warning": EXECUTION_WARNING,
+        "broker_authorization_artifact_created": False,
         "contract": contract,
         "git_branch": _git_branch(),
         "git_clean_before_validation": git_clean_before,
@@ -513,7 +660,8 @@ def run_phase_197w_create(*, verbose: bool = True, force: bool = False) -> Dict[
         print(f"[197W-APPROVAL] wrote {OUTPUT_JSON.relative_to(ROOT)}")
         print(
             f"[197W-APPROVAL] status={status} final_state={final_state} "
-            f"created={approval_created} valid={approval_valid} symbols={len(approved_symbols)}"
+            f"created={approval_created} valid={approval_valid} symbols={len(approved_symbols)} "
+            f"dry_run={dry_run} partial_mode={partial_mode}"
         )
     return payload
 
@@ -524,8 +672,13 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument(
         "--force", action="store_true", help="Reserved; creation still requires preconditions"
     )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate partial/paper approval contract without writing governance artifact",
+    )
     args = ap.parse_args(argv)
-    result = run_phase_197w_create(verbose=not args.quiet, force=args.force)
+    result = run_phase_197w_create(verbose=not args.quiet, force=args.force, dry_run=args.dry_run)
     return 0 if result.get("status") in ("PASS", "PASS_SAFE_BLOCKED") else 1
 
 

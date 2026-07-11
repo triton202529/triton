@@ -396,3 +396,138 @@ def enrich_sizing_analysis_with_partial_preview(analysis: Dict[str, Any]) -> Dic
         )
         out["capped_preview_available"] = True
     return out
+
+
+def extract_partial_approval_contract_fields(
+    preview_doc: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Normalize partial defensive-exit fields for operator packet / approval / dry-run.
+    """
+    preview_doc = (
+        preview_doc
+        if preview_doc is not None
+        else _read_json(RESULTS / "defensive_exit_capped_batch_preview.json")
+    )
+    nested = preview_doc.get("partial_defensive_exit_preview") or {}
+    runtime = preview_doc.get("capped_preview_runtime_cap") or {}
+    order = nested.get("partial_preview_order") or {}
+
+    available = bool(
+        preview_doc.get("partial_preview_available")
+        or nested.get("partial_preview_available")
+        or runtime.get("partial_defensive_exit_preview")
+    )
+    symbol = str(
+        preview_doc.get("partial_preview_symbol")
+        or nested.get("partial_preview_symbol")
+        or runtime.get("partial_preview_symbol")
+        or order.get("symbol")
+        or ""
+    ).upper()
+    partial_qty = int(
+        _safe_float(
+            preview_doc.get("partial_preview_qty")
+            or nested.get("partial_preview_qty")
+            or runtime.get("partial_preview_qty")
+            or order.get("qty")
+        )
+    )
+    full_qty = int(
+        _safe_float(
+            order.get("full_position_qty")
+            or (nested.get("partial_preview_order") or {}).get("full_position_qty")
+        )
+    )
+    if full_qty <= 0 and symbol:
+        held = _held_symbols()
+        # Fall back to positions snapshot qty.
+        try:
+            import pandas as pd
+
+            if POSITIONS_CSV.is_file():
+                df = pd.read_csv(POSITIONS_CSV, low_memory=False)
+                sym_col = "symbol" if "symbol" in df.columns else "ticker"
+                row = df[df[sym_col].astype(str).str.upper() == symbol]
+                if not row.empty:
+                    full_qty = int(_safe_float(row.iloc[0].get("qty")))
+        except Exception:
+            pass
+    remaining_qty = int(
+        _safe_float(
+            nested.get("remaining_qty")
+            or order.get("remaining_qty")
+            or max(0, full_qty - partial_qty)
+        )
+    )
+    notional = round(
+        _safe_float(
+            preview_doc.get("partial_preview_notional")
+            or nested.get("partial_preview_notional")
+            or runtime.get("partial_preview_notional")
+            or order.get("notional")
+        ),
+        2,
+    )
+    classification = str(
+        preview_doc.get("partial_preview_classification")
+        or nested.get("partial_preview_classification")
+        or ""
+    )
+    scenario = str(nested.get("partial_preview_scenario") or order.get("scenario_name") or "")
+    full_exit_notional = _safe_float(
+        preview_doc.get("full_exit_notional") or nested.get("full_exit_notional")
+    )
+    full_exit_deferred_reason = str(
+        preview_doc.get("full_exit_deferred_reason")
+        or nested.get("full_exit_deferred_reason")
+        or runtime.get("full_exit_deferred_reason")
+        or ""
+    )
+    limit_price = _safe_float(order.get("limit_price"))
+
+    if not available or not symbol or partial_qty <= 0:
+        return {
+            "partial_preview_available": False,
+            "preview_type": None,
+            "approved_action": None,
+            "symbol": None,
+            "partial_qty": 0,
+            "full_qty": 0,
+            "remaining_qty_after_preview": 0,
+            "estimated_notional": 0.0,
+            "full_exit_deferred": False,
+            "full_exit_deferred_reason": None,
+            "approved_symbols": [],
+            "approved_quantities": {},
+            "broker_orders_submitted": False,
+        }
+
+    return {
+        "partial_preview_available": True,
+        "preview_type": PREVIEW_TYPE,
+        "approved_action": "PARTIAL_EXIT",
+        "symbol": symbol,
+        "partial_qty": partial_qty,
+        "full_qty": full_qty,
+        "remaining_qty_after_preview": remaining_qty,
+        "estimated_notional": notional,
+        "classification": classification,
+        "scenario": scenario,
+        "limit_price": limit_price,
+        "full_exit_notional": full_exit_notional,
+        "full_exit_deferred": True,
+        "full_exit_deferred_reason": full_exit_deferred_reason
+        or f"FULL_EXIT_EXCEEDS_CAP notional={full_exit_notional}",
+        "approved_symbols": [symbol],
+        "approved_quantities": {symbol: partial_qty},
+        "partial_preview_requires_operator_approval": True,
+        "partial_preview_analysis_only": True,
+        "acknowledgement_partial_exit": True,
+        "acknowledgement_full_exit_deferred": True,
+        "acknowledgement_live_blocked": True,
+        "acknowledgement_no_broker_authorization": True,
+        "paper_only": True,
+        "broker_orders_submitted": False,
+        "eligible_for_paper_execution": False,
+    }

@@ -329,38 +329,61 @@ def _render_markdown(review: Dict[str, Any]) -> str:
         f"- Highest drag symbol: **{review.get('highest_drag_symbol')}**",
         f"- Largest notional symbol (capped batch): **{review.get('largest_notional_symbol')}**",
         "",
-        "## Risk flags",
-        "",
-        f"- Handoff status: {review.get('handoff_status')}",
-        f"- Governance packet state: {review.get('governance_packet_state')}",
-        f"- 197N state: {review.get('governance_review_state_197n')}",
-        f"- 197O state: {review.get('market_hours_recheck_state_197o')}",
-        f"- Dispatch interlock: {review.get('dispatch_interlock_state')}",
-        f"- Open orders: {review.get('open_orders_count')}",
-        f"- Broker orders submitted (soak): {review.get('broker_orders_submitted')}",
-        f"- Exits executed (soak): {review.get('exits_executed')}",
-        f"- Trims executed (soak): {review.get('trims_executed')}",
-        "",
-        review.get("concentration_risk_note") or "",
-        "",
-        "## Runtime safety evidence",
-        "",
-        f"- 197U: {review.get('phase_197u_status')} / {review.get('governance_packet_state')}",
-        f"- 197T soak: {review.get('phase_197t_status')} / {review.get('soak_state')}",
-        f"- 197S interlock: {review.get('phase_197s_status')} / {review.get('post_interlock_runtime_state')}",
-        "",
-        "## Blocked until explicit approval",
-        "",
-        review.get("blocked_command_note") or BLOCKED_COMMAND_NOTE,
-        "",
-        f"**Forbidden unless explicitly approved:** `{FORBIDDEN_ARTIFACT}`",
-        "",
-        f"**Packet ID:** `{review.get('operator_packet_id')}`",
-        f"**Source preview hash:** `{review.get('source_preview_hash')}`",
-        "",
-        "## Operator decision options (informational only)",
-        "",
     ]
+    if review.get("partial_preview_available"):
+        lines.extend(
+            [
+                "## Partial defensive exit (GLD)",
+                "",
+                f"- preview_type: **{review.get('preview_type')}**",
+                f"- symbol: **{review.get('partial_preview_symbol')}**",
+                f"- approved_action: **{review.get('approved_action')}**",
+                f"- partial_qty: **{review.get('partial_qty')}**",
+                f"- full_qty: **{review.get('full_qty')}**",
+                f"- remaining_qty_after_preview: **{review.get('remaining_qty_after_preview')}**",
+                f"- estimated_notional: **${float(review.get('estimated_notional') or 0):,.2f}**",
+                f"- full_exit_deferred: **{review.get('full_exit_deferred')}**",
+                f"- full_exit_deferred_reason: {review.get('full_exit_deferred_reason')}",
+                f"- operator approval required: **{review.get('operator_approval_required')}**",
+                f"- broker_orders_submitted: **{review.get('broker_orders_submitted')}**",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Risk flags",
+            "",
+            f"- Handoff status: {review.get('handoff_status')}",
+            f"- Governance packet state: {review.get('governance_packet_state')}",
+            f"- 197N state: {review.get('governance_review_state_197n')}",
+            f"- 197O state: {review.get('market_hours_recheck_state_197o')}",
+            f"- Dispatch interlock: {review.get('dispatch_interlock_state')}",
+            f"- Open orders: {review.get('open_orders_count')}",
+            f"- Broker orders submitted (soak): {review.get('broker_orders_submitted')}",
+            f"- Exits executed (soak): {review.get('exits_executed')}",
+            f"- Trims executed (soak): {review.get('trims_executed')}",
+            "",
+            review.get("concentration_risk_note") or "",
+            "",
+            "## Runtime safety evidence",
+            "",
+            f"- 197U: {review.get('phase_197u_status')} / {review.get('governance_packet_state')}",
+            f"- 197T soak: {review.get('phase_197t_status')} / {review.get('soak_state')}",
+            f"- 197S interlock: {review.get('phase_197s_status')} / {review.get('post_interlock_runtime_state')}",
+            "",
+            "## Blocked until explicit approval",
+            "",
+            review.get("blocked_command_note") or BLOCKED_COMMAND_NOTE,
+            "",
+            f"**Forbidden unless explicitly approved:** `{FORBIDDEN_ARTIFACT}`",
+            "",
+            f"**Packet ID:** `{review.get('operator_packet_id')}`",
+            f"**Source preview hash:** `{review.get('source_preview_hash')}`",
+            "",
+            "## Operator decision options (informational only)",
+            "",
+        ]
+    )
     for opt in review.get("operator_decision_options") or []:
         if isinstance(opt, dict):
             lines.append(f"- **{opt.get('decision')}**: {opt.get('description')}")
@@ -396,6 +419,43 @@ def run_phase_197v_review(*, verbose: bool = True) -> Dict[str, Any]:
         GOV_REVIEW_BLOCKED_BY_STALE_PACKET,
         evaluate_governance_review_criteria,
     )
+    from services.defensive_exit_operator_paper_approval import (
+        compute_capped_preview_hash,
+        write_operator_approval_packet,
+    )
+    from services.partial_defensive_exit_preview import extract_partial_approval_contract_fields
+
+    partial = extract_partial_approval_contract_fields(preview_doc)
+    # Merge partial contract fields onto the existing packet without rotating packet_id.
+    if partial.get("partial_preview_available") and packet:
+        packet = dict(packet)
+        # Rebind hash to partial-aware preview identity used by 197W/197X.
+        packet["source_preview_hash"] = compute_capped_preview_hash(preview_doc)
+        packet.update(
+            {
+                "preview_type": partial.get("preview_type"),
+                "approved_action": partial.get("approved_action"),
+                "partial_preview_available": True,
+                "partial_preview_symbol": partial.get("symbol"),
+                "partial_qty": partial.get("partial_qty"),
+                "full_qty": partial.get("full_qty"),
+                "remaining_qty_after_preview": partial.get("remaining_qty_after_preview"),
+                "partial_estimated_notional": partial.get("estimated_notional"),
+                "partial_preview_classification": partial.get("classification"),
+                "partial_preview_scenario": partial.get("scenario"),
+                "full_exit_deferred": True,
+                "full_exit_deferred_reason": partial.get("full_exit_deferred_reason"),
+                "full_exit_notional": partial.get("full_exit_notional"),
+                "approved_quantities": partial.get("approved_quantities"),
+                "partial_approved_symbols": partial.get("approved_symbols"),
+                "acknowledgement_partial_exit": True,
+                "acknowledgement_full_exit_deferred": True,
+                "acknowledgement_no_broker_authorization": True,
+                "partial_preview_requires_operator_approval": True,
+                "operator_approval_required": True,
+            }
+        )
+        write_operator_approval_packet(packet)
 
     criteria = evaluate_governance_review_criteria(
         broker_snapshot_ok=True,
@@ -489,7 +549,11 @@ def run_phase_197v_review(*, verbose: bool = True) -> Dict[str, Any]:
         "live_block_reason": criteria.get("live_block_reason"),
         "real_approval_artifact_exists": real_approval_exists,
         "eligible_for_execution": eligible_for_execution,
-        "operator_approval_required": bool(packet.get("approval_required", True)),
+        "operator_approval_required": bool(
+            packet.get("approval_required", True)
+            or packet.get("operator_approval_required", True)
+            or partial.get("partial_preview_requires_operator_approval", True)
+        ),
         "operator_packet_current": packet_current,
         "operator_packet_id": packet.get("packet_id"),
         "source_preview_hash": packet.get("source_preview_hash")
@@ -509,11 +573,31 @@ def run_phase_197v_review(*, verbose: bool = True) -> Dict[str, Any]:
         "execution_prerequisites": packet.get("execution_prerequisites"),
         "review_markdown_path": str(OUTPUT_MD.relative_to(ROOT)).replace("\\", "/"),
         **analytics,
+        "partial_preview_available": bool(partial.get("partial_preview_available")),
+        "preview_type": partial.get("preview_type") or packet.get("preview_type"),
+        "approved_action": partial.get("approved_action") or packet.get("approved_action"),
+        "partial_preview_symbol": partial.get("symbol") or packet.get("partial_preview_symbol"),
+        "partial_qty": partial.get("partial_qty") or packet.get("partial_qty"),
+        "full_qty": partial.get("full_qty") or packet.get("full_qty"),
+        "remaining_qty_after_preview": partial.get("remaining_qty_after_preview")
+        or packet.get("remaining_qty_after_preview"),
+        "estimated_notional": partial.get("estimated_notional")
+        or packet.get("partial_estimated_notional"),
+        "full_exit_deferred": bool(
+            partial.get("full_exit_deferred") or packet.get("full_exit_deferred")
+        ),
+        "full_exit_deferred_reason": partial.get("full_exit_deferred_reason")
+        or packet.get("full_exit_deferred_reason"),
+        "approved_quantities": partial.get("approved_quantities")
+        or packet.get("approved_quantities"),
         "git_branch": _git_branch(),
         "git_clean_before_validation": git_clean_before,
         "git_clean_after_validation": _git_clean(),
         "notes": notes,
     }
+
+    if partial.get("partial_preview_available"):
+        payload["broker_orders_submitted"] = False
 
     if n197_state == GOV_REVIEW_BLOCKED_BY_STALE_PACKET:
         status = "FAIL"
@@ -531,6 +615,14 @@ def run_phase_197v_review(*, verbose: bool = True) -> Dict[str, Any]:
             f"symbols={len(payload.get('symbols_to_exit') or [])} "
             f"approval_required={payload.get('operator_approval_required')}"
         )
+        if payload.get("partial_preview_available"):
+            print(
+                f"[197V-OPERATOR-REVIEW] preview_type={payload.get('preview_type')} "
+                f"symbol={payload.get('partial_preview_symbol')} "
+                f"partial_qty={payload.get('partial_qty')} "
+                f"full_exit_deferred={payload.get('full_exit_deferred')} "
+                f"broker_orders_submitted={payload.get('broker_orders_submitted')}"
+            )
     return payload
 
 

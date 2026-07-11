@@ -23,8 +23,10 @@ PROJECTED_ORDERS_CSV = RESULTS / "phase_197x_projected_paper_orders.csv"
 APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
 PREVIEW_JSON = RESULTS / "defensive_exit_capped_batch_preview.json"
 V197_JSON = RESULTS / "phase_197v_operator_approval_packet_review.json"
+W197_JSON = RESULTS / "phase_197w_create_paper_operator_approval_artifact.json"
 POSITIONS_CSV = RESULTS / "positions_snapshot.csv"
 OPEN_ORDERS_CSV = RESULTS / "open_orders_snapshot.csv"
+BROKER_AUTH_PATH = GOVERNANCE / "operator_paper_broker_execution_authorization.json"
 PREVIOUS_COMMIT = "bdd044c6"
 PREVIOUS_PHASE = "197W-FIX2"
 
@@ -155,16 +157,38 @@ def _build_projected_orders(
     preview_block: Dict[str, Any],
     contract: Dict[str, Any],
     positions: Dict[str, Dict[str, Any]],
+    preview_doc: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     notes: List[str] = []
     preview_orders = list(preview_block.get("capped_preview_orders") or [])
     preview_symbols = _norm_symbols(preview_block.get("capped_preview_symbols"))
-    if preview_symbols != approved_symbols:
+    approved_quantities_raw = contract.get("approved_quantities") or {}
+    approved_quantities: Dict[str, int] = {}
+    for sym, qty in (approved_quantities_raw or {}).items():
+        try:
+            approved_quantities[str(sym).strip().upper()] = int(float(qty))
+        except (TypeError, ValueError):
+            notes.append(f"invalid_approved_quantity={sym}")
+
+    is_partial = str(
+        contract.get("preview_type") or ""
+    ).upper() == "PARTIAL_DEFENSIVE_EXIT_PREVIEW" or bool(approved_quantities)
+
+    if not is_partial and preview_symbols != approved_symbols:
         notes.append(
             f"preview_symbols_mismatch preview={preview_symbols} approved={approved_symbols}"
         )
 
     by_symbol = {str(o.get("symbol") or "").upper(): o for o in preview_orders}
+
+    # Partial GLD may be deferred from capped orders; pull from nested partial preview order.
+    if is_partial and preview_doc is not None:
+        nested = preview_doc.get("partial_defensive_exit_preview") or {}
+        partial_order = nested.get("partial_preview_order") or {}
+        psym = str(partial_order.get("symbol") or "").upper()
+        if psym and psym not in by_symbol:
+            by_symbol[psym] = partial_order
+
     projected: List[Dict[str, Any]] = []
     packet_id = str(contract.get("packet_id") or contract.get("source_packet_id") or "")
     expires_at = str(contract.get("expires_at") or "")
@@ -175,16 +199,35 @@ def _build_projected_orders(
             notes.append(f"position_missing={sym}")
             continue
         order = by_symbol.get(sym)
-        if not order:
+        if not order and not (is_partial and sym in approved_quantities):
             notes.append(f"preview_order_missing={sym}")
             continue
-        qty = int(order.get("qty") or pos.get("qty") or 0)
+
+        if is_partial and sym in approved_quantities:
+            qty = int(approved_quantities[sym])
+        else:
+            qty = int((order or {}).get("qty") or pos.get("qty") or 0)
+
+        # Never project full position when partial quantities are approved.
+        if is_partial and sym in approved_quantities and qty != int(approved_quantities[sym]):
+            qty = int(approved_quantities[sym])
         if qty <= 0:
             notes.append(f"non_positive_qty={sym}")
             continue
-        limit_price = float(order.get("limit_price") or pos.get("current_price") or 0)
-        notional = float(order.get("notional") or (qty * limit_price))
-        reason = str(order.get("reason_code") or order.get("reason") or "DEFENSIVE_EXIT")
+        held_qty = int(float(pos.get("qty") or 0))
+        if is_partial and held_qty > 0 and qty >= held_qty:
+            notes.append(f"partial_qty_not_less_than_full symbol={sym} qty={qty} held={held_qty}")
+            continue
+
+        limit_price = float((order or {}).get("limit_price") or pos.get("current_price") or 0)
+        notional = float((order or {}).get("notional") or (qty * limit_price))
+        if is_partial and sym in approved_quantities:
+            notional = round(qty * limit_price, 2)
+        reason = str(
+            (order or {}).get("reason_code")
+            or (order or {}).get("reason")
+            or ("PARTIAL_EXIT_CAP_AWARE" if is_partial else "DEFENSIVE_EXIT")
+        )
         projected.append(
             {
                 "symbol": sym,
@@ -192,7 +235,11 @@ def _build_projected_orders(
                 "quantity": qty,
                 "notional_estimate": round(notional, 2),
                 "reason": reason,
-                "source": "defensive_exit_capped_batch_preview",
+                "source": (
+                    "partial_defensive_exit_preview"
+                    if is_partial
+                    else "defensive_exit_capped_batch_preview"
+                ),
                 "approval_packet_id": packet_id,
                 "approval_expires_at": expires_at,
                 "eligible_for_execution": False,
@@ -243,6 +290,7 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
         INVALID_STATES,
         classify_paper_operator_approval_artifact,
     )
+    from services.partial_defensive_exit_preview import extract_partial_approval_contract_fields
 
     criteria = evaluate_governance_review_criteria(broker_snapshot_ok=snapshot_ok)
     live_blocked = bool(criteria.get("live_blocked"))
@@ -253,13 +301,38 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
     )
     contract = ap_details.get("contract") or _read_json(APPROVAL_PATH)
     approval_valid = ap_state == PAPER_APPROVAL_VALID_CURRENT
+    w197 = _read_json(W197_JSON)
+    preview_doc = _read_json(PREVIEW_JSON)
+    partial_fields = extract_partial_approval_contract_fields(preview_doc)
+
+    # Compatibility path: project from 197W dry-run validated partial contract when
+    # no governance approval artifact is present (no broker auth / no execution).
+    using_dry_run_contract = False
+    if (
+        ap_state == PAPER_APPROVAL_ABSENT
+        and bool(w197.get("dry_run_validated"))
+        and bool(w197.get("contract"))
+    ):
+        contract = dict(w197.get("contract") or {})
+        using_dry_run_contract = True
+        notes.append("projecting_from_197w_dry_run_contract_no_governance_artifact")
+
     approved_symbols = _norm_symbols(contract.get("approved_symbols"))
     deferred_symbols = _norm_symbols(contract.get("deferred_symbols"))
+    approved_quantities_raw = contract.get("approved_quantities") or {}
+    if not approved_quantities_raw and partial_fields.get("partial_preview_available"):
+        approved_quantities_raw = partial_fields.get("approved_quantities") or {}
+    projected_quantities: Dict[str, int] = {}
+    for sym, qty in (approved_quantities_raw or {}).items():
+        try:
+            projected_quantities[str(sym).strip().upper()] = int(float(qty))
+        except (TypeError, ValueError):
+            pass
 
     final_state = READY
     block_reason = ""
 
-    if ap_state == PAPER_APPROVAL_ABSENT:
+    if ap_state == PAPER_APPROVAL_ABSENT and not using_dry_run_contract:
         final_state, block_reason = BLOCKED_ABSENT, ap_reason
     elif ap_state == PAPER_APPROVAL_EXPIRED:
         final_state, block_reason = BLOCKED_EXPIRED, ap_reason
@@ -267,20 +340,27 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
         final_state, block_reason = BLOCKED_INVALID, ap_reason
     elif not live_blocked:
         final_state, block_reason = BLOCKED_LIVE_NOT_BLOCKED, "live_blocked=false"
-    elif not market_open:
+    elif not market_open and not using_dry_run_contract:
         final_state, block_reason = BLOCKED_MARKET_CLOSED, "market_closed"
     elif open_orders != 0:
         final_state, block_reason = BLOCKED_OPEN_ORDERS, f"open_orders={open_orders}"
     elif positions_count == 0:
         final_state, block_reason = BLOCKED_BATCH_MISMATCH, "no_positions_in_snapshot"
-    elif approval_valid:
-        preview_doc = _read_json(PREVIEW_JSON)
+    elif approval_valid or using_dry_run_contract:
         preview_block = _runtime_capped_preview(preview_doc)
+        if using_dry_run_contract and not approved_symbols and partial_fields.get("symbol"):
+            approved_symbols = _norm_symbols([partial_fields.get("symbol")])
+            projected_quantities = dict(partial_fields.get("approved_quantities") or {})
+            contract = dict(contract)
+            contract["approved_symbols"] = approved_symbols
+            contract["approved_quantities"] = projected_quantities
+            contract["preview_type"] = partial_fields.get("preview_type")
         projected_orders, build_notes = _build_projected_orders(
             approved_symbols=approved_symbols,
             preview_block=preview_block,
             contract=contract,
             positions=positions,
+            preview_doc=preview_doc,
         )
         notes.extend(build_notes)
         missing_positions = [s for s in approved_symbols if s not in positions]
@@ -295,6 +375,10 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
         elif not projected_orders:
             final_state = BLOCKED_NO_ORDERS
             block_reason = "no_projected_orders"
+        else:
+            projected_quantities = {
+                str(o.get("symbol")).upper(): int(o.get("quantity") or 0) for o in projected_orders
+            }
 
     if final_state == READY and projected_orders:
         _write_projected_csv(projected_orders)
@@ -317,9 +401,22 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
     if open_orders != 0 and final_state != BLOCKED_OPEN_ORDERS:
         status = "FAIL"
         notes.append("open_orders_must_be_zero")
+    if BROKER_AUTH_PATH.is_file():
+        status = "FAIL"
+        notes.append("broker_authorization_artifact_must_not_exist")
 
     batch_notional = round(sum(float(o.get("notional_estimate") or 0) for o in projected_orders), 2)
+    batch_cap = float(
+        contract.get("batch_notional_cap")
+        or preview_doc.get("configured_batch_cap_manage_positions")
+        or 50000.0
+    )
     v197 = _read_json(V197_JSON)
+    full_exit_deferred = bool(
+        contract.get("full_exit_deferred")
+        or partial_fields.get("full_exit_deferred")
+        or str(contract.get("preview_type") or "").upper() == "PARTIAL_DEFENSIVE_EXIT_PREVIEW"
+    )
 
     payload: Dict[str, Any] = {
         "phase": "197X",
@@ -332,6 +429,7 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
         "approval_artifact_state": ap_state,
         "approval_artifact_reason": ap_reason,
         "approval_artifact_valid": approval_valid,
+        "using_dry_run_contract": using_dry_run_contract,
         "approval_artifact_path": (
             str(APPROVAL_PATH.relative_to(ROOT)).replace("\\", "/")
             if APPROVAL_PATH.is_file()
@@ -340,10 +438,20 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
         "approval_scope": contract.get("approval_scope"),
         "approval_packet_id": contract.get("packet_id") or contract.get("source_packet_id"),
         "approval_expires_at": contract.get("expires_at"),
+        "preview_type": contract.get("preview_type") or partial_fields.get("preview_type"),
         "approved_symbols": approved_symbols,
         "deferred_symbols": deferred_symbols,
+        "projected_symbols": [str(o.get("symbol")).upper() for o in projected_orders],
+        "projected_quantities": projected_quantities,
         "batch_notional_estimate": batch_notional,
-        "batch_notional_cap": contract.get("batch_notional_cap"),
+        "projected_notional": batch_notional,
+        "batch_notional_cap": batch_cap,
+        "projected_notional_under_cap": (
+            bool(batch_notional <= batch_cap) if projected_orders else None
+        ),
+        "full_exit_deferred": full_exit_deferred,
+        "full_exit_deferred_reason": contract.get("full_exit_deferred_reason")
+        or partial_fields.get("full_exit_deferred_reason"),
         "projected_order_count": len(projected_orders),
         "projected_orders_path": (
             str(PROJECTED_ORDERS_CSV.relative_to(ROOT)).replace("\\", "/")
@@ -363,6 +471,8 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
             "positions_written": snapshot.get("paths", {}),
         },
         "broker_orders_submitted": False,
+        "broker_authorization_artifact_created": False,
+        "requires_explicit_broker_execution_authorization": True,
         "exits_executed": 0,
         "trims_executed": 0,
         "operator_execution_required": True,
@@ -380,7 +490,9 @@ def run_phase_197x_dry_run(*, verbose: bool = True) -> Dict[str, Any]:
         print(
             f"[197X-DRY-RUN] status={status} final_state={final_state} "
             f"projected={len(projected_orders)} open_orders={open_orders} "
-            f"broker_orders_submitted=False"
+            f"broker_orders_submitted=False "
+            f"projected_quantities={projected_quantities} "
+            f"full_exit_deferred={full_exit_deferred}"
         )
     return payload
 

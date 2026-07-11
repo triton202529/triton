@@ -131,12 +131,25 @@ def compute_capped_preview_hash(
             or preview_doc.get("configured_batch_cap_cli_default")
             or 0.0
         )
-    canonical = {
+    canonical: Dict[str, Any] = {
         "capped_preview_symbols": sorted({s.upper() for s in symbols if s}),
         "deferred_symbols": sorted({s.upper() for s in deferred if s}),
         "batch_notional_capped_preview": round(float(notional), 2),
         "configured_cap": round(float(cap), 2),
     }
+    # Include partial defensive-exit identity so approval contracts bind to qty, not full exit.
+    try:
+        from services.partial_defensive_exit_preview import extract_partial_approval_contract_fields
+
+        partial = extract_partial_approval_contract_fields(preview_doc)
+        if partial.get("partial_preview_available"):
+            canonical["preview_type"] = partial.get("preview_type")
+            canonical["partial_symbol"] = partial.get("symbol")
+            canonical["partial_qty"] = int(partial.get("partial_qty") or 0)
+            canonical["partial_notional"] = round(float(partial.get("estimated_notional") or 0), 2)
+            canonical["full_exit_deferred"] = True
+    except Exception:
+        pass
     payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -241,7 +254,15 @@ def build_formal_operator_approval_packet(
         broker_snapshot_ok=broker_snapshot_ok,
     )
 
-    return {
+    partial_fields: Dict[str, Any] = {}
+    try:
+        from services.partial_defensive_exit_preview import extract_partial_approval_contract_fields
+
+        partial_fields = extract_partial_approval_contract_fields(preview_doc)
+    except Exception:
+        partial_fields = {"partial_preview_available": False}
+
+    packet: Dict[str, Any] = {
         "packet_id": packet_id,
         "generated_at": generated_at.isoformat(),
         "expires_at": expires_at.isoformat(),
@@ -331,6 +352,43 @@ def build_formal_operator_approval_packet(
         ),
         "related_contract_decision": contract_doc.get("decision") if contract_exists else None,
     }
+
+    if partial_fields.get("partial_preview_available"):
+        packet.update(
+            {
+                "preview_type": partial_fields.get("preview_type"),
+                "approved_action": partial_fields.get("approved_action"),
+                "partial_preview_available": True,
+                "partial_preview_symbol": partial_fields.get("symbol"),
+                "partial_qty": partial_fields.get("partial_qty"),
+                "full_qty": partial_fields.get("full_qty"),
+                "remaining_qty_after_preview": partial_fields.get("remaining_qty_after_preview"),
+                "partial_estimated_notional": partial_fields.get("estimated_notional"),
+                "partial_preview_classification": partial_fields.get("classification"),
+                "partial_preview_scenario": partial_fields.get("scenario"),
+                "full_exit_deferred": True,
+                "full_exit_deferred_reason": partial_fields.get("full_exit_deferred_reason"),
+                "full_exit_notional": partial_fields.get("full_exit_notional"),
+                "approved_quantities": partial_fields.get("approved_quantities"),
+                "partial_approved_symbols": partial_fields.get("approved_symbols"),
+                "acknowledgement_partial_exit": True,
+                "acknowledgement_full_exit_deferred": True,
+                "acknowledgement_no_broker_authorization": True,
+                "partial_preview_requires_operator_approval": True,
+                "operator_approval_required": True,
+            }
+        )
+        packet["approval_contract_required_fields"] = sorted(
+            set(REQUIRED_CONTRACT_FIELDS)
+            | {
+                "preview_type",
+                "approved_quantities",
+                "acknowledgement_partial_exit",
+                "acknowledgement_full_exit_deferred",
+                "acknowledgement_no_broker_authorization",
+            }
+        )
+    return packet
 
 
 def write_operator_approval_packet(packet: Dict[str, Any]) -> Path:
@@ -430,6 +488,55 @@ def validate_operator_approval_contract(
     if not current_packet_id and OPERATOR_PACKET_JSON.is_file():
         current_packet_id = str(_read_json(OPERATOR_PACKET_JSON).get("packet_id") or "")
 
+    partial_fields: Dict[str, Any] = {"partial_preview_available": False}
+    preview_type_name = "PARTIAL_DEFENSIVE_EXIT_PREVIEW"
+    try:
+        from services.partial_defensive_exit_preview import (
+            PREVIEW_TYPE,
+            extract_partial_approval_contract_fields,
+        )
+
+        preview_type_name = PREVIEW_TYPE
+        partial_fields = extract_partial_approval_contract_fields(preview_doc)
+    except Exception:
+        partial_fields = {"partial_preview_available": False}
+
+    contract_preview_type = str(contract.get("preview_type") or "").strip().upper()
+    approved_quantities_raw = contract.get("approved_quantities") or {}
+    is_partial_contract = contract_preview_type == str(preview_type_name).upper() or (
+        isinstance(approved_quantities_raw, dict) and bool(approved_quantities_raw)
+    )
+    details["partial_contract"] = bool(is_partial_contract)
+
+    if is_partial_contract:
+        partial_required = {
+            "preview_type",
+            "approved_quantities",
+            "acknowledgement_partial_exit",
+            "acknowledgement_full_exit_deferred",
+            "acknowledgement_no_broker_authorization",
+        }
+        missing_partial = sorted(partial_required - set(contract.keys()))
+        details["checks"]["partial_required_fields_present"] = not missing_partial
+        if missing_partial:
+            return (
+                APPROVAL_STATUS_INVALID,
+                f"missing_partial_required_fields={','.join(missing_partial)}",
+                details,
+            )
+        if contract_preview_type != str(preview_type_name).upper():
+            return APPROVAL_STATUS_INVALID, "preview_type_not_partial_defensive_exit", details
+        for ack_field in (
+            "acknowledgement_partial_exit",
+            "acknowledgement_full_exit_deferred",
+            "acknowledgement_live_blocked",
+            "acknowledgement_no_broker_authorization",
+        ):
+            if not bool(contract.get(ack_field)):
+                return APPROVAL_STATUS_INVALID, f"{ack_field}_not_true", details
+        if not partial_fields.get("partial_preview_available"):
+            return APPROVAL_STATUS_INVALID, "partial_preview_unavailable", details
+
     approved_symbols = [
         str(s).strip().upper() for s in (contract.get("approved_symbols") or []) if str(s).strip()
     ]
@@ -437,7 +544,31 @@ def validate_operator_approval_contract(
     approved_set = set(approved_symbols)
     if not approved_set:
         return APPROVAL_STATUS_INVALID, "approved_symbols_empty", details
-    if not approved_set.issubset(capped_set):
+
+    if is_partial_contract:
+        expected_symbol = str(partial_fields.get("symbol") or "").upper()
+        expected_qty = int(partial_fields.get("partial_qty") or 0)
+        if approved_set != {expected_symbol}:
+            return (
+                APPROVAL_STATUS_INVALID,
+                f"partial_approved_symbols_mismatch expected={expected_symbol} got={sorted(approved_set)}",
+                details,
+            )
+        qty_map: Dict[str, int] = {}
+        for sym, qty in (approved_quantities_raw or {}).items():
+            try:
+                qty_map[str(sym).strip().upper()] = int(float(qty))
+            except (TypeError, ValueError):
+                return APPROVAL_STATUS_INVALID, f"invalid_approved_quantity symbol={sym}", details
+        if qty_map.get(expected_symbol) != expected_qty:
+            return (
+                APPROVAL_STATUS_INVALID,
+                f"partial_qty_mismatch expected={expected_qty} got={qty_map.get(expected_symbol)}",
+                details,
+            )
+        details["checks"]["partial_quantity_match"] = True
+        details["approved_quantities"] = qty_map
+    elif not approved_set.issubset(capped_set):
         extra = sorted(approved_set - capped_set)
         return (
             APPROVAL_STATUS_INVALID,
@@ -452,6 +583,14 @@ def validate_operator_approval_contract(
             f"max_notional_exceeds_cap max={max_notional} cap={current_cap}",
             details,
         )
+    if is_partial_contract:
+        partial_notional = float(partial_fields.get("estimated_notional") or 0.0)
+        if partial_notional > 0 and max_notional + 1e-6 < partial_notional:
+            return (
+                APPROVAL_STATUS_INVALID,
+                f"max_notional_below_partial_notional max={max_notional} partial={partial_notional}",
+                details,
+            )
 
     contract_packet_id = str(contract.get("source_packet_id") or "")
     if not current_packet_id or contract_packet_id != current_packet_id:
@@ -502,7 +641,11 @@ def validate_operator_approval_contract(
         "no_in_flight_conflict": True,
         "broker_snapshot_ok": broker_snapshot_ok,
         "live_blocked": live_execution_blocked,
+        "partial_contract": bool(is_partial_contract),
     }
+    if is_partial_contract:
+        details["checks"]["partial_quantity_match"] = True
+        details["checks"]["partial_required_fields_present"] = True
     return APPROVAL_STATUS_VALID, "", details
 
 
@@ -568,6 +711,32 @@ def approval_contract_schema_example() -> Dict[str, Any]:
         "acknowledgement_no_live_execution": True,
         "acknowledgement_paper_only": True,
         "decision": OPERATOR_DECISION_APPROVE,
+    }
+
+
+def partial_approval_contract_schema_example() -> Dict[str, Any]:
+    """Document-only partial defensive-exit example; not written to disk by TRITON."""
+    return {
+        "approval_id": "example-partial-do-not-use",
+        "approved_at": "2026-07-10T12:00:00+00:00",
+        "expires_at": "2026-07-10T12:30:00+00:00",
+        "approved_by": "operator_name",
+        "approval_mode": "PAPER_ONLY",
+        "preview_type": "PARTIAL_DEFENSIVE_EXIT_PREVIEW",
+        "approved_symbols": ["GLD"],
+        "approved_quantities": {"GLD": 48},
+        "max_notional": 18058.56,
+        "source_packet_id": "def-exit-paper-xxxxxxxxxxxx-20260710T120000Z",
+        "source_preview_hash": "sha256_hex_from_latest_preview",
+        "acknowledgement_live_blocked": True,
+        "acknowledgement_no_live_execution": True,
+        "acknowledgement_paper_only": True,
+        "acknowledgement_partial_exit": True,
+        "acknowledgement_full_exit_deferred": True,
+        "acknowledgement_no_broker_authorization": True,
+        "decision": OPERATOR_DECISION_APPROVE,
+        "broker_execution_authorized": False,
+        "live_authorized": False,
     }
 
 
