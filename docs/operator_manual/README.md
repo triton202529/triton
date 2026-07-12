@@ -11,6 +11,7 @@ boundaries. They do **not** create approval, broker authorization, or execution 
 |-------|----------|
 | Partial GLD Defensive Path | [PARTIAL_GLD_DEFENSIVE_PATH.md](./PARTIAL_GLD_DEFENSIVE_PATH.md) |
 | Weekend Safe Work Map | [WEEKEND_SAFE_WORK_MAP.md](./WEEKEND_SAFE_WORK_MAP.md) |
+| Monday Market-Open Restart Checklist | [MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md](./MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md) |
 | Paper Execution Safety Rules | [§ Paper Execution Safety Rules](#paper-execution-safety-rules) |
 | Approval Artifact Rules | [§ Approval Artifact Rules](#approval-artifact-rules) |
 | Broker Authorization Rules | [§ Broker Authorization Rules](#broker-authorization-rules) |
@@ -80,6 +81,10 @@ Classify every task using [WEEKEND_SAFE_WORK_MAP.md](./WEEKEND_SAFE_WORK_MAP.md)
 
 ## Monday Market-Open Review
 
+Full operator checklist (commands, stop points, paper preconditions):
+
+→ [MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md](./MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md)
+
 Before any market-open action, rerun:
 
 1. Broker snapshot
@@ -91,6 +96,8 @@ Before any market-open action, rerun:
    `data/governance/operator_paper_broker_execution_authorization.json` unless intentionally created)
 
 Do not assume Friday or weekend state still applies Monday morning.
+
+> Market-open restart does not itself authorize paper execution.
 
 ---
 
