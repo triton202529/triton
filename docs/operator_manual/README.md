@@ -14,7 +14,7 @@ boundaries. They do **not** create approval, broker authorization, or execution 
 | Monday Market-Open Restart Checklist | [MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md](./MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md) |
 | Paper Execution Safety Rules | [PAPER_EXECUTION_SAFETY_RULES.md](./PAPER_EXECUTION_SAFETY_RULES.md) |
 | Approval Artifact Rules | [APPROVAL_ARTIFACT_RULES.md](./APPROVAL_ARTIFACT_RULES.md) |
-| Broker Authorization Rules | [§ Broker Authorization Rules](#broker-authorization-rules) |
+| Broker Authorization Rules | [BROKER_AUTHORIZATION_RULES.md](./BROKER_AUTHORIZATION_RULES.md) |
 | Market-Closed Safe Work | [§ Market-Closed Safe Work](#market-closed-safe-work) |
 | Monday Market-Open Review | [§ Monday Market-Open Review](#monday-market-open-review) |
 | Runtime Cleanup Rules | [§ Runtime Cleanup Rules](#runtime-cleanup-rules) |
@@ -68,11 +68,19 @@ Summary:
 
 ## Broker Authorization Rules
 
+Full manual (preconditions, GLD partial scope, phrase, cleanup, stop rules):
+
+→ [BROKER_AUTHORIZATION_RULES.md](./BROKER_AUTHORIZATION_RULES.md)
+
+Summary:
+
 - Path: `data/governance/operator_paper_broker_execution_authorization.json`
 - Absent means no paper broker execution authority.
+- Authorizes paper broker execution phase only after valid operator approval exists.
+- Does **not** authorize live trading, BUY/ADD, or quantity beyond approved/projected scope.
 - Do **not** create this artifact during market-closed / weekend documentation work.
-- Authorization must match the projected partial dispatch scope; do not authorize raw full qty.
-- Broker authorization without matching approval, or with mismatched quantity, is invalid.
+- Authorization must match projected partial dispatch scope (e.g. GLD qty **48** only).
+- Remove or expire after use; never commit the artifact.
 
 ---
 
