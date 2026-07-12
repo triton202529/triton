@@ -16,7 +16,13 @@ from typing import Any, Dict, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
+GOVERNANCE = ROOT / "data" / "governance"
 OUTPUT_JSON = RESULTS / "phase_197y_loop_mediated_paper_execution_gate.json"
+PREVIEW_JSON = RESULTS / "defensive_exit_capped_batch_preview.json"
+X197_JSON = RESULTS / "phase_197x_paper_broker_execution_final_dry_run.json"
+Z197_JSON = RESULTS / "phase_197z_paper_broker_execution_authorization_creator.json"
+APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
+BROKER_AUTH_PATH = GOVERNANCE / "operator_paper_broker_execution_authorization.json"
 
 GATE_BLOCKED_EXECUTION_AUTH_REQUIRED = "PAPER_EXECUTION_GATE_BLOCKED_EXECUTION_AUTH_REQUIRED"
 GATE_BLOCKED_197W_APPROVAL_EXPIRED = "PAPER_EXECUTION_GATE_BLOCKED_197W_APPROVAL_EXPIRED"
@@ -47,6 +53,77 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def _read_json(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
+def _extract_partial_gate_context() -> Dict[str, Any]:
+    """Surface partial defensive-exit eligibility contract for loop gate dry-run."""
+    from services.partial_defensive_exit_preview import (
+        PREVIEW_TYPE,
+        extract_partial_approval_contract_fields,
+    )
+
+    preview_doc = _read_json(PREVIEW_JSON)
+    x197 = _read_json(X197_JSON)
+    z197 = _read_json(Z197_JSON)
+    partial = extract_partial_approval_contract_fields(preview_doc)
+
+    qty_map = (
+        x197.get("projected_quantities")
+        or z197.get("authorized_quantities")
+        or partial.get("approved_quantities")
+        or {}
+    )
+    symbol = str(
+        partial.get("symbol")
+        or z197.get("symbol")
+        or (x197.get("projected_symbols") or [None])[0]
+        or ""
+    ).upper()
+    eligible_qty = int(
+        qty_map.get(symbol) or z197.get("authorized_qty") or partial.get("partial_qty") or 0
+    )
+    full_qty = int(partial.get("full_qty") or z197.get("full_qty") or 0)
+    remaining = int(
+        partial.get("remaining_qty_after_preview")
+        or z197.get("remaining_qty_after_authorized_preview")
+        or max(0, full_qty - eligible_qty)
+    )
+    available = bool(partial.get("partial_preview_available")) and eligible_qty > 0
+    return {
+        "partial_loop_gate_supported": available,
+        "preview_type": PREVIEW_TYPE if available else None,
+        "symbol": symbol if available else None,
+        "eligible_action": "PARTIAL_EXIT" if available else None,
+        "eligible_qty": eligible_qty if available else 0,
+        "full_qty": full_qty if available else 0,
+        "remaining_qty_after_preview": remaining if available else 0,
+        "full_exit_deferred": bool(available),
+        "full_exit_deferred_reason": (
+            (partial.get("full_exit_deferred_reason") or z197.get("full_exit_deferred_reason"))
+            if available
+            else None
+        ),
+        "estimated_notional": (
+            float(
+                x197.get("projected_notional")
+                or z197.get("estimated_notional")
+                or partial.get("estimated_notional")
+                or 0.0
+            )
+            if available
+            else 0.0
+        ),
+    }
 
 
 def map_gate_state_to_dispatch(gate_state: str) -> Tuple[str, str]:
@@ -205,9 +282,29 @@ def evaluate_loop_mediated_paper_execution_gate(
         final_state = GATE_BLOCKED_EXECUTION_AUTH_REQUIRED
         gate_reason = f"execution_authorization_invalid:{auth_state}:{auth_reason}"
 
+    # Hard rule: both real approval and broker authorization must exist for eligibility.
+    approval_present = ap_state == PAPER_APPROVAL_VALID_CURRENT and APPROVAL_PATH.is_file()
+    broker_auth_present = (
+        auth_state == PAPER_BROKER_EXECUTION_AUTH_VALID_CURRENT and BROKER_AUTH_PATH.is_file()
+    )
+    if not (approval_present and broker_auth_present):
+        eligible_for_execution = False
+        operator_execution_required = True
+        explicit_broker_execution_phase_required = True
+        if final_state == GATE_READY_LOOP_MEDIATED:
+            final_state = GATE_BLOCKED_EXECUTION_AUTH_REQUIRED
+            gate_reason = "missing_approval_or_broker_authorization"
+
+    partial_ctx = _extract_partial_gate_context()
+
+    status = "PASS" if final_state == GATE_READY_LOOP_MEDIATED else "PASS_SAFE_BLOCKED"
+    if not live_blocked:
+        status = "FAIL"
+
     payload: Dict[str, Any] = {
         "phase": "197Y",
         "generated_at": _utc_now_iso(),
+        "status": status,
         "final_state": final_state,
         "gate_reason": gate_reason,
         "paper_approval_state": ap_state,
@@ -225,10 +322,27 @@ def evaluate_loop_mediated_paper_execution_gate(
         "trims_executed": 0,
         "operator_execution_required": operator_execution_required,
         "explicit_broker_execution_phase_required": explicit_broker_execution_phase_required,
+        "requires_operator_approval": True,
+        "requires_broker_authorization": True,
+        "operator_approval_present": approval_present,
+        "broker_authorization_present": broker_auth_present,
         "eligible_for_execution": eligible_for_execution,
         "execution_must_use_loop": True,
         "execution_must_use_approved_scope_only": True,
         "safe_blocked": final_state in SAFE_BLOCKED_GATE_STATES,
+        "partial_loop_gate_supported": bool(partial_ctx.get("partial_loop_gate_supported")),
+        "preview_type": partial_ctx.get("preview_type"),
+        "symbol": partial_ctx.get("symbol"),
+        "eligible_action": partial_ctx.get("eligible_action"),
+        "eligible_qty": partial_ctx.get("eligible_qty"),
+        "full_qty": partial_ctx.get("full_qty"),
+        "remaining_qty_after_preview": partial_ctx.get("remaining_qty_after_preview"),
+        "full_exit_deferred": bool(partial_ctx.get("full_exit_deferred")),
+        "full_exit_deferred_reason": partial_ctx.get("full_exit_deferred_reason"),
+        "estimated_notional": partial_ctx.get("estimated_notional"),
+        "approval_artifact_created": APPROVAL_PATH.is_file(),
+        "broker_authorization_artifact_created": BROKER_AUTH_PATH.is_file(),
+        "live_execution_permitted": False,
         "paper_approval_details": {
             "artifact_path": ap_details.get("artifact_path"),
             "artifact_exists": ap_details.get("artifact_exists"),
@@ -258,7 +372,11 @@ def run_gate(*, verbose: bool = True, write_output: bool = True) -> Dict[str, An
         print(f"[197Y] wrote {OUTPUT_JSON.relative_to(ROOT)}")
         print(
             f"[197Y] final_state={result.get('final_state')} "
-            f"eligible_for_execution={result.get('eligible_for_execution')}"
+            f"eligible_for_execution={result.get('eligible_for_execution')} "
+            f"preview_type={result.get('preview_type')} "
+            f"eligible_qty={result.get('eligible_qty')} "
+            f"requires_approval={result.get('requires_operator_approval')} "
+            f"requires_broker_auth={result.get('requires_broker_authorization')}"
         )
     return result
 
