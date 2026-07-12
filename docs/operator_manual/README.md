@@ -13,7 +13,7 @@ boundaries. They do **not** create approval, broker authorization, or execution 
 | Weekend Safe Work Map | [WEEKEND_SAFE_WORK_MAP.md](./WEEKEND_SAFE_WORK_MAP.md) |
 | Monday Market-Open Restart Checklist | [MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md](./MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md) |
 | Paper Execution Safety Rules | [PAPER_EXECUTION_SAFETY_RULES.md](./PAPER_EXECUTION_SAFETY_RULES.md) |
-| Approval Artifact Rules | [§ Approval Artifact Rules](#approval-artifact-rules) |
+| Approval Artifact Rules | [APPROVAL_ARTIFACT_RULES.md](./APPROVAL_ARTIFACT_RULES.md) |
 | Broker Authorization Rules | [§ Broker Authorization Rules](#broker-authorization-rules) |
 | Market-Closed Safe Work | [§ Market-Closed Safe Work](#market-closed-safe-work) |
 | Monday Market-Open Review | [§ Monday Market-Open Review](#monday-market-open-review) |
@@ -50,13 +50,19 @@ Summary:
 
 ## Approval Artifact Rules
 
+Full manual (purpose, lifecycle, validation, expiry, cleanup, GLD partial scope):
+
+→ [APPROVAL_ARTIFACT_RULES.md](./APPROVAL_ARTIFACT_RULES.md)
+
+Summary:
+
 - Path: `data/governance/operator_paper_defensive_exit_approval.json`
 - Absent means no operator paper approval authority.
+- Approves capped paper defensive batch for review; does **not** authorize broker execution alone.
 - Do **not** create this artifact during market-closed / weekend documentation work.
 - Short-lived approval, when intentionally created later, must match the governed partial scope
   (e.g. GLD qty **48** only)—never expand to full raw handoff qty.
-- Remove or expire approval after the intended paper window; do not leave standing authority overnight
-  into the next session unless that is an explicit operator decision.
+- Remove or expire approval after the intended paper window; never commit the artifact.
 
 ---
 
