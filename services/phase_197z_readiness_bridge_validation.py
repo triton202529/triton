@@ -103,8 +103,20 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
     snap_rc, snapshot = _run_snapshot()
 
     bridge_active = bool(bridge.get("bridge_active"))
-    dispatch_state = str(interlock.get("dispatch_interlock_state") or "")
-    dispatch_reason = str(interlock.get("dispatch_interlock_reason") or "")
+    # Prefer bridge-normalized dispatch for partial missing-artifact messaging.
+    dispatch_state = str(bridge.get("dispatch") or interlock.get("dispatch_interlock_state") or "")
+    dispatch_reason = str(
+        bridge.get("missing_requirement") or interlock.get("dispatch_interlock_reason") or ""
+    )
+    if not APPROVAL_PATH.is_file():
+        dispatch_state = "DISPATCH_BLOCKED_APPROVAL_REQUIRED"
+        dispatch_reason = "operator_approval_required_for_partial_defensive_path"
+        bridge_active = False
+    elif not EXEC_AUTH_PATH.is_file():
+        dispatch_state = "DISPATCH_BLOCKED_BROKER_AUTH_REQUIRED"
+        dispatch_reason = "broker_authorization_required_for_partial_defensive_path"
+        bridge_active = False
+
     baseline_readiness = str(criteria.get("readiness_status") or "UNKNOWN")
 
     status = "PASS_SAFE_BLOCKED"
@@ -129,6 +141,7 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
             notes.append("197y_eligible_for_execution=false")
     else:
         notes.append(f"bridge_inactive reasons={bridge.get('block_reasons')}")
+        notes.append(f"missing_requirement={bridge.get('missing_requirement') or dispatch_reason}")
 
     if not live.get("live_blocked"):
         status = "FAIL"
@@ -141,6 +154,8 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
     if snap_rc != 0:
         notes.append(f"snapshot exit_code={snap_rc}")
 
+    from services.portfolio_history_sync import load_live_execution_flag
+
     payload: Dict[str, Any] = {
         "phase": "197Z-RB",
         "generated_at": _utc_now_iso(),
@@ -152,6 +167,19 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "baseline_readiness_status": baseline_readiness,
         "effective_readiness_status": bridge.get("effective_readiness_status"),
         "execution_readiness_bridged": bool(bridge.get("execution_readiness_bridged")),
+        "partial_path_detected": bool(bridge.get("partial_path_detected")),
+        "preview_type": bridge.get("preview_type"),
+        "symbol": bridge.get("symbol"),
+        "bridge_action": bridge.get("bridge_action"),
+        "bridge_qty": bridge.get("bridge_qty"),
+        "full_qty": bridge.get("full_qty"),
+        "remaining_qty_after_preview": bridge.get("remaining_qty_after_preview"),
+        "full_exit_deferred": bool(bridge.get("full_exit_deferred")),
+        "full_exit_deferred_reason": bridge.get("full_exit_deferred_reason"),
+        "requires_operator_approval": bool(bridge.get("requires_operator_approval", True)),
+        "requires_broker_authorization": bool(bridge.get("requires_broker_authorization", True)),
+        "missing_requirement": bridge.get("missing_requirement") or dispatch_reason,
+        "dispatch": dispatch_state,
         "paper_approval_present": APPROVAL_PATH.is_file(),
         "paper_approval_state": ap_state,
         "paper_approval_valid_current": ap_state == PAPER_APPROVAL_VALID_CURRENT,
@@ -165,9 +193,11 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "master_execution_gate_status": master.status,
         "master_execution_gate_ok": master.ok,
         "master_execution_gate_reasons": master.reasons,
-        "dispatch_interlock_state": dispatch_state,
-        "dispatch_interlock_reason": dispatch_reason,
-        "dispatch_permitted": bool(interlock.get("dispatch_permitted")),
+        "dispatch_interlock_state": str(interlock.get("dispatch_interlock_state") or ""),
+        "dispatch_interlock_reason": str(interlock.get("dispatch_interlock_reason") or ""),
+        "dispatch_permitted": (
+            False if not bridge_active else bool(interlock.get("dispatch_permitted"))
+        ),
         "dispatch_blocked_readiness": dispatch_state == DISPATCH_BLOCKED_READINESS,
         "dispatch_blocked_batch_notional_cap": dispatch_state
         == DISPATCH_BLOCKED_BATCH_NOTIONAL_CAP,
@@ -179,6 +209,7 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "exits_executed": 0,
         "trims_executed": 0,
         "live_blocked": bool(live.get("live_blocked")),
+        "live_execution_permitted": bool(load_live_execution_flag()),
         "open_orders": int(criteria.get("open_orders_count") or 0),
         "open_orders_written": int(
             snapshot.get("open_orders_written") or snapshot.get("open_orders") or 0
@@ -187,8 +218,8 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "snapshot_errors": snapshot.get("errors") or [],
         "bridge": bridge,
         "interlock": {
-            "dispatch_interlock_state": dispatch_state,
-            "dispatch_interlock_reason": dispatch_reason,
+            "dispatch_interlock_state": str(interlock.get("dispatch_interlock_state") or ""),
+            "dispatch_interlock_reason": str(interlock.get("dispatch_interlock_reason") or ""),
             "dispatch_permitted": interlock.get("dispatch_permitted"),
             "execution_readiness_bridged": interlock.get("execution_readiness_bridged"),
             "effective_readiness_status": interlock.get("effective_readiness_status"),
@@ -201,7 +232,10 @@ def run_validation(*, verbose: bool = True) -> Dict[str, Any]:
         print(
             f"[197Z-RB] status={status} bridge_active={bridge_active} "
             f"dispatch={dispatch_state} master={master.status} "
-            f"baseline_readiness={baseline_readiness}"
+            f"baseline_readiness={baseline_readiness} "
+            f"partial={payload.get('partial_path_detected')} "
+            f"bridge_qty={payload.get('bridge_qty')} "
+            f"missing={payload.get('missing_requirement')}"
         )
     return payload
 
