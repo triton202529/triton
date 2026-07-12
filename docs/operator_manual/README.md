@@ -12,7 +12,7 @@ boundaries. They do **not** create approval, broker authorization, or execution 
 | Partial GLD Defensive Path | [PARTIAL_GLD_DEFENSIVE_PATH.md](./PARTIAL_GLD_DEFENSIVE_PATH.md) |
 | Weekend Safe Work Map | [WEEKEND_SAFE_WORK_MAP.md](./WEEKEND_SAFE_WORK_MAP.md) |
 | Monday Market-Open Restart Checklist | [MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md](./MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md) |
-| Paper Execution Safety Rules | [§ Paper Execution Safety Rules](#paper-execution-safety-rules) |
+| Paper Execution Safety Rules | [PAPER_EXECUTION_SAFETY_RULES.md](./PAPER_EXECUTION_SAFETY_RULES.md) |
 | Approval Artifact Rules | [§ Approval Artifact Rules](#approval-artifact-rules) |
 | Broker Authorization Rules | [§ Broker Authorization Rules](#broker-authorization-rules) |
 | Market-Closed Safe Work | [§ Market-Closed Safe Work](#market-closed-safe-work) |
@@ -33,6 +33,13 @@ Full detail: [PARTIAL_GLD_DEFENSIVE_PATH.md](./PARTIAL_GLD_DEFENSIVE_PATH.md)
 
 ## Paper Execution Safety Rules
 
+Full manual (four layers, short-lived artifacts, GLD partial qty, stop rules, authorization phrase):
+
+→ [PAPER_EXECUTION_SAFETY_RULES.md](./PAPER_EXECUTION_SAFETY_RULES.md)
+
+Summary:
+
+- Paper execution policy being enabled does **not** mean orders may be placed.
 - Paper execution is not implied by documentation, dry-run PASS, or no-execution certification.
 - Never treat `data/live/manage_orders.csv` alone as broker dispatch authority.
 - Use governed projected dispatch quantity from 197X / 198J / 198K evidence only.
