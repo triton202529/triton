@@ -17,6 +17,23 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
 LIVE = ROOT / "data" / "live"
 
+# Governed paper-entry contract states (196S/T/V alignment)
+PAPER_ARMED_NO_ALLOCATION_BUY = "PAPER_ARMED_NO_ALLOCATION_BUY"
+PLANNER_CANDIDATES_REJECTED_BY_ALLOCATION = "PLANNER_CANDIDATES_REJECTED_BY_ALLOCATION"
+ALLOCATION_APPROVED_ENTRY_READY = "ALLOCATION_APPROVED_ENTRY_READY"
+ENTRY_BLOCKED_BY_EXECUTION_READINESS = "ENTRY_BLOCKED_BY_EXECUTION_READINESS"
+ENTRY_BLOCKED_BY_RISK_OR_GOVERNANCE = "ENTRY_BLOCKED_BY_RISK_OR_GOVERNANCE"
+CONTRACT_SCHEMA_MISMATCH = "CONTRACT_SCHEMA_MISMATCH"
+
+INTENTIONAL_CONTRACT_STATES = frozenset(
+    {
+        PAPER_ARMED_NO_ALLOCATION_BUY,
+        PLANNER_CANDIDATES_REJECTED_BY_ALLOCATION,
+        ENTRY_BLOCKED_BY_EXECUTION_READINESS,
+        ENTRY_BLOCKED_BY_RISK_OR_GOVERNANCE,
+    }
+)
+
 TRADE_OPPORTUNITIES = RESULTS / "trade_opportunities.csv"
 ALLOC_SUMMARY = RESULTS / "portfolio_allocation_summary.json"
 ALLOC_RECOMMENDATIONS = RESULTS / "portfolio_allocation_recommendations.csv"
@@ -280,6 +297,177 @@ def build_planner_rejection_audit_fields(preview_meta: Dict[str, Any]) -> Dict[s
         "considered_symbols_count": len(considered_set),
         "selected_symbols_count": len(set(selected)),
         "planner_empty_rejection_coverage": round(coverage, 4),
+    }
+
+
+def _load_allocation_signal_buy_rows() -> List[Dict[str, str]]:
+    """Allocation rows with BUY signal/lifecycle but non-OPEN_NEW/ADD action."""
+    import pandas as pd
+
+    rows: List[Dict[str, str]] = []
+    if not ALLOC_RECOMMENDATIONS.is_file():
+        return rows
+    try:
+        df = pd.read_csv(ALLOC_RECOMMENDATIONS, low_memory=False)
+        sym_col = "ticker" if "ticker" in df.columns else "symbol"
+        if sym_col not in df.columns:
+            return rows
+        for _, row in df.iterrows():
+            sym = _norm(row.get(sym_col))
+            action = _norm(row.get("recommended_action"))
+            lifecycle = _norm(row.get("lifecycle_action"))
+            signal = _norm(row.get("signal"))
+            if not sym or action in ("OPEN_NEW", "ADD"):
+                continue
+            if lifecycle != "BUY" and signal != "BUY":
+                continue
+            rows.append(
+                {
+                    "symbol": sym,
+                    "recommended_action": action or "NONE",
+                    "lifecycle_action": lifecycle,
+                    "signal": signal,
+                    "reason": str(row.get("reason") or "no_actionable_rule_matched").strip(),
+                    "risk_flag": str(row.get("risk_flag") or "OK"),
+                }
+            )
+    except Exception:
+        return rows
+    return rows
+
+
+def build_symbol_rejection_reasons(
+    symbols: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, str]]:
+    """Rejection detail per symbol from allocation recommendations."""
+    import pandas as pd
+
+    out: Dict[str, Dict[str, str]] = {}
+    want = {_norm(s) for s in (symbols or []) if s}
+    if not ALLOC_RECOMMENDATIONS.is_file():
+        return out
+    try:
+        df = pd.read_csv(ALLOC_RECOMMENDATIONS, low_memory=False)
+        sym_col = "ticker" if "ticker" in df.columns else "symbol"
+        for _, row in df.iterrows():
+            sym = _norm(row.get(sym_col))
+            if not sym or (want and sym not in want):
+                continue
+            action = _norm(row.get("recommended_action"))
+            out[sym] = {
+                "allocation_action": action or "UNKNOWN",
+                "allocation_status": (
+                    "NO_APPROVED_BUY" if action not in ("OPEN_NEW", "ADD") else action
+                ),
+                "rejection_reason": str(row.get("reason") or "").strip(),
+                "lifecycle_action": _norm(row.get("lifecycle_action")),
+                "signal": _norm(row.get("signal")),
+                "risk_flag": str(row.get("risk_flag") or "OK"),
+                "planner_only": action not in ("OPEN_NEW", "ADD"),
+            }
+    except Exception:
+        pass
+    return out
+
+
+def classify_paper_entry_contract_state(
+    *,
+    handoff: Optional[Dict[str, Any]] = None,
+    planner_symbols: Optional[List[str]] = None,
+    planner_meta: Optional[Dict[str, Any]] = None,
+    contract_detail: Optional[Dict[str, Any]] = None,
+    gate_ok: bool = False,
+    gate_reason: str = "",
+    gate_details: Optional[Dict[str, Any]] = None,
+    readiness_status: str = "UNKNOWN",
+    paper_arm_valid: bool = False,
+    live_execution: bool = False,
+) -> Dict[str, Any]:
+    """
+    Single source of truth for allocation ↔ planner ↔ paper-entry contract posture.
+    """
+    handoff = handoff or {}
+    planner_symbols = list(planner_symbols or [])
+    planner_meta = planner_meta or {}
+    contract_detail = contract_detail or {}
+    gate_details = gate_details or {}
+
+    open_new = int(handoff.get("allocation_open_new_count") or 0)
+    add_count = int(handoff.get("allocation_add_count") or 0)
+    eligible = list(handoff.get("eligible_entry_symbols") or [])
+    signal_buy_rows = _load_allocation_signal_buy_rows()
+    planner_set = {_norm(s) for s in planner_symbols if s}
+    signal_buy_syms = {_norm(r["symbol"]) for r in signal_buy_rows}
+
+    rejection_by_symbol = build_symbol_rejection_reasons(sorted(planner_set | signal_buy_syms))
+
+    readiness_upper = str(readiness_status or "").upper()
+    readiness_doc = _load_json(RESULTS / "execution_readiness.json")
+    failed_checks = list(readiness_doc.get("failed_checks") or [])
+    governance_blocked = "governance" in failed_checks or str(
+        readiness_doc.get("governance_mode") or ""
+    ).upper() in ("RED_BLOCKED", "ORANGE_DEGRADED")
+
+    if contract_detail.get("contract_mismatch_detected"):
+        state = CONTRACT_SCHEMA_MISMATCH
+        issue_type = "ALLOCATION_AND_ENTRY_ENGINE_CONTRACT_MISMATCH"
+    elif eligible and readiness_upper == "READY" and gate_ok and paper_arm_valid:
+        state = ALLOCATION_APPROVED_ENTRY_READY
+        issue_type = ""
+    elif governance_blocked or "governance" in str(gate_reason).lower():
+        state = ENTRY_BLOCKED_BY_RISK_OR_GOVERNANCE
+        issue_type = ""
+    elif (
+        readiness_upper != "READY"
+        or "execution_readiness" in str(gate_reason).lower()
+        or gate_details.get("failed_check") == "execution_readiness"
+    ):
+        state = ENTRY_BLOCKED_BY_EXECUTION_READINESS
+        issue_type = ""
+    elif (planner_set or signal_buy_syms) and open_new == 0 and add_count == 0 and not eligible:
+        state = PLANNER_CANDIDATES_REJECTED_BY_ALLOCATION
+        issue_type = ""
+    elif open_new == 0 and add_count == 0 and not eligible:
+        state = PAPER_ARMED_NO_ALLOCATION_BUY
+        issue_type = ""
+    elif eligible:
+        state = ENTRY_BLOCKED_BY_EXECUTION_READINESS
+        issue_type = ""
+    else:
+        state = PAPER_ARMED_NO_ALLOCATION_BUY
+        issue_type = ""
+
+    allocation_status = "NO_APPROVED_BUY" if not eligible else "APPROVED_BUY"
+    if open_new > 0 or add_count > 0:
+        allocation_status = f"OPEN_NEW={open_new},ADD={add_count}"
+
+    validation_status = "PASS"
+    if state == CONTRACT_SCHEMA_MISMATCH:
+        validation_status = "FAIL"
+    elif state in INTENTIONAL_CONTRACT_STATES:
+        validation_status = "PASS_SAFE_BLOCKED"
+    elif state == ALLOCATION_APPROVED_ENTRY_READY:
+        validation_status = "PASS"
+
+    return {
+        "contract_state": state,
+        "validation_status": validation_status,
+        "issue_type": issue_type or "DOCUMENTED_INTENTIONAL_BEHAVIOR",
+        "allocation_status": allocation_status,
+        "eligible_allocation": list(eligible),
+        "planner_candidates": planner_symbols,
+        "signal_buy_symbols": sorted(signal_buy_syms),
+        "rejection_reasons_by_symbol": rejection_by_symbol,
+        "open_new_count": open_new,
+        "add_count": add_count,
+        "paper_arm_valid": paper_arm_valid,
+        "execution_readiness_status": readiness_status,
+        "gate_pass": gate_ok,
+        "gate_reason": gate_reason,
+        "live_execution": live_execution,
+        "intentional_behavior": state in INTENTIONAL_CONTRACT_STATES,
+        "contract_mismatch_detected": bool(contract_detail.get("contract_mismatch_detected")),
+        "contract_status": contract_detail.get("contract_status"),
     }
 
 
@@ -593,6 +781,7 @@ def build_candidate_contract_rows() -> List[Dict[str, str]]:
 
     entry_candidates, handoff = _load_governed_allocation_candidates()
     eligible_alloc = handoff.get("eligible_entry_symbols") or []
+
     planner_symbols, planner_meta = preview_planned_buy_symbols(
         "paper",
         verbose=False,
@@ -602,12 +791,22 @@ def build_candidate_contract_rows() -> List[Dict[str, str]]:
     )
     enrich_planner_preview_metadata(planner_symbols, planner_meta, alloc_summary=alloc)
 
+    raw_planner_symbols, raw_planner_meta = preview_planned_buy_symbols(
+        "paper",
+        verbose=False,
+        for_execute=True,
+    )
+    enrich_planner_preview_metadata(raw_planner_symbols, raw_planner_meta, alloc_summary=alloc)
+
     alloc_open_new, alloc_add, alloc_actions = _load_allocation_open_new_add_symbols()
+    signal_buy_rows = _load_allocation_signal_buy_rows()
     symbols_of_interest: List[str] = list(alloc_open_new)
     symbols_of_interest.extend(alloc_add)
+    for row in signal_buy_rows:
+        symbols_of_interest.append(_norm(row.get("symbol")))
     for c in entry_candidates:
         symbols_of_interest.append(_norm(c.get("ticker")))
-    for s in planner_symbols:
+    for s in raw_planner_symbols:
         symbols_of_interest.append(_norm(s))
     symbols_of_interest = sorted({s for s in symbols_of_interest if s})
 
@@ -629,10 +828,10 @@ def build_candidate_contract_rows() -> List[Dict[str, str]]:
             source = "planner_intake_only"
             entry_eligible = False
 
-        if sym in planner_symbols:
-            if sym == planner_meta.get("preview_candidate"):
+        if sym in raw_planner_symbols:
+            if sym == raw_planner_meta.get("preview_candidate"):
                 planner_status = "PLANNER_RAW_TOP"
-            elif sym in (planner_meta.get("symbols_governed") or []):
+            elif sym in (raw_planner_meta.get("symbols_governed") or []):
                 planner_status = "PLANNER_GOVERNED"
             else:
                 planner_status = "PLANNER_INCLUDED"
@@ -640,22 +839,29 @@ def build_candidate_contract_rows() -> List[Dict[str, str]]:
             planner_status = ""
 
         allocation_status = alloc_action or "UNKNOWN"
+        signal_buy = next((r for r in signal_buy_rows if _norm(r.get("symbol")) == sym), None)
 
         if risk_blocked:
             final_status = "BLOCKED"
             rejection = f"FINAL_SELECTION_RISK_OVERLAY_BLOCK:{sym}"
             executable = "false"
         elif alloc_action not in ("OPEN_NEW", "ADD"):
-            final_status = "NOT_ACTIONABLE"
-            rejection = f"allocation_action={alloc_action or 'UNKNOWN'}"
+            final_status = "PLANNER_ONLY" if sym in raw_planner_symbols else "NOT_ACTIONABLE"
+            rejection = str(
+                (signal_buy or {}).get("reason") or f"allocation_action={alloc_action or 'UNKNOWN'}"
+            )
+            if sym in raw_planner_symbols and alloc_action not in ("OPEN_NEW", "ADD"):
+                rejection = f"planner_only; allocation_rejected; {rejection}"
             executable = "false"
         elif ec and not entry_eligible:
             final_status = "EXCLUDED"
             rejection = str(ec.get("block_reasons") or "allocation_gate_block")
             executable = "false"
-        elif sym in planner_symbols and sym not in (handoff.get("eligible_entry_symbols") or []):
-            final_status = "CONTRACT_MISMATCH"
-            rejection = "planner_symbol_outside_allocation_eligible"
+        elif sym in raw_planner_symbols and sym not in (
+            handoff.get("eligible_entry_symbols") or []
+        ):
+            final_status = "PLANNER_ONLY"
+            rejection = "planner_candidate_not_allocation_approved"
             executable = "false"
         elif entry_eligible and alloc_action in ("OPEN_NEW", "ADD") and not risk_blocked:
             final_status = "ENTRY_ELIGIBLE"
@@ -689,6 +895,7 @@ def build_candidate_contract_rows() -> List[Dict[str, str]]:
 def build_governed_candidate_summary() -> Dict[str, Any]:
     """Summary payload for dashboard and validation."""
     from services.execute_trades import preview_planned_buy_symbols
+    from services.paper_arm_status import build_paper_arm_status
     from services.paper_entry_loop_stage import _load_governed_allocation_candidates
 
     alloc = _load_json(ALLOC_SUMMARY)
@@ -696,6 +903,8 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
     contract_rows = build_candidate_contract_rows()
     _, handoff = _load_governed_allocation_candidates()
     eligible_alloc = handoff.get("eligible_entry_symbols") or []
+    arm_st = build_paper_arm_status(verbose_notes=False)
+    arm_status = str(arm_st.get("status") or "UNKNOWN")
 
     planner_symbols, planner_meta = preview_planned_buy_symbols(
         "paper",
@@ -706,8 +915,14 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
     )
     enrich_planner_preview_metadata(planner_symbols, planner_meta, alloc_summary=alloc)
 
+    raw_planner_symbols, raw_planner_meta = preview_planned_buy_symbols(
+        "paper",
+        verbose=False,
+        for_execute=True,
+    )
+    enrich_planner_preview_metadata(raw_planner_symbols, raw_planner_meta, alloc_summary=alloc)
+
     executable_rows = [r for r in contract_rows if r.get("executable_candidate") == "true"]
-    planner_set = {_norm(s) for s in planner_symbols if s}
     _, _, contract_eval = evaluate_allocation_planner_contract(
         list(eligible_alloc),
         list(planner_symbols),
@@ -719,6 +934,18 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
         and not contract_mismatch
         and planner_meta.get("preview_candidate_executable")
         and not is_risk_blocked_symbol(str(planner_meta.get("preview_candidate") or ""))
+    )
+
+    contract_state_payload = classify_paper_entry_contract_state(
+        handoff=handoff,
+        planner_symbols=raw_planner_symbols,
+        planner_meta=raw_planner_meta,
+        contract_detail=contract_eval,
+        gate_ok=False,
+        readiness_status=str(
+            _load_json(RESULTS / "execution_readiness.json").get("readiness_status") or ""
+        ),
+        paper_arm_valid=arm_status == "VALID",
     )
 
     return {
@@ -737,15 +964,23 @@ def build_governed_candidate_summary() -> Dict[str, Any]:
         "planner_considered_symbols": planner_meta.get("planner_considered_symbols") or [],
         "planner_selected_symbols": planner_meta.get("planner_selected_symbols") or planner_symbols,
         "planner_rejected_symbols": planner_meta.get("planner_rejected_symbols") or {},
-        "planner_preview_candidate": str(planner_meta.get("preview_candidate") or ""),
-        "planner_preview_risk_flag": str(planner_meta.get("preview_candidate_risk_flag") or ""),
-        "planner_preview_executable": bool(planner_meta.get("preview_candidate_executable")),
+        "planner_preview_candidate": str(raw_planner_meta.get("preview_candidate") or ""),
+        "planner_preview_risk_flag": str(raw_planner_meta.get("preview_candidate_risk_flag") or ""),
+        "planner_preview_executable": bool(raw_planner_meta.get("preview_candidate_executable")),
         "governed_executable_preview_candidate": str(
-            planner_meta.get("governed_executable_preview_candidate") or ""
+            raw_planner_meta.get("governed_executable_preview_candidate") or ""
         ),
-        "preview_warnings": list(planner_meta.get("preview_warnings") or []),
-        "final_selection_status": str(planner_meta.get("final_selection_status") or ""),
-        "final_selection_block_reason": str(planner_meta.get("final_selection_block_reason") or ""),
+        "preview_warnings": list(raw_planner_meta.get("preview_warnings") or []),
+        "final_selection_status": str(raw_planner_meta.get("final_selection_status") or ""),
+        "final_selection_block_reason": str(
+            raw_planner_meta.get("final_selection_block_reason") or ""
+        ),
+        "raw_planner_candidates": list(raw_planner_symbols),
+        "governed_planner_candidates": list(planner_symbols),
+        "contract_state": contract_state_payload.get("contract_state"),
+        "contract_validation_status": contract_state_payload.get("validation_status"),
+        "rejection_reasons_by_symbol": contract_state_payload.get("rejection_reasons_by_symbol"),
+        "allocation_status_label": contract_state_payload.get("allocation_status"),
         "contract_mismatch_detected": contract_mismatch,
         "would_execute_if_market_open": could_order,
         "stale_candidate_cache": cache,

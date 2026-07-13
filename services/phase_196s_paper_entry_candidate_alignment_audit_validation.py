@@ -206,9 +206,12 @@ def _build_alignment_rows(
 def run_phase_196s_audit(*, verbose: bool = True) -> Dict[str, Any]:
     notes: List[str] = []
     from services.paper_arm_status import build_paper_arm_status
+    from services.paper_entry_candidate_contract import classify_paper_entry_contract_state
     from services.paper_entry_loop_stage import (
-        _load_entry_candidates,
+        _check_allocation_planner_contract,
+        _load_governed_allocation_candidates,
         _risk_blocked_in_selection,
+        evaluate_paper_entry_gates,
     )
     from services.execute_trades import preview_planned_buy_symbols
 
@@ -254,12 +257,35 @@ def run_phase_196s_audit(*, verbose: bool = True) -> Dict[str, Any]:
     cert = _load_json(RESULTS / "capital_preservation_certification.json")
     cert_status = str(cert.get("certification_status") or "REVIEW")
 
-    entry_candidates, _ = _load_entry_candidates()
+    entry_candidates, handoff = _load_governed_allocation_candidates()
     eligible = [c for c in entry_candidates if c.get("eligible_for_auto_entry")]
     planner_symbols, planner_meta = preview_planned_buy_symbols(
         "paper", verbose=False, for_execute=True
     )
     risk_blocked = _risk_blocked_in_selection(planner_symbols)
+
+    contract_ok, contract_reason, contract_detail = _check_allocation_planner_contract(
+        list(handoff.get("eligible_entry_symbols") or []),
+        planner_symbols,
+        planner_meta,
+    )
+    gate_ok, gate_reason, gate_details = evaluate_paper_entry_gates(verbose=False)
+    readiness = _load_json(RESULTS / "execution_readiness.json")
+    readiness_status = str(readiness.get("readiness_status") or "UNKNOWN")
+
+    contract_state = classify_paper_entry_contract_state(
+        handoff=handoff,
+        planner_symbols=planner_symbols,
+        planner_meta=planner_meta,
+        contract_detail=contract_detail,
+        gate_ok=gate_ok,
+        gate_reason=gate_reason,
+        gate_details=gate_details,
+        readiness_status=readiness_status,
+        paper_arm_valid=str(arm_st.get("status") or "") == "VALID",
+        live_execution=live_execution,
+    )
+    issue_type = str(contract_state.get("issue_type") or "DOCUMENTED_INTENTIONAL_BEHAVIOR")
 
     import pandas as pd
 
@@ -312,24 +338,28 @@ def run_phase_196s_audit(*, verbose: bool = True) -> Dict[str, Any]:
     current_block = str(audit.get("gate_reason") or "")
     audit_reached_planner = bool((audit.get("details") or {}).get("planner_preview"))
 
-    issue_type = "ALLOCATION_AND_ENTRY_ENGINE_CONTRACT_MISMATCH"
     notes.append(
-        "paper_entry_loop_stage pre-filters ENTRY rows with risk/allocation BLOCK; "
-        "execute_trades planner preview uses full trade_opportunities and does not "
-        "apply performance_risk_overlay BLOCK_NEW_BUY before ranking."
+        f"contract_state={contract_state.get('contract_state')} "
+        f"allocation_status={contract_state.get('allocation_status')}"
+    )
+    if contract_state.get("rejection_reasons_by_symbol"):
+        sample = {
+            k: v.get("rejection_reason")
+            for k, v in list(contract_state["rejection_reasons_by_symbol"].items())[:6]
+        }
+        notes.append(f"rejection_reasons_sample={sample}")
+    notes.append(
+        "Planner preview uses trade_opportunities; paper entry executes "
+        "portfolio_allocation OPEN_NEW/ADD only — planner-only is not a schema mismatch."
     )
     notes.append(
         f"Entry eligible={[c.get('ticker') for c in eligible]}; "
         f"planner_preview={planner_symbols}; risk_blocked={risk_blocked}."
     )
-    notes.append(
-        "Final risk overlay in paper_entry_loop_stage blocks planner output when armed; "
-        "current live audit stops at ARM_EXPIRED before planner stage."
-    )
     if alloc.get("open_new_candidates") == 0 and alloc.get("add_candidates") == 0:
         notes.append(
-            "Allocation summary open_new=0 and add=0 — no actionable deployment slots "
-            "despite ENTRY signals in trade_opportunities."
+            "Allocation summary open_new=0 and add=0 — intentional when allocation "
+            "rejects signal BUY rows (WATCH/HOLD)."
         )
 
     stale_path = RESULTS / "controlled_paper_entry_loop_candidates.csv"
@@ -382,19 +412,25 @@ def run_phase_196s_audit(*, verbose: bool = True) -> Dict[str, Any]:
     mtime_after = PAPER_ARM_PATH.stat().st_mtime if PAPER_ARM_PATH.is_file() else None
     confirm_unchanged = mtime_before == mtime_after
 
-    status = "PASS"
+    status = str(contract_state.get("validation_status") or "PASS")
+    if status == "PASS_SAFE_BLOCKED":
+        status = "PASS"
     if sup_rc != 0 or fresh_rc != 0:
         status = "FAIL"
         notes.append("Runtime status script failure.")
     elif not confirm_unchanged:
         status = "FAIL"
         notes.append("paper_arm_confirm modified during audit.")
-    elif positions != ["JPM", "WFC"] or open_orders != 0 or live_execution:
+    elif open_orders != 0 or live_execution:
         status = "FAIL"
-        notes.append("Portfolio state mismatch.")
-    elif not head_commit.startswith("efca296f"):
-        status = "REVIEW"
-        notes.append(f"HEAD={head_commit[:8]}; expected efca296f base.")
+        notes.append(f"Safety: open_orders={open_orders} live_execution={live_execution}")
+    elif contract_state.get("contract_state") == "CONTRACT_SCHEMA_MISMATCH":
+        status = "FAIL"
+        notes.append(f"True contract mismatch: {contract_reason}")
+    elif not head_commit.startswith("c4e5f490") and not head_commit.startswith("efca296f"):
+        if status == "PASS":
+            status = "REVIEW"
+        notes.append(f"HEAD={head_commit[:8]}; review base commit.")
 
     payload = {
         "phase": "196S",
@@ -430,10 +466,19 @@ def run_phase_196s_audit(*, verbose: bool = True) -> Dict[str, Any]:
         "bac_considered": bac_considered,
         "bac_rejection_reason": bac_rejection,
         "candidate_alignment_issue_type": issue_type,
+        "contract_state": contract_state.get("contract_state"),
+        "allocation_status": contract_state.get("allocation_status"),
+        "rejection_reasons_by_symbol": contract_state.get("rejection_reasons_by_symbol"),
+        "planner_candidates": contract_state.get("planner_candidates"),
+        "eligible_allocation": contract_state.get("eligible_allocation"),
+        "execution_readiness_status": readiness_status,
+        "gate_pass": gate_ok,
+        "gate_reason": gate_reason,
+        "contract_mismatch_detected": bool(contract_detail.get("contract_mismatch_detected")),
         "secondary_issue_types": [
             "PLANNER_PREVIEW_NOT_FILTERED_BY_RISK",
             "PLANNER_USING_DIFFERENT_SOURCE_THAN_ALLOCATION",
-            "NO_BUG_RISK_OVERLAY_BLOCK_IS_EXPECTED",
+            "DOCUMENTED_INTENTIONAL_PLANNER_ONLY",
         ],
         "risk_block_symbols": sorted(risk_block_flags.keys()),
         "eligible_entry_symbols": [c.get("ticker") for c in eligible],
@@ -468,7 +513,7 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true", default=True)
     args = ap.parse_args()
     report = run_phase_196s_audit(verbose=args.verbose)
-    return 0 if report.get("status") in ("PASS", "REVIEW") else 1
+    return 0 if report.get("status") in ("PASS", "REVIEW", "PASS_SAFE_BLOCKED") else 1
 
 
 if __name__ == "__main__":

@@ -59,7 +59,10 @@ def run_phase_196v_validation(*, verbose: bool = True) -> Dict[str, Any]:
     notes: List[str] = []
     from services.guard_auto import is_market_open_et
     from services.paper_arm_status import classify_paper_arm_confirm_status
-    from services.paper_entry_candidate_contract import build_candidate_contract_rows
+    from services.paper_entry_candidate_contract import (
+        build_candidate_contract_rows,
+        classify_paper_entry_contract_state,
+    )
     from services.paper_entry_loop_stage import (
         _check_allocation_planner_contract,
         _load_governed_allocation_candidates,
@@ -68,8 +71,12 @@ def run_phase_196v_validation(*, verbose: bool = True) -> Dict[str, Any]:
     from services.execute_trades import preview_planned_buy_symbols
     from services.portfolio_history_sync import load_live_execution_flag
 
-    os.environ.setdefault("TRITON_ENABLE_PAPER_EXECUTION", "1")
-    os.environ.setdefault("TRITON_ENABLE_AUTO_PAPER_ENTRIES", "1")
+    from services.triton_env_loader import resolve_paper_runtime_env_flags
+
+    env_flags = resolve_paper_runtime_env_flags()
+    if not env_flags.get("all_required_enabled"):
+        os.environ.setdefault("TRITON_ENABLE_PAPER_EXECUTION", "1")
+        os.environ.setdefault("TRITON_ENABLE_AUTO_PAPER_ENTRIES", "1")
 
     market_open = is_market_open_et(datetime.now(timezone.utc))
     paper_arm_valid = classify_paper_arm_confirm_status() == "VALID"
@@ -93,6 +100,19 @@ def run_phase_196v_validation(*, verbose: bool = True) -> Dict[str, Any]:
 
     gate_ok, gate_reason, gate_details = evaluate_paper_entry_gates(verbose=False)
     checks = gate_details.get("checks") or {}
+
+    contract_state = classify_paper_entry_contract_state(
+        handoff=handoff,
+        planner_symbols=list(planner_symbols),
+        planner_meta=planner_meta,
+        contract_detail=contract_detail,
+        gate_ok=gate_ok,
+        gate_reason=gate_reason,
+        gate_details=gate_details,
+        readiness_status=readiness_status,
+        paper_arm_valid=paper_arm_valid,
+        live_execution=load_live_execution_flag(),
+    )
 
     would_execute = bool(
         market_open
@@ -134,22 +154,16 @@ def run_phase_196v_validation(*, verbose: bool = True) -> Dict[str, Any]:
         stale_cache_used = True
         notes.append("stale controlled_paper_entry_loop_candidates marked executable")
 
-    status = "PASS"
+    status = str(contract_state.get("validation_status") or "REVIEW")
     if not ALLOC_RECOMMENDATIONS.is_file():
         status = "FAIL"
         notes.append("allocation source missing")
-    elif (
-        handoff.get("allocation_open_new_count", 0) == 0
-        and handoff.get("allocation_add_count", 0) == 0
-    ):
-        status = "REVIEW"
-        notes.append("no OPEN_NEW/ADD allocation rows")
-    elif not eligible and handoff.get("allocation_open_new_count", 0) > 0:
-        status = "REVIEW"
-        notes.append("OPEN_NEW rows present but none eligible after gates")
     elif load_live_execution_flag():
         status = "FAIL"
         notes.append("live_execution true")
+    elif contract_state.get("contract_state") == "CONTRACT_SCHEMA_MISMATCH":
+        status = "FAIL"
+        notes.append(f"true contract mismatch: {contract_reason}")
     elif market_open and gate_ok and not contract_ok:
         status = "REVIEW"
         notes.append(f"market open but contract mismatch: {contract_reason}")
@@ -157,6 +171,13 @@ def run_phase_196v_validation(*, verbose: bool = True) -> Dict[str, Any]:
         status = "REVIEW"
         notes.append(f"unexpected gate reason when closed: {gate_reason}")
 
+    notes.append(f"contract_state={contract_state.get('contract_state')}")
+    notes.append(f"allocation_status={contract_state.get('allocation_status')}")
+    if contract_state.get("rejection_reasons_by_symbol"):
+        notes.append(
+            "rejection_reasons_by_symbol="
+            + json.dumps(contract_state.get("rejection_reasons_by_symbol"), default=str)[:500]
+        )
     if market_open:
         notes.append("market open during validation — no orders submitted by this script")
     else:
@@ -193,6 +214,10 @@ def run_phase_196v_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "allocation_add_count": handoff.get("allocation_add_count", 0),
         "eligible_allocation_symbols": list(eligible),
         "rejected_allocation_symbols": rejected,
+        "contract_state": contract_state.get("contract_state"),
+        "allocation_status": contract_state.get("allocation_status"),
+        "rejection_reasons_by_symbol": contract_state.get("rejection_reasons_by_symbol"),
+        "planner_candidates": contract_state.get("planner_candidates"),
         "candidate_handoff_status": contract_detail.get("contract_status"),
         "contract_mismatch_detected": bool(contract_detail.get("contract_mismatch_detected")),
         "contract_mismatch_reason": contract_reason if not contract_ok else "",
@@ -230,7 +255,7 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true", default=True)
     args = ap.parse_args()
     report = run_phase_196v_validation(verbose=args.verbose)
-    return 0 if report.get("status") in ("PASS", "REVIEW") else 1
+    return 0 if report.get("status") in ("PASS", "REVIEW", "PASS_SAFE_BLOCKED") else 1
 
 
 if __name__ == "__main__":

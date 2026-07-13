@@ -3861,8 +3861,25 @@ def page_reconciliation() -> None:
 def page_ai_signals() -> None:
     st.markdown("### 🤖 AI Signals")
     st.caption(
-        "Priority order: **Signal Lifecycle (STATE) → Signals w/ Rationale → Raw Signals**. Lifecycle rows represent Triton’s current stance per ticker."
+        "Priority order: **Signal Lifecycle (STATE) → Signals w/ Rationale → Raw Signals**. "
+        "Lifecycle rows represent Triton's current stance per ticker. "
+        "**BUY in this table is signal-only** unless allocation recommends OPEN_NEW/ADD."
     )
+
+    alloc_actions: Dict[str, str] = {}
+    alloc_reasons: Dict[str, str] = {}
+    try:
+        alloc_path = RESULTS_DIR / "portfolio_allocation_recommendations.csv"
+        if alloc_path.is_file():
+            alloc_df = pd.read_csv(alloc_path, low_memory=False)
+            sym_col = "ticker" if "ticker" in alloc_df.columns else "symbol"
+            for _, row in alloc_df.iterrows():
+                sym = str(row.get(sym_col) or "").strip().upper()
+                if sym:
+                    alloc_actions[sym] = str(row.get("recommended_action") or "")
+                    alloc_reasons[sym] = str(row.get("reason") or "")
+    except Exception:
+        pass
 
     stale = _lifecycle_is_stale_vs_upstream()
     df: Optional[pd.DataFrame] = None
@@ -3898,6 +3915,40 @@ def page_ai_signals() -> None:
         return
 
     df = sanitize_df_cols(df)
+
+    sym_col = "ticker" if "ticker" in df.columns else ("symbol" if "symbol" in df.columns else None)
+    if sym_col:
+        df["allocation_action"] = (
+            df[sym_col].astype(str).str.upper().map(lambda s: alloc_actions.get(s, "—"))
+        )
+        df["entry_authority"] = df.apply(
+            lambda r: (
+                "allocation-approved"
+                if str(alloc_actions.get(str(r.get(sym_col) or "").strip().upper(), "")).upper()
+                in ("OPEN_NEW", "ADD")
+                else "signal only"
+            ),
+            axis=1,
+        )
+        rejected = [
+            sym
+            for sym, act in alloc_actions.items()
+            if act not in ("OPEN_NEW", "ADD")
+            and sym in set(df[sym_col].astype(str).str.upper())
+            and any(
+                str(r.get("signal") or r.get("stance") or "").upper() == "BUY"
+                for _, r in df[df[sym_col].astype(str).str.upper() == sym].iterrows()
+            )
+        ]
+        if rejected:
+            sample = ", ".join(
+                f"{s}({alloc_actions.get(s, '—')}: {alloc_reasons.get(s, '')[:40]})"
+                for s in rejected[:5]
+            )
+            st.info(
+                f"Signal BUY rows without allocation-approved entry: **{sample}**. "
+                "Paper entry uses OPEN_NEW/ADD from allocation only."
+            )
 
     # Display-only formatting (keep raw numerics intact elsewhere)
     df_disp = format_df_for_display(
@@ -5252,10 +5303,22 @@ def page_execution_dashboard() -> None:
             f"{cand.get('allocation_open_new_count', 0)}/{cand.get('allocation_add_count', 0)}",
         )
         st.caption(
+            f"Contract state: **{cand.get('contract_state') or '—'}** · "
+            f"Allocation: **{cand.get('allocation_status_label') or '—'}** · "
+            f"Planner candidates: **{', '.join(cand.get('raw_planner_candidates') or []) or '—'}**"
+        )
+        st.caption(
             f"Risk flag: **{cand.get('planner_preview_risk_flag') or '—'}** · "
             f"Final selection: **{cand.get('final_selection_status') or '—'}** · "
             f"Block: **{cand.get('final_selection_block_reason') or '—'}**"
         )
+        rej = cand.get("rejection_reasons_by_symbol") or {}
+        if rej:
+            lines = [
+                f"**{sym}**: {info.get('allocation_action')} — {info.get('rejection_reason')}"
+                for sym, info in list(rej.items())[:6]
+            ]
+            st.caption("Allocation rejections: " + " · ".join(lines))
         for w in cand.get("preview_warnings") or []:
             st.warning(str(w))
         cache = cand.get("stale_candidate_cache") or {}

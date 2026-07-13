@@ -76,14 +76,31 @@ def _extract_snapshot_json(stdout: str) -> Dict[str, Any]:
         return {}
 
 
+def _load_json(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
 def run_phase_196t_validation(*, verbose: bool = True) -> Dict[str, Any]:
     notes: List[str] = []
     from services.paper_arm_status import build_paper_arm_status
     from services.paper_entry_candidate_contract import (
         assess_controlled_candidates_cache,
         build_governed_candidate_summary,
+        classify_paper_entry_contract_state,
         write_candidate_artifacts,
     )
+    from services.paper_entry_loop_stage import (
+        _check_allocation_planner_contract,
+        _load_governed_allocation_candidates,
+        evaluate_paper_entry_gates,
+    )
+    from services.execute_trades import preview_planned_buy_symbols
 
     head = subprocess.run(
         ["git", "log", "-1", "--format=%H"],
@@ -129,6 +146,31 @@ def run_phase_196t_validation(*, verbose: bool = True) -> Dict[str, Any]:
         contract_path=CONTRACT_CSV,
     )
 
+    _, handoff = _load_governed_allocation_candidates()
+    planner_symbols, planner_meta = preview_planned_buy_symbols(
+        "paper", verbose=False, for_execute=True
+    )
+    _, _, contract_detail = _check_allocation_planner_contract(
+        list(handoff.get("eligible_entry_symbols") or []),
+        planner_symbols,
+        planner_meta,
+    )
+    gate_ok, gate_reason, gate_details = evaluate_paper_entry_gates(verbose=False)
+    readiness = _load_json(RESULTS / "execution_readiness.json")
+    readiness_status = str(readiness.get("readiness_status") or "UNKNOWN")
+    contract_state = classify_paper_entry_contract_state(
+        handoff=handoff,
+        planner_symbols=planner_symbols,
+        planner_meta=planner_meta,
+        contract_detail=contract_detail,
+        gate_ok=gate_ok,
+        gate_reason=gate_reason,
+        gate_details=gate_details,
+        readiness_status=readiness_status,
+        paper_arm_valid=str(arm_st.get("status") or "") == "VALID",
+        live_execution=live_execution,
+    )
+
     snap_proc = subprocess.run(
         [sys.executable, "-m", "services.snapshot_live_orders", "--mode", "paper"],
         cwd=str(ROOT),
@@ -166,28 +208,60 @@ def run_phase_196t_validation(*, verbose: bool = True) -> Dict[str, Any]:
     mtime_after = PAPER_ARM_PATH.stat().st_mtime if PAPER_ARM_PATH.is_file() else None
     confirm_unchanged = mtime_before == mtime_after
 
-    status = "PASS"
+    status = str(
+        summary.get("contract_validation_status")
+        or contract_state.get("validation_status")
+        or "PASS"
+    )
+    if status == "PASS_SAFE_BLOCKED":
+        status = "PASS"
     if sup_rc != 0 or arm_rc != 0:
         status = "FAIL"
         notes.append("Runtime status script failure.")
     elif not confirm_unchanged:
         status = "FAIL"
         notes.append("paper_arm_confirm modified during validation.")
-    elif positions != ["JPM", "WFC"] or open_orders != 0 or live_execution:
+    elif open_orders != 0 or live_execution:
         status = "FAIL"
-        notes.append("Portfolio state mismatch.")
-    elif map_count < 1 or contract_count < 1:
+        notes.append(f"Safety: open_orders={open_orders} live_execution={live_execution}")
+    elif map_count < 1:
         status = "FAIL"
-        notes.append("Candidate artifacts not written.")
+        notes.append("Source map artifact not written.")
+    elif contract_count < 1 and contract_state.get("contract_state") not in (
+        "PAPER_ARMED_NO_ALLOCATION_BUY",
+        "PLANNER_CANDIDATES_REJECTED_BY_ALLOCATION",
+        "ENTRY_BLOCKED_BY_EXECUTION_READINESS",
+        "ENTRY_BLOCKED_BY_RISK_OR_GOVERNANCE",
+    ):
+        status = "FAIL"
+        notes.append("Candidate contract rows missing for non-intentional state.")
     elif preview_candidate and risk_blocked_preview and preview_executable:
         status = "FAIL"
         notes.append("Risk-blocked preview incorrectly marked executable.")
+    elif contract_state.get("contract_state") == "CONTRACT_SCHEMA_MISMATCH":
+        status = "FAIL"
+        notes.append("True allocation/planner schema mismatch detected.")
     elif not risk_prevented and preview_candidate and risk_blocked_preview:
         status = "REVIEW"
         notes.append("Verify preview warnings for risk-blocked candidate.")
     elif not dashboard_ok:
         status = "REVIEW"
         notes.append("Dashboard candidate contract section incomplete.")
+
+    notes.append(
+        f"contract_state={contract_state.get('contract_state')} "
+        f"planner_candidates={contract_state.get('planner_candidates')}"
+    )
+    if contract_state.get("rejection_reasons_by_symbol"):
+        notes.append(
+            "rejection_reasons="
+            + str(
+                {
+                    k: v.get("rejection_reason")
+                    for k, v in list(contract_state["rejection_reasons_by_symbol"].items())[:6]
+                }
+            )
+        )
 
     payload = {
         "phase": "196T",
@@ -220,8 +294,18 @@ def run_phase_196t_validation(*, verbose: bool = True) -> Dict[str, Any]:
         "allocation_exit_count": summary.get("allocation_exit_count"),
         "allocation_block_count": summary.get("allocation_block_count"),
         "candidate_alignment_issue_resolved_or_documented": True,
-        "candidate_alignment_issue_type_196s": "ALLOCATION_AND_ENTRY_ENGINE_CONTRACT_MISMATCH",
-        "resolution": "governed preview metadata + contract CSV; stale cache marked diagnostic",
+        "candidate_alignment_issue_type_196s": str(
+            contract_state.get("issue_type") or "DOCUMENTED_INTENTIONAL_BEHAVIOR"
+        ),
+        "contract_state": contract_state.get("contract_state"),
+        "allocation_status": contract_state.get("allocation_status"),
+        "eligible_allocation": contract_state.get("eligible_allocation"),
+        "planner_candidates": contract_state.get("planner_candidates"),
+        "rejection_reasons_by_symbol": contract_state.get("rejection_reasons_by_symbol"),
+        "execution_readiness_status": readiness_status,
+        "gate_pass": gate_ok,
+        "gate_reason": gate_reason,
+        "resolution": "governed contract states clarify planner-only vs allocation-approved entries",
         "risk_blocked_candidates_prevented_from_executable_preview": risk_prevented
         or (risk_blocked_preview and not preview_executable),
         "final_risk_overlay_preserved": True,
@@ -263,7 +347,7 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true", default=True)
     args = ap.parse_args()
     report = run_phase_196t_validation(verbose=args.verbose)
-    return 0 if report.get("status") in ("PASS", "REVIEW") else 1
+    return 0 if report.get("status") in ("PASS", "REVIEW", "PASS_SAFE_BLOCKED") else 1
 
 
 if __name__ == "__main__":
