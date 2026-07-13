@@ -18,6 +18,7 @@ This file is intentionally dependency-light and safe to import anywhere.
 import json
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
 
 
 def _utcnow():
@@ -257,6 +258,89 @@ def compute_live_gates(
 
     live_ready = all(g["ok"] for g in gates)
     return live_ready, gates
+
+
+def evaluate_paper_arm_confirm_gate() -> Dict[str, Any]:
+    """Paper operator latch gate — distinct from live_confirm.json."""
+    try:
+        from services.paper_arm_status import classify_paper_arm_confirm_status
+
+        status = classify_paper_arm_confirm_status()
+        ok = status == "VALID"
+        detail = (
+            "paper_arm_confirm VALID"
+            if ok
+            else f"paper_arm_confirm {status} — run: python -m services.set_paper_arm_confirm --ttl <minutes>"
+        )
+        return _status("PAPER_ARM_CONFIRM", ok, detail, {"status": status})
+    except Exception as exc:
+        return _status(
+            "PAPER_ARM_CONFIRM",
+            False,
+            f"paper_arm_confirm check error: {exc}",
+            {},
+        )
+
+
+def _load_paper_display_context(project_root: Path) -> Dict[str, Any]:
+    readiness_path = project_root / "data" / "results" / "execution_readiness.json"
+    readiness = _load_json(readiness_path) or {}
+    paper_permitted = bool(readiness.get("paper_execution_permitted", False))
+    live_permitted = bool(readiness.get("live_execution_permitted", False))
+    return {
+        "paper_execution_permitted": paper_permitted,
+        "live_execution_permitted": live_permitted,
+        "paper_runtime_display": paper_permitted and not live_permitted,
+    }
+
+
+def align_gates_for_paper_runtime(
+    gates: list,
+    gate_bits: dict,
+    *,
+    project_root: Path | None = None,
+) -> Dict[str, Any]:
+    """
+    Dashboard / operator display: CONFIRM reflects paper_arm_confirm, not live_confirm.
+    Live hard gate semantics are unchanged for live order placement.
+    """
+    root = project_root or Path(__file__).resolve().parents[1]
+    ctx = _load_paper_display_context(root)
+    if not ctx.get("paper_runtime_display"):
+        return ctx
+
+    paper_gate = evaluate_paper_arm_confirm_gate()
+    for gate in gates:
+        if gate.get("name") == "CONFIRM":
+            gate["ok"] = bool(paper_gate.get("ok"))
+            gate["detail"] = str(paper_gate.get("detail") or "")
+            gate["meta"] = dict(paper_gate.get("meta") or {})
+            gate["meta"]["source"] = "paper_arm_confirm"
+            gate["meta"]["live_confirm_distinct"] = True
+            break
+    gate_bits["CONFIRM"] = bool(paper_gate.get("ok"))
+    ctx["paper_arm_confirm_gate"] = paper_gate
+    return ctx
+
+
+def compute_display_gates(
+    project_root: Path | None = None,
+    confirm_ttl_minutes: int = 10,
+    freshness_max_age_minutes: int = 180,
+    require_market_open: bool = True,
+    broker=None,
+):
+    """Live gates with paper-runtime CONFIRM alignment for dashboard and operator views."""
+    live_ready, gates = compute_live_gates(
+        project_root=project_root,
+        confirm_ttl_minutes=confirm_ttl_minutes,
+        freshness_max_age_minutes=freshness_max_age_minutes,
+        require_market_open=require_market_open,
+        broker=broker,
+    )
+    gate_bits = {str(g.get("name")): bool(g.get("ok")) for g in gates}
+    paper_ctx = align_gates_for_paper_runtime(gates, gate_bits, project_root=project_root)
+    return live_ready, gates, gate_bits, paper_ctx
 
 
 class LiveExecutionBlocked(RuntimeError):

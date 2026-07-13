@@ -358,3 +358,75 @@ def load_cli_validation_env(*, verbose: bool = False) -> Dict[str, Any]:
     if _env_truthy(LIVE_EXECUTION_ENV) or _env_truthy(LIVE_FORCE_ENV):
         return evaluate_paper_env_authority(load_local_env=True, cli_validation=True)
     return evaluate_paper_env_authority(load_local_env=True, cli_validation=True)
+
+
+def _readiness_paper_supervisor_active() -> Tuple[bool, str]:
+    """True when continuous loop is running and readiness permits paper (not live)."""
+    try:
+        from services.runtime_process_detector import detect_runtime_loop_processes
+
+        procs = detect_runtime_loop_processes()
+        if not procs.get("continuous_loop_running"):
+            return False, "continuous_loop_not_running"
+        readiness_path = ROOT / "data" / "results" / "execution_readiness.json"
+        if not readiness_path.is_file():
+            return False, "execution_readiness_missing"
+        doc = json.loads(readiness_path.read_text(encoding="utf-8"))
+        if not bool(doc.get("paper_execution_permitted", False)):
+            return False, "paper_execution_not_permitted"
+        if bool(doc.get("live_execution_permitted", False)):
+            return False, "live_execution_permitted"
+        return True, "continuous_loop_paper_runtime"
+    except Exception as exc:
+        return False, f"supervisor_check_error:{exc}"
+
+
+def resolve_paper_runtime_env_flags() -> Dict[str, Any]:
+    """
+    Single source of truth for paper execution env flags across CLI, loop stage,
+    session arm policy, and dashboard posture.
+    """
+    paper = _env_truthy(PAPER_EXECUTION_ENV)
+    auto_entries = _env_truthy(AUTO_PAPER_ENTRIES_ENV)
+    auto_approval = _env_truthy(AUTO_PAPER_APPROVAL_ENV)
+    source = "process_environment" if paper else "missing"
+    supervisor_active = False
+    supervisor_reason = ""
+
+    if not paper:
+        supervisor_active, supervisor_reason = _readiness_paper_supervisor_active()
+        if supervisor_active:
+            paper = True
+            auto_entries = True
+            auto_approval = True
+            source = "supervisor_runtime_inherited"
+
+    all_required = paper and auto_entries
+    return {
+        "paper_execution_enabled": paper,
+        "auto_paper_entries_enabled": auto_entries,
+        "auto_paper_approval_enabled": auto_approval,
+        "all_required_enabled": all_required,
+        "env_source": source,
+        "supervisor_runtime_active": supervisor_active,
+        "supervisor_runtime_reason": supervisor_reason,
+        "process_env_paper_execution": _env_truthy(PAPER_EXECUTION_ENV),
+        "process_env_auto_paper_entries": _env_truthy(AUTO_PAPER_ENTRIES_ENV),
+        "process_env_auto_paper_approval": _env_truthy(AUTO_PAPER_APPROVAL_ENV),
+    }
+
+
+def paper_runtime_env_ready() -> Tuple[bool, str, Dict[str, Any]]:
+    """Return (ok, reason, flags) for paper execution env preconditions."""
+    flags = resolve_paper_runtime_env_flags()
+    if flags["paper_execution_enabled"] and flags["auto_paper_entries_enabled"]:
+        return True, "ok", flags
+    if not flags["paper_execution_enabled"]:
+        if flags.get("supervisor_runtime_active"):
+            return (
+                False,
+                "TRITON_ENABLE_PAPER_EXECUTION not set in shell (supervisor active)",
+                flags,
+            )
+        return False, "TRITON_ENABLE_PAPER_EXECUTION not set to 1", flags
+    return False, "TRITON_ENABLE_AUTO_PAPER_ENTRIES not set to 1", flags

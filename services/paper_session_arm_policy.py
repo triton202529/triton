@@ -127,16 +127,17 @@ def is_within_session_arm_window(
 
 
 def _env_ok(policy: Dict[str, Any]) -> Tuple[bool, str]:
-    if (
-        policy.get("require_paper_execution_env")
-        and os.environ.get("TRITON_ENABLE_PAPER_EXECUTION", "").strip() != "1"
-    ):
+    from services.triton_env_loader import resolve_paper_runtime_env_flags
+
+    flags = resolve_paper_runtime_env_flags()
+    if not policy.get("require_paper_execution_env"):
+        return True, "ok"
+    if not flags.get("paper_execution_enabled"):
         return False, "TRITON_ENABLE_PAPER_EXECUTION not set to 1"
-    if (
-        policy.get("require_auto_paper_entries_env")
-        and os.environ.get("TRITON_ENABLE_AUTO_PAPER_ENTRIES", "").strip() != "1"
-    ):
+    if policy.get("require_auto_paper_entries_env") and not flags.get("auto_paper_entries_enabled"):
         return False, "TRITON_ENABLE_AUTO_PAPER_ENTRIES not set to 1"
+    if flags.get("env_source") == "supervisor_runtime_inherited":
+        return True, "supervisor_runtime_inherited"
     return True, "ok"
 
 
@@ -254,9 +255,18 @@ def run_paper_session_arm_policy(
         return result
 
     env_ok, env_reason = _env_ok(policy)
+    from services.triton_env_loader import resolve_paper_runtime_env_flags
+
+    env_flags = resolve_paper_runtime_env_flags()
+    result["paper_env_source"] = env_flags.get("env_source")
+    result["supervisor_runtime_active"] = env_flags.get("supervisor_runtime_active")
     if not env_ok:
         result["action"] = "skipped_env"
         result["notes"].append(env_reason)
+        if env_flags.get("supervisor_runtime_active"):
+            result["notes"].append(
+                "continuous loop has paper env; shell env unset — policy skipped in this process"
+            )
         return result
 
     if policy.get("require_broker_mode_paper"):

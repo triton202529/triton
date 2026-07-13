@@ -53,7 +53,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from services.live_gate import compute_live_gates
+from services.live_gate import compute_display_gates, compute_live_gates
 from services.schema_guard import (
     dedupe_columns,
     find_duplicate_columns,
@@ -2194,7 +2194,13 @@ def load_dashboard_execution_posture() -> DashboardExecutionPosture:
     except Exception:
         market_open = False
 
-    auto_approval = os.environ.get("TRITON_ENABLE_AUTO_PAPER_APPROVAL", "").strip() == "1"
+    auto_approval = False
+    try:
+        from services.triton_env_loader import resolve_paper_runtime_env_flags
+
+        auto_approval = bool(resolve_paper_runtime_env_flags().get("auto_paper_approval_enabled"))
+    except Exception:
+        auto_approval = os.environ.get("TRITON_ENABLE_AUTO_PAPER_APPROVAL", "").strip() == "1"
     if not market_open:
         approval_label = "MARKET_CLOSED"
     elif auto_approval and readiness_status == "READY" and paper and not live:
@@ -2261,14 +2267,13 @@ def render_sidebar_execution_status(
     live_ready = False
     gate_bits: Dict[str, bool] = {}
     try:
-        live_ready, gates = compute_live_gates(
+        live_ready, gates, gate_bits, _paper_ctx = compute_display_gates(
             project_root=PROJECT_ROOT,
             confirm_ttl_minutes=10,
             freshness_max_age_minutes=180,
             require_market_open=True,
             broker=None,
         )
-        gate_bits = {str(g.get("name")): bool(g.get("ok")) for g in gates}
     except Exception:
         pass
 
@@ -2557,8 +2562,7 @@ def render_top_status_stack() -> None:
             pill = "stale"
             label = "DATA STALE"
 
-    # Live execution gate (single source of truth)
-    # Keep this aligned with the executor via services.live_gate.compute_live_gates.
+    # Keep this aligned with the executor via services.live_gate.compute_display_gates.
     def _try_get_broker():
         try:
             from services.broker_alpaca import AlpacaBroker
@@ -2568,14 +2572,13 @@ def render_top_status_stack() -> None:
             return None
 
     broker = _try_get_broker()
-    live_ready, gates = compute_live_gates(
+    live_ready, gates, gate_bits, _paper_ctx = compute_display_gates(
         project_root=PROJECT_ROOT,
         confirm_ttl_minutes=10,
         freshness_max_age_minutes=180,
         require_market_open=True,
         broker=broker,
     )
-    gate_bits = {g.get("name"): bool(g.get("ok")) for g in gates}
     bad_bits = [k for k, v in gate_bits.items() if not v]
 
     # Pipeline/contracts lock (data integrity) — separate from authority posture labels.
@@ -24251,14 +24254,13 @@ def main() -> None:
     render_top_status_stack()
     pipeline_locked, pipeline_reason = compute_execution_lock()
     posture = load_dashboard_execution_posture()
-    live_ready, gates = compute_live_gates(
+    live_ready, gates, gate_bits, _paper_ctx = compute_display_gates(
         project_root=PROJECT_ROOT,
         confirm_ttl_minutes=10,
         freshness_max_age_minutes=180,
         require_market_open=True,
         broker=None,
     )
-    gate_bits = {str(g.get("name")): bool(g.get("ok")) for g in gates}
     render_dashboard_guard_summary(
         pipeline_locked=pipeline_locked,
         pipeline_reason=pipeline_reason,

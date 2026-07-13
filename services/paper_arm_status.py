@@ -109,16 +109,28 @@ def build_paper_arm_status(*, verbose_notes: bool = True) -> Dict[str, Any]:
         live_execution = load_live_execution_flag()
         live_confirm_status = classify_live_confirm_status()
 
+        from services.triton_env_loader import resolve_paper_runtime_env_flags
+
+        env_flags = resolve_paper_runtime_env_flags()
+
         if verbose_notes:
             notes.append("Read-only status; does not submit orders or write confirmation files.")
+            notes.append(
+                f"Paper env source: {env_flags.get('env_source')} "
+                f"(supervisor_active={env_flags.get('supervisor_runtime_active')})"
+            )
             if operator_required and status != "VALID":
                 notes.append(
                     "ASSISTED mode: paper entry requires fresh paper_arm_confirm "
                     "(operator latch, distinct from live_confirm)."
                 )
+                notes.append("Refresh: python -m services.set_paper_arm_confirm --ttl <minutes>")
+            elif operator_required and status == "VALID":
+                notes.append("paper_arm_confirm VALID — paper operator latch armed.")
             if live_confirm_status != "VALID":
                 notes.append(
-                    "live_confirm.json is separate; expired/missing live confirm does not arm paper."
+                    "live_confirm.json is separate; dashboard CONFIRM uses paper_arm_confirm "
+                    "in paper runtime (not live_confirm)."
                 )
             notes.append("live_execution remains blocked by policy.")
 
@@ -147,6 +159,11 @@ def build_paper_arm_status(*, verbose_notes: bool = True) -> Dict[str, Any]:
             "live_confirm_path": str(LIVE_CONFIRM_PATH.relative_to(ROOT)).replace("\\", "/"),
             "live_confirm_status": live_confirm_status,
             "live_confirm_distinct_from_paper_arm": True,
+            "paper_env_source": env_flags.get("env_source"),
+            "supervisor_runtime_active": env_flags.get("supervisor_runtime_active"),
+            "paper_execution_env_enabled": env_flags.get("paper_execution_enabled"),
+            "auto_paper_entries_env_enabled": env_flags.get("auto_paper_entries_enabled"),
+            "auto_paper_approval_env_enabled": env_flags.get("auto_paper_approval_enabled"),
             "set_paper_arm_confirm_command": "python -m services.set_paper_arm_confirm --ttl <minutes>",
             "status_check_command": "python -m services.paper_arm_status",
             "notes": notes,

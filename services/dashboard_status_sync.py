@@ -339,7 +339,7 @@ def build_top_guard_message(
     if "NOT_CERTIFIED" in execution_block_reasons:
         return "Certification review required before execution can proceed."
     if "CONFIRM_REQUIRED" in execution_block_reasons:
-        return "Execution blocked pending live confirmation phrase."
+        return "Execution blocked pending paper_arm_confirm (paper operator latch)."
     return "Runtime pipeline healthy. Execution remains blocked by policy gates."
 
 

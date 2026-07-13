@@ -188,6 +188,45 @@ def _load_trade_opportunity_enrichment() -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _load_dashboard_buy_signal_exclusions() -> List[Dict[str, str]]:
+    """Symbols with BUY lifecycle/signal but no OPEN_NEW/ADD allocation action."""
+    if not ALLOC_RECOMMENDATIONS.is_file():
+        return []
+    exclusions: List[Dict[str, str]] = []
+    try:
+        df = pd.read_csv(ALLOC_RECOMMENDATIONS, low_memory=False)
+        sym_col = _allocation_sym_col(df)
+        if not sym_col:
+            return []
+        for _, row in df.iterrows():
+            sym = _norm(row.get(sym_col))
+            if not sym:
+                continue
+            lifecycle = _norm(row.get("lifecycle_action") or row.get("lifecycle"))
+            signal = _norm(row.get("signal") or row.get("signal_action"))
+            action = _norm(row.get("recommended_action") or row.get("action"))
+            if action in ("OPEN_NEW", "ADD"):
+                continue
+            if lifecycle != "BUY" and signal != "BUY":
+                continue
+            reason = str(
+                row.get("reason")
+                or row.get("rejection_reason")
+                or row.get("allocation_reason")
+                or "no_actionable_rule_matched"
+            ).strip()
+            exclusions.append(
+                {
+                    "symbol": sym,
+                    "recommended_action": action or "NONE",
+                    "rejection_reason": reason,
+                }
+            )
+    except Exception:
+        return []
+    return exclusions
+
+
 def _allocation_sym_col(df: pd.DataFrame) -> Optional[str]:
     if "ticker" in df.columns:
         return "ticker"
@@ -667,14 +706,21 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
             print(f"[PAPER_ENTRY_GATE] status={label} reason={reason}", flush=True)
         return False, reason, details
 
-    paper_env = os.environ.get("TRITON_ENABLE_PAPER_EXECUTION", "").strip() == "1"
-    auto_env = os.environ.get("TRITON_ENABLE_AUTO_PAPER_ENTRIES", "").strip() == "1"
-    details["checks"]["TRITON_ENABLE_PAPER_EXECUTION"] = paper_env
-    details["checks"]["TRITON_ENABLE_AUTO_PAPER_ENTRIES"] = auto_env
-    if not paper_env:
-        return block("TRITON_ENABLE_PAPER_EXECUTION not set to 1", "paper_execution_env")
-    if not auto_env:
-        return block("TRITON_ENABLE_AUTO_PAPER_ENTRIES not set to 1", "auto_paper_entries_env")
+    from services.triton_env_loader import paper_runtime_env_ready
+
+    paper_env_ok, paper_env_reason, paper_env_flags = paper_runtime_env_ready()
+    details["checks"]["TRITON_ENABLE_PAPER_EXECUTION"] = bool(
+        paper_env_flags.get("paper_execution_enabled")
+    )
+    details["checks"]["TRITON_ENABLE_AUTO_PAPER_ENTRIES"] = bool(
+        paper_env_flags.get("auto_paper_entries_enabled")
+    )
+    details["checks"]["paper_env_source"] = paper_env_flags.get("env_source")
+    details["checks"]["supervisor_runtime_active"] = paper_env_flags.get(
+        "supervisor_runtime_active"
+    )
+    if not paper_env_ok:
+        return block(paper_env_reason, "paper_execution_env")
 
     if not ALLOC_RECOMMENDATIONS.is_file():
         return block(
@@ -824,15 +870,25 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     details["checks"]["entry_rows_total"] = len(candidates)
     details["checks"]["entry_rows_eligible"] = len(eligible)
     if not candidates:
-        return block(
-            "no OPEN_NEW/ADD rows in portfolio_allocation_recommendations.csv",
-            "entry_candidates",
-        )
+        exclusions = _load_dashboard_buy_signal_exclusions()
+        details["checks"]["dashboard_buy_signal_exclusions"] = exclusions
+        msg = "paper armed, no qualifying buy candidates (no OPEN_NEW/ADD in allocation)"
+        if exclusions:
+            sample = ", ".join(f"{e['symbol']}:{e['rejection_reason']}" for e in exclusions[:6])
+            msg += f"; dashboard BUY excluded: {sample}"
+        if verbose:
+            print(f"[PAPER_ENTRY_GATE] status=SAFE_BLOCK reason={msg}", flush=True)
+        return block(msg, "entry_candidates")
     if not eligible:
-        return block(
-            "no eligible allocation candidates after risk/duplicate/cap gates",
-            "entry_candidates",
-        )
+        exclusions = _load_dashboard_buy_signal_exclusions()
+        details["checks"]["dashboard_buy_signal_exclusions"] = exclusions
+        msg = "paper armed, no eligible allocation candidates after risk/duplicate/cap gates"
+        if exclusions:
+            sample = ", ".join(f"{e['symbol']}:{e['rejection_reason']}" for e in exclusions[:6])
+            msg += f"; dashboard BUY excluded: {sample}"
+        if verbose:
+            print(f"[PAPER_ENTRY_GATE] status=SAFE_BLOCK reason={msg}", flush=True)
+        return block(msg, "entry_candidates")
 
     try:
         eligible_syms = list(handoff_reload.get("eligible_entry_symbols") or [])
