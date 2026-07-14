@@ -126,7 +126,87 @@ Required **before real broker authorization creation** (197Z path):
   artifact; only the intentional creator module with confirmation does.
 
 Related earlier gate (197W approval creation) uses its own phrase and still does **not**
-authorize broker orders.
+authorize broker orders:
+
+```powershell
+python -m services.phase_197w_create_paper_operator_approval_artifact --create --operator-confirmation "I authorize Phase 197W to create the paper-only operator approval artifact for the current capped defensive batch. No broker orders yet."
+```
+
+197Z create (only after valid 197W approval exists):
+
+```powershell
+python -m services.phase_197z_paper_broker_execution_authorization_creator --create --operator-confirmation "I authorize the paper broker execution phase for the approved capped defensive batch. Paper only. No live trading."
+```
+
+---
+
+## Hard-stop operator command block
+
+Use `$ErrorActionPreference = "Stop"` so later commands do not continue after a failed gate.
+
+```powershell
+$ErrorActionPreference = "Stop"
+
+function Assert-JsonField {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)]$Expected
+  )
+  if (-not (Test-Path $Path)) { throw "Missing result file: $Path" }
+  $doc = Get-Content -Raw -Path $Path | ConvertFrom-Json
+  $actual = $doc.$Name
+  if ("$actual" -ne "$Expected") {
+    throw "Hard stop: $Path.$Name expected=$Expected actual=$actual"
+  }
+}
+
+# 1) Create/refresh short-lived approval (197W) — paper only, no broker orders
+python -m services.phase_197w_create_paper_operator_approval_artifact --create --operator-confirmation "I authorize Phase 197W to create the paper-only operator approval artifact for the current capped defensive batch. No broker orders yet."
+if ($LASTEXITCODE -ne 0) { throw "Hard stop: 197W create failed" }
+if (-not (Test-Path .\data\governance\operator_paper_defensive_exit_approval.json)) {
+  throw "Hard stop: 197W approval artifact absent"
+}
+
+# 2) Final dry-run must PASS with GLD qty 48
+python -m services.phase_197x_paper_broker_execution_final_dry_run
+if ($LASTEXITCODE -ne 0) { throw "Hard stop: 197X failed" }
+Assert-JsonField .\data\results\phase_197x_paper_broker_execution_final_dry_run.json status PASS
+$x197 = Get-Content -Raw .\data\results\phase_197x_paper_broker_execution_final_dry_run.json | ConvertFrom-Json
+if ($x197.projected_quantities.GLD -ne 48) {
+  throw "Hard stop: GLD projected qty is not 48"
+}
+
+# 3) Evidence gates
+python -m services.phase_198j_partial_dispatch_evidence_reconciliation
+if ($LASTEXITCODE -ne 0) { throw "Hard stop: 198J failed" }
+Assert-JsonField .\data\results\phase_198j_partial_dispatch_evidence_reconciliation.json status PASS
+python -m services.phase_198k_partial_gld_no_execution_certification
+if ($LASTEXITCODE -ne 0) { throw "Hard stop: 198K failed" }
+Assert-JsonField .\data\results\phase_198k_partial_gld_no_execution_certification.json status PASS
+
+# 4) Broker auth create (197Z) — still no manage_positions dispatch in this block
+python -m services.phase_197z_paper_broker_execution_authorization_creator --create --operator-confirmation "I authorize the paper broker execution phase for the approved capped defensive batch. Paper only. No live trading."
+if ($LASTEXITCODE -ne 0) { throw "Hard stop: 197Z create failed" }
+if (-not (Test-Path .\data\governance\operator_paper_broker_execution_authorization.json)) {
+  throw "Hard stop: 197Z broker auth artifact absent"
+}
+
+# 5) Eligibility / bridge
+python -m services.phase_197y_loop_mediated_paper_execution_gate
+if ($LASTEXITCODE -ne 0) { throw "Hard stop: 197Y failed" }
+$y197 = Get-Content -Raw .\data\results\phase_197y_loop_mediated_paper_execution_gate.json | ConvertFrom-Json
+if (-not $y197.eligible_for_execution) { throw "Hard stop: 197Y eligible_for_execution is not true" }
+
+python -m services.phase_197z_readiness_bridge_validation
+if ($LASTEXITCODE -ne 0) { throw "Hard stop: 197Z bridge validation failed" }
+$zBridge = Get-Content -Raw .\data\results\phase_197z_readiness_bridge_validation.json | ConvertFrom-Json
+if (-not $zBridge.bridge_active) { throw "Hard stop: 197Z bridge_active is not true" }
+
+Write-Host "Hard-stop gate block passed. Dispatch remains a separate intentional step."
+```
+
+Do **not** continue into `manage_positions` from this block unless the operator separately and intentionally starts a paper dispatch window after all hard stops above have passed.
 
 ---
 

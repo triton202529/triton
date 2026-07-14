@@ -210,19 +210,83 @@ def classify_paper_operator_approval_artifact(
     approved = _norm_symbols(contract.get("approved_symbols"))
     deferred = _norm_symbols(contract.get("deferred_symbols") or ctx["deferred_symbols"])
     capped = ctx["capped_symbols"]
-    if approved != capped:
-        return (
-            PAPER_APPROVAL_PACKET_MISMATCH,
-            f"approved_symbols_mismatch approved={approved} capped={capped}",
-            details,
+
+    # Partial defensive-exit approvals authorize one symbol/qty (e.g. GLD 48),
+    # not the full capped multi-symbol batch list.
+    is_partial_contract = False
+    try:
+        from services.partial_defensive_exit_preview import (
+            PREVIEW_TYPE,
+            extract_partial_approval_contract_fields,
         )
-    if set(approved) & set(deferred):
+
+        partial_fields = extract_partial_approval_contract_fields(ctx["preview"])
+        contract_preview_type = str(contract.get("preview_type") or "").strip().upper()
+        approved_quantities_raw = contract.get("approved_quantities") or {}
+        is_partial_contract = contract_preview_type == str(PREVIEW_TYPE).upper() or (
+            isinstance(approved_quantities_raw, dict) and bool(approved_quantities_raw)
+        )
+        if is_partial_contract:
+            if not partial_fields.get("partial_preview_available"):
+                return PAPER_APPROVAL_PACKET_MISMATCH, "partial_preview_unavailable", details
+            expected_symbol = str(partial_fields.get("symbol") or "").upper()
+            expected_qty = int(partial_fields.get("partial_qty") or 0)
+            if approved != [expected_symbol]:
+                return (
+                    PAPER_APPROVAL_PACKET_MISMATCH,
+                    f"partial_approved_symbols_mismatch approved={approved} expected={[expected_symbol]}",
+                    details,
+                )
+            qty_map: Dict[str, int] = {}
+            for sym, qty in (approved_quantities_raw or {}).items():
+                try:
+                    qty_map[str(sym).strip().upper()] = int(float(qty))
+                except (TypeError, ValueError):
+                    return (
+                        PAPER_APPROVAL_MALFORMED,
+                        f"invalid_approved_quantity symbol={sym}",
+                        details,
+                    )
+            if qty_map.get(expected_symbol) != expected_qty:
+                return (
+                    PAPER_APPROVAL_PACKET_MISMATCH,
+                    f"partial_qty_mismatch expected={expected_qty} got={qty_map.get(expected_symbol)}",
+                    details,
+                )
+            auth_qty = int(contract.get("authorized_qty") or contract.get("partial_qty") or 0)
+            if auth_qty and auth_qty != expected_qty:
+                return (
+                    PAPER_APPROVAL_PACKET_MISMATCH,
+                    f"authorized_qty_mismatch expected={expected_qty} got={auth_qty}",
+                    details,
+                )
+            details["partial_contract"] = True
+            details["authorized_qty"] = expected_qty
+            details["approved_quantities"] = qty_map
+    except Exception as exc:
+        if (
+            str(contract.get("preview_type") or "").strip().upper()
+            == "PARTIAL_DEFENSIVE_EXIT_PREVIEW"
+        ):
+            return PAPER_APPROVAL_MALFORMED, f"partial_classify_error={exc}", details
+
+    if not is_partial_contract:
+        if approved != capped:
+            return (
+                PAPER_APPROVAL_PACKET_MISMATCH,
+                f"approved_symbols_mismatch approved={approved} capped={capped}",
+                details,
+            )
+    if set(approved) & set(deferred) and not is_partial_contract:
         overlap = sorted(set(approved) & set(deferred))
         return (
             PAPER_APPROVAL_PACKET_MISMATCH,
             f"deferred_symbols_in_approved={overlap}",
             details,
         )
+    # Partial path may list the approved symbol in deferred full-exit set; that is expected.
+    if is_partial_contract and len(approved) != 1:
+        return PAPER_APPROVAL_PACKET_MISMATCH, "partial_approved_symbols_must_be_single", details
 
     batch_notional = float(contract.get("batch_notional") or contract.get("max_notional") or 0.0)
     batch_cap = float(

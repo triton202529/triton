@@ -240,7 +240,36 @@ def evaluate_creator_preconditions(
             return BLOCKED_197W, ["197w_broker_execution_authorized=true"], context
         if contract.get("live_authorized") is True:
             return BLOCKED_197W, ["197w_live_authorized=true"], context
+        if contract.get("live_execution_allowed") is True:
+            return BLOCKED_197W, ["197w_live_execution_allowed=true"], context
+        # Real create: approval scope must match partial projected qty (GLD 48).
+        if create and partial_ctx.get("partial_broker_authorization_supported"):
+            expected_qty = int(partial_ctx.get("authorized_qty") or 0)
+            approval_qty = int(
+                contract.get("authorized_qty")
+                or contract.get("partial_qty")
+                or (
+                    (contract.get("approved_quantities") or {}).get(
+                        str(partial_ctx.get("symbol") or "").upper()
+                    )
+                    if isinstance(contract.get("approved_quantities"), dict)
+                    else 0
+                )
+                or 0
+            )
+            if expected_qty != 48:
+                return (
+                    BLOCKED_197W,
+                    [f"projected_authorized_qty_not_48 qty={expected_qty}"],
+                    context,
+                )
+            if approval_qty != 48:
+                return BLOCKED_197W, [f"197w_approval_qty_not_48 qty={approval_qty}"], context
+            if str(contract.get("symbol") or "").upper() not in ("", "GLD"):
+                if "GLD" not in [str(s).upper() for s in (contract.get("approved_symbols") or [])]:
+                    return BLOCKED_197W, ["197w_approval_symbol_not_gld"], context
         context["using_partial_dry_run_compat"] = False
+        context["approval_artifact_path"] = _rel(APPROVAL_PATH)
 
     if not x197.get("dry_run_valid"):
         return BLOCKED_197X, ["197x_dry_run_invalid_or_missing"], context
@@ -479,7 +508,30 @@ def run_creator(
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Phase 197Z paper broker execution authorization creator (dry-run default)"
+        description=(
+            "Phase 197Z paper broker execution authorization creator. "
+            "Default is dry-run. Real creation requires valid "
+            "data/governance/operator_paper_defensive_exit_approval.json "
+            "from 197W, plus --create and the exact operator confirmation phrase."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  # Safe default: evaluate only; do not write broker auth\n"
+            "  python -m services.phase_197z_paper_broker_execution_authorization_creator\n"
+            "\n"
+            "  # Real create (only after valid 197W approval artifact exists):\n"
+            "  python -m services.phase_197z_paper_broker_execution_authorization_creator "
+            "--create --operator-confirmation "
+            '"I authorize the paper broker execution phase for the approved capped '
+            'defensive batch. Paper only. No live trading."\n'
+            "\n"
+            "Requires approval path:\n"
+            "  data/governance/operator_paper_defensive_exit_approval.json\n"
+            "Writes (on --create only):\n"
+            "  data/governance/operator_paper_broker_execution_authorization.json\n"
+            "Does NOT submit broker orders."
+        ),
     )
     ap.add_argument(
         "--create",

@@ -63,6 +63,12 @@ PAPER_OPERATOR_APPROVAL_BLOCKED_LIVE_NOT_BLOCKED = (
 PAPER_OPERATOR_APPROVAL_BLOCKED_EXECUTION_DETECTED = (
     "PAPER_OPERATOR_APPROVAL_BLOCKED_EXECUTION_DETECTED"
 )
+PAPER_OPERATOR_APPROVAL_BLOCKED_OPERATOR_CONFIRMATION_REQUIRED = (
+    "PAPER_OPERATOR_APPROVAL_BLOCKED_OPERATOR_CONFIRMATION_REQUIRED"
+)
+PAPER_OPERATOR_APPROVAL_BLOCKED_CREATE_FLAG_REQUIRED = (
+    "PAPER_OPERATOR_APPROVAL_BLOCKED_CREATE_FLAG_REQUIRED"
+)
 
 
 def _utc_now() -> datetime:
@@ -312,12 +318,16 @@ def build_paper_approval_artifact(
         "approval_status": "APPROVED",
         "approval_action": OPERATOR_DECISION_APPROVE,
         "approval_scope": "PAPER_ONLY",
+        "paper_only": True,
         "live_authorized": False,
+        "live_execution_allowed": False,
         "broker_execution_authorized": False,
         "raw_execution_authorized": False,
         "created_at": now.isoformat(),
         "ttl_minutes": TTL_MINUTES,
         "operator_authorization_phrase": OPERATOR_AUTHORIZATION_PHRASE,
+        "operator_confirmation": OPERATOR_AUTHORIZATION_PHRASE,
+        "source": "phase_197w",
         "packet_id": packet_id,
         "review_artifact_path": str(V197_JSON.relative_to(ROOT)).replace("\\", "/"),
         "governance_packet_path": str(OPERATOR_PACKET_JSON.relative_to(ROOT)).replace("\\", "/"),
@@ -334,14 +344,21 @@ def build_paper_approval_artifact(
         "phase": "197W",
     }
     if partial_fields.get("partial_preview_available"):
+        symbol = str(
+            partial_fields.get("symbol") or (approved_symbols[0] if approved_symbols else "")
+        ).upper()
+        authorized_qty = int(partial_fields.get("partial_qty") or 0)
+        full_qty = int(partial_fields.get("full_qty") or 0)
         contract.update(
             {
                 "preview_type": PREVIEW_TYPE,
                 "approved_action": "PARTIAL_EXIT",
+                "symbol": symbol,
+                "authorized_qty": authorized_qty,
                 "approved_quantities": partial_fields.get("approved_quantities")
-                or {str(approved_symbols[0]): int(partial_fields.get("partial_qty") or 0)},
-                "partial_qty": partial_fields.get("partial_qty"),
-                "full_qty": partial_fields.get("full_qty"),
+                or ({symbol: authorized_qty} if symbol else {}),
+                "partial_qty": authorized_qty,
+                "full_qty": full_qty,
                 "remaining_qty_after_preview": partial_fields.get("remaining_qty_after_preview"),
                 "full_exit_deferred": True,
                 "full_exit_deferred_reason": partial_fields.get("full_exit_deferred_reason"),
@@ -386,10 +403,53 @@ def run_phase_197w_create(
     *,
     verbose: bool = True,
     force: bool = False,
-    dry_run: bool = False,
+    dry_run: bool = True,
+    create: bool = False,
+    operator_confirmation: Optional[str] = None,
 ) -> Dict[str, Any]:
     notes: List[str] = []
     git_clean_before = _git_clean()
+
+    # Dry-run is the default safety posture. Real write requires --create.
+    if create:
+        dry_run = False
+    else:
+        dry_run = True
+
+    if create:
+        if not operator_confirmation or operator_confirmation != OPERATOR_AUTHORIZATION_PHRASE:
+            payload = {
+                "phase": "197W",
+                "generated_at": _utc_now_iso(),
+                "status": "PASS_SAFE_BLOCKED",
+                "final_state": PAPER_OPERATOR_APPROVAL_BLOCKED_OPERATOR_CONFIRMATION_REQUIRED,
+                "block_reasons": ["operator_confirmation_phrase_mismatch"],
+                "dry_run": False,
+                "create_requested": True,
+                "approval_artifact_created": False,
+                "approval_artifact_path": None,
+                "broker_authorization_artifact_created": False,
+                "broker_orders_submitted": False,
+                "operator_authorization_phrase": OPERATOR_AUTHORIZATION_PHRASE,
+                "warning": (
+                    "Real approval creation requires --create and the exact "
+                    "operator confirmation phrase. Dry-run remains default."
+                ),
+                "notes": [
+                    "Provide --create --operator-confirmation with the exact 197W phrase.",
+                    f"Required phrase: {OPERATOR_AUTHORIZATION_PHRASE}",
+                ],
+            }
+            _atomic_write_json(OUTPUT_JSON, payload)
+            if verbose:
+                print(f"[197W-APPROVAL] wrote {OUTPUT_JSON.relative_to(ROOT)}")
+                print(
+                    "[197W-APPROVAL] status=PASS_SAFE_BLOCKED "
+                    f"final_state={PAPER_OPERATOR_APPROVAL_BLOCKED_OPERATOR_CONFIRMATION_REQUIRED}"
+                )
+            return payload
+    else:
+        notes.append("dry_run_default_no_governance_write")
 
     v197 = _read_json(V197_JSON)
     u197 = _read_json(U197_JSON)
@@ -609,9 +669,13 @@ def run_phase_197w_create(
         "previous_commit": PREVIOUS_COMMIT,
         "dry_run": dry_run,
         "dry_run_validated": dry_run_validated,
+        "create_requested": create,
         "partial_mode": partial_mode,
         "preview_type": contract.get("preview_type") if partial_mode else None,
         "approved_quantities": contract.get("approved_quantities") if partial_mode else None,
+        "symbol": contract.get("symbol") if partial_mode else None,
+        "authorized_qty": contract.get("authorized_qty") if partial_mode else None,
+        "full_qty": contract.get("full_qty") if partial_mode else None,
         "approval_artifact_created": approval_created,
         "approval_artifact_path": (
             str(REAL_APPROVAL_PATH.relative_to(ROOT)).replace("\\", "/")
@@ -667,7 +731,30 @@ def run_phase_197w_create(
 
 
 def main(argv: List[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Phase 197W create paper operator approval artifact")
+    ap = argparse.ArgumentParser(
+        description=(
+            "Phase 197W create paper operator approval artifact. "
+            "Default is dry-run (no governance write). "
+            "Real creation requires --create and the exact operator confirmation phrase."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  # Safe default: validate contract only, do not write governance approval\n"
+            "  python -m services.phase_197w_create_paper_operator_approval_artifact\n"
+            "  python -m services.phase_197w_create_paper_operator_approval_artifact --dry-run\n"
+            "\n"
+            "  # Real create (writes data/governance/operator_paper_defensive_exit_approval.json):\n"
+            "  python -m services.phase_197w_create_paper_operator_approval_artifact --create "
+            "--operator-confirmation "
+            '"I authorize Phase 197W to create the paper-only operator approval artifact '
+            'for the current capped defensive batch. No broker orders yet."\n'
+            "\n"
+            "Real creation writes ONLY:\n"
+            "  data/governance/operator_paper_defensive_exit_approval.json\n"
+            "This does NOT create broker authorization and does NOT submit orders."
+        ),
+    )
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument(
         "--force", action="store_true", help="Reserved; creation still requires preconditions"
@@ -675,10 +762,36 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate partial/paper approval contract without writing governance artifact",
+        help="Validate partial/paper approval contract without writing governance artifact (default)",
+    )
+    ap.add_argument(
+        "--create",
+        action="store_true",
+        help=(
+            "Create real approval artifact at "
+            "data/governance/operator_paper_defensive_exit_approval.json "
+            "(requires exact --operator-confirmation)"
+        ),
+    )
+    ap.add_argument(
+        "--operator-confirmation",
+        default="",
+        help="Exact 197W operator confirmation phrase (required with --create)",
     )
     args = ap.parse_args(argv)
-    result = run_phase_197w_create(verbose=not args.quiet, force=args.force, dry_run=args.dry_run)
+    if args.create and args.dry_run:
+        print(
+            "[197W-APPROVAL] refuse: pass either --create or --dry-run, not both",
+            file=sys.stderr,
+        )
+        return 1
+    result = run_phase_197w_create(
+        verbose=not args.quiet,
+        force=args.force,
+        dry_run=not args.create,
+        create=bool(args.create),
+        operator_confirmation=args.operator_confirmation or None,
+    )
     return 0 if result.get("status") in ("PASS", "PASS_SAFE_BLOCKED") else 1
 
 

@@ -18,7 +18,10 @@ Write-Host ""
 
 if (-not (Test-Path -LiteralPath $jsonPath -PathType Leaf)) {
     Write-Host "Report missing. Run:" -ForegroundColor Yellow
-    Write-Host "  python -m services.phase_197w_create_paper_operator_approval_artifact" -ForegroundColor DarkGray
+    Write-Host "  # Dry-run (default; no governance write)" -ForegroundColor DarkGray
+Write-Host "  python -m services.phase_197w_create_paper_operator_approval_artifact --dry-run" -ForegroundColor DarkGray
+Write-Host "  # Real create (requires exact phrase)" -ForegroundColor DarkGray
+Write-Host '  python -m services.phase_197w_create_paper_operator_approval_artifact --create --operator-confirmation "I authorize Phase 197W to create the paper-only operator approval artifact for the current capped defensive batch. No broker orders yet."' -ForegroundColor DarkGray
     exit 1
 }
 

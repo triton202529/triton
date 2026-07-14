@@ -13,10 +13,19 @@ Operator authorization phrase required:
 ## Usage
 
 ```powershell
+# Default = dry-run (no governance write)
 python -m services.phase_197w_create_paper_operator_approval_artifact
+python -m services.phase_197w_create_paper_operator_approval_artifact --dry-run
+
+# Real create
+python -m services.phase_197w_create_paper_operator_approval_artifact --create --operator-confirmation "I authorize Phase 197W to create the paper-only operator approval artifact for the current capped defensive batch. No broker orders yet."
+
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\show_phase_197w_create_paper_operator_approval_artifact.ps1
 ```
 
+`--create` plus the exact operator confirmation phrase are required to write
+`data/governance/operator_paper_defensive_exit_approval.json`. Without `--create`,
+197W remains dry-run only.
 ## Approval Artifact
 
 - `approval_action`: `APPROVE_CAPPED_PAPER_DEFENSIVE_BATCH`

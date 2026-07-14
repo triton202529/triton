@@ -68,10 +68,15 @@ A valid approval artifact should include or imply:
 | Broker auth is separate | `broker_execution_authorized`: **false**; broker auth is a distinct artifact |
 | Expiry / short-lived validity | `expires_at` or TTL (e.g. 30 minutes); not standing overnight authority by default |
 
-Typical creation path (intentional only):
+Typical creation path (intentional only; dry-run is default):
 
 ```powershell
-python -m services.phase_197w_create_paper_operator_approval_artifact
+# Dry-run / syntax check (no governance write)
+python -m services.phase_197w_create_paper_operator_approval_artifact --help
+python -m services.phase_197w_create_paper_operator_approval_artifact --dry-run
+
+# Real create (writes data/governance/operator_paper_defensive_exit_approval.json)
+python -m services.phase_197w_create_paper_operator_approval_artifact --create --operator-confirmation "I authorize Phase 197W to create the paper-only operator approval artifact for the current capped defensive batch. No broker orders yet."
 ```
 
 197W operator phrase (approval creation only — still no broker orders):
@@ -79,7 +84,11 @@ python -m services.phase_197w_create_paper_operator_approval_artifact
 > I authorize Phase 197W to create the paper-only operator approval artifact
 > for the current capped defensive batch. No broker orders yet.
 
-Use `--dry-run` when validating compatibility without writing the artifact.
+`--create` is required for a real write. Without `--create`, 197W remains dry-run and
+does **not** create `data/governance/operator_paper_defensive_exit_approval.json`.
+
+Use `--dry-run` (or plain invocation with no `--create`) when validating compatibility
+without writing the artifact.
 
 ---
 

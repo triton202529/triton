@@ -36,9 +36,12 @@ PAPER_BROKER_EXECUTION_AUTH_197X_DRY_RUN_MISSING = (
 PAPER_BROKER_EXECUTION_AUTH_OPEN_ORDERS_PRESENT = "PAPER_BROKER_EXECUTION_AUTH_OPEN_ORDERS_PRESENT"
 
 AUTH_ACTION = "EXECUTE_APPROVED_197X_CAPPED_DEFENSIVE_BATCH"
+AUTH_ACTION_PARTIAL = "EXECUTE_APPROVED_197X_PARTIAL_DEFENSIVE_EXIT"
+AUTH_ACTIONS_ALLOWED = frozenset({AUTH_ACTION, AUTH_ACTION_PARTIAL})
 AUTH_STATUS_APPROVED = "AUTHORIZED"
 PAPER_SCOPE = "PAPER_ONLY"
 DEFAULT_TTL_MINUTES = 10
+PARTIAL_AUTHORIZED_QTY_REQUIRED = 48
 
 INVALID_AUTH_STATES = frozenset(
     {
@@ -209,8 +212,10 @@ def classify_paper_broker_execution_authorization(
         return PAPER_BROKER_EXECUTION_AUTH_SCOPE_INVALID, f"authorization_scope={scope}", details
 
     action = str(contract.get("authorization_action") or "").upper()
-    if action != AUTH_ACTION:
+    if action not in AUTH_ACTIONS_ALLOWED:
         return PAPER_BROKER_EXECUTION_AUTH_MALFORMED, f"authorization_action={action}", details
+    is_partial_auth = action == AUTH_ACTION_PARTIAL
+    details["partial_authorization"] = is_partial_auth
 
     if contract.get("live_authorized") is True:
         return PAPER_BROKER_EXECUTION_AUTH_LIVE_INVALID, "live_authorized=true", details
@@ -258,6 +263,43 @@ def classify_paper_broker_execution_authorization(
             f"auth_symbols={auth_symbols} projected={projected_symbols}",
             details,
         )
+
+    if is_partial_auth:
+        authorized_qty = int(
+            contract.get("authorized_qty") or contract.get("partial_authorization_qty") or 0
+        )
+        qty_map = contract.get("authorized_quantities") or {}
+        if isinstance(qty_map, dict) and auth_symbols:
+            try:
+                authorized_qty = int(qty_map.get(auth_symbols[0]) or authorized_qty or 0)
+            except (TypeError, ValueError):
+                return (
+                    PAPER_BROKER_EXECUTION_AUTH_MALFORMED,
+                    "invalid_authorized_quantities",
+                    details,
+                )
+        projected_qty_map = x197.get("projected_quantities") or {}
+        projected_qty = 0
+        if isinstance(projected_qty_map, dict) and auth_symbols:
+            try:
+                projected_qty = int(float(projected_qty_map.get(auth_symbols[0]) or 0))
+            except (TypeError, ValueError):
+                projected_qty = 0
+        if authorized_qty != PARTIAL_AUTHORIZED_QTY_REQUIRED:
+            return (
+                PAPER_BROKER_EXECUTION_AUTH_BATCH_MISMATCH,
+                f"authorized_qty_not_48 qty={authorized_qty}",
+                details,
+            )
+        if projected_qty and projected_qty != authorized_qty:
+            return (
+                PAPER_BROKER_EXECUTION_AUTH_BATCH_MISMATCH,
+                f"authorized_qty_mismatch auth={authorized_qty} projected={projected_qty}",
+                details,
+            )
+        if contract.get("full_exit_authorized") is True:
+            return PAPER_BROKER_EXECUTION_AUTH_BATCH_MISMATCH, "full_exit_authorized=true", details
+        details["authorized_qty"] = authorized_qty
 
     approval_hash = compute_artifact_hash(APPROVAL_PATH)
     if (
