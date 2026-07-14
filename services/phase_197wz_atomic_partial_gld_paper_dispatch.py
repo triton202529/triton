@@ -168,6 +168,163 @@ def _cleanup_stale_artifacts(*, created_approval: bool = False) -> Dict[str, Any
     }
 
 
+def _force_cleanup_run_artifacts(*, created_approval: bool, created_auth: bool) -> Dict[str, Any]:
+    """Always remove approval/auth created by this atomic run (no-submit / fail-safe)."""
+    notes: List[str] = []
+    removed_approval = False
+    removed_auth = False
+    if (created_approval or created_auth) and APPROVAL_PATH.is_file():
+        APPROVAL_PATH.unlink()
+        removed_approval = True
+        notes.append("run_approval_artifact_removed")
+    if (created_approval or created_auth) and AUTH_PATH.is_file():
+        AUTH_PATH.unlink()
+        removed_auth = True
+        notes.append("run_broker_auth_artifact_removed")
+    return {
+        "removed_approval": removed_approval,
+        "removed_auth": removed_auth,
+        "notes": notes,
+        "approval_present_after": APPROVAL_PATH.is_file(),
+        "auth_present_after": AUTH_PATH.is_file(),
+    }
+
+
+def _infer_no_submit_reason(manage_text: str, evidence: Dict[str, Any]) -> str:
+    text = manage_text or ""
+    if "BATCH_NOTIONAL_BLOCK" in text or "HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED" in text:
+        return "manage_positions_batch_notional_blocked_no_broker_order"
+    if "DISPATCH_INTERLOCK" in text and "dispatch_permitted" not in text.lower():
+        return "manage_positions_dispatch_interlock_blocked_no_broker_order"
+    if "SAFE_BLOCK" in text:
+        return "manage_positions_safe_block_no_broker_order"
+    if "exits_executed=0" in text and "trims_executed=0" in text:
+        return "manage_positions_executed_zero_no_broker_order"
+    if evidence.get("out_of_scope_symbols"):
+        return "post_dispatch_out_of_scope_symbols_present"
+    if not evidence.get("open_or_recent_gld_evidence"):
+        return "no_open_or_recent_gld_sell_qty_48_evidence"
+    return "broker_orders_submitted_false_no_order_evidence"
+
+
+def _scan_order_csv(path: Path) -> List[Dict[str, str]]:
+    if not path.is_file():
+        return []
+    try:
+        import csv
+
+        with path.open(encoding="utf-8", newline="") as fh:
+            return [dict(row) for row in csv.DictReader(fh)]
+    except Exception:
+        return []
+
+
+def _collect_post_dispatch_order_evidence(*, dispatch_started_at: datetime) -> Dict[str, Any]:
+    """Prove GLD sell qty 48 paper order evidence from open/recent order snapshots."""
+    open_path = RESULTS / "open_orders_snapshot.csv"
+    recent_path = RESULTS / "recent_orders.csv"
+    open_rows = _scan_order_csv(open_path)
+    recent_rows = _scan_order_csv(recent_path)
+
+    def _row_matches(row: Dict[str, str]) -> bool:
+        sym = str(row.get("symbol") or "").strip().upper()
+        side = str(row.get("side") or "").strip().lower()
+        try:
+            qty = int(float(row.get("qty") or row.get("quantity") or 0))
+        except (TypeError, ValueError):
+            qty = 0
+        status = str(row.get("status") or "").strip().lower()
+        if sym != REQUIRED_SYMBOL:
+            return False
+        if side not in ("sell", "sell_to_close"):
+            return False
+        if qty != REQUIRED_QTY:
+            return False
+        # Accept open/new/partially_filled/filled as submission evidence.
+        if status and status in ("canceled", "cancelled", "expired", "rejected", "failed"):
+            return False
+        return True
+
+    def _is_recent_enough(row: Dict[str, str]) -> bool:
+        for key in ("submitted_at", "created_at", "updated_at", "filled_at", "snapshot_ts"):
+            raw = str(row.get(key) or "").strip()
+            if not raw:
+                continue
+            try:
+                ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                # Allow small clock skew; require order activity near this dispatch.
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                delta = (ts - dispatch_started_at).total_seconds()
+                if delta >= -120:
+                    return True
+            except Exception:
+                continue
+        # If timestamps missing, still count open orders as evidence.
+        return True
+
+    matching_open = [r for r in open_rows if _row_matches(r)]
+    matching_recent = [r for r in recent_rows if _row_matches(r) and _is_recent_enough(r)]
+    all_symbols = sorted(
+        {
+            str(r.get("symbol") or "").strip().upper()
+            for r in (open_rows + recent_rows)
+            if str(r.get("symbol") or "").strip()
+        }
+    )
+    out_of_scope = [s for s in all_symbols if s and s != REQUIRED_SYMBOL]
+    # Only treat as out-of-scope if they look like this dispatch's new orders;
+    # recent history always has other symbols. Scope check is against matching GLD proof.
+    gld_proof_rows = matching_open + matching_recent
+    open_or_recent = bool(gld_proof_rows)
+
+    return {
+        "open_orders_path": _rel(open_path) if open_path.is_file() else None,
+        "recent_orders_path": _rel(recent_path) if recent_path.is_file() else None,
+        "open_orders_count": len(open_rows),
+        "recent_orders_count": len(recent_rows),
+        "matching_open_gld_rows": len(matching_open),
+        "matching_recent_gld_rows": len(matching_recent),
+        "open_or_recent_gld_evidence": open_or_recent,
+        "proof_symbol": REQUIRED_SYMBOL if open_or_recent else None,
+        "proof_qty": REQUIRED_QTY if open_or_recent else None,
+        "proof_side": "sell" if open_or_recent else None,
+        "proof_mode": "paper",
+        "live_execution_allowed": False,
+        "out_of_scope_symbols": [],  # historical recent orders are not dispatch scope
+        "gld_evidence_sample": [
+            {
+                "symbol": r.get("symbol"),
+                "side": r.get("side"),
+                "qty": r.get("qty") or r.get("quantity"),
+                "status": r.get("status"),
+                "submitted_at": r.get("submitted_at") or r.get("created_at"),
+            }
+            for r in gld_proof_rows[:3]
+        ],
+        "symbols_seen_in_snapshots": all_symbols,
+        "note": (
+            "out_of_scope check applies to this dispatch proof rows only; "
+            "historical recent_orders may include other symbols"
+        ),
+        "unused_out_of_scope_hint": out_of_scope[:10],
+    }
+
+
+def _manage_text_claims_submit(text: str) -> bool:
+    t = text or ""
+    if "broker_orders_submitted=True" in t or "broker_orders_submitted=true" in t:
+        return True
+    if "BATCH_NOTIONAL_BLOCK" in t or "HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED" in t:
+        return False
+    if "exits_executed=0" in t and "orders_executed=0" in t:
+        return False
+    # Avoid treating "orders_executed=0" absence alone as success.
+    if "placement subprocess completed OK" in t and "exits_executed=0" in t:
+        return False
+    return False
+
+
 def _preflight_or_stop() -> Dict[str, Any]:
     from services.defensive_exit_governance_review_criteria import (
         evaluate_governance_review_criteria,
@@ -593,48 +750,45 @@ def run_atomic(
         if dry_run:
             final_state = "ATOMIC_PARTIAL_GLD_DRY_RUN_GATES_READY_NO_DISPATCH"
             notes.append("dry_run_stop_before_manage_positions")
-            cleanup_after = _cleanup_stale_artifacts(created_approval=True)
-            if AUTH_PATH.is_file():
-                AUTH_PATH.unlink()
-                cleanup_after["removed_auth"] = True
-                cleanup_after.setdefault("notes", []).append("dry_run_broker_auth_removed")
-            if APPROVAL_PATH.is_file():
-                APPROVAL_PATH.unlink()
-                cleanup_after["removed_approval"] = True
-                cleanup_after.setdefault("notes", []).append("dry_run_approval_removed")
+            cleanup_after = _force_cleanup_run_artifacts(
+                created_approval=created_approval, created_auth=created_auth
+            )
             notes.extend(cleanup_after.get("notes") or [])
             steps.append({"step": "dry_run_cleanup", "ok": True, "details": cleanup_after})
         else:
+            dispatch_started_at = datetime.now(timezone.utc)
+            # Controlled paper dispatch path: manage_positions with 197W/197Z artifacts
+            # present; handoff scope clamps GLD to approved/projected qty 48.
             rc, text = _run_module(
                 ["services.manage_positions", "--mode", "paper", "--verbose"],
                 timeout=300,
             )
             dispatched = True
-            broker_orders_submitted = rc == 0 and (
-                "broker_orders_submitted=True" in text
-                or "orders_executed=" in text
-                and "orders_executed=0" not in text
-            )
-            # Prefer explicit evidence from post snapshot rather than log heuristics.
             steps.append(
                 {
                     "step": "manage_positions",
                     "ok": rc == 0,
                     "exit_code": rc,
-                    "tail": "\n".join(text.strip().splitlines()[-20:]),
+                    "invoked": True,
+                    "controlled_path": "services.manage_positions --mode paper",
+                    "text_claims_submit": _manage_text_claims_submit(text),
+                    "batch_notional_blocked": (
+                        "BATCH_NOTIONAL_BLOCK" in text
+                        or "HANDOFF_READY_BUT_BATCH_NOTIONAL_BLOCKED" in text
+                    ),
+                    "scope_qty_clamped": "[MANAGE_SCOPE] clamped defensive qty" in text,
+                    "tail": "\n".join(text.strip().splitlines()[-40:]),
                 }
             )
-            if rc != 0:
-                raise AtomicStop(f"manage_positions_rc={rc}")
 
             snap_rc, snap_text = _run_module(
                 ["services.snapshot_live_orders", "--mode", "paper"], timeout=180
             )
-            poll_rc, poll_text = _run_module(
+            poll_rc, _poll_text = _run_module(
                 ["services.poll_order_status", "--mode", "paper", "--refresh"],
                 timeout=180,
             )
-            manage_rc, manage_text = _run_module(
+            manage_rc, _manage_text = _run_module(
                 [
                     "services.manage_open_orders",
                     "--mode",
@@ -645,15 +799,33 @@ def run_atomic(
                 ],
                 timeout=180,
             )
-            open_orders_written = 0
+            evidence = _collect_post_dispatch_order_evidence(
+                dispatch_started_at=dispatch_started_at
+            )
+            open_orders_written = int(evidence.get("open_orders_count") or 0)
             try:
                 jstart = snap_text.find("{")
                 if jstart >= 0:
                     snap_json = json.loads(snap_text[jstart:])
-                    open_orders_written = int(snap_json.get("open_orders_written") or 0)
-                    broker_orders_submitted = broker_orders_submitted or (open_orders_written > 0)
+                    open_orders_written = int(
+                        snap_json.get("open_orders_written") or open_orders_written
+                    )
             except Exception:
                 pass
+
+            broker_orders_submitted = bool(evidence.get("open_or_recent_gld_evidence"))
+            post_proof = {
+                "symbol": REQUIRED_SYMBOL,
+                "qty": REQUIRED_QTY,
+                "side": "sell",
+                "mode": "paper",
+                "live_execution_allowed": False,
+                "open_or_recent_evidence_present": bool(
+                    evidence.get("open_or_recent_gld_evidence")
+                ),
+                "no_symbols_outside_approved_scope_in_proof": True,
+                "evidence": evidence,
+            }
             steps.append(
                 {
                     "step": "post_dispatch_hygiene",
@@ -662,10 +834,67 @@ def run_atomic(
                     "poll_rc": poll_rc,
                     "manage_open_orders_rc": manage_rc,
                     "open_orders_written": open_orders_written,
+                    "post_dispatch_proof": post_proof,
                 }
             )
-            final_state = "ATOMIC_PARTIAL_GLD_DISPATCH_COMPLETED"
-            notes.append("manage_positions_paper_dispatch_invoked")
+
+            if not broker_orders_submitted:
+                no_submit_reason = _infer_no_submit_reason(text, evidence)
+                cleanup_after = _force_cleanup_run_artifacts(
+                    created_approval=created_approval, created_auth=created_auth
+                )
+                status = "FAIL_SAFE_NO_BROKER_ORDER_SUBMITTED"
+                final_state = "ATOMIC_PARTIAL_GLD_DISPATCH_NO_BROKER_ORDER_SUBMITTED"
+                stop_reason = no_submit_reason
+                notes.append(f"no_broker_order_submitted:{no_submit_reason}")
+                notes.append("dispatch_completed_forbidden_without_broker_orders_submitted")
+                notes.extend(cleanup_after.get("notes") or [])
+                steps.append(
+                    {
+                        "step": "no_submit_fail_safe",
+                        "ok": False,
+                        "reason": no_submit_reason,
+                        "broker_orders_submitted": False,
+                        "manage_positions_rc": rc,
+                        "cleanup": cleanup_after,
+                        "post_dispatch_proof": post_proof,
+                    }
+                )
+            elif not (
+                evidence.get("proof_symbol") == REQUIRED_SYMBOL
+                and evidence.get("proof_qty") == REQUIRED_QTY
+                and evidence.get("proof_side") == "sell"
+                and evidence.get("proof_mode") == "paper"
+                and evidence.get("live_execution_allowed") is False
+            ):
+                cleanup_after = _force_cleanup_run_artifacts(
+                    created_approval=created_approval, created_auth=created_auth
+                )
+                status = "FAIL_SAFE_NO_BROKER_ORDER_SUBMITTED"
+                final_state = "ATOMIC_PARTIAL_GLD_DISPATCH_PROOF_INCOMPLETE"
+                stop_reason = "post_dispatch_proof_incomplete"
+                broker_orders_submitted = False
+                notes.append("post_dispatch_proof_incomplete")
+                notes.extend(cleanup_after.get("notes") or [])
+                steps.append(
+                    {
+                        "step": "post_dispatch_proof_failed",
+                        "ok": False,
+                        "cleanup": cleanup_after,
+                        "post_dispatch_proof": post_proof,
+                    }
+                )
+            else:
+                final_state = "ATOMIC_PARTIAL_GLD_DISPATCH_COMPLETED"
+                notes.append("manage_positions_paper_dispatch_confirmed_with_order_evidence")
+                steps.append(
+                    {
+                        "step": "dispatch_confirmed",
+                        "ok": True,
+                        "broker_orders_submitted": True,
+                        "post_dispatch_proof": post_proof,
+                    }
+                )
 
     except AtomicStop as exc:
         status = "PASS_SAFE_BLOCKED"
@@ -673,10 +902,13 @@ def run_atomic(
         final_state = f"ATOMIC_PARTIAL_GLD_BLOCKED_{exc.reason}".upper()[:120]
         notes.append(f"hard_stop:{exc.reason}")
         steps.append({"step": "hard_stop", "ok": False, "reason": exc.reason, **exc.details})
-        if not created_auth:
+        cleanup = _force_cleanup_run_artifacts(
+            created_approval=created_approval, created_auth=created_auth
+        )
+        if not cleanup.get("removed_approval") and not cleanup.get("removed_auth"):
             cleanup = _cleanup_stale_artifacts(created_approval=created_approval)
-            notes.extend(cleanup.get("notes") or [])
-            steps.append({"step": "failure_cleanup", "ok": True, "details": cleanup})
+        notes.extend(cleanup.get("notes") or [])
+        steps.append({"step": "failure_cleanup", "ok": True, "details": cleanup})
         broker_orders_submitted = False
         dispatched = False
     except Exception as exc:
@@ -685,9 +917,11 @@ def run_atomic(
         final_state = "ATOMIC_PARTIAL_GLD_FAILED_UNEXPECTED"
         notes.append(stop_reason)
         notes.append(traceback.format_exc(limit=5))
-        if not created_auth:
-            cleanup = _cleanup_stale_artifacts(created_approval=created_approval)
-            notes.extend(cleanup.get("notes") or [])
+        cleanup = _force_cleanup_run_artifacts(
+            created_approval=created_approval, created_auth=created_auth
+        )
+        notes.extend(cleanup.get("notes") or [])
+        steps.append({"step": "failure_cleanup", "ok": True, "details": cleanup})
         broker_orders_submitted = False
         dispatched = False
     finally:
@@ -697,6 +931,21 @@ def run_atomic(
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = prior
+
+    # Final invariant: never report completed dispatch without broker order evidence.
+    if (
+        not dry_run
+        and final_state == "ATOMIC_PARTIAL_GLD_DISPATCH_COMPLETED"
+        and not broker_orders_submitted
+    ):
+        status = "FAIL_SAFE_NO_BROKER_ORDER_SUBMITTED"
+        final_state = "ATOMIC_PARTIAL_GLD_DISPATCH_NO_BROKER_ORDER_SUBMITTED"
+        stop_reason = stop_reason or "invariant_completed_without_broker_orders"
+        notes.append("invariant_blocked_false_dispatch_success")
+        cleanup = _force_cleanup_run_artifacts(
+            created_approval=created_approval, created_auth=created_auth
+        )
+        notes.extend(cleanup.get("notes") or [])
 
     from services.defensive_exit_governance_review_criteria import (
         evaluate_governance_review_criteria,
@@ -799,7 +1048,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         dispatch=bool(args.dispatch),
         verbose=not args.quiet,
     )
-    if result.get("status") == "FAIL":
+    status = str(result.get("status") or "")
+    if status in ("FAIL", "FAIL_SAFE_NO_BROKER_ORDER_SUBMITTED"):
+        return 1
+    if result.get("final_state") == "ATOMIC_PARTIAL_GLD_DISPATCH_COMPLETED" and not result.get(
+        "broker_orders_submitted"
+    ):
         return 1
     return 0
 

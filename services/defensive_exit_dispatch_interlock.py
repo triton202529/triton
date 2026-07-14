@@ -476,19 +476,80 @@ def load_paper_approved_execution_scope() -> Tuple[List[str], str, bool]:
     return approved, "operator_paper_defensive_exit_approval", True
 
 
+def load_paper_approved_execution_quantities() -> Tuple[Dict[str, int], str]:
+    """
+    Approved per-symbol quantities for paper defensive handoff.
+
+    Prefers 197X projected order quantities when they are a subset of the
+    approval contract; otherwise uses approval approved_quantities.
+    """
+    from services.paper_operator_approval_artifact_state import (
+        PAPER_APPROVAL_VALID_CURRENT,
+        classify_paper_operator_approval_artifact,
+    )
+
+    ap_state, _, ap_details = classify_paper_operator_approval_artifact()
+    if ap_state != PAPER_APPROVAL_VALID_CURRENT:
+        return {}, "approval_not_valid_current"
+
+    contract = ap_details.get("contract") or {}
+    approval_qty: Dict[str, int] = {}
+    raw = contract.get("approved_quantities") or {}
+    if isinstance(raw, dict):
+        for sym, qty in raw.items():
+            try:
+                q = int(float(qty))
+            except (TypeError, ValueError):
+                continue
+            s = str(sym).strip().upper()
+            if s and q > 0:
+                approval_qty[s] = q
+
+    projected_qty: Dict[str, int] = {}
+    for row in _load_197x_projected_order_rows():
+        sym = str(row.get("symbol") or "").strip().upper()
+        try:
+            q = int(float(row.get("quantity") or 0))
+        except (TypeError, ValueError):
+            q = 0
+        if sym and q > 0:
+            projected_qty[sym] = q
+
+    if projected_qty and (
+        not approval_qty or set(projected_qty.keys()).issubset(set(approval_qty.keys()))
+    ):
+        # When both exist, projected qty must not exceed approval qty.
+        if approval_qty:
+            for sym, q in list(projected_qty.items()):
+                approved = int(approval_qty.get(sym) or 0)
+                if approved > 0:
+                    projected_qty[sym] = min(q, approved)
+        return projected_qty, "phase_197x_projected_paper_orders"
+    if approval_qty:
+        return approval_qty, "operator_paper_defensive_exit_approval"
+    return {}, "no_approved_quantities"
+
+
 def constrain_handoff_to_approved_paper_scope(
     planned: Sequence[Any],
 ) -> Tuple[List[Any], Dict[str, Any]]:
     """
     When valid paper-only approval exists, restrict sell-side defensive handoff
-    to the approved 197W/197X capped batch. Broader candidates remain diagnosed
-    upstream; they are excluded from execution-eligible handoff only.
+    to the approved 197W/197X capped batch (symbols and quantities). Broader
+    candidates remain diagnosed upstream; they are excluded from
+    execution-eligible handoff only.
     """
+    from dataclasses import replace
+
     symbols, source, valid = load_paper_approved_execution_scope()
+    qty_map, qty_source = load_paper_approved_execution_quantities()
     meta: Dict[str, Any] = {
         "paper_scope_constrained": False,
         "paper_scope_source": source,
         "paper_scope_approval_valid": valid,
+        "paper_scope_qty_source": qty_source,
+        "paper_scope_approved_quantities": dict(qty_map),
+        "paper_scope_qty_clamps": [],
     }
     if not valid or not symbols:
         return list(planned), meta
@@ -496,6 +557,7 @@ def constrain_handoff_to_approved_paper_scope(
     approved_set = set(symbols)
     kept: List[Any] = []
     excluded: List[str] = []
+    qty_clamps: List[str] = []
     for item in planned:
         sym = str(getattr(item, "symbol", "") or "").strip().upper()
         action = str(getattr(item, "management_action", "") or "").upper()
@@ -504,6 +566,30 @@ def constrain_handoff_to_approved_paper_scope(
         if is_defensive_sell and sym and sym not in approved_set:
             excluded.append(sym)
             continue
+        if is_defensive_sell and sym in qty_map:
+            approved_qty = int(qty_map[sym])
+            cur_qty = int(getattr(item, "qty", 0) or 0)
+            pos_qty = float(getattr(item, "current_position_qty", 0) or 0)
+            max_by_position = int(pos_qty) if pos_qty > 0 else approved_qty
+            new_qty = min(approved_qty, max_by_position)
+            if new_qty <= 0:
+                excluded.append(sym)
+                continue
+            if cur_qty != new_qty:
+                updates: Dict[str, Any] = {"qty": new_qty}
+                planned_notional = float(getattr(item, "planned_notional", 0.0) or 0.0)
+                if planned_notional > 0 and cur_qty > 0:
+                    updates["planned_notional"] = round(planned_notional * (new_qty / cur_qty), 2)
+                try:
+                    item = replace(item, **updates)
+                except TypeError:
+                    try:
+                        setattr(item, "qty", new_qty)
+                        if "planned_notional" in updates:
+                            setattr(item, "planned_notional", updates["planned_notional"])
+                    except Exception:
+                        pass
+                qty_clamps.append(f"{sym}:{cur_qty}->{new_qty}")
         kept.append(item)
 
     meta.update(
@@ -513,12 +599,18 @@ def constrain_handoff_to_approved_paper_scope(
             "paper_scope_excluded_symbols": sorted(set(excluded)),
             "paper_scope_kept_count": len(kept),
             "paper_scope_excluded_count": len(set(excluded)),
+            "paper_scope_qty_clamps": qty_clamps,
         }
     )
     if excluded:
         print(
             f"[MANAGE_SCOPE] excluded {len(set(excluded))} sell(s) outside approved "
             f"197W/197X batch: {sorted(set(excluded))}",
+            flush=True,
+        )
+    if qty_clamps:
+        print(
+            f"[MANAGE_SCOPE] clamped defensive qty to approved 197X/197W scope: {qty_clamps}",
             flush=True,
         )
     return kept, meta

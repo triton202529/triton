@@ -80,8 +80,10 @@ python -m services.phase_197wz_atomic_partial_gld_paper_dispatch --dispatch --op
 Expected:
 
 - all dry-run gates pass first
-- one `manage_positions --mode paper` invocation
+- one `manage_positions --mode paper` invocation (controlled path; scope clamps GLD to qty **48**)
 - post-dispatch snapshot / poll / manage open orders
+- **PASS / `ATOMIC_PARTIAL_GLD_DISPATCH_COMPLETED` only when** broker order evidence exists for GLD sell qty **48** (open or recent)
+- if no broker order is submitted: status `FAIL_SAFE_NO_BROKER_ORDER_SUBMITTED`, artifacts cleaned, never `DISPATCH_COMPLETED`
 - final JSON report under
   `data/results/phase_197wz_atomic_partial_gld_paper_dispatch.json`
 
@@ -104,11 +106,15 @@ In one process:
 11. Create 197Z broker authorization (qty **48**)
 12. Verify 197Y eligible and 197Z bridge active at qty **48**
 13. Dry-run: stop and clean artifacts
-14. `--dispatch`: invoke `manage_positions` once, then post-dispatch hygiene
+14. `--dispatch`: invoke `manage_positions` once; require open/recent GLD sell qty **48** evidence for PASS; on no-submit set `FAIL_SAFE_NO_BROKER_ORDER_SUBMITTED` and clean artifacts
 
 ### Why 198I/J/K run before 197W create
 
 198I / 198J / 198K are **no-execution** certifications. They hard-fail when a real approval or broker-auth artifact is present. The atomic runner therefore certifies the partial GLD qty-**48** evidence path **before** creating short-lived 197W/197Z artifacts, then creates those artifacts in the same process so they cannot expire between paste steps.
+
+### No false dispatch success
+
+`ATOMIC_PARTIAL_GLD_DISPATCH_COMPLETED` / status `PASS` is allowed only when post-dispatch proof shows a paper GLD **sell** qty **48** in open or recent orders. A `manage_positions` exit code of 0 alone is **not** enough (for example batch-notional blocks previously returned 0 with `exits_executed=0`).
 
 ---
 
