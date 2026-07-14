@@ -10,6 +10,7 @@ boundaries. They do **not** create approval, broker authorization, or execution 
 | Topic | Document |
 |-------|----------|
 | Partial GLD Defensive Path | [PARTIAL_GLD_DEFENSIVE_PATH.md](./PARTIAL_GLD_DEFENSIVE_PATH.md) |
+| Partial GLD Atomic Paper Dispatch | [PARTIAL_GLD_ATOMIC_DISPATCH.md](./PARTIAL_GLD_ATOMIC_DISPATCH.md) |
 | Weekend Safe Work Map | [WEEKEND_SAFE_WORK_MAP.md](./WEEKEND_SAFE_WORK_MAP.md) |
 | Monday Market-Open Restart Checklist | [MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md](./MONDAY_MARKET_OPEN_RESTART_CHECKLIST.md) |
 | Paper Execution Safety Rules | [PAPER_EXECUTION_SAFETY_RULES.md](./PAPER_EXECUTION_SAFETY_RULES.md) |

@@ -107,6 +107,10 @@ Before any future **paper-only** attempt on this partial path (separate explicit
 
 Until those steps are completed deliberately, treat the path as certified for understanding and dry-run evidence only.
 
+Preferred operator command for an intentional paper-only attempt:
+
+→ [PARTIAL_GLD_ATOMIC_DISPATCH.md](./PARTIAL_GLD_ATOMIC_DISPATCH.md)
+
 ---
 
 ## Live execution remains blocked
