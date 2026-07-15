@@ -41,6 +41,8 @@ AUTH_ACTIONS_ALLOWED = frozenset({AUTH_ACTION, AUTH_ACTION_PARTIAL})
 AUTH_STATUS_APPROVED = "AUTHORIZED"
 PAPER_SCOPE = "PAPER_ONLY"
 DEFAULT_TTL_MINUTES = 10
+# Legacy campaign constant retained for docs/compat; validation requires
+# authorized_qty == projected_qty (>0) and full liquidation forbidden.
 PARTIAL_AUTHORIZED_QTY_REQUIRED = 48
 
 INVALID_AUTH_STATES = frozenset(
@@ -285,10 +287,10 @@ def classify_paper_broker_execution_authorization(
                 projected_qty = int(float(projected_qty_map.get(auth_symbols[0]) or 0))
             except (TypeError, ValueError):
                 projected_qty = 0
-        if authorized_qty != PARTIAL_AUTHORIZED_QTY_REQUIRED:
+        if authorized_qty <= 0:
             return (
                 PAPER_BROKER_EXECUTION_AUTH_BATCH_MISMATCH,
-                f"authorized_qty_not_48 qty={authorized_qty}",
+                f"authorized_qty_not_positive qty={authorized_qty}",
                 details,
             )
         if projected_qty and projected_qty != authorized_qty:
@@ -299,6 +301,13 @@ def classify_paper_broker_execution_authorization(
             )
         if contract.get("full_exit_authorized") is True:
             return PAPER_BROKER_EXECUTION_AUTH_BATCH_MISMATCH, "full_exit_authorized=true", details
+        full_qty = int(contract.get("full_qty") or 0)
+        if full_qty > 0 and authorized_qty >= full_qty:
+            return (
+                PAPER_BROKER_EXECUTION_AUTH_BATCH_MISMATCH,
+                f"full_liquidation_not_allowed auth={authorized_qty} full={full_qty}",
+                details,
+            )
         details["authorized_qty"] = authorized_qty
 
     approval_hash = compute_artifact_hash(APPROVAL_PATH)

@@ -33,6 +33,16 @@ OPERATOR_CONFIRMATION_PHRASE = (
     "I authorize the paper broker execution phase for the approved capped defensive batch. "
     "Paper only. No live trading."
 )
+OPERATOR_CONFIRMATION_PHRASE_GLD_20PCT = (
+    "I authorize the paper broker execution phase for the GLD 20 percent target reduction "
+    "batch. Paper only. No live trading."
+)
+ALLOWED_OPERATOR_CONFIRMATION_PHRASES = frozenset(
+    {
+        OPERATOR_CONFIRMATION_PHRASE,
+        OPERATOR_CONFIRMATION_PHRASE_GLD_20PCT,
+    }
+)
 
 BLOCKED_197W = "PAPER_BROKER_EXECUTION_AUTH_CREATOR_BLOCKED_197W_APPROVAL_REQUIRED"
 BLOCKED_197X = "PAPER_BROKER_EXECUTION_AUTH_CREATOR_BLOCKED_197X_DRY_RUN_REQUIRED"
@@ -242,7 +252,7 @@ def evaluate_creator_preconditions(
             return BLOCKED_197W, ["197w_live_authorized=true"], context
         if contract.get("live_execution_allowed") is True:
             return BLOCKED_197W, ["197w_live_execution_allowed=true"], context
-        # Real create: approval scope must match partial projected qty (GLD 48).
+        # Real create: approval scope must match projected partial qty (not full exit).
         if create and partial_ctx.get("partial_broker_authorization_supported"):
             expected_qty = int(partial_ctx.get("authorized_qty") or 0)
             approval_qty = int(
@@ -257,14 +267,29 @@ def evaluate_creator_preconditions(
                 )
                 or 0
             )
-            if expected_qty != 48:
+            full_qty = int(partial_ctx.get("full_qty") or contract.get("full_qty") or 0)
+            if expected_qty <= 0:
                 return (
                     BLOCKED_197W,
-                    [f"projected_authorized_qty_not_48 qty={expected_qty}"],
+                    [f"projected_authorized_qty_not_positive qty={expected_qty}"],
                     context,
                 )
-            if approval_qty != 48:
-                return BLOCKED_197W, [f"197w_approval_qty_not_48 qty={approval_qty}"], context
+            if approval_qty <= 0:
+                return BLOCKED_197W, [f"197w_approval_qty_not_positive qty={approval_qty}"], context
+            if expected_qty != approval_qty:
+                return (
+                    BLOCKED_197W,
+                    [
+                        f"approval_projected_qty_mismatch approval={approval_qty} projected={expected_qty}"
+                    ],
+                    context,
+                )
+            if full_qty > 0 and expected_qty >= full_qty:
+                return (
+                    BLOCKED_197W,
+                    [f"full_liquidation_not_allowed qty={expected_qty} full={full_qty}"],
+                    context,
+                )
             if str(contract.get("symbol") or "").upper() not in ("", "GLD"):
                 if "GLD" not in [str(s).upper() for s in (contract.get("approved_symbols") or [])]:
                     return BLOCKED_197W, ["197w_approval_symbol_not_gld"], context
@@ -296,8 +321,12 @@ def evaluate_creator_preconditions(
         return BLOCKED_EXISTING_AUTH, [auth_reason], context
 
     if require_confirmation or create:
-        if not operator_confirmation or operator_confirmation != OPERATOR_CONFIRMATION_PHRASE:
+        if (
+            not operator_confirmation
+            or operator_confirmation not in ALLOWED_OPERATOR_CONFIRMATION_PHRASES
+        ):
             return BLOCKED_CONFIRMATION, ["operator_confirmation_phrase_mismatch"], context
+        context["operator_confirmation_text"] = operator_confirmation
 
     notional = round(
         sum(float(r.get("notional_estimate") or 0) for r in rows),
@@ -416,7 +445,11 @@ def run_creator(
     if create and would_create:
         contract = build_execution_authorization_artifact(
             context=context,
-            operator_confirmation_text=OPERATOR_CONFIRMATION_PHRASE,
+            operator_confirmation_text=str(
+                context.get("operator_confirmation_text")
+                or operator_confirmation
+                or OPERATOR_CONFIRMATION_PHRASE
+            ),
         )
         write_execution_authorization_artifact(contract)
         real_created = True
