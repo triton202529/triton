@@ -179,6 +179,8 @@ GLD_TARGET_WEIGHT = 0.20
 GLD_EXPECTED_PARTIAL_SELL = 48
 GLD_EXPECTED_TARGET_SELL = 131
 CONCENTRATION_CREDIT_MODEL = "phase_198q_v1"
+EXPOSURE_CALIBRATION_MODEL = "phase_198s_v1"
+DRAWDOWN_ALERT_THRESHOLD_PCT = -10.0
 
 
 def _read_json_artifact(path: Path) -> Dict[str, Any]:
@@ -214,11 +216,16 @@ def _gld_position_from_snapshot(results_dir: Path) -> Dict[str, Any]:
     qty = _safe_float(gld_row.get("qty") or gld_row.get("qty_available"), 0.0) or 0.0
     mv = abs(_safe_float(gld_row.get("market_value") or gld_row.get("value"), 0.0) or 0.0)
     weight = mv / total if total > 0 else 0.0
+    upl = _safe_float(gld_row.get("unrealized_pl"), 0.0) or 0.0
+    uplpc = _safe_float(gld_row.get("unrealized_plpc"), 0.0) or 0.0
     return {
         "qty": qty,
         "weight": round(weight, 6),
         "market_value": mv,
         "total_invested": total,
+        "unrealized_pl": round(upl, 2),
+        "unrealized_plpc": round(uplpc, 6),
+        "unrealized_pl_pct": round(uplpc * 100.0, 4),
     }
 
 
@@ -369,6 +376,182 @@ def _credit_completed_concentration_trial(
                 f"CPI concentration={conc_component}). Hypothetical pre-reduction simulation "
                 "no longer penalizes current state."
             ),
+        }
+    )
+    return updated
+
+
+def _position_severity_from_loss_pct(loss_pct: float) -> str:
+    if loss_pct >= 15.0:
+        return "HIGH"
+    if loss_pct >= 10.0:
+        return "ELEVATED"
+    if loss_pct >= 5.0:
+        return "MODERATE"
+    return "LOW"
+
+
+def _portfolio_weighted_severity(impact_pct: float) -> str:
+    if impact_pct >= 4.0:
+        return "ELEVATED"
+    if impact_pct >= 2.5:
+        return "MODERATE"
+    return "LOW"
+
+
+def build_portfolio_weighted_drawdown_metadata(
+    *,
+    results_dir: Path,
+    watchdog_alerts: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Phase 198S: portfolio-weight-aware drawdown severity metadata (advisory only)."""
+    pos = _gld_position_from_snapshot(results_dir)
+    total = float(pos.get("total_invested") or 0)
+    gld_weight = float(pos.get("weight") or 0)
+    upl = float(pos.get("unrealized_pl") or 0)
+    position_loss_pct = abs(float(pos.get("unrealized_pl_pct") or 0))
+    portfolio_impact_pct = (abs(upl) / total * 100.0) if total > 0 else 0.0
+
+    drawdown_alert: Optional[Dict[str, Any]] = None
+    for alert in (watchdog_alerts or {}).get("active_alerts") or []:
+        if str(alert.get("alert_type") or "") != "EXCESS_POSITION_DRAWDOWN":
+            continue
+        if str(alert.get("subject") or "").upper() == GLD_SYMBOL:
+            drawdown_alert = alert
+            break
+
+    alert_pct = _safe_float((drawdown_alert or {}).get("details", {}).get("unrealized_pl_pct"), 0.0)
+    broker_supported = False
+    if drawdown_alert is not None and position_loss_pct > 0:
+        broker_pct = float(pos.get("unrealized_pl_pct") or 0)
+        delta = abs(float(alert_pct or 0) - broker_pct)
+        broker_supported = broker_pct <= DRAWDOWN_ALERT_THRESHOLD_PCT and delta <= 1.5
+
+    position_severity = _position_severity_from_loss_pct(position_loss_pct)
+    weighted_severity = _portfolio_weighted_severity(portfolio_impact_pct)
+    if position_severity in ("ELEVATED", "HIGH") and weighted_severity == "LOW":
+        combined = "RESIDUAL_POSITION_DRAWDOWN_REVIEW"
+    elif weighted_severity == "ELEVATED":
+        combined = "PORTFOLIO_MATERIAL_DRAWDOWN"
+    else:
+        combined = "MONITOR"
+
+    return {
+        "symbol": GLD_SYMBOL,
+        "gld_qty": int(pos.get("qty") or 0),
+        "gld_market_value": round(float(pos.get("market_value") or 0), 2),
+        "position_weight": gld_weight,
+        "position_weight_pct": round(gld_weight * 100.0, 4),
+        "position_level_drawdown_pct": round(position_loss_pct, 4),
+        "gld_unrealized_pl": round(upl, 2),
+        "gld_unrealized_pl_pct": round(float(pos.get("unrealized_pl_pct") or 0), 4),
+        "portfolio_weighted_drawdown_impact_pct": round(portfolio_impact_pct, 4),
+        "position_level_severity": position_severity,
+        "portfolio_weighted_severity": weighted_severity,
+        "combined_advisory_classification": combined,
+        "drawdown_alert_active": bool(drawdown_alert),
+        "drawdown_alert_broker_supported": broker_supported,
+        "drawdown_trial_remains_review_required": bool(drawdown_alert and broker_supported),
+        "metadata_only": True,
+        "certification_thresholds_unchanged": True,
+    }
+
+
+def assess_exposure_trial_stale_input(
+    *,
+    reduction_context: Dict[str, Any],
+    cpi_doc: Dict[str, Any],
+    trials_doc: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Phase 198S: detect exposure trial inputs that assume unresolved GLD concentration."""
+    conc_component = int((cpi_doc.get("component_scores") or {}).get("concentration") or 0)
+    exposure_component = int((cpi_doc.get("component_scores") or {}).get("exposure") or 0)
+    gld_weight = float(reduction_context.get("gld_weight") or 0)
+    conc_resolved = bool(reduction_context.get("concentration_reduction_completed"))
+    concentration_resolved = conc_resolved and (
+        conc_component >= 95 or gld_weight <= GLD_TARGET_WEIGHT + 0.005
+    )
+
+    exposure_trial = next(
+        (
+            t
+            for t in (trials_doc.get("trials") or [])
+            if t.get("trial_id") == "paper_exposure_reduction"
+        ),
+        {},
+    )
+    est_conc = float(
+        _safe_float(exposure_trial.get("estimated_concentration_reduction"), 0.0) or 0.0
+    )
+    stale = concentration_resolved and exposure_component >= 85 and est_conc >= 3.0
+    return {
+        "concentration_resolved": concentration_resolved,
+        "exposure_trial_stale_input_detected": stale,
+        "exposure_trial_stale_input_resolved": False,
+        "exposure_component_score": exposure_component,
+        "concentration_component_score": conc_component,
+        "estimated_concentration_reduction_in_trial": est_conc,
+    }
+
+
+def _resolve_completed_exposure_trial(
+    evaluation: Dict[str, Any],
+    *,
+    exposure_context: Dict[str, Any],
+    cpi_doc: Dict[str, Any],
+    baseline_label: str,
+) -> Dict[str, Any]:
+    exposure_component = int((cpi_doc.get("component_scores") or {}).get("exposure") or 0)
+    credited_score = int(min(72, max(45, 35 + exposure_component * 0.38)))
+    evaluation_label = "NEUTRAL" if credited_score < 65 else "BENEFICIAL"
+
+    updated = dict(evaluation)
+    updated.update(
+        {
+            "effectiveness_score": credited_score,
+            "evaluation": evaluation_label,
+            "evaluation_mode": "COMPLETED_OR_NOT_APPLICABLE",
+            "trial_evaluation_class": "completed_or_not_applicable",
+            "exposure_trial_stale_input_resolved": True,
+            "excludes_from_negative_count": True,
+            "concentration_reduction": 0.0,
+            "baseline_context": baseline_label,
+            "evaluation_reason": (
+                "Paper Exposure Reduction: completed or not applicable — GLD concentration "
+                f"already resolved (CPI exposure={exposure_component}, CPI concentration="
+                f"{exposure_context.get('concentration_component_score')}). Hypothetical "
+                "concentration/exposure reduction for resolved GLD no longer penalizes evaluation."
+            ),
+        }
+    )
+    return updated
+
+
+def _enrich_drawdown_trial_metadata(
+    evaluation: Dict[str, Any],
+    *,
+    drawdown_metadata: Dict[str, Any],
+    baseline_label: str,
+) -> Dict[str, Any]:
+    """Keep drawdown trial honest; attach portfolio-weight-aware severity metadata only."""
+    updated = dict(evaluation)
+    review_required = bool(drawdown_metadata.get("drawdown_trial_remains_review_required"))
+    reason_suffix = (
+        " Residual GLD drawdown alert broker-supported; review remains required."
+        if review_required
+        else ""
+    )
+    updated.update(
+        {
+            "drawdown_alert_broker_supported": bool(
+                drawdown_metadata.get("drawdown_alert_broker_supported")
+            ),
+            "drawdown_trial_remains_review_required": review_required,
+            "portfolio_weighted_drawdown": drawdown_metadata,
+            "evaluation_reason": (
+                f"{evaluation.get('evaluation_reason', '')}{reason_suffix}".strip()
+            ),
+            "baseline_context": baseline_label,
         }
     )
     return updated
@@ -539,11 +722,12 @@ def compute_protective_action_evaluation(
     readiness_doc: Optional[Dict[str, Any]] = None,
     results_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Phase 19 / 150B / 198Q: evaluate paper-mode protective action trials."""
+    """Phase 19 / 150B / 198Q / 198S: evaluate paper-mode protective action trials."""
     ts = _iso_utc()
     cpe_doc = cpe_doc or {}
     rd = Path(results_dir) if results_dir else RESULTS
     trials_in = trials_doc.get("trials") or []
+    watchdog_alerts = _read_json_artifact(rd / "watchdog_alerts.json")
     cps = int(cpi_doc.get("capital_preservation_score") or trials_doc.get("baseline_cps") or 0)
     health_band = str(cpi_doc.get("health_band") or "")
     baseline_label = _derive_baseline_context_label(cps=cps, health_band=health_band)
@@ -612,6 +796,45 @@ def compute_protective_action_evaluation(
             "concentration_trial_stale": False,
         }
 
+    drawdown_metadata = build_portfolio_weighted_drawdown_metadata(
+        results_dir=rd,
+        watchdog_alerts=watchdog_alerts,
+    )
+    exposure_context = assess_exposure_trial_stale_input(
+        reduction_context=reduction_context,
+        cpi_doc=cpi_doc,
+        trials_doc=trials_doc,
+    )
+    exposure_stale_detected = False
+    if exposure_context.get("exposure_trial_stale_input_detected"):
+        for idx, ev in enumerate(evaluations):
+            if ev.get("trial_id") != "paper_exposure_reduction":
+                continue
+            if str(ev.get("evaluation") or "").upper() == "NEGATIVE":
+                exposure_stale_detected = True
+            evaluations[idx] = _resolve_completed_exposure_trial(
+                ev,
+                exposure_context=exposure_context,
+                cpi_doc=cpi_doc,
+                baseline_label=baseline_label,
+            )
+            break
+        exposure_context = {
+            **exposure_context,
+            "exposure_trial_stale_input_detected": exposure_stale_detected
+            or bool(exposure_context.get("exposure_trial_stale_input_detected")),
+            "exposure_trial_stale_input_resolved": True,
+        }
+
+    for idx, ev in enumerate(evaluations):
+        if ev.get("trial_id") == "paper_drawdown_reduction":
+            evaluations[idx] = _enrich_drawdown_trial_metadata(
+                ev,
+                drawdown_metadata=drawdown_metadata,
+                baseline_label=baseline_label,
+            )
+            break
+
     evaluations.sort(key=lambda e: e.get("effectiveness_score", 0), reverse=True)
 
     raw_beneficial = sum(1 for e in evaluations if e.get("evaluation") == "BENEFICIAL")
@@ -641,8 +864,8 @@ def compute_protective_action_evaluation(
         if concentration_reduction_stable and not preservation_stable:
             evaluation_reason = (
                 "High CPS with broker-verified GLD concentration reduction complete; "
-                "evaluation adjusted for completed defensive action while drawdown review "
-                "remains a separate current concern."
+                "exposure trial refreshed for resolved concentration; drawdown review "
+                "remains a separate broker-supported current concern."
             )
         else:
             evaluation_reason = (
@@ -667,11 +890,17 @@ def compute_protective_action_evaluation(
         for e in evaluations
         if e.get("evaluation_mode") == "COMPLETED_BROKER_VERIFIED"
     ]
+    not_applicable_trials = [
+        e.get("trial_id")
+        for e in evaluations
+        if e.get("evaluation_mode") == "COMPLETED_OR_NOT_APPLICABLE"
+    ]
 
     return {
         "generated_at": ts,
         "scoring_model_version": SCORING_MODEL_VERSION,
         "concentration_credit_model_version": CONCENTRATION_CREDIT_MODEL,
+        "exposure_calibration_model_version": EXPOSURE_CALIBRATION_MODEL,
         "baseline_context": baseline_detail,
         "baseline_context_label": baseline_label,
         "high_cps_adjustment_applied": high_cps_adj and apply_high_cps_metrics,
@@ -687,6 +916,14 @@ def compute_protective_action_evaluation(
             reduction_context.get("stale_concentration_trial_resolved")
         ),
         "concentration_trial_stale": bool(reduction_context.get("concentration_trial_stale")),
+        "exposure_trial_stale_input_detected": bool(
+            exposure_context.get("exposure_trial_stale_input_detected")
+        ),
+        "exposure_trial_stale_input_resolved": bool(
+            exposure_context.get("exposure_trial_stale_input_resolved")
+        ),
+        "exposure_trial_context": exposure_context,
+        "portfolio_weighted_drawdown_metadata": drawdown_metadata,
         "gld_concentration_context": reduction_context,
         "evaluation_reason": evaluation_reason,
         "baseline_cps": trials_doc.get("baseline_cps") or cps,
@@ -702,6 +939,7 @@ def compute_protective_action_evaluation(
         "trial_evaluation_modes": {
             "hypothetical_defensive_trials": hypothetical_trials,
             "completed_broker_verified_trials": completed_trials,
+            "completed_or_not_applicable_trials": not_applicable_trials,
         },
         "disclaimer": "Evaluation only. No trades, orders, or portfolio modifications.",
     }
