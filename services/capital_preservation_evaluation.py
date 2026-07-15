@@ -174,6 +174,206 @@ def _preservation_stable_context(
     )
 
 
+GLD_SYMBOL = "GLD"
+GLD_TARGET_WEIGHT = 0.20
+GLD_EXPECTED_PARTIAL_SELL = 48
+GLD_EXPECTED_TARGET_SELL = 131
+CONCENTRATION_CREDIT_MODEL = "phase_198q_v1"
+
+
+def _read_json_artifact(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
+def _gld_position_from_snapshot(results_dir: Path) -> Dict[str, Any]:
+    path = results_dir / "positions_snapshot.csv"
+    if not path.is_file():
+        return {"qty": 0.0, "weight": 0.0, "market_value": 0.0, "total_invested": 0.0}
+    try:
+        with path.open(newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return {"qty": 0.0, "weight": 0.0, "market_value": 0.0, "total_invested": 0.0}
+
+    total = 0.0
+    gld_row: Optional[Dict[str, str]] = None
+    for row in rows:
+        total += abs(_safe_float(row.get("market_value") or row.get("value"), 0.0) or 0.0)
+        sym = str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+        if sym == GLD_SYMBOL:
+            gld_row = row
+    if not gld_row:
+        return {"qty": 0.0, "weight": 0.0, "market_value": 0.0, "total_invested": total}
+
+    qty = _safe_float(gld_row.get("qty") or gld_row.get("qty_available"), 0.0) or 0.0
+    mv = abs(_safe_float(gld_row.get("market_value") or gld_row.get("value"), 0.0) or 0.0)
+    weight = mv / total if total > 0 else 0.0
+    return {
+        "qty": qty,
+        "weight": round(weight, 6),
+        "market_value": mv,
+        "total_invested": total,
+    }
+
+
+def _gld_filled_sell_evidence(results_dir: Path) -> Dict[str, Any]:
+    path = results_dir / "recent_orders.csv"
+    sells: List[Dict[str, Any]] = []
+    if path.is_file():
+        try:
+            with path.open(newline="", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    sym = str(row.get("symbol") or "").strip().upper()
+                    side = str(row.get("side") or "").strip().lower()
+                    status = str(row.get("status") or "").strip().lower()
+                    if sym != GLD_SYMBOL or side != "sell" or status != "filled":
+                        continue
+                    qty = int(_safe_float(row.get("filled_qty") or row.get("qty"), 0.0) or 0)
+                    sells.append(
+                        {
+                            "filled_at": row.get("filled_at"),
+                            "qty": qty,
+                            "filled_avg_price": _safe_float(row.get("filled_avg_price"), 0.0),
+                        }
+                    )
+        except Exception:
+            pass
+    qtys = {s["qty"] for s in sells}
+    total = sum(s["qty"] for s in sells)
+    return {
+        "gld_filled_sells": sells,
+        "completed_gld_sell_qty": total,
+        "partial_48_present": GLD_EXPECTED_PARTIAL_SELL in qtys,
+        "target_131_present": GLD_EXPECTED_TARGET_SELL in qtys,
+        "broker_sell_evidence_ok": (
+            GLD_EXPECTED_PARTIAL_SELL in qtys and GLD_EXPECTED_TARGET_SELL in qtys and total >= 179
+        ),
+    }
+
+
+def assess_gld_concentration_reduction_completion(
+    *,
+    results_dir: Optional[Path] = None,
+    cpi_doc: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Phase 198Q: detect broker-verified GLD concentration reduction vs stale hypothetical trials.
+    Read-only — uses positions, recent orders, and phase gate artifacts.
+    """
+    rd = Path(results_dir) if results_dir else RESULTS
+    cpi_doc = cpi_doc or {}
+    pos = _gld_position_from_snapshot(rd)
+    sell_evidence = _gld_filled_sell_evidence(rd)
+    phase_198l = _read_json_artifact(rd / "phase_198l_gld_20pct_target_reduction_analysis.json")
+    phase_197y = _read_json_artifact(rd / "phase_197y_loop_mediated_paper_execution_gate.json")
+    phase_197z = _read_json_artifact(rd / "phase_197z_readiness_bridge_validation.json")
+
+    sell_qty_198l = int(
+        _safe_float(
+            phase_198l.get("recommended_sell_qty")
+            or (phase_198l.get("calculation") or {}).get("recommended_sell_qty"),
+            0.0,
+        )
+        or 0
+    )
+    target_satisfied = bool(
+        phase_198l.get("target_already_satisfied")
+        or (phase_198l.get("calculation") or {}).get("target_already_satisfied")
+        or float(pos.get("weight") or 0) <= GLD_TARGET_WEIGHT + 0.005
+    )
+    eligible_qty = int(_safe_float(phase_197y.get("eligible_qty"), 0.0) or 0)
+    bridge_active = bool(phase_197z.get("bridge_active"))
+    conc_component = int((cpi_doc.get("component_scores") or {}).get("concentration") or 0)
+
+    no_stale_dispatch = eligible_qty <= 0 and not bridge_active
+    broker_ok = bool(sell_evidence.get("broker_sell_evidence_ok"))
+    weight_ok = float(pos.get("weight") or 0) <= GLD_TARGET_WEIGHT + 0.005
+
+    completed = (
+        weight_ok and broker_ok and target_satisfied and sell_qty_198l == 0 and no_stale_dispatch
+    )
+
+    stale_trial = completed and conc_component >= 95
+
+    return {
+        "concentration_reduction_completed": completed,
+        "stale_concentration_trial_detected": stale_trial,
+        "stale_concentration_trial_resolved": False,
+        "concentration_trial_stale": stale_trial,
+        "gld_qty": int(pos.get("qty") or 0),
+        "gld_weight": float(pos.get("weight") or 0),
+        "completed_gld_sell_qty": int(sell_evidence.get("completed_gld_sell_qty") or 0),
+        "gld_target_satisfied": target_satisfied,
+        "phase_198l_sell_qty": sell_qty_198l,
+        "phase_197y_eligible_qty": eligible_qty,
+        "phase_197z_bridge_active": bridge_active,
+        "concentration_component_score": conc_component,
+        "broker_sell_evidence": sell_evidence,
+        "evaluation_mode_hint": (
+            "COMPLETED_BROKER_VERIFIED" if completed else "HYPOTHETICAL_SIMULATION"
+        ),
+    }
+
+
+def _concentration_reduction_stable_context(
+    *,
+    baseline_label: str,
+    cpi_doc: Dict[str, Any],
+    readiness_doc: Optional[Dict[str, Any]],
+    reduction_context: Dict[str, Any],
+) -> bool:
+    """Allow high-CPS metric adjustment when concentration reduction is broker-verified."""
+    if baseline_label != "HIGH_CPS_PRESERVATION":
+        return False
+    if not reduction_context.get("concentration_reduction_completed"):
+        return False
+    band = str(cpi_doc.get("health_band") or "").upper()
+    readiness = str((readiness_doc or {}).get("readiness_status") or "")
+    conc = int(reduction_context.get("concentration_component_score") or 0)
+    return band in ("HEALTHY", "EXCELLENT", "STABLE") and readiness == "READY" and conc >= 95
+
+
+def _credit_completed_concentration_trial(
+    evaluation: Dict[str, Any],
+    *,
+    reduction_context: Dict[str, Any],
+    cpi_doc: Dict[str, Any],
+    baseline_label: str,
+) -> Dict[str, Any]:
+    conc_component = int((cpi_doc.get("component_scores") or {}).get("concentration") or 0)
+    gld_weight = float(reduction_context.get("gld_weight") or 0)
+    sold_qty = int(reduction_context.get("completed_gld_sell_qty") or 0)
+    credited_score = int(min(88, max(65, 50 + conc_component * 0.35)))
+
+    updated = dict(evaluation)
+    updated.update(
+        {
+            "effectiveness_score": credited_score,
+            "evaluation": "BENEFICIAL",
+            "evaluation_mode": "COMPLETED_BROKER_VERIFIED",
+            "trial_evaluation_class": "completed_broker_verified",
+            "hypothetical_trial_stale": False,
+            "concentration_trial_stale": False,
+            "concentration_reduction_completed": True,
+            "concentration_reduction": round(gld_weight * 100.0, 2),
+            "baseline_context": baseline_label,
+            "evaluation_reason": (
+                "Paper Concentration Reduction: credited as broker-verified completed defensive "
+                f"action (GLD weight={gld_weight * 100:.2f}%, sold={sold_qty} shares, "
+                f"CPI concentration={conc_component}). Hypothetical pre-reduction simulation "
+                "no longer penalizes current state."
+            ),
+        }
+    )
+    return updated
+
+
 def _trial_evaluation_reason(
     *,
     trial: Dict[str, Any],
@@ -339,41 +539,78 @@ def compute_protective_action_evaluation(
     readiness_doc: Optional[Dict[str, Any]] = None,
     results_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Phase 19 / 150B: evaluate paper-mode protective action trials."""
+    """Phase 19 / 150B / 198Q: evaluate paper-mode protective action trials."""
     ts = _iso_utc()
     cpe_doc = cpe_doc or {}
+    rd = Path(results_dir) if results_dir else RESULTS
     trials_in = trials_doc.get("trials") or []
     cps = int(cpi_doc.get("capital_preservation_score") or trials_doc.get("baseline_cps") or 0)
     health_band = str(cpi_doc.get("health_band") or "")
     baseline_label = _derive_baseline_context_label(cps=cps, health_band=health_band)
     high_cps_adj = baseline_label == "HIGH_CPS_PRESERVATION"
+
+    reduction_context = assess_gld_concentration_reduction_completion(
+        results_dir=rd,
+        cpi_doc=cpi_doc,
+    )
     preservation_stable = _preservation_stable_context(
         baseline_label=baseline_label,
         cpi_doc=cpi_doc,
         readiness_doc=readiness_doc,
         cpe_doc=cpe_doc,
     )
+    concentration_reduction_stable = _concentration_reduction_stable_context(
+        baseline_label=baseline_label,
+        cpi_doc=cpi_doc,
+        readiness_doc=readiness_doc,
+        reduction_context=reduction_context,
+    )
+    apply_high_cps_metrics = preservation_stable or concentration_reduction_stable
+
     baseline_detail = _build_baseline_context_detail(
         cpi_doc=cpi_doc,
         cpe_doc=cpe_doc,
         readiness_doc=readiness_doc,
         baseline_label=baseline_label,
-        results_dir=results_dir,
+        results_dir=rd,
     )
 
     evaluations: List[Dict[str, Any]] = []
     for trial in trials_in:
         if not isinstance(trial, dict):
             continue
-        evaluations.append(
-            _evaluate_single_trial(
-                trial,
-                cpi_doc,
-                baseline_label=baseline_label,
-                high_cps_adj=high_cps_adj,
-                preservation_stable=preservation_stable,
-            )
+        ev = _evaluate_single_trial(
+            trial,
+            cpi_doc,
+            baseline_label=baseline_label,
+            high_cps_adj=high_cps_adj,
+            preservation_stable=preservation_stable or concentration_reduction_stable,
         )
+        ev["evaluation_mode"] = "HYPOTHETICAL_SIMULATION"
+        ev["trial_evaluation_class"] = "hypothetical_defensive_trial"
+        evaluations.append(ev)
+
+    stale_concentration_detected = False
+    if reduction_context.get("concentration_reduction_completed"):
+        for idx, ev in enumerate(evaluations):
+            if ev.get("trial_id") != "paper_concentration_reduction":
+                continue
+            if ev.get("evaluation") == "NEGATIVE":
+                stale_concentration_detected = True
+            evaluations[idx] = _credit_completed_concentration_trial(
+                ev,
+                reduction_context=reduction_context,
+                cpi_doc=cpi_doc,
+                baseline_label=baseline_label,
+            )
+            break
+        reduction_context = {
+            **reduction_context,
+            "stale_concentration_trial_detected": stale_concentration_detected
+            or bool(reduction_context.get("stale_concentration_trial_detected")),
+            "stale_concentration_trial_resolved": True,
+            "concentration_trial_stale": False,
+        }
 
     evaluations.sort(key=lambda e: e.get("effectiveness_score", 0), reverse=True)
 
@@ -394,16 +631,25 @@ def compute_protective_action_evaluation(
             raw_neutral=raw_neutral,
             raw_negative=raw_negative,
             high_cps_adj=high_cps_adj,
-            preservation_stable=preservation_stable,
+            preservation_stable=apply_high_cps_metrics,
         )
     )
+    adjustment_meta["concentration_reduction_stable"] = concentration_reduction_stable
+    adjustment_meta["preservation_stable_context"] = preservation_stable
 
-    if high_cps_adj and preservation_stable:
-        evaluation_reason = (
-            "High CPS reduces marginal protective benefit; evaluation adjusted for "
-            "preservation context with stable neutral outcomes treated as evidence of "
-            "preservation stability."
-        )
+    if high_cps_adj and apply_high_cps_metrics:
+        if concentration_reduction_stable and not preservation_stable:
+            evaluation_reason = (
+                "High CPS with broker-verified GLD concentration reduction complete; "
+                "evaluation adjusted for completed defensive action while drawdown review "
+                "remains a separate current concern."
+            )
+        else:
+            evaluation_reason = (
+                "High CPS reduces marginal protective benefit; evaluation adjusted for "
+                "preservation context with stable neutral outcomes treated as evidence of "
+                "preservation stability."
+            )
     elif high_cps_adj:
         evaluation_reason = (
             "High CPS preservation context; marginal trial improvements expected to be limited."
@@ -411,13 +657,37 @@ def compute_protective_action_evaluation(
     else:
         evaluation_reason = "Standard protective action evaluation against current CPS baseline."
 
+    hypothetical_trials = [
+        e.get("trial_id")
+        for e in evaluations
+        if e.get("evaluation_mode") == "HYPOTHETICAL_SIMULATION"
+    ]
+    completed_trials = [
+        e.get("trial_id")
+        for e in evaluations
+        if e.get("evaluation_mode") == "COMPLETED_BROKER_VERIFIED"
+    ]
+
     return {
         "generated_at": ts,
         "scoring_model_version": SCORING_MODEL_VERSION,
+        "concentration_credit_model_version": CONCENTRATION_CREDIT_MODEL,
         "baseline_context": baseline_detail,
         "baseline_context_label": baseline_label,
-        "high_cps_adjustment_applied": high_cps_adj and preservation_stable,
+        "high_cps_adjustment_applied": high_cps_adj and apply_high_cps_metrics,
         "preservation_stable_context": preservation_stable,
+        "concentration_reduction_completed": bool(
+            reduction_context.get("concentration_reduction_completed")
+        ),
+        "concentration_reduction_stable_context": concentration_reduction_stable,
+        "stale_concentration_trial_detected": bool(
+            reduction_context.get("stale_concentration_trial_detected")
+        ),
+        "stale_concentration_trial_resolved": bool(
+            reduction_context.get("stale_concentration_trial_resolved")
+        ),
+        "concentration_trial_stale": bool(reduction_context.get("concentration_trial_stale")),
+        "gld_concentration_context": reduction_context,
         "evaluation_reason": evaluation_reason,
         "baseline_cps": trials_doc.get("baseline_cps") or cps,
         "escalation_state": cpe_doc.get("escalation_state"),
@@ -429,6 +699,10 @@ def compute_protective_action_evaluation(
         "evaluations": evaluations,
         "top_trial": evaluations[0] if evaluations else None,
         "adjustment_meta": adjustment_meta,
+        "trial_evaluation_modes": {
+            "hypothetical_defensive_trials": hypothetical_trials,
+            "completed_broker_verified_trials": completed_trials,
+        },
         "disclaimer": "Evaluation only. No trades, orders, or portfolio modifications.",
     }
 
@@ -562,9 +836,13 @@ def _governor_top_drivers(
     ]
     preservation_stable = bool(evaluation_doc.get("preservation_stable_context"))
     high_cps_adj = bool(evaluation_doc.get("high_cps_adjustment_applied"))
+    concentration_completed = bool(evaluation_doc.get("concentration_reduction_completed"))
+    eval_context_stable = (preservation_stable and high_cps_adj) or (
+        concentration_completed and high_cps_adj
+    )
     if (
         len(negative_evals) >= 2
-        and not (preservation_stable and high_cps_adj)
+        and not eval_context_stable
         and "Weak Trial Outcomes" not in drivers
     ):
         drivers.append("Weak Trial Outcomes")
@@ -593,18 +871,20 @@ def _derive_preservation_posture(
     avg_effectiveness = _safe_float(adaptive_doc.get("average_effectiveness"), 0.0) or 0.0
     high_cps_adj = bool(evaluation_doc.get("high_cps_adjustment_applied"))
     preservation_stable = bool(evaluation_doc.get("preservation_stable_context"))
+    concentration_completed = bool(evaluation_doc.get("concentration_reduction_completed"))
     cps_healthy = cps >= HIGH_CPS_PRESERVATION_THRESHOLD and str(
         cpi_doc.get("health_band") or ""
     ).upper() in ("HEALTHY", "EXCELLENT", "STABLE")
     readiness_ready = readiness == "READY"
+    eval_context_stable = (
+        high_cps_adj and preservation_stable and cps_healthy and readiness_ready
+    ) or (high_cps_adj and concentration_completed and cps_healthy and readiness_ready)
 
     if escalation == "CRITICAL" or cps < 25:
         return "CRITICAL"
     if escalation == "RED" or cps < 40 or (readiness == "NOT_READY" and cps < 50):
         return "RED"
-    negative_orange = negative_count >= 2 and not (
-        high_cps_adj and preservation_stable and cps_healthy and readiness_ready
-    )
+    negative_orange = negative_count >= 2 and not eval_context_stable
     if esc_sev >= 2 or cps < 55 or negative_orange:
         return "ORANGE"
     if (
@@ -615,13 +895,13 @@ def _derive_preservation_posture(
         or (
             beneficial_count == 0
             and evaluation_doc.get("evaluation_count", 0) > 0
-            and not (high_cps_adj and preservation_stable and cps_healthy and readiness_ready)
+            and not eval_context_stable
         )
     ):
         return "YELLOW"
     if cps >= 75 and escalation == "GREEN" and avg_effectiveness >= 60:
         return "GREEN"
-    if high_cps_adj and preservation_stable and cps_healthy and readiness_ready and cps >= 75:
+    if eval_context_stable and cps >= 75:
         return "GREEN"
     return "YELLOW" if cps < 75 else "GREEN"
 
