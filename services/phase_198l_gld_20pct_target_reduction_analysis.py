@@ -277,18 +277,37 @@ def run_phase_198l_analysis(*, verbose: bool = True) -> Dict[str, Any]:
         projected_weight = float(calculation.get("projected_post_sale_gld_weight") or 1.0)
         sell_qty = int(calculation.get("recommended_sell_qty") or 0)
         remaining = int(calculation.get("projected_remaining_qty") or -1)
-        if sell_qty <= 0:
-            status = "FAIL"
-            block_reasons.append("recommended_sell_qty_not_positive")
-        if remaining < 0:
-            status = "FAIL"
-            block_reasons.append("projected_remaining_qty_invalid")
-        if projected_weight > TARGET_WEIGHT + 1e-9:
-            status = "FAIL"
-            block_reasons.append(f"projected_weight_above_target weight={projected_weight}")
-        if not bool(calculation.get("full_liquidation_avoided")):
-            # Still PASS if math forces near-full exit, but note it.
-            notes.append("full_liquidation_not_avoided_by_math")
+        current_weight = float(calculation.get("current_gld_weight") or 1.0)
+        current_qty = int(float(snapshot.get("current_gld_qty") or 0))
+
+        # Target already satisfied: no further defensive sell is required.
+        if current_weight <= TARGET_WEIGHT + 1e-9 or sell_qty <= 0:
+            status = "PASS"
+            calculation["recommended_sell_qty"] = 0
+            calculation["projected_remaining_qty"] = current_qty
+            calculation["projected_post_sale_gld_value"] = snapshot.get("current_gld_market_value")
+            calculation["projected_post_sale_invested_exposure"] = snapshot.get(
+                "total_invested_value"
+            )
+            calculation["projected_post_sale_gld_weight"] = current_weight
+            calculation["projected_post_sale_gld_weight_pct"] = round(current_weight * 100.0, 4)
+            calculation["estimated_sell_notional"] = 0.0
+            calculation["target_already_satisfied"] = True
+            calculation["full_liquidation_avoided"] = True
+            notes.append("target_already_satisfied_no_sell_required")
+            block_reasons = [b for b in block_reasons if b != "recommended_sell_qty_not_positive"]
+        else:
+            if sell_qty <= 0:
+                status = "FAIL"
+                block_reasons.append("recommended_sell_qty_not_positive")
+            if remaining < 0:
+                status = "FAIL"
+                block_reasons.append("projected_remaining_qty_invalid")
+            if projected_weight > TARGET_WEIGHT + 1e-9:
+                status = "FAIL"
+                block_reasons.append(f"projected_weight_above_target weight={projected_weight}")
+            if not bool(calculation.get("full_liquidation_avoided")):
+                notes.append("full_liquidation_not_avoided_by_math")
 
     if live_flag or not bool(live_block.get("live_blocked")):
         status = "FAIL"
@@ -305,8 +324,14 @@ def run_phase_198l_analysis(*, verbose: bool = True) -> Dict[str, Any]:
         "phase": "198L",
         "generated_at": _utc_now_iso(),
         "status": status,
+        "final_state": (
+            "TARGET_ALREADY_SATISFIED"
+            if bool(calculation.get("target_already_satisfied"))
+            else ("ANALYSIS_READY" if status == "PASS" else "ANALYSIS_BLOCKED")
+        ),
         "symbol": SYMBOL,
         "target_weight": TARGET_WEIGHT,
+        "target_already_satisfied": bool(calculation.get("target_already_satisfied")),
         "snapshot": {
             "current_gld_qty": snapshot.get("current_gld_qty"),
             "current_gld_price": snapshot.get("current_gld_price"),

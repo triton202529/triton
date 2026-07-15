@@ -18,6 +18,10 @@ def _extract_partial_bridge_context() -> Dict[str, Any]:
     """Normalize partial defensive-exit fields for readiness bridge reporting."""
     from pathlib import Path
 
+    from services.defensive_preview_broker_state import (
+        TARGET_ALREADY_COMPLETED,
+        apply_broker_invalidation_to_partial_fields,
+    )
     from services.partial_defensive_exit_preview import (
         PREVIEW_TYPE,
         extract_partial_approval_contract_fields,
@@ -70,6 +74,37 @@ def _extract_partial_bridge_context() -> Dict[str, Any]:
         or partial.get("partial_qty")
         or 0
     )
+    partial_for_check = dict(partial)
+    if bridge_qty > int(partial_for_check.get("partial_qty") or 0):
+        partial_for_check["partial_qty"] = bridge_qty
+    partial_for_check = apply_broker_invalidation_to_partial_fields(
+        partial_for_check, projected_qty=bridge_qty
+    )
+    freshness = partial_for_check.get("defensive_preview_broker_state") or {}
+
+    if partial_for_check.get("defensive_preview_invalidated"):
+        return {
+            "partial_path_detected": False,
+            "preview_type": None,
+            "symbol": symbol or None,
+            "bridge_action": None,
+            "bridge_qty": 0,
+            "full_qty": int(partial_for_check.get("stale_preview_original_full_qty") or 0),
+            "remaining_qty_after_preview": 0,
+            "full_exit_deferred": False,
+            "full_exit_deferred_reason": None,
+            "defensive_preview_state": partial_for_check.get("defensive_preview_state"),
+            "defensive_preview_invalidated": True,
+            "defensive_preview_broker_state": freshness,
+            "stale_preview_original_qty": partial_for_check.get("stale_preview_original_qty"),
+            "broker_qty": freshness.get("broker_qty"),
+            "invalidation_reason": partial_for_check.get("invalidation_reason"),
+            "target_already_completed": (
+                partial_for_check.get("defensive_preview_state") == TARGET_ALREADY_COMPLETED
+            ),
+            "bridge_active_override": False,
+        }
+
     full_qty = int(partial.get("full_qty") or y197.get("full_qty") or z197.get("full_qty") or 0)
     remaining = int(
         partial.get("remaining_qty_after_preview")
@@ -96,6 +131,11 @@ def _extract_partial_bridge_context() -> Dict[str, Any]:
             if available
             else None
         ),
+        "defensive_preview_state": freshness.get("final_state"),
+        "defensive_preview_invalidated": False,
+        "defensive_preview_broker_state": freshness,
+        "broker_qty": freshness.get("broker_qty"),
+        "target_already_completed": False,
     }
 
 
@@ -258,6 +298,18 @@ def evaluate_paper_loop_mediated_execution_readiness_bridge(
 
         # Bridge is active only when both real artifacts exist and all checks pass.
         bridge_active = all(checks.values()) and approval_present and broker_auth_present
+        if partial_ctx.get("defensive_preview_invalidated"):
+            bridge_active = False
+            block_reasons.append(
+                str(
+                    partial_ctx.get("invalidation_reason")
+                    or partial_ctx.get("defensive_preview_state")
+                    or "stale_defensive_preview_invalidated"
+                )
+            )
+            missing_requirement = missing_requirement or "fresh_defensive_preview"
+            if partial_ctx.get("target_already_completed"):
+                dispatch = dispatch or DISPATCH_BLOCKED_APPROVAL_REQUIRED
         if bridge_active:
             bridge_state = BRIDGE_ACTIVE
             missing_requirement = None

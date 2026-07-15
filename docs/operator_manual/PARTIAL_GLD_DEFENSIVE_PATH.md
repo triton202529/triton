@@ -26,6 +26,25 @@ Evidence: `data/results/phase_198k_partial_gld_no_execution_certification.json`
 
 ---
 
+## After a completed defensive batch (Phase 198N)
+
+Broker position is the authority after dispatch.
+
+- Once GLD has already been reduced (for example 147 → 16 after Phase 198M), stale
+  defensive preview / 197X projection artifacts must **not** keep advertising the old
+  sell quantity (for example 131).
+- 197Y and 197Z read shared broker-state invalidation
+  (`services/defensive_preview_broker_state.py`).
+- Expected states after completion:
+  - `STALE_DEFENSIVE_PREVIEW_INVALIDATED`, or
+  - `TARGET_ALREADY_COMPLETED`
+- `eligible_qty` / `bridge_qty` must be **0** (not the completed batch size).
+- `bridge_active` remains **false**.
+- Approval / broker-auth artifacts must **never** revive a completed stale preview.
+- Rebuild a fresh preview from current broker positions before any new paper window.
+
+---
+
 ## Why GLD full exit exceeds the cap
 
 A full GLD defensive exit (qty **195**) is part of a larger defensive batch whose notional exceeds the governed placement caps used by `place_live_orders` / manage handoff. Full-batch dispatch is therefore blocked by sizing-cap governance (Phase 197H and related controls). Caps are **not** raised to force a full exit.

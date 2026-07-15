@@ -114,6 +114,18 @@ Do not create the next-layer artifact to “fix” a stop condition. Resolve the
 
 ---
 
+## Completed defensive batches and stale previews
+
+After a paper defensive batch has already filled (for example GLD reduced from 147 to 16):
+
+- Broker position is the authority.
+- Stale preview / projection artifacts must be invalidated (`STALE_DEFENSIVE_PREVIEW_INVALIDATED`
+  or `TARGET_ALREADY_COMPLETED`).
+- Do **not** recreate approval/broker-auth artifacts to revive a completed stale preview.
+- 197Y must not advertise the old sell qty; 197Z must not advertise the old bridge qty.
+
+---
+
 ## Exact paper-only authorization phrase
 
 Required **before real broker authorization creation** (197Z path):

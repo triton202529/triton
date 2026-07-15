@@ -30,6 +30,10 @@ GATE_BLOCKED_197X_DRY_RUN_INVALID = "PAPER_EXECUTION_GATE_BLOCKED_197X_DRY_RUN_I
 GATE_BLOCKED_BATCH_MISMATCH = "PAPER_EXECUTION_GATE_BLOCKED_BATCH_MISMATCH"
 GATE_BLOCKED_LIVE_NOT_BLOCKED = "PAPER_EXECUTION_GATE_BLOCKED_LIVE_NOT_BLOCKED"
 GATE_BLOCKED_OPEN_ORDERS_PRESENT = "PAPER_EXECUTION_GATE_BLOCKED_OPEN_ORDERS_PRESENT"
+GATE_BLOCKED_STALE_DEFENSIVE_PREVIEW_INVALIDATED = (
+    "PAPER_EXECUTION_GATE_BLOCKED_STALE_DEFENSIVE_PREVIEW_INVALIDATED"
+)
+GATE_BLOCKED_TARGET_ALREADY_COMPLETED = "PAPER_EXECUTION_GATE_BLOCKED_TARGET_ALREADY_COMPLETED"
 GATE_READY_LOOP_MEDIATED = "PAPER_EXECUTION_GATE_READY_LOOP_MEDIATED"
 
 SAFE_BLOCKED_GATE_STATES = frozenset(
@@ -40,6 +44,8 @@ SAFE_BLOCKED_GATE_STATES = frozenset(
         GATE_BLOCKED_BATCH_MISMATCH,
         GATE_BLOCKED_LIVE_NOT_BLOCKED,
         GATE_BLOCKED_OPEN_ORDERS_PRESENT,
+        GATE_BLOCKED_STALE_DEFENSIVE_PREVIEW_INVALIDATED,
+        GATE_BLOCKED_TARGET_ALREADY_COMPLETED,
     }
 )
 
@@ -67,6 +73,10 @@ def _read_json(path: Path) -> Dict[str, Any]:
 
 def _extract_partial_gate_context() -> Dict[str, Any]:
     """Surface partial defensive-exit eligibility contract for loop gate dry-run."""
+    from services.defensive_preview_broker_state import (
+        TARGET_ALREADY_COMPLETED,
+        apply_broker_invalidation_to_partial_fields,
+    )
     from services.partial_defensive_exit_preview import (
         PREVIEW_TYPE,
         extract_partial_approval_contract_fields,
@@ -89,9 +99,47 @@ def _extract_partial_gate_context() -> Dict[str, Any]:
         or (x197.get("projected_symbols") or [None])[0]
         or ""
     ).upper()
+    projected_qty = 0
+    try:
+        projected_qty = int(float((qty_map or {}).get(symbol) or 0))
+    except (TypeError, ValueError):
+        projected_qty = 0
     eligible_qty = int(
-        qty_map.get(symbol) or z197.get("authorized_qty") or partial.get("partial_qty") or 0
+        projected_qty or z197.get("authorized_qty") or partial.get("partial_qty") or 0
     )
+    # Prefer the largest advertised sell qty among preview/projection for freshness checks.
+    partial_for_check = dict(partial)
+    if eligible_qty > int(partial_for_check.get("partial_qty") or 0):
+        partial_for_check["partial_qty"] = eligible_qty
+    # If projection advertises a full_qty via remaining math, keep preview full_qty when present.
+    partial_for_check = apply_broker_invalidation_to_partial_fields(
+        partial_for_check, projected_qty=eligible_qty
+    )
+    freshness = partial_for_check.get("defensive_preview_broker_state") or {}
+
+    if partial_for_check.get("defensive_preview_invalidated"):
+        return {
+            "partial_loop_gate_supported": False,
+            "preview_type": None,
+            "symbol": symbol or None,
+            "eligible_action": None,
+            "eligible_qty": 0,
+            "full_qty": int(partial_for_check.get("stale_preview_original_full_qty") or 0),
+            "remaining_qty_after_preview": 0,
+            "full_exit_deferred": False,
+            "full_exit_deferred_reason": None,
+            "estimated_notional": 0.0,
+            "defensive_preview_state": partial_for_check.get("defensive_preview_state"),
+            "defensive_preview_invalidated": True,
+            "defensive_preview_broker_state": freshness,
+            "stale_preview_original_qty": partial_for_check.get("stale_preview_original_qty"),
+            "broker_qty": freshness.get("broker_qty"),
+            "invalidation_reason": partial_for_check.get("invalidation_reason"),
+            "target_already_completed": (
+                partial_for_check.get("defensive_preview_state") == TARGET_ALREADY_COMPLETED
+            ),
+        }
+
     full_qty = int(partial.get("full_qty") or z197.get("full_qty") or 0)
     remaining = int(
         partial.get("remaining_qty_after_preview")
@@ -123,6 +171,11 @@ def _extract_partial_gate_context() -> Dict[str, Any]:
             if available
             else 0.0
         ),
+        "defensive_preview_state": freshness.get("final_state"),
+        "defensive_preview_invalidated": False,
+        "defensive_preview_broker_state": freshness,
+        "broker_qty": freshness.get("broker_qty"),
+        "target_already_completed": False,
     }
 
 
@@ -297,6 +350,21 @@ def evaluate_loop_mediated_paper_execution_gate(
 
     partial_ctx = _extract_partial_gate_context()
 
+    # Broker position is authority after dispatch: never advertise or enable a
+    # completed/stale defensive preview, even if approval artifacts were recreated.
+    if partial_ctx.get("defensive_preview_invalidated"):
+        eligible_for_execution = False
+        operator_execution_required = True
+        explicit_broker_execution_phase_required = True
+        if partial_ctx.get("target_already_completed"):
+            final_state = GATE_BLOCKED_TARGET_ALREADY_COMPLETED
+            gate_reason = str(partial_ctx.get("invalidation_reason") or "target_already_completed")
+        else:
+            final_state = GATE_BLOCKED_STALE_DEFENSIVE_PREVIEW_INVALIDATED
+            gate_reason = str(
+                partial_ctx.get("invalidation_reason") or "stale_defensive_preview_invalidated"
+            )
+
     status = "PASS" if final_state == GATE_READY_LOOP_MEDIATED else "PASS_SAFE_BLOCKED"
     if not live_blocked:
         status = "FAIL"
@@ -340,6 +408,12 @@ def evaluate_loop_mediated_paper_execution_gate(
         "full_exit_deferred": bool(partial_ctx.get("full_exit_deferred")),
         "full_exit_deferred_reason": partial_ctx.get("full_exit_deferred_reason"),
         "estimated_notional": partial_ctx.get("estimated_notional"),
+        "defensive_preview_state": partial_ctx.get("defensive_preview_state"),
+        "defensive_preview_invalidated": bool(partial_ctx.get("defensive_preview_invalidated")),
+        "defensive_preview_broker_state": partial_ctx.get("defensive_preview_broker_state"),
+        "broker_qty": partial_ctx.get("broker_qty"),
+        "stale_preview_original_qty": partial_ctx.get("stale_preview_original_qty"),
+        "target_already_completed": bool(partial_ctx.get("target_already_completed")),
         "approval_artifact_created": APPROVAL_PATH.is_file(),
         "broker_authorization_artifact_created": BROKER_AUTH_PATH.is_file(),
         "live_execution_permitted": False,
