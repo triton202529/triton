@@ -1,0 +1,107 @@
+{
+  "phase": "198W",
+  "generated_at": "2026-07-17T15:47:23.961490+00:00",
+  "status": "REVIEW_REQUIRED",
+  "marker": "MARKET_OPEN_REFRESH_PIPELINE_VALIDATION_ONLY",
+  "executive_summary": "Refresh pipeline SAFE_BLOCKED: generate_signals=FAIL, apply_signal_lifecycle=PASS, build_effective_lifecycle=PASS. After refresh: signals_stale=True, lifecycle_stale=False, effective_stale=False. execution_readiness=NOT_READY (failed=['signals']); certification=NOT_CERTIFIED. Broker safe: open_orders=0, live_blocked=True, approval_absent=True, broker_auth_absent=True. GLD target satisfied=True. allocation open_new=0 add=0. No broker orders submitted by this phase.",
+  "audit": {
+    "refresh_pipeline_status": "SAFE_BLOCKED",
+    "refresh_failure_reason": "generate_signals_failed: Fix upstream: ensure train_model fetch window includes the completed bar (end-date inclusivity).",
+    "refresh_steps": [
+      {
+        "module": "services.generate_signals",
+        "exit_code": 1,
+        "status": "FAIL",
+        "output_tail": [
+          "- USO latest=2026-07-10 expected=2026-07-16",
+          "- V latest=2026-07-10 expected=2026-07-16",
+          "- VOO latest=2026-07-10 expected=2026-07-16",
+          "- VTI latest=2026-07-10 expected=2026-07-16",
+          "- WFC latest=2026-07-10 expected=2026-07-16",
+          "- WMT latest=2026-07-10 expected=2026-07-16",
+          "See: data/results\\signals_asof_diagnostics.json",
+          "Fix upstream: ensure train_model fetch window includes the completed bar (end-date inclusivity)."
+        ]
+      },
+      {
+        "module": "services.apply_signal_lifecycle",
+        "exit_code": 0,
+        "status": "PASS",
+        "output_tail": [
+          "[LIFECYCLE_ROW_NORMALIZED] ticker=TSLA field=lifecycle_action old=EXIT new=WAIT reason=flat_exit_no_position",
+          "[LIFECYCLE_NORMALIZE_SUMMARY] rows_normalized=4 fields_changed=4 remaining_invalid=0",
+          "[LIFECYCLE_ARTIFACT_GUARD] action=replaced path=signal_lifecycle.csv rows=65 min_rows=65 backup=signal_lifecycle_20260717_154721.csv",
+          "[LIFECYCLE_SELF_CHECK] status=PASS",
+          "[LIFECYCLE_SELF_CHECK] PASS: signal_lifecycle self-check",
+          "[LIFECYCLE_SELF_CHECK] status=OK invalid_rows=0",
+          "Lifecycle applied: signals_with_rationale.csv -> signal_lifecycle.csv",
+          "State persisted: signal_state.json"
+        ]
+      },
+      {
+        "module": "services.build_effective_lifecycle",
+        "exit_code": 0,
+        "status": "PASS",
+        "output_tail": [
+          "[LIFECYCLE CONFIG] {'enabled': True, 'add_confidence_min': 0.52, 'add_delta_pct_min': 0.008, 'hold_delta_floor': -0.003, 'hold_delta_ceiling': 0.006, 'trim_delta_pct_threshold': -0.001, 'exit_delta_pct_threshold': -0.0025, 'exit_confidence_min': 0.5}",
+          "[RECONCILIATION] broker_reconciled_rows=0 (snapshot+reconciliation.csv)",
+          "[LIFECYCLE_SUMMARY] tickers=65 long=6 flat=59 buy=2 add=0 hold=5 exit=0 wait=57 trim=1 invalid=0 reconciled=0 healed=0",
+          "[EFFECTIVE_LIFECYCLE_SUMMARY] rows=65 healed_broker_reconciliation=0 stance_adjustments=0 rare_exceptions_only=true",
+          "[LIFECYCLE_ARTIFACT_GUARD] action=replaced path=signal_lifecycle_effective.csv rows=65 min_rows=65 backup=signal_lifecycle_effective_20260717_154721.csv",
+          "[build_effective_lifecycle] wrote C:\\Users\\akimw\\triton\\data\\results\\signal_lifecycle_effective.csv",
+          "[build_effective_lifecycle] total_rows=65 healed_count=0 open_buy_in_flight_preserved=0"
+        ]
+      }
+    ],
+    "generate_signals_status": "FAIL",
+    "apply_signal_lifecycle_status": "PASS",
+    "build_effective_lifecycle_status": "PASS",
+    "signals_file_age_seconds": 338396.085,
+    "signals_file_mtime": "2026-07-13T17:47:26Z",
+    "lifecycle_file_age_seconds": 1.607,
+    "lifecycle_file_mtime": "2026-07-17T15:47:21Z",
+    "effective_lifecycle_file_age_seconds": 0.871,
+    "effective_lifecycle_file_mtime": "2026-07-17T15:47:21Z",
+    "lifecycle_stale_after_refresh": false,
+    "signals_stale_after_refresh": true,
+    "effective_lifecycle_stale_after_refresh": false,
+    "lifecycle_reason": "Effective lifecycle present and reconciled",
+    "signals_reason": "signals.csv exceeds freshness window",
+    "lifecycle_freshness_threshold_seconds": 172800,
+    "signals_freshness_threshold_seconds": 172800,
+    "execution_readiness_status": "NOT_READY",
+    "execution_readiness_failed_checks": [
+      "signals"
+    ],
+    "readiness_blocked_by_freshness": true,
+    "certification_status": "NOT_CERTIFIED",
+    "certification_failed_requirements": [
+      "Readiness",
+      "veto:mandatory_preservation_gate_failed"
+    ],
+    "paper_arm_valid": true,
+    "paper_entry_armed": true,
+    "live_execution_blocked": true,
+    "approval_artifact_present": false,
+    "broker_auth_artifact_present": false,
+    "broker_connected": true,
+    "open_orders_count": 0,
+    "positions_count": 10,
+    "gld_qty": 16,
+    "gld_weight": 0.197232,
+    "gld_target_satisfied": true,
+    "allocation_open_new_count": 0,
+    "allocation_add_count": 0,
+    "allocation_exit_count": 3,
+    "allocation_trim_count": 0,
+    "broker_orders_submitted": false,
+    "recommended_runtime_posture": "SAFE_BLOCK \u2014 refresh step failed (generate_signals_failed: Fix upstream: ensure train_model fetch window includes the completed bar (end-date inclusivity).); readiness safe-blocked; investigate upstream predictions/model (fetch_raw_data/preprocess/train_model) before retrying. No broker orders, no authority artifacts; live blocked."
+  },
+  "safety": {
+    "broker_orders_submitted": false,
+    "live_execution_blocked": true,
+    "approval_artifact_present": false,
+    "broker_auth_artifact_present": false,
+    "open_orders_count": 0
+  }
+}

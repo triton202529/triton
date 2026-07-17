@@ -7,6 +7,10 @@
 #   B. Manage open orders     (smart reprice / cancellations)
 #   C. Poll order status      (re-poll after adjustments)
 #   D. Snapshot live state    (broker positions + open orders)
+#   D1. Signal + lifecycle refresh (generate_signals, apply_signal_lifecycle,
+#       build_effective_lifecycle) BEFORE analytics/allocation/readiness so
+#       readiness/certification never evaluate stale inputs (Phase 198W).
+#       Soft-fails to a safe-block: no orders, no artifacts, snapshot kept.
 #   E0. Universe hydration preflight (stranded symbol sync; no orders)
 #   E. Rebuild intelligence   (outcomes, pnl, perf, risk overlay, allocation)
 #   F. Run position management (drives exits / rotation)
@@ -79,6 +83,28 @@ function Run-Step {
     }
 }
 
+# ── Run-RefreshStep: invoke a signal/lifecycle refresh module WITHOUT ─
+# aborting the whole sequence on failure. Returns $true on success and
+# $false on failure so the caller can safe-block (skip risk-acting stages,
+# still snapshot/report) instead of placing orders on stale inputs.
+function Run-RefreshStep {
+    param(
+        [Parameter(Mandatory = $true)] [string]   $Label,
+        [Parameter(Mandatory = $true)] [string[]] $PyArgs
+    )
+    Write-Host ""
+    Write-Host "[$Label]" -ForegroundColor Yellow
+    Write-Host (">>> python " + ($PyArgs -join " ")) -ForegroundColor Cyan
+    & python @PyArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host ("[REFRESH_FAIL] Step '" + $Label + "' failed (exit $LASTEXITCODE).") -ForegroundColor Red
+        Write-Host ("[REFRESH_FAIL] Command: python " + ($PyArgs -join " ")) -ForegroundColor Red
+        return $false
+    }
+    return $true
+}
+
 $exitCode = 0
 try {
     Write-Host "=== TRITON MARKET OPEN SEQUENCE START ===" -ForegroundColor Green
@@ -105,6 +131,51 @@ try {
     # ── D. Snapshot broker / live state ──────────────────────────────────
     Run-Step -Label "D. SNAPSHOT LIVE ORDERS" `
              -PyArgs @("-m","services.snapshot_live_orders","--mode","paper")
+
+    # ── D1. Signal + lifecycle refresh (Phase 198W) ──────────────────────
+    # Refresh market-data inputs BEFORE analytics / allocation / position
+    # management / readiness / certification so those stages never evaluate
+    # stale signals or lifecycle artifacts (Phase 198V: REFRESH_PIPELINE_GAP).
+    # Soft-fail: if any refresh step fails we safe-block the risk-acting
+    # stages (no broker orders, no approval/auth artifacts), still complete
+    # the broker snapshot (already done above) and heartbeat/reporting, and
+    # exit non-zero so the continuous loop blocks paper entry this cycle.
+    $refreshOk = $true
+    $refreshFailReason = ""
+    $refreshFailRc = 0
+    Write-Host ""
+    Write-Host "[D1. SIGNAL + LIFECYCLE REFRESH]" -ForegroundColor Yellow
+    if ($refreshOk) {
+        if (-not (Run-RefreshStep -Label "D1a. GENERATE SIGNALS" -PyArgs @("-m","services.generate_signals"))) {
+            $refreshOk = $false; $refreshFailReason = "generate_signals_failed"; $refreshFailRc = $LASTEXITCODE
+        }
+    }
+    if ($refreshOk) {
+        if (-not (Run-RefreshStep -Label "D1b. APPLY SIGNAL LIFECYCLE" -PyArgs @("-m","services.apply_signal_lifecycle"))) {
+            $refreshOk = $false; $refreshFailReason = "apply_signal_lifecycle_failed"; $refreshFailRc = $LASTEXITCODE
+        }
+    }
+    if ($refreshOk) {
+        if (-not (Run-RefreshStep -Label "D1c. BUILD EFFECTIVE LIFECYCLE" -PyArgs @("-m","services.build_effective_lifecycle"))) {
+            $refreshOk = $false; $refreshFailReason = "build_effective_lifecycle_failed"; $refreshFailRc = $LASTEXITCODE
+        }
+    }
+
+    if (-not $refreshOk) {
+        if ($refreshFailRc -eq 0) { $refreshFailRc = 1 }
+        Write-Host ""
+        Write-Host ("[REFRESH_SAFE_BLOCK] reason=" + $refreshFailReason + " rc=" + $refreshFailRc) -ForegroundColor Red
+        Write-Host "[REFRESH_SAFE_BLOCK] readiness=SAFE_BLOCKED; skipping allocation / position management." -ForegroundColor Red
+        Write-Host "[REFRESH_SAFE_BLOCK] No broker orders, no approval/auth artifacts. Broker snapshot already captured." -ForegroundColor Red
+        # Still touch heartbeat so dashboards report the (safe-blocked) cycle.
+        Run-Step -Label "G. TOUCH PIPELINE HEARTBEAT (post safe-block)" `
+                 -PyArgs @("-m","services.touch_pipeline_heartbeat")
+        # Surface the failure so the outer catch records it and the loop
+        # blocks paper entry. Broker safety snapshot (D) already completed.
+        throw ("STEP_FAILED:D1. SIGNAL + LIFECYCLE REFRESH (" + $refreshFailReason + "):" + $refreshFailRc)
+    }
+
+    Write-Host "[D1. SIGNAL + LIFECYCLE REFRESH] complete (signals + lifecycle refreshed)." -ForegroundColor Green
 
     # ── E0. Universe hydration preflight (before allocation; no broker orders) ─
     Run-Step -Label "E0. UNIVERSE HYDRATION PREFLIGHT" `
