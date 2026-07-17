@@ -1,0 +1,110 @@
+{
+  "phase": "198V",
+  "generated_at": "2026-07-17T15:25:35.931724+00:00",
+  "status": "PASS",
+  "marker": "MARKET_OPEN_LIFECYCLE_SIGNALS_FRESHNESS_AUDIT_ONLY",
+  "executive_summary": "Market-open readiness is NOT_READY because failed_checks=['lifecycle', 'signals']. Lifecycle diagnostics FILE_STALE on signal_lifecycle.csv (age=178856.400346s > threshold=172800.0s). Signals check: signals.csv exceeds freshness window. Classification=REFRESH_PIPELINE_GAP. Broker safety clean=True; live blocked=True; paper arm valid=True. No broker orders submitted by this audit.",
+  "audit": {
+    "status": "PASS",
+    "readiness_status": "NOT_READY",
+    "failed_checks": [
+      "lifecycle",
+      "signals"
+    ],
+    "lifecycle_stale": true,
+    "lifecycle_file": "C:/Users/akimw/triton/data/results/signal_lifecycle.csv",
+    "lifecycle_file_mtime": "2026-07-15T13:44:37Z",
+    "lifecycle_file_age_seconds": 178856.400346,
+    "lifecycle_freshness_threshold_seconds": 172800.0,
+    "lifecycle_rows": 65,
+    "lifecycle_missing_columns": [],
+    "lifecycle_diagnostics_failure_reason": "FILE_STALE",
+    "readiness_lifecycle_file": "C:/Users/akimw/triton/data/results/signal_lifecycle_effective.csv",
+    "readiness_lifecycle_file_mtime": "2026-07-15T13:44:38Z",
+    "readiness_lifecycle_file_age_seconds": 178855.681,
+    "readiness_lifecycle_reason": "signal_lifecycle_effective.csv is stale",
+    "lifecycle_effective_diag": {
+      "path": "C:\\Users\\akimw\\triton\\data\\results\\signal_lifecycle_effective.csv",
+      "age_seconds": 178855.647513,
+      "failure_reason": "FILE_STALE",
+      "rows": 65
+    },
+    "signals_stale": true,
+    "signals_file": "C:/Users/akimw/triton/data/results/signals.csv",
+    "signals_file_mtime": "2026-07-13T17:47:26Z",
+    "signals_file_age_seconds": 337087.465,
+    "signals_freshness_threshold_seconds": 172800.0,
+    "signals_snapshot_path": "C:/Users/akimw/triton/data/results/signals_snapshot.json",
+    "signals_snapshot_age_seconds": 2472865.197,
+    "signals_reason": "signals.csv exceeds freshness window",
+    "stale_files_expected_after_market_close": true,
+    "continuous_loop_refreshing_lifecycle_signals": false,
+    "market_open_refresh_pipeline_gap": true,
+    "market_open_refresh_modules_missing": [
+      "services.generate_signals",
+      "services.apply_signal_lifecycle",
+      "services.build_effective_lifecycle"
+    ],
+    "market_open_script_audit": {
+      "market_open_script": "scripts/run_market_open.ps1",
+      "script_exists": true,
+      "refresh_modules_present": {
+        "services.generate_signals": false,
+        "services.apply_signal_lifecycle": false,
+        "services.build_effective_lifecycle": false
+      },
+      "refresh_modules_missing": [
+        "services.generate_signals",
+        "services.apply_signal_lifecycle",
+        "services.build_effective_lifecycle"
+      ],
+      "refresh_pipeline_gap": true
+    },
+    "watchdog_vs_readiness_path_mismatch": false,
+    "watchdog_reads_lifecycle_file": "C:/Users/akimw/triton/data/results/signal_lifecycle.csv",
+    "readiness_reads_lifecycle_file": "C:/Users/akimw/triton/data/results/signal_lifecycle_effective.csv",
+    "certification_failing_from_stale_inputs_only": true,
+    "broker_connected": true,
+    "broker_safe": true,
+    "open_orders_count": 0,
+    "positions_count": 10,
+    "paper_arm_valid": true,
+    "paper_entry_armed": true,
+    "live_execution_blocked": true,
+    "approval_artifact_present": false,
+    "broker_auth_artifact_present": false,
+    "gld_qty": 16,
+    "gld_weight": 0.197118,
+    "gld_target_satisfied": true,
+    "allocation_open_new_count": 0,
+    "allocation_add_count": 0,
+    "allocation_exit_count": 3,
+    "allocation_trim_count": 0,
+    "allocation_safe_blocked_no_open_new_add": true,
+    "certification_status": "NOT_CERTIFIED",
+    "failed_requirements": [
+      "Readiness",
+      "veto:mandatory_preservation_gate_failed"
+    ],
+    "blocker_classification": "REFRESH_PIPELINE_GAP",
+    "classification_notes": [
+      "run_market_open.ps1 does not invoke generate_signals / apply_signal_lifecycle / build_effective_lifecycle; stale inputs persist after market-open sequence",
+      "broker/order safety is clean; blocker is stale market-data inputs"
+    ],
+    "recommended_refresh_command": "python -m services.generate_signals; python -m services.apply_signal_lifecycle; python -m services.build_effective_lifecycle; python -m services.execution_readiness; python -m services.capital_preservation_certification --skip-stress-revalidation",
+    "recommended_next_phase": "198W \u2014 refresh market-open / continuous-loop signal+lifecycle pipeline (generate_signals \u2192 apply_signal_lifecycle \u2192 build_effective_lifecycle) then re-evaluate readiness/certification; do not loosen freshness thresholds",
+    "broker_orders_submitted": false,
+    "thresholds": {
+      "lifecycle_freshness_hours": 48.0,
+      "signals_freshness_hours": 48.0
+    }
+  },
+  "safety": {
+    "broker_orders_submitted": false,
+    "live_execution_blocked": true,
+    "approval_artifact_present": false,
+    "broker_auth_artifact_present": false,
+    "open_orders_count": 0
+  },
+  "do_not_certify_automatically": true
+}
