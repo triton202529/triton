@@ -1,0 +1,216 @@
+﻿{
+    "generated_at":  "2026-07-20T11:44:06Z",
+    "classification":  "RUNTIME_931_START_REPAIR_VALIDATED",
+    "root_cause":  "931 autostart treated an empty errors list as success and never required continuous process+lock postconditions. Confirmation used a single 2s probe without Start-Process -PassThru, so early child exit/PID/exit-code were invisible. Continuous lock was never verified; Session-0 Minimized starts were fragile; live flags were not explicitly forced to 0. Observed audit (2026-07-19 Sunday): continuous_was_running=false, continuous_started=false, errors=[], LastResult=0 - false success with no continuous log/lock created.",
+    "files_changed":  [
+                          "scripts/start_triton_runtime_931.ps1",
+                          "scripts/start_triton_runtime_supervisor.ps1",
+                          "scripts/validate_monday_runtime_931_start_repair.ps1",
+                          "data/results/monday_runtime_931_start_repair_validation.json"
+                      ],
+    "tests_run":  [
+                      "parser::scripts\\start_triton_runtime_931.ps1",
+                      "parser::scripts\\start_triton_runtime_supervisor.ps1",
+                      "parser::scripts\\validate_monday_runtime_931_start_repair.ps1",
+                      "mock_wd_running_c_absent_success_exit0",
+                      "mock_wd_running_c_absent_success_start_attempted",
+                      "mock_wd_running_c_absent_success_postconditions",
+                      "mock_wd_running_c_absent_success_start_called_once",
+                      "mock_child_exits_immediately_exit1",
+                      "mock_child_exits_immediately_flagged",
+                      "mock_child_exits_immediately_failed_post",
+                      "mock_process_without_lock_exit1",
+                      "mock_process_without_lock_not_success",
+                      "mock_lock_without_process_exit1",
+                      "mock_lock_without_process_not_success",
+                      "mock_both_healthy_exit0",
+                      "mock_both_healthy_no_duplicate_start",
+                      "mock_both_healthy_postconditions",
+                      "mock_weekend_exit0",
+                      "mock_weekend_no_start",
+                      "mock_weekend_reason_present",
+                      "paper_flags_are_1",
+                      "live_flags_are_0",
+                      "no_approval_artifact_created_by_validation",
+                      "no_broker_auth_created_by_validation",
+                      "no_broker_order_modules_invoked",
+                      "watchdog_untouched",
+                      "real_continuous_loop_not_started_by_validation"
+                  ],
+    "tests_passed":  [
+                         "parser::scripts\\start_triton_runtime_931.ps1",
+                         "parser::scripts\\start_triton_runtime_supervisor.ps1",
+                         "parser::scripts\\validate_monday_runtime_931_start_repair.ps1",
+                         "mock_wd_running_c_absent_success_exit0",
+                         "mock_wd_running_c_absent_success_start_attempted",
+                         "mock_wd_running_c_absent_success_postconditions",
+                         "mock_wd_running_c_absent_success_start_called_once",
+                         "mock_child_exits_immediately_exit1",
+                         "mock_child_exits_immediately_flagged",
+                         "mock_child_exits_immediately_failed_post",
+                         "mock_process_without_lock_exit1",
+                         "mock_process_without_lock_not_success",
+                         "mock_lock_without_process_exit1",
+                         "mock_lock_without_process_not_success",
+                         "mock_both_healthy_exit0",
+                         "mock_both_healthy_no_duplicate_start",
+                         "mock_both_healthy_postconditions",
+                         "mock_weekend_exit0",
+                         "mock_weekend_no_start",
+                         "mock_weekend_reason_present",
+                         "paper_flags_are_1",
+                         "live_flags_are_0",
+                         "no_approval_artifact_created_by_validation",
+                         "no_broker_auth_created_by_validation",
+                         "no_broker_order_modules_invoked",
+                         "watchdog_untouched",
+                         "real_continuous_loop_not_started_by_validation"
+                     ],
+    "tests_failed":  [
+
+                     ],
+    "test_details":  [
+                         {
+                             "name":  "parser::scripts\\start_triton_runtime_931.ps1",
+                             "passed":  true,
+                             "detail":  "ok"
+                         },
+                         {
+                             "name":  "parser::scripts\\start_triton_runtime_supervisor.ps1",
+                             "passed":  true,
+                             "detail":  "ok"
+                         },
+                         {
+                             "name":  "parser::scripts\\validate_monday_runtime_931_start_repair.ps1",
+                             "passed":  true,
+                             "detail":  "ok"
+                         },
+                         {
+                             "name":  "mock_wd_running_c_absent_success_exit0",
+                             "passed":  true,
+                             "detail":  "exit=0"
+                         },
+                         {
+                             "name":  "mock_wd_running_c_absent_success_start_attempted",
+                             "passed":  true,
+                             "detail":  "attempted=True"
+                         },
+                         {
+                             "name":  "mock_wd_running_c_absent_success_postconditions",
+                             "passed":  true,
+                             "detail":  "post=True"
+                         },
+                         {
+                             "name":  "mock_wd_running_c_absent_success_start_called_once",
+                             "passed":  true,
+                             "detail":  "calls=1"
+                         },
+                         {
+                             "name":  "mock_child_exits_immediately_exit1",
+                             "passed":  true,
+                             "detail":  "exit=1"
+                         },
+                         {
+                             "name":  "mock_child_exits_immediately_flagged",
+                             "passed":  true,
+                             "detail":  "early=True code=7"
+                         },
+                         {
+                             "name":  "mock_child_exits_immediately_failed_post",
+                             "passed":  true,
+                             "detail":  "post=False"
+                         },
+                         {
+                             "name":  "mock_process_without_lock_exit1",
+                             "passed":  true,
+                             "detail":  "exit=1"
+                         },
+                         {
+                             "name":  "mock_process_without_lock_not_success",
+                             "passed":  true,
+                             "detail":  "post=False"
+                         },
+                         {
+                             "name":  "mock_lock_without_process_exit1",
+                             "passed":  true,
+                             "detail":  "exit=1"
+                         },
+                         {
+                             "name":  "mock_lock_without_process_not_success",
+                             "passed":  true,
+                             "detail":  "post=False"
+                         },
+                         {
+                             "name":  "mock_both_healthy_exit0",
+                             "passed":  true,
+                             "detail":  "exit=0"
+                         },
+                         {
+                             "name":  "mock_both_healthy_no_duplicate_start",
+                             "passed":  true,
+                             "detail":  "c_attempted=False c_calls=0 wd_calls=0"
+                         },
+                         {
+                             "name":  "mock_both_healthy_postconditions",
+                             "passed":  true,
+                             "detail":  "post=True"
+                         },
+                         {
+                             "name":  "mock_weekend_exit0",
+                             "passed":  true,
+                             "detail":  "exit=0"
+                         },
+                         {
+                             "name":  "mock_weekend_no_start",
+                             "passed":  true,
+                             "detail":  "eligible=False attempted=False calls=0"
+                         },
+                         {
+                             "name":  "mock_weekend_reason_present",
+                             "passed":  true,
+                             "detail":  "reason=ineligible_session_day=Sunday"
+                         },
+                         {
+                             "name":  "paper_flags_are_1",
+                             "passed":  true,
+                             "detail":  "paper=1/1/1"
+                         },
+                         {
+                             "name":  "live_flags_are_0",
+                             "passed":  true,
+                             "detail":  "enable_live=0 live=0 enabled=False"
+                         },
+                         {
+                             "name":  "no_approval_artifact_created_by_validation",
+                             "passed":  true,
+                             "detail":  "exists_now=False"
+                         },
+                         {
+                             "name":  "no_broker_auth_created_by_validation",
+                             "passed":  true,
+                             "detail":  "exists_now=False"
+                         },
+                         {
+                             "name":  "no_broker_order_modules_invoked",
+                             "passed":  true,
+                             "detail":  "validator_uses_mocks_only"
+                         },
+                         {
+                             "name":  "watchdog_untouched",
+                             "passed":  true,
+                             "detail":  "before=True after=True lock_before=True lock_after=True"
+                         },
+                         {
+                             "name":  "real_continuous_loop_not_started_by_validation",
+                             "passed":  true,
+                             "detail":  "c_running_now=False"
+                         }
+                     ],
+    "real_continuous_loop_started":  false,
+    "orders_dispatched":  false,
+    "approval_artifacts_created":  false,
+    "broker_authorization_created":  false,
+    "watchdog_interrupted":  false,
+    "live_execution_blocked":  true,
+    "ready_for_operator_validation":  true
+}
