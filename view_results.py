@@ -65,7 +65,7 @@ from services.schema_guard import (
 # PAGE CONFIG  (MUST BE FIRST Streamlit call)
 # ──────────────────────────────
 st.set_page_config(
-    page_title="TRITON • Command Center (Phase 1.5)",
+    page_title="TRITON • Operator Console",
     page_icon="🧠",
     layout="wide",
 )
@@ -24282,10 +24282,34 @@ if HAS_MANUAL_ORDER_DESK:
     SECTIONS["System"].insert(-1, "🧾 Manual Order Desk")
 
 
-def sidebar_controls() -> Tuple[str, str]:
+def sidebar_controls() -> Tuple[str, str, str]:
+    """Return (mode, section_or_operator_page, legacy_page_label).
+
+    mode is 'operator' (default) or 'legacy'.
+    """
+    from dashboard.operator_console import DEFAULT_OPERATOR_PAGE, OPERATOR_PAGES
+
     with st.sidebar:
-        st.title("TRITON Nav")
+        st.title("TRITON Operator")
         st.caption(f"Build: {APP_VERSION}")
+
+        if "dashboard_nav_mode" not in st.session_state:
+            st.session_state["dashboard_nav_mode"] = "operator"
+
+        mode_label = st.radio(
+            "Console mode",
+            [
+                "Operator Console (recommended)",
+                "Advanced / Legacy Dashboard",
+            ],
+            index=0 if st.session_state["dashboard_nav_mode"] == "operator" else 1,
+            key="dashboard_mode_radio",
+            help="Operator Console is for routine observation. Advanced/Legacy retains the full research dashboard.",
+        )
+        if mode_label.startswith("Operator"):
+            st.session_state["dashboard_nav_mode"] = "operator"
+        else:
+            st.session_state["dashboard_nav_mode"] = "legacy"
 
         if st.button("⟳ Refresh data", key="refresh"):
             try:
@@ -24295,6 +24319,7 @@ def sidebar_controls() -> Tuple[str, str]:
             st.session_state.pop("contract_results", None)
             st.session_state.pop("contract_summary", None)
             st.session_state.pop("pipeline_health", None)
+            st.session_state.pop("activity_feed_cache", None)
             st.rerun()
 
         pipeline_locked, pipeline_reason = compute_execution_lock()
@@ -24302,17 +24327,65 @@ def sidebar_controls() -> Tuple[str, str]:
         render_sidebar_execution_status(posture, pipeline_locked, pipeline_reason)
 
         st.markdown("---")
+        mode = st.session_state["dashboard_nav_mode"]
+        if mode == "operator":
+            st.caption("Routine operator navigation")
+            page = st.radio(
+                "Page",
+                OPERATOR_PAGES,
+                index=(
+                    OPERATOR_PAGES.index(DEFAULT_OPERATOR_PAGE)
+                    if DEFAULT_OPERATOR_PAGE in OPERATOR_PAGES
+                    else 0
+                ),
+                key="operator_page_choice",
+            )
+            st.markdown("---")
+            st.caption(f"Repo root: {PROJECT_ROOT}")
+            return mode, page, ""
+
+        st.warning("Advanced / Legacy mode — not required for routine operation.")
         section = st.selectbox("Section", list(SECTIONS.keys()), index=0, key="section_choice")
         page = st.radio("View", SECTIONS[section], index=0, key="sub_choice")
-
         st.markdown("---")
         st.caption(f"Repo root: {PROJECT_ROOT}")
-
-    return section, page
+        return mode, section, page
 
 
 def main() -> None:
-    section, page = sidebar_controls()
+    from dashboard.operator_console import OPERATOR_RENDERERS, render_diagnostics_page
+
+    mode, section_or_page, legacy_page = sidebar_controls()
+
+    if mode == "operator":
+        st.markdown("### TRITON Operator Console")
+        st.caption(
+            "Observation only · Live execution remains blocked · Runtime Start/Stop not available"
+        )
+        render_heartbeat_freshness_banner()
+
+        page = section_or_page
+        if page == "Diagnostics":
+
+            def _to_legacy() -> None:
+                st.session_state["dashboard_nav_mode"] = "legacy"
+                st.rerun()
+
+            render_diagnostics_page(switch_to_legacy_callback=_to_legacy)
+            return
+
+        fn = OPERATOR_RENDERERS.get(page)
+        if fn is None:
+            st.error(f"❌ Operator page not wired: {page}")
+            return
+        fn()
+        return
+
+    # ── Advanced / Legacy Dashboard (unchanged page registry) ──
+    section, page = section_or_page, legacy_page
+    st.info(
+        "You are in **Advanced / Legacy Dashboard** mode. Prefer Operator Console for routine operation."
+    )
     render_heartbeat_freshness_banner()
     render_top_status_stack()
     pipeline_locked, pipeline_reason = compute_execution_lock()

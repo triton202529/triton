@@ -1,0 +1,17 @@
+# .streamlit/config.toml
+# Phase DO-002 — localhost-only operator console defaults.
+# Do not expose the dashboard on the LAN. Do not store passwords here.
+
+[server]
+address = "127.0.0.1"
+port = 8501
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+serverAddress = "127.0.0.1"
+
+[runner]
+fastReruns = true
