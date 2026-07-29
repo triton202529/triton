@@ -1,8 +1,9 @@
 """
 operator_console.py
-Phase DO-002 — Streamlit operator-console pages (read-only).
+Phase DO-002/DO-003 — Streamlit operator-console pages.
 
-No Start/Stop/Restart/Arm/Approve/Execute controls.
+DO-003 adds protected START_TRITON only.
+Stop/Restart/Arm/Approve/Execute remain unavailable.
 """
 
 from __future__ import annotations
@@ -54,12 +55,124 @@ def _status_color(status: str) -> str:
     return "⚫"
 
 
+def _render_start_controls() -> None:
+    """Protected START_TRITON UI (DO-003). Stop/Restart remain unavailable."""
+    from services.operator_runtime_controller import (
+        ACTION_START,
+        execute_start_triton,
+        start_eligibility,
+    )
+
+    eligibility = start_eligibility()
+    st.subheader("Runtime controls")
+    st.caption(
+        f"Start eligibility: **{eligibility.get('decision')}** · "
+        f"Paper arm (not modified by Start): **{eligibility.get('paper_arm_status')}**"
+    )
+    st.write(eligibility.get("explanation") or "")
+
+    if "start_idempotency_key" not in st.session_state:
+        st.session_state["start_idempotency_key"] = None
+    if "start_confirm_pending" not in st.session_state:
+        st.session_state["start_confirm_pending"] = False
+    if "start_last_result" not in st.session_state:
+        st.session_state["start_last_result"] = None
+    if "start_in_progress" not in st.session_state:
+        st.session_state["start_in_progress"] = False
+
+    last = st.session_state.get("start_last_result")
+    if last:
+        res = str(last.get("result") or "")
+        msg = last.get("safe_message") or res
+        if res in ("STARTED", "ALREADY_RUNNING"):
+            st.success(msg)
+        elif res in ("PARTIAL_START", "START_IN_PROGRESS"):
+            st.warning(msg) if res == "PARTIAL_START" else st.info(msg)
+        else:
+            st.error(msg)
+        with st.expander("Start technical evidence", expanded=False):
+            st.json(
+                {
+                    "result": last.get("result"),
+                    "action_id": last.get("action_id"),
+                    "launched_components": last.get("launched_components"),
+                    "preserved_components": last.get("preserved_components"),
+                    "live_execution_blocked_after": last.get("live_execution_blocked_after"),
+                    "paper_arm_status": last.get("paper_arm_status"),
+                    "paper_arm_mutated": last.get("paper_arm_mutated"),
+                    "error_code": last.get("error_code"),
+                }
+            )
+
+    ctrl1, ctrl2, ctrl3 = st.columns(3)
+    with ctrl1:
+        if eligibility.get("already_running"):
+            st.info("TRITON is already running")
+        elif st.session_state.get("start_in_progress") or eligibility.get("guard_active"):
+            st.button("Start TRITON", key="start_triton_disabled_busy", disabled=True)
+            st.caption("Start action in progress…")
+        elif not eligibility.get("start_button_enabled"):
+            st.button("Start TRITON", key="start_triton_disabled_unsafe", disabled=True)
+            st.caption("Start disabled: unsafe, ambiguous, or not eligible.")
+        else:
+            if not st.session_state.get("start_confirm_pending"):
+                if st.button("Start TRITON", key="start_triton_request", type="primary"):
+                    import uuid
+
+                    st.session_state["start_confirm_pending"] = True
+                    st.session_state["start_idempotency_key"] = str(uuid.uuid4())
+                    st.rerun()
+            else:
+                st.warning(
+                    "This starts TRITON’s local watchdog and continuous runtime in its existing "
+                    "paper-only configuration. Live execution will remain blocked. "
+                    "This does **not** create or extend paper-arm authorization."
+                )
+                conf_a, conf_b = st.columns(2)
+                with conf_a:
+                    if st.button("Confirm Start", key="start_triton_confirm", type="primary"):
+                        st.session_state["start_in_progress"] = True
+                        st.session_state["start_confirm_pending"] = False
+                        with st.spinner("Starting and validating TRITON…"):
+                            result = execute_start_triton(
+                                action=ACTION_START,
+                                idempotency_key=st.session_state.get("start_idempotency_key"),
+                                source="operator_console",
+                                operator_context={"ui": "operations"},
+                            )
+                        st.session_state["start_last_result"] = result
+                        st.session_state["start_in_progress"] = False
+                        st.session_state["start_idempotency_key"] = None
+                        st.rerun()
+                with conf_b:
+                    if st.button("Cancel", key="start_triton_cancel"):
+                        st.session_state["start_confirm_pending"] = False
+                        st.session_state["start_idempotency_key"] = None
+                        st.rerun()
+    with ctrl2:
+        st.button("Stop TRITON — unavailable", key="stop_triton_placeholder", disabled=True)
+        st.caption(
+            "Stop and Restart will become available only after cooperative shutdown "
+            "is implemented and validated."
+        )
+    with ctrl3:
+        st.button("Restart TRITON — unavailable", key="restart_triton_placeholder", disabled=True)
+        st.caption("No process termination or lock deletion is available from this console.")
+
+    st.caption(
+        f"allowed_action={eligibility.get('allowed_action')} · "
+        f"stop_available={eligibility.get('stop_available')} · "
+        f"restart_available={eligibility.get('restart_available')}"
+    )
+
+
 def render_operations_page() -> None:
     from services.operator_console_status import build_operator_status
 
     st.title("Operations")
     st.caption(
-        "Read-only runtime and safety posture. Runtime controls are not available in this phase."
+        "Operator console · Protected Start available · Live execution remains blocked · "
+        "Stop/Restart unavailable until cooperative shutdown exists."
     )
 
     status = build_operator_status()
@@ -149,11 +262,7 @@ def render_operations_page() -> None:
                 st.write(f"Recommended safe action: {item.get('recommended_action')}")
 
     st.markdown("---")
-    st.warning("Runtime controls are being validated and are not yet available.")
-    st.caption(
-        f"runtime_controls_exposed={status.get('runtime_controls_exposed')} · "
-        f"live_execution_control_exposed={status.get('live_execution_control_exposed')}"
-    )
+    _render_start_controls()
 
 
 def render_activity_page() -> None:
@@ -412,6 +521,35 @@ def render_diagnostics_page(*, switch_to_legacy_callback=None) -> None:
     st.subheader("Paper-arm and live-block evidence")
     st.json({"paper_arm": status.get("paper_arm"), "live_execution": status.get("live_execution")})
 
+    st.subheader("Start eligibility (DO-003)")
+    from services.operator_runtime_controller import read_recent_runtime_actions, start_eligibility
+
+    eligibility = start_eligibility()
+    st.json(
+        {
+            "decision": eligibility.get("decision"),
+            "explanation": eligibility.get("explanation"),
+            "components_to_start": eligibility.get("components_to_start"),
+            "preserved_components": eligibility.get("preserved_components"),
+            "live_execution_blocked": eligibility.get("live_execution_blocked"),
+            "paper_arm_status": eligibility.get("paper_arm_status"),
+            "guard_active": eligibility.get("guard_active"),
+            "start_button_enabled": eligibility.get("start_button_enabled"),
+            "fixed_paths": eligibility.get("fixed_paths"),
+            "stop_available": eligibility.get("stop_available"),
+            "restart_available": eligibility.get("restart_available"),
+            "allowed_action": eligibility.get("allowed_action"),
+            "denied_actions": eligibility.get("denied_actions"),
+        }
+    )
+    with st.expander("Loop classifications"):
+        st.json(eligibility.get("classifications"))
+    with st.expander("Recent sanitized runtime-action audit"):
+        st.json(read_recent_runtime_actions(limit=15))
+    st.caption(
+        "Diagnostics is read-only. No repair, delete, kill, or override buttons are provided."
+    )
+
     st.subheader("Runtime autostart audit")
     from pathlib import Path
     import json
@@ -456,8 +594,10 @@ def render_diagnostics_page(*, switch_to_legacy_callback=None) -> None:
         {
             "operator_pages": OPERATOR_PAGES,
             "default_page": DEFAULT_OPERATOR_PAGE,
-            "runtime_controls_exposed": False,
+            "runtime_controls_exposed": True,
+            "allowed_runtime_action": "START_TRITON",
             "live_execution_control_exposed": False,
+            "stop_restart_available": False,
             "localhost_recommended": "streamlit run view_results.py --server.address 127.0.0.1",
         }
     )

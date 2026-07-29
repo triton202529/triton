@@ -317,18 +317,23 @@ def test_localhost_config_present():
 
 
 def test_no_mutating_runtime_action_exposed():
+    """DO-002 baseline updated for DO-003: Start is allowed; destructive controls are not."""
     from dashboard import operator_console as oc
     import inspect
 
     src = inspect.getsource(oc)
+    # Start is the sole allowed mutation entry point (DO-003); must require confirmation path
+    assert "Start TRITON" in src
+    assert "Confirm Start" in src
+    # Stop/Restart may appear only as unavailable placeholders
+    assert "Stop TRITON — unavailable" in src
+    assert "Restart TRITON — unavailable" in src
     forbidden = [
-        "Start TRITON",
-        "Stop TRITON",
-        "Restart TRITON",
         "set_paper_arm_confirm",
         "taskkill",
         "subprocess.run",
         "Clear-OrphanLoopLock",
+        "Stop-Process",
     ]
     for token in forbidden:
         assert token not in src
