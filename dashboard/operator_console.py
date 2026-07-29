@@ -1,9 +1,9 @@
 """
 operator_console.py
-Phase DO-002/DO-003 — Streamlit operator-console pages.
+Phase DO-002/DO-003/DO-004/DO-005 — Streamlit operator-console pages.
 
-DO-003 adds protected START_TRITON only.
-Stop/Restart/Arm/Approve/Execute remain unavailable.
+DO-005 adds confirmation-protected STOP_TRITON (maps to DO-004 cooperative shutdown).
+Restart/Arm/Approve/Execute remain unavailable.
 """
 
 from __future__ import annotations
@@ -56,18 +56,21 @@ def _status_color(status: str) -> str:
 
 
 def _render_start_controls() -> None:
-    """Protected START_TRITON UI (DO-003). Stop/Restart remain unavailable."""
+    """Protected START_TRITON (DO-003) + protected STOP_TRITON (DO-005). Restart unavailable."""
     from services.operator_runtime_controller import (
         ACTION_START,
         execute_start_triton,
         start_eligibility,
     )
+    from services.operator_stop_action import stop_eligibility
 
     eligibility = start_eligibility()
+    stop_el = stop_eligibility()
     st.subheader("Runtime controls")
     st.caption(
         f"Start eligibility: **{eligibility.get('decision')}** · "
-        f"Paper arm (not modified by Start): **{eligibility.get('paper_arm_status')}**"
+        f"Stop eligibility: **{stop_el.get('decision')}** · "
+        f"Paper arm (not modified by Start/Stop): **{eligibility.get('paper_arm_status')}**"
     )
     st.write(eligibility.get("explanation") or "")
 
@@ -79,6 +82,31 @@ def _render_start_controls() -> None:
         st.session_state["start_last_result"] = None
     if "start_in_progress" not in st.session_state:
         st.session_state["start_in_progress"] = False
+    if "stop_confirm_pending" not in st.session_state:
+        st.session_state["stop_confirm_pending"] = False
+    if "stop_preflight_token" not in st.session_state:
+        st.session_state["stop_preflight_token"] = None
+    if "stop_request_nonce" not in st.session_state:
+        st.session_state["stop_request_nonce"] = None
+    if "stop_preflight_expires_at" not in st.session_state:
+        st.session_state["stop_preflight_expires_at"] = None
+    if "stop_last_result" not in st.session_state:
+        st.session_state["stop_last_result"] = None
+    if "stop_in_progress" not in st.session_state:
+        st.session_state["stop_in_progress"] = False
+
+    stop_busy = bool(
+        st.session_state.get("stop_in_progress")
+        or st.session_state.get("stop_confirm_pending")
+        or stop_el.get("shutdown_guard_active")
+        or (stop_el.get("shutdown_active") or {}).get("active")
+        or eligibility.get("decision") == "START_REFUSED_SHUTDOWN_IN_PROGRESS"
+    )
+    start_busy = bool(
+        st.session_state.get("start_in_progress")
+        or st.session_state.get("start_confirm_pending")
+        or eligibility.get("guard_active")
+    )
 
     last = st.session_state.get("start_last_result")
     if last:
@@ -104,11 +132,47 @@ def _render_start_controls() -> None:
                 }
             )
 
+    stop_last = st.session_state.get("stop_last_result")
+    if stop_last:
+        sres = str(stop_last.get("result") or "")
+        smsg = stop_last.get("safe_message") or sres
+        if sres in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED"):
+            st.success(smsg)
+        elif sres in ("STOP_PARTIAL_COMPLETION", "STOP_TIMED_OUT", "STOP_IN_PROGRESS"):
+            st.warning(smsg)
+        elif sres == "STOP_AUDIT_FAILED":
+            st.error(smsg)
+        else:
+            st.error(smsg)
+        with st.expander("Stop technical evidence", expanded=False):
+            st.json(
+                {
+                    "result": stop_last.get("result"),
+                    "ui_state": stop_last.get("ui_state"),
+                    "action_id": stop_last.get("action_id"),
+                    "request_id": stop_last.get("request_id"),
+                    "target_components": stop_last.get("target_components"),
+                    "acknowledgement_results": stop_last.get("acknowledgement_results"),
+                    "process_exit_results": stop_last.get("process_exit_results"),
+                    "lock_release_results": stop_last.get("lock_release_results"),
+                    "forced_termination_used": stop_last.get("forced_termination_used"),
+                    "runtime_locks_deleted_by_controller": stop_last.get(
+                        "runtime_locks_deleted_by_controller"
+                    ),
+                    "live_execution_blocked_after": stop_last.get("live_execution_blocked_after"),
+                    "paper_arm_mutated": stop_last.get("paper_arm_mutated"),
+                    "error_code": stop_last.get("error_code"),
+                }
+            )
+
     ctrl1, ctrl2, ctrl3 = st.columns(3)
     with ctrl1:
         if eligibility.get("already_running"):
             st.info("TRITON is already running")
-        elif st.session_state.get("start_in_progress") or eligibility.get("guard_active"):
+        elif stop_busy:
+            st.button("Start TRITON", key="start_triton_disabled_stop_busy", disabled=True)
+            st.caption("Start unavailable while Stop is active or unresolved.")
+        elif start_busy:
             st.button("Start TRITON", key="start_triton_disabled_busy", disabled=True)
             st.caption("Start action in progress…")
         elif not eligibility.get("start_button_enabled"):
@@ -149,40 +213,163 @@ def _render_start_controls() -> None:
                         st.session_state["start_confirm_pending"] = False
                         st.session_state["start_idempotency_key"] = None
                         st.rerun()
+
     with ctrl2:
-        st.button("Stop TRITON — unavailable", key="stop_triton_placeholder", disabled=True)
-        st.caption(
-            "Cooperative shutdown protocol installed. Operator Stop remains unavailable "
-            "until protected Stop control validation is complete."
-        )
+        _render_stop_control_column(stop_el, start_busy=start_busy)
+
     with ctrl3:
         st.button("Restart TRITON — unavailable", key="restart_triton_placeholder", disabled=True)
-        st.caption("No process termination or lock deletion is available from this console.")
+        st.caption(
+            "Restart TRITON remains unavailable until protected restart orchestration "
+            "is implemented and validated in a later phase."
+        )
 
     st.caption(
-        f"allowed_action={eligibility.get('allowed_action')} · "
-        f"stop_available={eligibility.get('stop_available')} · "
-        f"restart_available={eligibility.get('restart_available')}"
+        f"allowed_start={eligibility.get('allowed_action')} · "
+        f"allowed_stop={stop_el.get('allowed_dashboard_action')} · "
+        f"stop_enabled={stop_el.get('stop_button_enabled')} · "
+        f"restart_available=False"
+    )
+    st.info(
+        "Stop TRITON uses verified cooperative shutdown. Active bounded work is allowed to "
+        "reach its documented safe boundary. TRITON is never force-terminated by this control."
     )
 
     _render_cooperative_shutdown_status()
 
 
+def _render_stop_control_column(stop_el: Dict[str, Any], *, start_busy: bool) -> None:
+    from services.operator_stop_action import (
+        ACTION_STOP,
+        CONFIRMATION_PHRASE,
+        execute_stop_triton,
+        issue_stop_preflight,
+    )
+
+    if start_busy:
+        st.button("Stop TRITON Safely", key="stop_triton_disabled_start_busy", disabled=True)
+        st.caption("Stop unavailable while Start is active.")
+        return
+
+    if st.session_state.get("stop_in_progress"):
+        st.button("Stop TRITON Safely", key="stop_triton_disabled_busy", disabled=True)
+        st.caption("Stop submission in progress… cooperative shutdown does not force-terminate.")
+        return
+
+    if stop_el.get("decision") == "STOP_ALREADY_STOPPED":
+        st.info("TRITON is already stopped")
+        st.button("Stop TRITON Safely", key="stop_triton_disabled_already", disabled=True)
+        return
+
+    if not stop_el.get("stop_button_enabled") and not st.session_state.get("stop_confirm_pending"):
+        st.button("Stop TRITON Safely", key="stop_triton_disabled_unsafe", disabled=True)
+        st.caption(
+            f"Stop disabled: {stop_el.get('decision')} — "
+            f"{(stop_el.get('explanation') or '')[:120]}"
+        )
+        return
+
+    if not st.session_state.get("stop_confirm_pending"):
+        if st.button("Stop TRITON Safely", key="stop_triton_request", type="primary"):
+            import uuid
+
+            pre = issue_stop_preflight()
+            if not pre.get("ok") or not pre.get("stop_button_enabled"):
+                st.session_state["stop_last_result"] = {
+                    "result": pre.get("decision") or "STOP_REFUSED",
+                    "safe_message": pre.get("explanation")
+                    or "Stop is not currently eligible. Confirmation was not opened.",
+                }
+                st.rerun()
+                return
+            st.session_state["stop_confirm_pending"] = True
+            st.session_state["stop_preflight_token"] = pre.get("preflight_token")
+            st.session_state["stop_request_nonce"] = pre.get("preflight_nonce") or str(uuid.uuid4())
+            st.session_state["stop_preflight_expires_at"] = pre.get("expires_at")
+            st.session_state["stop_preflight_decision"] = pre.get("decision")
+            st.session_state["stop_preflight_targets"] = pre.get("target_components")
+            st.rerun()
+        st.caption(
+            "Requests a cooperative shutdown. Active bounded work will finish at its "
+            "documented safe boundary. No process will be force-terminated."
+        )
+        return
+
+    st.warning(
+        "Requests a cooperative shutdown. Active bounded work will finish at its documented "
+        "safe boundary. No process will be force-terminated. Live execution remains blocked. "
+        "This does **not** create or extend paper-arm authorization."
+    )
+    st.caption(
+        f"Preflight expires: {st.session_state.get('stop_preflight_expires_at')} · "
+        f"decision={st.session_state.get('stop_preflight_decision')} · "
+        f"targets={st.session_state.get('stop_preflight_targets')}"
+    )
+    checked = st.checkbox(
+        "I understand that TRITON will finish its current safe unit of work before exiting "
+        "and that this action will not force-terminate any process.",
+        key="stop_confirm_checkbox",
+    )
+    phrase = st.text_input(
+        "Type exactly: STOP TRITON",
+        key="stop_confirm_phrase",
+    )
+    can_submit = (
+        checked
+        and phrase == CONFIRMATION_PHRASE
+        and bool(st.session_state.get("stop_preflight_token"))
+        and not start_busy
+    )
+    conf_a, conf_b = st.columns(2)
+    with conf_a:
+        if st.button(
+            "Confirm Stop",
+            key="stop_triton_confirm",
+            type="primary",
+            disabled=not can_submit,
+        ):
+            st.session_state["stop_in_progress"] = True
+            st.session_state["stop_confirm_pending"] = False
+            with st.spinner("Requesting cooperative shutdown and validating…"):
+                result = execute_stop_triton(
+                    action=ACTION_STOP,
+                    confirmation_phrase=phrase,
+                    confirmation_checked=True,
+                    preflight_token=st.session_state.get("stop_preflight_token"),
+                    request_nonce=st.session_state.get("stop_request_nonce"),
+                    source="operator_console",
+                )
+            st.session_state["stop_last_result"] = result
+            st.session_state["stop_in_progress"] = False
+            st.session_state["stop_preflight_token"] = None
+            st.session_state["stop_request_nonce"] = None
+            st.rerun()
+    with conf_b:
+        if st.button("Cancel", key="stop_triton_cancel"):
+            st.session_state["stop_confirm_pending"] = False
+            st.session_state["stop_preflight_token"] = None
+            st.session_state["stop_request_nonce"] = None
+            st.rerun()
+
+
 def _render_cooperative_shutdown_status() -> None:
-    """Read-only DO-004 cooperative shutdown visibility. No Stop button / no submit."""
+    """Read-only DO-004/DO-005 cooperative shutdown visibility."""
     from services.operator_shutdown_controller import shutdown_eligibility
+    from services.operator_stop_action import stop_eligibility
 
     status = shutdown_eligibility()
-    st.subheader("Cooperative Shutdown (read-only)")
-    st.info(status.get("safe_message") or "")
+    stop_el = stop_eligibility()
+    st.subheader("Cooperative Shutdown / Protected Stop")
+    st.info(stop_el.get("safe_message") or status.get("safe_message") or "")
     st.caption(
-        f"Eligibility: **{status.get('decision')}** · "
-        f"targets={status.get('target_components')} · "
-        f"protocol={status.get('protocol_implemented')} · "
-        f"clickable_stop={status.get('clickable_stop_exposed')}"
+        f"Stop decision: **{stop_el.get('decision')}** · "
+        f"shutdown decision: **{status.get('decision')}** · "
+        f"targets={stop_el.get('target_components')} · "
+        f"protected_stop={stop_el.get('protected_stop_exposed')} · "
+        f"restart={stop_el.get('restart_exposed')}"
     )
-    st.write(status.get("explanation") or "")
-    st.write(status.get("recommended_action") or "")
+    st.write(stop_el.get("explanation") or status.get("explanation") or "")
+    st.write(stop_el.get("recommended_action") or "")
 
     req = status.get("active_request") or {}
     active = status.get("shutdown_active") or {}
@@ -203,25 +390,30 @@ def _render_cooperative_shutdown_status() -> None:
             }
         )
     with col_b:
-        st.markdown("**Acknowledgements**")
+        st.markdown("**Acknowledgements / progress**")
         st.json(
             {
                 "continuous": status.get("ack_continuous") or {},
                 "watchdog": status.get("ack_watchdog") or {},
+                "last_stop_ui_state": (st.session_state.get("stop_last_result") or {}).get(
+                    "ui_state"
+                ),
             }
         )
 
-    with st.expander("Shutdown decision evidence", expanded=False):
+    with st.expander("Shutdown / Stop decision evidence", expanded=False):
         st.json(
             {
-                "decision": status.get("decision"),
-                "target_components": status.get("target_components"),
-                "live_execution_blocked": status.get("live_execution_blocked"),
-                "allowed_backend_action": status.get("allowed_backend_action"),
-                "denied_actions": status.get("denied_actions"),
+                "stop_decision": stop_el.get("decision"),
+                "shutdown_decision": status.get("decision"),
+                "target_components": stop_el.get("target_components"),
+                "live_execution_blocked": stop_el.get("live_execution_blocked"),
+                "allowed_dashboard_action": stop_el.get("allowed_dashboard_action"),
+                "backend_operation": stop_el.get("backend_operation"),
+                "dashboard_target_policy": stop_el.get("dashboard_target_policy"),
                 "classifications": {
-                    "continuous": (status.get("classifications") or {}).get("continuous"),
-                    "watchdog": (status.get("classifications") or {}).get("watchdog"),
+                    "continuous": (stop_el.get("classifications") or {}).get("continuous"),
+                    "watchdog": (stop_el.get("classifications") or {}).get("watchdog"),
                 },
             }
         )
@@ -232,8 +424,8 @@ def render_operations_page() -> None:
 
     st.title("Operations")
     st.caption(
-        "Operator console · Protected Start available · Cooperative shutdown protocol installed · "
-        "Live execution remains blocked · Stop/Restart remain unavailable."
+        "Operator console · Protected Start · Protected Stop (cooperative) · "
+        "Live execution remains blocked · Restart remains unavailable."
     )
 
     status = build_operator_status()
@@ -644,8 +836,34 @@ def render_diagnostics_page(*, switch_to_legacy_callback=None) -> None:
         )
     with st.expander("Recent sanitized shutdown-action audit"):
         st.json(read_recent_shutdown_actions(limit=15))
+    st.subheader("Protected Stop evidence (DO-005)")
+    from services.operator_stop_action import read_recent_stop_actions, stop_eligibility
+
+    stop_el = stop_eligibility()
+    st.json(
+        {
+            "decision": stop_el.get("decision"),
+            "explanation": stop_el.get("explanation"),
+            "target_components": stop_el.get("target_components"),
+            "stop_button_enabled": stop_el.get("stop_button_enabled"),
+            "protected_stop_exposed": stop_el.get("protected_stop_exposed"),
+            "restart_exposed": stop_el.get("restart_exposed"),
+            "confirmation_phrase_required": stop_el.get("confirmation_phrase_required"),
+            "preflight_token_required": stop_el.get("preflight_token_required"),
+            "dashboard_target_policy": stop_el.get("dashboard_target_policy"),
+            "backend_operation": stop_el.get("backend_operation"),
+            "live_execution_blocked": stop_el.get("live_execution_blocked"),
+            "start_guard_active": stop_el.get("start_guard_active"),
+            "shutdown_guard_active": stop_el.get("shutdown_guard_active"),
+            "shutdown_active": stop_el.get("shutdown_active"),
+            "recommended_action": stop_el.get("recommended_action"),
+            "token_presented": False,
+        }
+    )
+    with st.expander("Recent sanitized stop-action audit"):
+        st.json(read_recent_stop_actions(limit=15))
     st.caption(
-        "Diagnostics is read-only. No repair, delete, kill, Stop, Restart, or override buttons are provided."
+        "Diagnostics is read-only. No repair, delete, kill, Stop submit, Restart, or override buttons are provided."
     )
 
     st.subheader("Runtime autostart audit")
@@ -693,9 +911,9 @@ def render_diagnostics_page(*, switch_to_legacy_callback=None) -> None:
             "operator_pages": OPERATOR_PAGES,
             "default_page": DEFAULT_OPERATOR_PAGE,
             "runtime_controls_exposed": True,
-            "allowed_runtime_action": "START_TRITON",
+            "allowed_runtime_actions": ["START_TRITON", "STOP_TRITON"],
             "live_execution_control_exposed": False,
-            "stop_restart_available": False,
+            "restart_available": False,
             "localhost_recommended": "streamlit run view_results.py --server.address 127.0.0.1",
         }
     )

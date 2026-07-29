@@ -1181,15 +1181,14 @@ def test_60_final_audit_failure_reports_audit_failed(tmp_path):
     assert (tmp_path / "data" / "live" / "operator_shutdown_request.json").is_file()
 
 
-def test_61_operations_exposes_no_clickable_stop():
+def test_61_operations_stop_uses_adapter_not_direct_prepare():
+    """DO-004/DO-005: dashboard must not call prepare_cooperative_shutdown directly."""
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
-    assert 'key="stop_triton_placeholder"' in src
-    assert "Stop TRITON — unavailable" in src
     assert "prepare_cooperative_shutdown(" not in src
-    # disabled=True appears on the Stop placeholder line context
-    stop_idx = src.index('key="stop_triton_placeholder"')
-    window = src[max(0, stop_idx - 120) : stop_idx + 80]
-    assert "disabled=True" in window
+    assert "execute_stop_triton" in src
+    assert "Stop TRITON Safely" in src
+    assert "Confirm Stop" in src
+    assert "Restart TRITON — unavailable" in src
 
 
 def test_62_operations_exposes_no_clickable_restart():
@@ -1230,7 +1229,8 @@ def test_64_query_parameters_cannot_request_shutdown():
 def test_65_diagnostics_readonly():
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
     assert "Cooperative shutdown evidence (DO-004)" in src
-    assert "No repair, delete, kill, Stop, Restart, or override" in src
+    assert "Diagnostics is read-only" in src
+    assert "No repair, delete, kill" in src
     assert "prepare_cooperative_shutdown(" not in src
 
 
@@ -1312,6 +1312,10 @@ def test_protocol_flags_on_eligibility(tmp_path):
     _write_fixture(tmp_path)
     el = shutdown_eligibility(root=tmp_path)
     assert el["protocol_implemented"] is True
+    # DO-004 protocol layer still reports no Stop button of its own
     assert el["clickable_stop_exposed"] is False
     assert el["clickable_restart_exposed"] is False
     assert el["allowed_backend_action"] == ACTION_PREPARE
+    assert "prepare_cooperative_shutdown(" not in (
+        ROOT / "dashboard" / "operator_console.py"
+    ).read_text(encoding="utf-8")

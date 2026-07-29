@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -216,6 +217,7 @@ def test_healthy_fixture_status(tmp_path: Path):
                 "continuous_loop_running": True,
                 "detected_watchdog_process_ids": [222],
                 "detected_continuous_process_ids": [111],
+                "process_detection_confidence": "high",
             }
         ),
         encoding="utf-8",
@@ -229,7 +231,14 @@ def test_healthy_fixture_status(tmp_path: Path):
         encoding="utf-8",
     )
 
-    status = build_operator_status(root=root)
+    with patch(
+        "services.runtime_lock_classifier._heartbeat_age_minutes",
+        return_value=0.0,
+    ), patch(
+        "services.runtime_lock_classifier._effective_heartbeat_age_minutes",
+        return_value=0.0,
+    ):
+        status = build_operator_status(root=root)
     assert status["continuous"]["process_running"] is True
     assert status["watchdog"]["process_running"] is True
     assert status["paper_arm"]["display_status"] == "ARMED"
@@ -317,17 +326,20 @@ def test_localhost_config_present():
 
 
 def test_no_mutating_runtime_action_exposed():
-    """DO-002 baseline updated for DO-003: Start is allowed; destructive controls are not."""
+    """DO-002/DO-003/DO-005: Start+Stop protected; Restart unavailable; no force paths."""
     from dashboard import operator_console as oc
     import inspect
 
     src = inspect.getsource(oc)
-    # Start is the sole allowed mutation entry point (DO-003); must require confirmation path
+    # Start is allowed with confirmation (DO-003)
     assert "Start TRITON" in src
     assert "Confirm Start" in src
-    # Stop/Restart may appear only as unavailable placeholders
-    assert "Stop TRITON — unavailable" in src
+    # Protected Stop (DO-005) — cooperative only; Restart remains unavailable
+    assert "Stop TRITON Safely" in src
+    assert "Confirm Stop" in src
+    assert "STOP TRITON" in src
     assert "Restart TRITON — unavailable" in src
+    assert "prepare_cooperative_shutdown(" not in src  # Stop goes through typed adapter
     forbidden = [
         "set_paper_arm_confirm",
         "taskkill",
