@@ -431,6 +431,27 @@ def start_eligibility(
     live_enabled = live_execution_appears_enabled(root=root)
     classifications = classify_runtime_loops(root=root, process_snapshot=process_snapshot)
     decision = evaluate_start_decision(classifications, live_execution_blocked=not live_enabled)
+
+    # DO-004: refuse Start while cooperative shutdown is unresolved
+    try:
+        from services.operator_shutdown_controller import shutdown_active
+
+        shut = shutdown_active(root=root)
+        if shut.get("active"):
+            decision = {
+                "decision": "START_REFUSED_SHUTDOWN_IN_PROGRESS",
+                "components_to_start": [],
+                "preserved_components": [],
+                "explanation": (
+                    "Cooperative shutdown is active or unresolved. Start refused until "
+                    "shutdown completes cleanly and runtime classification is clear."
+                ),
+                "safe_to_retry": True,
+                "shutdown_active": shut,
+            }
+    except Exception:
+        pass
+
     paths = verify_fixed_paths(root=root)
     if not paths["ok"] and decision["decision"] in (
         "START_ALLOWED",
@@ -672,6 +693,30 @@ def execute_start_triton(
 
         pre = _classify()
         decision = evaluate_start_decision(pre, live_execution_blocked=True)
+
+        # DO-004: refuse Start while cooperative shutdown is unresolved
+        from services.operator_shutdown_controller import shutdown_active
+
+        shut = shutdown_active(root=root)
+        if shut.get("active"):
+            rec = _result(
+                result="START_REFUSED_SHUTDOWN_IN_PROGRESS",
+                error_code="SHUTDOWN_IN_PROGRESS",
+                safe_message=(
+                    "Start refused: cooperative shutdown is active or unresolved. "
+                    "Wait for clean completion before starting."
+                ),
+                safe_to_retry=True,
+                live_execution_blocked_before=True,
+                live_execution_blocked_after=not live_execution_appears_enabled(root=root),
+                preflight_classification=pre,
+                launched_components=[],
+                preserved_components=[],
+                component_results={},
+                evidence={"shutdown_active": shut},
+            )
+            append_runtime_action_audit(rec, path=audit_path)
+            return rec
 
         if decision["decision"] == "ALREADY_RUNNING":
             rec = _result(

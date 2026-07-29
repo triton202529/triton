@@ -152,8 +152,8 @@ def _render_start_controls() -> None:
     with ctrl2:
         st.button("Stop TRITON — unavailable", key="stop_triton_placeholder", disabled=True)
         st.caption(
-            "Stop and Restart will become available only after cooperative shutdown "
-            "is implemented and validated."
+            "Cooperative shutdown protocol installed. Operator Stop remains unavailable "
+            "until protected Stop control validation is complete."
         )
     with ctrl3:
         st.button("Restart TRITON — unavailable", key="restart_triton_placeholder", disabled=True)
@@ -165,14 +165,75 @@ def _render_start_controls() -> None:
         f"restart_available={eligibility.get('restart_available')}"
     )
 
+    _render_cooperative_shutdown_status()
+
+
+def _render_cooperative_shutdown_status() -> None:
+    """Read-only DO-004 cooperative shutdown visibility. No Stop button / no submit."""
+    from services.operator_shutdown_controller import shutdown_eligibility
+
+    status = shutdown_eligibility()
+    st.subheader("Cooperative Shutdown (read-only)")
+    st.info(status.get("safe_message") or "")
+    st.caption(
+        f"Eligibility: **{status.get('decision')}** · "
+        f"targets={status.get('target_components')} · "
+        f"protocol={status.get('protocol_implemented')} · "
+        f"clickable_stop={status.get('clickable_stop_exposed')}"
+    )
+    st.write(status.get("explanation") or "")
+    st.write(status.get("recommended_action") or "")
+
+    req = status.get("active_request") or {}
+    active = status.get("shutdown_active") or {}
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("**Request / guard**")
+        st.json(
+            {
+                "shutdown_active": active.get("active"),
+                "reasons": active.get("reasons"),
+                "request_id": req.get("request_id"),
+                "request_state": req.get("state"),
+                "requested_at": req.get("requested_at"),
+                "expires_at": req.get("expires_at"),
+                "target_components": req.get("target_components"),
+                "start_guard_active": status.get("start_guard_active"),
+                "shutdown_guard_active": status.get("shutdown_guard_active"),
+            }
+        )
+    with col_b:
+        st.markdown("**Acknowledgements**")
+        st.json(
+            {
+                "continuous": status.get("ack_continuous") or {},
+                "watchdog": status.get("ack_watchdog") or {},
+            }
+        )
+
+    with st.expander("Shutdown decision evidence", expanded=False):
+        st.json(
+            {
+                "decision": status.get("decision"),
+                "target_components": status.get("target_components"),
+                "live_execution_blocked": status.get("live_execution_blocked"),
+                "allowed_backend_action": status.get("allowed_backend_action"),
+                "denied_actions": status.get("denied_actions"),
+                "classifications": {
+                    "continuous": (status.get("classifications") or {}).get("continuous"),
+                    "watchdog": (status.get("classifications") or {}).get("watchdog"),
+                },
+            }
+        )
+
 
 def render_operations_page() -> None:
     from services.operator_console_status import build_operator_status
 
     st.title("Operations")
     st.caption(
-        "Operator console · Protected Start available · Live execution remains blocked · "
-        "Stop/Restart unavailable until cooperative shutdown exists."
+        "Operator console · Protected Start available · Cooperative shutdown protocol installed · "
+        "Live execution remains blocked · Stop/Restart remain unavailable."
     )
 
     status = build_operator_status()
@@ -546,8 +607,45 @@ def render_diagnostics_page(*, switch_to_legacy_callback=None) -> None:
         st.json(eligibility.get("classifications"))
     with st.expander("Recent sanitized runtime-action audit"):
         st.json(read_recent_runtime_actions(limit=15))
+
+    st.subheader("Cooperative shutdown evidence (DO-004)")
+    from services.operator_shutdown_controller import (
+        read_recent_shutdown_actions,
+        shutdown_eligibility,
+    )
+
+    shut = shutdown_eligibility()
+    st.json(
+        {
+            "decision": shut.get("decision"),
+            "explanation": shut.get("explanation"),
+            "target_components": shut.get("target_components"),
+            "protocol_implemented": shut.get("protocol_implemented"),
+            "clickable_stop_exposed": shut.get("clickable_stop_exposed"),
+            "clickable_restart_exposed": shut.get("clickable_restart_exposed"),
+            "live_execution_blocked": shut.get("live_execution_blocked"),
+            "start_guard_active": shut.get("start_guard_active"),
+            "shutdown_guard_active": shut.get("shutdown_guard_active"),
+            "shutdown_active": shut.get("shutdown_active"),
+            "active_request": shut.get("active_request"),
+            "ack_continuous": shut.get("ack_continuous"),
+            "ack_watchdog": shut.get("ack_watchdog"),
+            "recommended_action": shut.get("recommended_action"),
+            "allowed_backend_action": shut.get("allowed_backend_action"),
+            "denied_actions": shut.get("denied_actions"),
+        }
+    )
+    with st.expander("Continuous / watchdog identity for shutdown"):
+        st.json(
+            {
+                "continuous": (shut.get("classifications") or {}).get("continuous"),
+                "watchdog": (shut.get("classifications") or {}).get("watchdog"),
+            }
+        )
+    with st.expander("Recent sanitized shutdown-action audit"):
+        st.json(read_recent_shutdown_actions(limit=15))
     st.caption(
-        "Diagnostics is read-only. No repair, delete, kill, or override buttons are provided."
+        "Diagnostics is read-only. No repair, delete, kill, Stop, Restart, or override buttons are provided."
     )
 
     st.subheader("Runtime autostart audit")
