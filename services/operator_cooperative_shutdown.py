@@ -42,6 +42,21 @@ GUARD_TTL_SEC = 900
 # Interruptible wait check intervals (recognition targets while sleeping)
 CONTINUOUS_WAIT_CHECK_SEC = 10
 WATCHDOG_WAIT_CHECK_SEC = 5
+# Controller acknowledgement wait = max observation interval + bounded processing margin.
+# Preserves 45-minute cycle cadence; does not wait a full inter-cycle sleep.
+ACK_OBSERVATION_MARGIN_SEC = 35
+
+
+def recommended_ack_timeout_sec() -> int:
+    """
+    Bounded controller wait for loop acknowledgement under interruptible cooperative wait.
+
+    Worst-case observation for a supported continuous loop is approximately one
+    CONTINUOUS_WAIT_CHECK_SEC chunk after request delivery, plus helper startup/
+    filesystem latency covered by ACK_OBSERVATION_MARGIN_SEC.
+    """
+    return int(CONTINUOUS_WAIT_CHECK_SEC + ACK_OBSERVATION_MARGIN_SEC)
+
 
 # Exit codes for CLI poll used by loop scripts
 EXIT_NO_REQUEST = 0
@@ -49,6 +64,63 @@ EXIT_ACCEPTED_EXIT_NOW = 10
 EXIT_REFUSED = 11
 EXIT_COMPLETING = 12
 EXIT_ERROR = 2
+
+# Bounded wait when the shutdown helper itself fails (distinct from refusal).
+# Used by loop scripts so a broken helper cannot open a new trading cycle.
+HELPER_DEGRADED_WAIT_SEC = 30
+
+
+def classify_loop_helper_exit(code: Optional[int]) -> str:
+    """
+    Map cooperative-shutdown helper exit codes to loop policy.
+
+    CONTINUE: no request (0) or refused request (11) — safe to proceed with
+    normal cadence (including starting the next cycle after PRE_CYCLE).
+    COOPERATIVE_EXIT: accepted shutdown (10).
+    DEGRADED_NO_NEW_CYCLE: helper/process failure or unknown code — do not
+    impersonate acceptance and do not start a new trading cycle.
+    """
+    if code == EXIT_ACCEPTED_EXIT_NOW:
+        return "COOPERATIVE_EXIT"
+    if code in (EXIT_NO_REQUEST, EXIT_REFUSED):
+        return "CONTINUE"
+    return "DEGRADED_NO_NEW_CYCLE"
+
+
+def decide_pre_cycle_action(code: Optional[int]) -> str:
+    """Behavioral PRE_CYCLE policy used by continuous/watchdog loops."""
+    if code == EXIT_ACCEPTED_EXIT_NOW:
+        return "COOPERATIVE_EXIT"
+    if code in (EXIT_NO_REQUEST, EXIT_REFUSED):
+        return "START_CYCLE"
+    return "DEGRADED_NO_NEW_CYCLE"
+
+
+def decide_post_cycle_action(code: Optional[int]) -> str:
+    """
+    Behavioral POST_CYCLE policy.
+
+    Exit 10 exits before inter-cycle waiting. Any other code proceeds to wait —
+    never starts a new cycle at this boundary (cycle work already finished).
+    """
+    if code == EXIT_ACCEPTED_EXIT_NOW:
+        return "COOPERATIVE_EXIT"
+    return "PROCEED_TO_WAIT"
+
+
+def decide_sleep_action(code: Optional[int]) -> str:
+    """
+    Behavioral interruptible-sleep return policy.
+
+    Sleep mode CLI emits only 0 or 10 today. Treat any other code (including 11)
+    as degraded so an early non-zero return cannot open a new cycle or shorten
+    cadence by impersonating a completed wait.
+    """
+    if code == EXIT_ACCEPTED_EXIT_NOW:
+        return "COOPERATIVE_EXIT"
+    if code == EXIT_NO_REQUEST:
+        return "PROCEED_TO_PRE_CYCLE"
+    return "DEGRADED_NO_NEW_CYCLE"
 
 
 def _utc_now() -> datetime:

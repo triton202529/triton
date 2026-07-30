@@ -26,6 +26,7 @@ from services.operator_cooperative_shutdown import (
     atomic_write_json,
     is_guard_active,
     read_json,
+    recommended_ack_timeout_sec,
 )
 from services.operator_runtime_controller import live_execution_appears_enabled
 from services.operator_shutdown_controller import (
@@ -537,7 +538,7 @@ def execute_stop_triton(
     root: Optional[Path] = None,
     process_snapshot: Optional[Callable[[], Dict[str, Any]]] = None,
     deliver: bool = True,
-    ack_timeout_sec: float = 30.0,
+    ack_timeout_sec: float = float(recommended_ack_timeout_sec()),
     exit_timeout_sec: float = 60.0,
     lock_timeout_sec: float = 30.0,
     poll_sec: float = 0.5,

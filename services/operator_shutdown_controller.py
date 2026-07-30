@@ -29,6 +29,7 @@ from services.operator_cooperative_shutdown import (
     is_guard_active,
     read_json,
     read_recent_shutdown_actions,
+    recommended_ack_timeout_sec,
     release_shutdown_guard,
     _iso,
     _sanitize,
@@ -93,7 +94,8 @@ UNSAFE_STATES = frozenset(
     }
 )
 
-ACK_TIMEOUT_SEC = 30
+# Aligned to interruptible cooperative observation interval (not full 45-minute sleep).
+ACK_TIMEOUT_SEC = recommended_ack_timeout_sec()
 EXIT_TIMEOUT_SEC = 60
 LOCK_RELEASE_TIMEOUT_SEC = 30
 POLL_SEC = 0.5
@@ -818,9 +820,24 @@ def prepare_cooperative_shutdown(
         if result == "COOPERATIVE_SHUTDOWN_COMPLETED":
             final_req["state"] = "COMPLETED"
         elif result == "PARTIAL_SHUTDOWN":
-            final_req["state"] = "PARTIAL_COMPLETION"
+            # Keep non-terminal so Start/Restart remain blocked until resolved or TTL.
+            final_req["state"] = "EXIT_PENDING"
+            final_req["partial_completion"] = True
+            final_req["controller_timed_out"] = True
         elif result == "SHUTDOWN_TIMED_OUT":
-            final_req["state"] = "TIMED_OUT"
+            # Explicit controller timeout for the transaction, but keep the typed
+            # request observable until expires_at so supported loops can still ack.
+            ack_results = completion.get("ack_results") or {}
+            any_accepted = any(bool((ack_results.get(c) or {}).get("accepted")) for c in targets)
+            if any_accepted:
+                final_req["state"] = "EXIT_PENDING"
+                final_req["controller_timed_out"] = True
+            else:
+                final_req["state"] = "DELIVERED"
+                final_req["controller_ack_timed_out"] = True
+        elif result == "POSTCONDITION_FAILED":
+            final_req["state"] = "EXIT_PENDING"
+            final_req["postcondition_failed"] = True
         else:
             final_req["state"] = result
         atomic_write_json(live / "operator_shutdown_request.json", final_req)

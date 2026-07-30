@@ -80,6 +80,34 @@ def test_cooperative_wait_checks_do_not_create_additional_work_cycles():
         assert "risk_watchdog" not in sleep_fn
         assert "paper_entry_loop_stage" not in sleep_fn
         assert "operator_cooperative_shutdown" in sleep_fn
+        # Defect repair: capture $LASTEXITCODE before logging output (pipe clobber).
+        assert "| ForEach-Object" not in sleep_fn
+        assert "$code = $LASTEXITCODE" in sleep_fn
+        assert "return $code" in sleep_fn
+        # Unexpected helper failure must not open a new cycle.
+        assert "[SHUTDOWN_HELPER_DEGRADED]" in src
+        assert "($pollCode -ne 0) -and ($pollCode -ne 11)" in src
+
+
+def test_helper_exit_policy_matrix():
+    from services.operator_cooperative_shutdown import (
+        EXIT_ACCEPTED_EXIT_NOW,
+        EXIT_ERROR,
+        EXIT_NO_REQUEST,
+        EXIT_REFUSED,
+        classify_loop_helper_exit,
+        decide_pre_cycle_action,
+        decide_sleep_action,
+    )
+
+    assert classify_loop_helper_exit(EXIT_NO_REQUEST) == "CONTINUE"
+    assert classify_loop_helper_exit(EXIT_ACCEPTED_EXIT_NOW) == "COOPERATIVE_EXIT"
+    assert classify_loop_helper_exit(EXIT_REFUSED) == "CONTINUE"
+    assert classify_loop_helper_exit(EXIT_ERROR) == "DEGRADED_NO_NEW_CYCLE"
+    assert classify_loop_helper_exit(None) == "DEGRADED_NO_NEW_CYCLE"
+    assert decide_pre_cycle_action(EXIT_REFUSED) == "START_CYCLE"
+    assert decide_sleep_action(EXIT_REFUSED) == "DEGRADED_NO_NEW_CYCLE"
+    assert decide_sleep_action(EXIT_NO_REQUEST) == "PROCEED_TO_PRE_CYCLE"
 
 
 def test_continuous_releases_only_own_lock_contract():

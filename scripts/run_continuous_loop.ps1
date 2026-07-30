@@ -51,10 +51,13 @@ function Test-CooperativeShutdown {
 
 function Invoke-InterruptibleSleep {
     param([int]$TotalSeconds)
+    # Capture exit code before logging: a pipeline into ForEach can clobber $LASTEXITCODE.
     Log-Line "[SLEEP] interruptible wait ${TotalSeconds}s (check every ~10s for cooperative shutdown)"
-    python -m services.operator_cooperative_shutdown `
-        --component continuous --pid $PID --mode sleep --seconds $TotalSeconds 2>&1 | ForEach-Object { Log-Line "[SLEEP_POLL] $_" }
-    return $LASTEXITCODE
+    $sleepOut = python -m services.operator_cooperative_shutdown `
+        --component continuous --pid $PID --mode sleep --seconds $TotalSeconds 2>&1
+    $code = $LASTEXITCODE
+    foreach ($line in @($sleepOut)) { Log-Line "[SLEEP_POLL] $line" }
+    return $code
 }
 
 function Remove-OwnLoopLock {
@@ -102,6 +105,13 @@ try {
             Log-Line "[SHUTDOWN_ACCEPTED] at PRE_CYCLE safe boundary; no new cycle will start"
             $shutdownAccepted = $true
             break
+        }
+        # 0 = no request, 11 = refused request (continue). Any other code is helper
+        # failure — refuse a new trading cycle and wait boundedly (do not treat as accept).
+        if (($null -eq $pollCode) -or (($pollCode -ne 0) -and ($pollCode -ne 11))) {
+            Log-Line "[SHUTDOWN_HELPER_DEGRADED] pre_cycle exit_code=$pollCode; refusing new cycle; wait 30s"
+            Start-Sleep -Seconds 30
+            continue
         }
 
         $cycle++
@@ -161,6 +171,12 @@ try {
             Log-Line "[SHUTDOWN_ACCEPTED] during INTERRUPTIBLE_WAIT; exiting without new cycle"
             $shutdownAccepted = $true
             break
+        }
+        # Sleep mode emits 0 or 10 only. Any other code (incl. 11) is treated as helper
+        # failure so an early non-zero return cannot open a new cycle / shorten cadence.
+        if (($null -eq $sleepCode) -or ($sleepCode -ne 0)) {
+            Log-Line "[SHUTDOWN_HELPER_DEGRADED] sleep exit_code=$sleepCode; refusing new cycle; wait 30s"
+            Start-Sleep -Seconds 30
         }
     }
 
