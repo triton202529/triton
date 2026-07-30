@@ -326,7 +326,7 @@ def test_localhost_config_present():
 
 
 def test_no_mutating_runtime_action_exposed():
-    """DO-002/DO-003/DO-005: Start+Stop protected; Restart unavailable; no force paths."""
+    """DO-002..DO-006: Start+Stop+Restart protected; no force paths."""
     from dashboard import operator_console as oc
     import inspect
 
@@ -334,12 +334,16 @@ def test_no_mutating_runtime_action_exposed():
     # Start is allowed with confirmation (DO-003)
     assert "Start TRITON" in src
     assert "Confirm Start" in src
-    # Protected Stop (DO-005) — cooperative only; Restart remains unavailable
+    # Protected Stop (DO-005)
     assert "Stop TRITON Safely" in src
     assert "Confirm Stop" in src
     assert "STOP TRITON" in src
-    assert "Restart TRITON — unavailable" in src
-    assert "prepare_cooperative_shutdown(" not in src  # Stop goes through typed adapter
+    # Protected Restart (DO-006)
+    assert "Restart TRITON Safely" in src
+    assert "Confirm Restart" in src
+    assert "RESTART TRITON" in src
+    assert "prepare_cooperative_shutdown(" not in src  # Stop/Restart go through typed adapters
+    assert "execute_restart_triton" in src
     forbidden = [
         "set_paper_arm_confirm",
         "taskkill",

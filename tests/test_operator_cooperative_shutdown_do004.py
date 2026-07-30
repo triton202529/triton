@@ -1182,22 +1182,29 @@ def test_60_final_audit_failure_reports_audit_failed(tmp_path):
 
 
 def test_61_operations_stop_uses_adapter_not_direct_prepare():
-    """DO-004/DO-005: dashboard must not call prepare_cooperative_shutdown directly."""
+    """DO-004/DO-005/DO-006: dashboard must not call prepare_cooperative_shutdown directly."""
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
     assert "prepare_cooperative_shutdown(" not in src
     assert "execute_stop_triton" in src
     assert "Stop TRITON Safely" in src
     assert "Confirm Stop" in src
-    assert "Restart TRITON — unavailable" in src
+    assert "Restart TRITON Safely" in src
+    assert "execute_restart_triton" in src
 
 
-def test_62_operations_exposes_no_clickable_restart():
+def test_62_operations_exposes_no_clickable_force_restart():
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
-    assert 'key="restart_triton_placeholder"' in src
-    assert "Restart TRITON — unavailable" in src
-    restart_idx = src.index('key="restart_triton_placeholder"')
-    window = src[max(0, restart_idx - 120) : restart_idx + 80]
-    assert "disabled=True" in window
+    assert "Restart TRITON Safely" in src
+    assert "Confirm Restart" in src
+    assert "RESTART TRITON" in src
+    assert "taskkill" not in src.lower()
+    assert "Stop-Process" not in src
+    # Restart goes through typed orchestrator, not direct Start after Stop in UI
+    restart_confirm = src[
+        src.index('key="restart_triton_confirm"') : src.index('key="restart_triton_cancel"')
+    ]
+    assert "execute_start_triton" not in restart_confirm
+    assert "execute_restart_triton" in restart_confirm
 
 
 def test_63_refresh_does_not_request_shutdown():

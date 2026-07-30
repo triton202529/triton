@@ -1188,17 +1188,20 @@ def test_84_stop_completion_does_not_automatically_start():
 
 
 def test_85_restart_remains_unavailable():
+    # DO-005 stop_action still does not implement Restart; DO-006 owns Restart.
+    stop_mod = (ROOT / "services" / "operator_stop_action.py").read_text(encoding="utf-8")
+    assert "ACTION_RESTART" not in stop_mod
+    assert "execute_restart" not in stop_mod
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
-    assert "Restart TRITON — unavailable" in src
-    assert 'key="restart_triton_placeholder"' in src
+    assert "Restart TRITON Safely" in src
+    assert "execute_restart_triton" in src
 
 
 def test_86_no_hidden_restart_endpoint():
     stop_mod = (ROOT / "services" / "operator_stop_action.py").read_text(encoding="utf-8")
     assert "ACTION_RESTART" not in stop_mod
-    src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
-    assert "execute_restart" not in src
-    assert "RESTART_TRITON" not in src
+    # Stop module must not chain Start
+    assert "execute_start_triton" not in stop_mod
 
 
 def test_87_no_stop_then_start_chain():
@@ -1209,6 +1212,7 @@ def test_87_no_stop_then_start_chain():
         src.index('key="stop_triton_confirm"') : src.index('key="stop_triton_cancel"')
     ]
     assert "execute_start_triton" not in stop_confirm
+    assert "execute_restart_triton" not in stop_confirm
 
 
 def test_88_initial_audit_failure(tmp_path):
