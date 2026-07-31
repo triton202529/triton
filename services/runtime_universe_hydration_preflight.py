@@ -24,6 +24,10 @@ AUDIT_JSON = RESULTS / "runtime_universe_hydration_preflight.json"
 PREVIOUS_PHASE = "197D"
 
 
+class HydrationSymbolContractError(ValueError):
+    """Raised when a missing-*_symbols field is not a valid symbol collection."""
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -33,6 +37,41 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def require_symbol_collection(value: Any, *, field: str) -> List[str]:
+    """
+    Authoritative shape for missing_*_symbols is List[str] tickers.
+
+    Boolean True/False are not valid collections (a prior producer bug emitted the
+    last loop iteration's membership bool). Never treat True as empty. Never iterate
+    strings as characters. Fail closed on malformed input.
+    """
+    if value is None:
+        return []
+    if isinstance(value, bool):
+        raise HydrationSymbolContractError(
+            f"{field} must be a symbol list, got bool ({value!r}); "
+            "boolean status must not be used as a symbol collection"
+        )
+    if isinstance(value, str):
+        raise HydrationSymbolContractError(
+            f"{field} must be a symbol list, got str (refusing to iterate characters)"
+        )
+    if isinstance(value, dict):
+        raise HydrationSymbolContractError(f"{field} must be a symbol list, got dict")
+    if isinstance(value, (list, tuple, set)):
+        out: List[str] = []
+        for item in value:
+            s = str(item).strip().upper()
+            if s and s not in ("NAN", "NONE"):
+                out.append(s)
+        return out
+    raise HydrationSymbolContractError(f"{field} must be a symbol list, got {type(value).__name__}")
+
+
+def symbol_collection_as_set(value: Any, *, field: str) -> Set[str]:
+    return set(require_symbol_collection(value, field=field))
 
 
 def _load_csv_ticker_set(path: Path) -> Set[str]:
@@ -91,12 +130,13 @@ def detect_hydration_gaps(
     critical: List[str] = []
     artifact_regression: List[str] = []
     for sym in configured:
-        missing_lifecycle = sym not in lifecycle_set
-        missing_signals = sym not in signals_set
-        missing_processed = sym not in processed_set
-        if missing_lifecycle or missing_signals:
+        # Keep symbol-list locals distinct from per-symbol boolean flags.
+        is_missing_lifecycle = sym not in lifecycle_set
+        is_missing_signals = sym not in signals_set
+        is_missing_processed = sym not in processed_set
+        if is_missing_lifecycle or is_missing_signals:
             critical.append(sym)
-        elif missing_processed:
+        elif is_missing_processed:
             artifact_regression.append(sym)
     critical = sorted(set(critical))
     artifact_regression = sorted(set(artifact_regression))
@@ -246,9 +286,31 @@ def run_runtime_hydration_preflight(
             )
         return audit
 
+    try:
+        missing_lifecycle_set = symbol_collection_as_set(
+            gaps.get("missing_lifecycle_symbols"), field="missing_lifecycle_symbols"
+        )
+        missing_signals_set = symbol_collection_as_set(
+            gaps.get("missing_signals_symbols"), field="missing_signals_symbols"
+        )
+        missing_processed_set = symbol_collection_as_set(
+            gaps.get("missing_processed_symbols"), field="missing_processed_symbols"
+        )
+    except HydrationSymbolContractError as exc:
+        audit["status"] = "CONTRACT_ERROR"
+        audit["reason"] = str(exc)
+        audit["hydration_attempted"] = False
+        _finalize_quarantine_audit(audit, gaps)
+        _atomic_write_json(AUDIT_JSON, audit)
+        if verbose:
+            print(
+                f"[RUNTIME_HYDRATION_PREFLIGHT] status=CONTRACT_ERROR reason={exc}",
+                flush=True,
+            )
+        return audit
+
     needs_expensive = any(
-        sym in gaps["missing_lifecycle_symbols"] or sym in gaps["missing_signals_symbols"]
-        for sym in stranded
+        sym in missing_lifecycle_set or sym in missing_signals_set for sym in stranded
     )
     defer_expensive = (
         needs_expensive and market_open and not force and not _allow_expensive_during_market_open()
@@ -262,7 +324,7 @@ def run_runtime_hydration_preflight(
     cheap_targets = [
         s
         for s in stranded
-        if s in gaps["missing_processed_symbols"] or not (PROCESSED / f"{s}.parquet").is_file()
+        if s in missing_processed_set or not (PROCESSED / f"{s}.parquet").is_file()
     ]
     if cheap_targets:
         ensure_raw_data(cheap_targets, verbose=verbose)
@@ -290,9 +352,7 @@ def run_runtime_hydration_preflight(
             )
 
     signal_chain_targets = [
-        s
-        for s in stranded
-        if s in gaps["missing_lifecycle_symbols"] or s in gaps["missing_signals_symbols"]
+        s for s in stranded if s in missing_lifecycle_set or s in missing_signals_set
     ]
 
     if signal_chain_targets and defer_expensive:
