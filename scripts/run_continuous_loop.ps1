@@ -13,6 +13,7 @@ Set-Location $repoRoot
 . (Join-Path $scriptDir "triton_env_bootstrap.ps1") -RepoRoot $repoRoot
 
 . (Join-Path $scriptDir "loop_lock_utils.ps1")
+. (Join-Path $scriptDir "loop_log_utils.ps1")
 
 $loopLogDir = "data\results\continuous_loop"
 New-Item -ItemType Directory -Force -Path $loopLogDir | Out-Null
@@ -34,9 +35,11 @@ if (Test-Path $lockFile) {
 Update-LoopLockMetadata -LockFile $lockFile -Source "continuous_loop" -Cycle 0
 
 function Log-Line($msg) {
+    # Host first so a sharing violation cannot hide the audit line from the console.
     $line = "$(Get-Date -Format s) $msg"
     Write-Host $line
-    Add-Content -Path $loopLog -Value $line
+    # Bounded retries for transient sharing violations; fail closed if exhausted.
+    Write-TritonLoopLogLine -Path $loopLog -Line $line | Out-Null
 }
 
 # DO-004: cooperative shutdown helper (Python). Exit code 10 = accepted, exit now.
@@ -65,14 +68,29 @@ function Remove-OwnLoopLock {
     try {
         $text = Get-Content -Path $lockFile -Raw -ErrorAction SilentlyContinue
         if ($text -match 'pid=(\d+)' -and [int]$Matches[1] -ne $PID) {
-            Log-Line "[LOCK_SKIP] lock owned by pid=$($Matches[1]); not removing (this pid=$PID)"
+            try {
+                Log-Line "[LOCK_SKIP] lock owned by pid=$($Matches[1]); not removing (this pid=$PID)"
+            }
+            catch {
+                Write-Host "$(Get-Date -Format s) [LOCK_SKIP] lock owned by pid=$($Matches[1]); not removing (this pid=$PID)"
+            }
             return
         }
     } catch {
-        Log-Line "[LOCK_CHECK] could not parse lock ownership: $($_.Exception.Message)"
+        try {
+            Log-Line "[LOCK_CHECK] could not parse lock ownership: $($_.Exception.Message)"
+        }
+        catch {
+            Write-Host "$(Get-Date -Format s) [LOCK_CHECK] could not parse lock ownership: $($_.Exception.Message)"
+        }
     }
     Remove-Item $lockFile -Force
-    Log-Line "[LOCK_RELEASE] released own continuous_loop.lock pid=$PID"
+    try {
+        Log-Line "[LOCK_RELEASE] released own continuous_loop.lock pid=$PID"
+    }
+    catch {
+        Write-Host "$(Get-Date -Format s) [LOCK_RELEASE] released own continuous_loop.lock pid=$PID"
+    }
 }
 
 try {
@@ -185,10 +203,25 @@ try {
     }
 }
 catch {
-    Log-Line "[LOOP_ABORT] $($_.Exception.Message)"
+    $abortMsg = $_.Exception.Message
+    try {
+        Log-Line "[LOOP_ABORT] $abortMsg"
+    }
+    catch {
+        # Independent channel if the loop log remains contended.
+        Write-Host "$(Get-Date -Format s) [LOOP_ABORT] $abortMsg"
+        Write-Host "$(Get-Date -Format s) [LOG_WRITE_FATAL] abort marker not persisted: $($_.Exception.Message)"
+    }
     exit 1
 }
 finally {
+    # Lock release must run even when logging is impaired.
     Remove-OwnLoopLock
-    Log-Line "=== TRITON CONTINUOUS LOOP END ==="
+    try {
+        Log-Line "=== TRITON CONTINUOUS LOOP END ==="
+    }
+    catch {
+        Write-Host "$(Get-Date -Format s) === TRITON CONTINUOUS LOOP END ==="
+        Write-Host "$(Get-Date -Format s) [LOG_WRITE_FATAL] end marker not persisted: $($_.Exception.Message)"
+    }
 }
