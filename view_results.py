@@ -24282,34 +24282,63 @@ if HAS_MANUAL_ORDER_DESK:
     SECTIONS["System"].insert(-1, "🧾 Manual Order Desk")
 
 
+# Unified Command Center top-level destinations (Operator pages + Advanced Dashboard).
+COMMAND_CENTER_DESTINATIONS: List[str] = [
+    "Operations",
+    "Activity",
+    "Portfolio",
+    "Orders",
+    "Risk & Alerts",
+    "Diagnostics",
+    "Advanced Dashboard",
+]
+ADVANCED_DASHBOARD_DESTINATION = "Advanced Dashboard"
+
+
 def sidebar_controls() -> Tuple[str, str, str]:
     """Return (mode, section_or_operator_page, legacy_page_label).
 
-    mode is 'operator' (default) or 'legacy'.
+    mode is 'operator' (default) or 'legacy' (Advanced Dashboard).
+    One top-level destination selector; Operator and Advanced trees are never
+    rendered in the same run.
     """
     from dashboard.operator_console import DEFAULT_OPERATOR_PAGE, OPERATOR_PAGES
 
     with st.sidebar:
-        st.title("TRITON Operator")
+        st.title("TRITON Command Center")
         st.caption(f"Build: {APP_VERSION}")
 
+        # Fresh sessions land on Operations. Preserve Advanced if already selected
+        # via dashboard_nav_mode (Diagnostics switch / prior session).
+        if "cc_top_destination" not in st.session_state:
+            if st.session_state.get("dashboard_nav_mode") == "legacy":
+                st.session_state["cc_top_destination"] = ADVANCED_DASHBOARD_DESTINATION
+            else:
+                st.session_state["cc_top_destination"] = DEFAULT_OPERATOR_PAGE
         if "dashboard_nav_mode" not in st.session_state:
             st.session_state["dashboard_nav_mode"] = "operator"
 
-        mode_label = st.radio(
-            "Console mode",
-            [
-                "Operator Console (recommended)",
-                "Advanced / Legacy Dashboard",
-            ],
-            index=0 if st.session_state["dashboard_nav_mode"] == "operator" else 1,
-            key="dashboard_mode_radio",
-            help="Operator Console is for routine observation. Advanced/Legacy retains the full research dashboard.",
+        current_dest = st.session_state.get("cc_top_destination", DEFAULT_OPERATOR_PAGE)
+        if current_dest not in COMMAND_CENTER_DESTINATIONS:
+            current_dest = DEFAULT_OPERATOR_PAGE
+            st.session_state["cc_top_destination"] = current_dest
+
+        destination = st.radio(
+            "Destination",
+            COMMAND_CENTER_DESTINATIONS,
+            index=COMMAND_CENTER_DESTINATIONS.index(current_dest),
+            key="cc_destination_radio",
+            help=(
+                "Operations is the default Command Center landing page. "
+                "Advanced Dashboard opens the existing research/system navigation "
+                "(formerly Advanced / Legacy Dashboard)."
+            ),
         )
-        if mode_label.startswith("Operator"):
-            st.session_state["dashboard_nav_mode"] = "operator"
-        else:
+        st.session_state["cc_top_destination"] = destination
+        if destination == ADVANCED_DASHBOARD_DESTINATION:
             st.session_state["dashboard_nav_mode"] = "legacy"
+        else:
+            st.session_state["dashboard_nav_mode"] = "operator"
 
         if st.button("⟳ Refresh data", key="refresh"):
             try:
@@ -24327,29 +24356,38 @@ def sidebar_controls() -> Tuple[str, str, str]:
         render_sidebar_execution_status(posture, pipeline_locked, pipeline_reason)
 
         st.markdown("---")
-        mode = st.session_state["dashboard_nav_mode"]
-        if mode == "operator":
-            st.caption("Routine operator navigation")
-            page = st.radio(
-                "Page",
-                OPERATOR_PAGES,
-                index=(
-                    OPERATOR_PAGES.index(DEFAULT_OPERATOR_PAGE)
-                    if DEFAULT_OPERATOR_PAGE in OPERATOR_PAGES
-                    else 0
-                ),
-                key="operator_page_choice",
-            )
+        if destination != ADVANCED_DASHBOARD_DESTINATION:
+            # Destination itself is the Operator page (no second page radio).
+            if destination not in OPERATOR_PAGES:
+                st.error(f"❌ Unknown Command Center destination: {destination}")
+                destination = DEFAULT_OPERATOR_PAGE
+            st.caption("Command Center · routine operator pages")
             st.markdown("---")
             st.caption(f"Repo root: {PROJECT_ROOT}")
-            return mode, page, ""
+            return "operator", destination, ""
 
-        st.warning("Advanced / Legacy mode — not required for routine operation.")
-        section = st.selectbox("Section", list(SECTIONS.keys()), index=0, key="section_choice")
-        page = st.radio("View", SECTIONS[section], index=0, key="sub_choice")
+        # Advanced Dashboard — reuse SECTIONS / PAGE_REGISTRY; default Portfolio (read-only).
+        st.caption(
+            "Advanced Dashboard (Advanced / Legacy Dashboard) — research views and "
+            "protected system tools. Not required for routine operation."
+        )
+        section_keys = list(SECTIONS.keys())
+        section = st.selectbox(
+            "Section",
+            section_keys,
+            index=0,
+            key="cc_advanced_section",
+        )
+        views = list(SECTIONS.get(section) or [])
+        page = st.radio(
+            "View",
+            views,
+            index=0,
+            key="cc_advanced_view",
+        )
         st.markdown("---")
         st.caption(f"Repo root: {PROJECT_ROOT}")
-        return mode, section, page
+        return "legacy", section, page
 
 
 def main() -> None:
@@ -24358,9 +24396,9 @@ def main() -> None:
     mode, section_or_page, legacy_page = sidebar_controls()
 
     if mode == "operator":
-        st.markdown("### TRITON Operator Console")
+        st.markdown("### TRITON Command Center")
         st.caption(
-            "Observation only · Live execution remains blocked · Runtime Start/Stop not available"
+            "Live execution remains blocked · Protected runtime controls require confirmation"
         )
         render_heartbeat_freshness_banner()
 
@@ -24369,6 +24407,7 @@ def main() -> None:
 
             def _to_legacy() -> None:
                 st.session_state["dashboard_nav_mode"] = "legacy"
+                st.session_state["cc_top_destination"] = ADVANCED_DASHBOARD_DESTINATION
                 st.rerun()
 
             render_diagnostics_page(switch_to_legacy_callback=_to_legacy)
@@ -24381,10 +24420,11 @@ def main() -> None:
         fn()
         return
 
-    # ── Advanced / Legacy Dashboard (unchanged page registry) ──
+    # ── Advanced Dashboard (unchanged PAGE_REGISTRY / SECTIONS) ──
     section, page = section_or_page, legacy_page
     st.info(
-        "You are in **Advanced / Legacy Dashboard** mode. Prefer Operator Console for routine operation."
+        "You are in **Advanced Dashboard** (Advanced / Legacy Dashboard). "
+        "Prefer **Operations** for routine Command Center work."
     )
     render_heartbeat_freshness_banner()
     render_top_status_stack()
