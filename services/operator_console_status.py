@@ -177,6 +177,148 @@ def _parse_dt(value: Any) -> Optional[datetime]:
         return None
 
 
+PAPER_READINESS_EXPLANATORY_COPY = (
+    "Standing authorization and the execution arm are separate. "
+    "Authorization alone cannot submit an order. "
+    "A current paper arm and all existing readiness, approval, and broker-dispatch "
+    "gates are still required. Live execution remains blocked."
+)
+
+
+def build_paper_readiness_wording(
+    *,
+    root: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Read-only standing authorization vs paper-arm display contracts.
+
+    Does not renew authorization, create an arm, or alter execution gates.
+    Never implies that standing authorization alone permits order submission.
+    """
+    now = now or _utc_now()
+    root = Path(root) if root is not None else ROOT
+    results = root / "data" / "results"
+    live = root / "data" / "live"
+
+    gov = _read_json(results / "governance_authorization.json")
+    readiness = _read_json(results / "execution_readiness.json")
+    gov_bad = bool(gov.get("__malformed__"))
+    ready_bad = bool(readiness.get("__malformed__"))
+
+    paper_flag: Optional[bool] = None
+    auth_created_at: Optional[str] = None
+    auth_source = "unknown"
+    if not gov_bad and (results / "governance_authorization.json").is_file():
+        if "paper_execution_permitted" in gov:
+            paper_flag = bool(gov.get("paper_execution_permitted"))
+            auth_created_at = (
+                str(gov.get("generated_at") or gov.get("as_of") or gov.get("timestamp") or "")
+                or None
+            )
+            auth_source = str(results / "governance_authorization.json")
+    if paper_flag is None and not ready_bad and (results / "execution_readiness.json").is_file():
+        if "paper_execution_permitted" in readiness:
+            paper_flag = bool(readiness.get("paper_execution_permitted"))
+            auth_created_at = (
+                str(
+                    readiness.get("generated_at")
+                    or readiness.get("as_of")
+                    or readiness.get("timestamp")
+                    or ""
+                )
+                or None
+            )
+            auth_source = str(results / "execution_readiness.json")
+
+    if paper_flag is True:
+        auth_status = "PERMITTED"
+    elif paper_flag is False:
+        auth_status = "NOT_PERMITTED"
+    else:
+        auth_status = "UNKNOWN"
+
+    # Standing policy flag has no operator latch expiry in these artifacts.
+    auth_expires_at = None
+
+    arm_path = live / "paper_arm_confirm.json"
+    arm_status = "UNKNOWN"
+    arm_created_at: Optional[str] = None
+    arm_expires_at: Optional[str] = None
+    arm_display = "UNKNOWN"
+    try:
+        from services.paper_arm_status import build_paper_arm_status
+
+        if root == ROOT:
+            arm_payload = build_paper_arm_status(verbose_notes=False)
+            arm_status = str(arm_payload.get("status") or "UNKNOWN")
+            arm_created_at = str(arm_payload.get("timestamp") or "") or None
+            arm_expires_at = str(arm_payload.get("expires_at") or "") or None
+        else:
+            # Fixture roots: classify from local file only (no global LIVE path).
+            if not arm_path.is_file():
+                arm_status = "MISSING"
+            else:
+                try:
+                    doc = json.loads(arm_path.read_text(encoding="utf-8"))
+                except Exception:
+                    doc = {"__malformed__": True}
+                if not isinstance(doc, dict) or doc.get("__malformed__"):
+                    arm_status = "UNKNOWN"
+                elif not bool(doc.get("allow_execute", True)):
+                    arm_status = "INVALID"
+                else:
+                    exp = _parse_dt(doc.get("expires_at"))
+                    if exp is None:
+                        arm_status = "INVALID"
+                    elif exp <= now:
+                        arm_status = "EXPIRED"
+                    else:
+                        arm_status = "VALID"
+                    arm_created_at = str(doc.get("timestamp") or "") or None
+                    arm_expires_at = str(doc.get("expires_at") or "") or None
+        # Display: VALID → ARMED for operator clarity; keep EXPIRED explicit.
+        if arm_status == "VALID":
+            arm_display = "ARMED"
+        elif arm_status in ("EXPIRED", "MISSING", "INVALID", "UNKNOWN"):
+            arm_display = arm_status
+        else:
+            arm_display = "UNKNOWN"
+    except Exception:
+        arm_status = "UNKNOWN"
+        arm_display = "UNKNOWN"
+
+    live_blocked = True
+    if not ready_bad and "live_execution_permitted" in readiness:
+        live_blocked = not bool(readiness.get("live_execution_permitted"))
+    if not gov_bad and "live_execution_permitted" in gov:
+        live_blocked = live_blocked and (not bool(gov.get("live_execution_permitted")))
+
+    return {
+        "standing_authorization_label": "Standing paper authorization",
+        "standing_authorization_status": auth_status,
+        "standing_authorization_created_at": auth_created_at,
+        "standing_authorization_expires_at": auth_expires_at,
+        "standing_authorization_currently_valid": paper_flag is True,
+        "standing_authorization_source": auth_source,
+        "paper_arm_label": "Paper execution arm",
+        "paper_arm_status": arm_display,
+        "paper_arm_raw_status": arm_status,
+        "paper_arm_created_at": arm_created_at,
+        "paper_arm_expires_at": arm_expires_at,
+        "paper_arm_currently_valid": arm_status == "VALID",
+        "paper_arm_source": str(arm_path),
+        "authorization_and_arm_are_distinct": True,
+        "authorization_alone_permits_submission": False,
+        "order_ready": False,
+        "ready_to_trade": False,
+        "explanatory_copy": PAPER_READINESS_EXPLANATORY_COPY,
+        "live_execution_blocked": live_blocked,
+        "live_execution_display": (
+            "LIVE EXECUTION BLOCKED" if live_blocked else "LIVE EXECUTION NOT BLOCKED"
+        ),
+    }
+
+
 def _age_minutes(ts: Optional[datetime], now: Optional[datetime] = None) -> Optional[float]:
     if ts is None:
         return None

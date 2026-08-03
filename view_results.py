@@ -2309,7 +2309,6 @@ def render_sidebar_execution_status(
         f"Market: **{summary.get('market_status', 'UNKNOWN')}**"
     )
     st.caption(
-        f"Paper authorization: **{'YES' if posture.paper_execution_permitted else 'NO'}** · "
         f"Readiness: **{posture.readiness_status}** · "
         f"Certification: **{summary.get('certification_status', 'UNKNOWN')}**"
     )
@@ -2336,23 +2335,35 @@ def render_sidebar_execution_status(
     if blocked:
         st.caption("Blocked by: " + ", ".join(str(x) for x in blocked[:8]))
 
+    # Standing paper authorization vs short-lived paper execution arm (distinct contracts).
     try:
-        from services.paper_arm_status import build_paper_arm_status
+        from services.operator_console_status import build_paper_readiness_wording
 
-        arm_st = build_paper_arm_status(verbose_notes=False)
-        st.caption(
-            f"Paper arm confirm: **{arm_st.get('status', 'UNKNOWN')}** "
-            f"(armed={'YES' if arm_st.get('paper_entry_armed') else 'NO'}) · "
-            f"Live confirm: **{arm_st.get('live_confirm_status', 'UNKNOWN')}** · "
-            f"Live execution: **BLOCKED**"
+        prw = build_paper_readiness_wording()
+        auth_line = (
+            f"{prw.get('standing_authorization_label')}: "
+            f"**{prw.get('standing_authorization_status') or 'UNKNOWN'}**"
         )
-        if arm_st.get("operator_required") and arm_st.get("status") != "VALID":
-            st.caption(
-                "ASSISTED mode needs fresh `paper_arm_confirm.json` — "
-                "distinct from live confirm and certification."
-            )
+        if prw.get("standing_authorization_created_at"):
+            auth_line += f" · as_of {prw['standing_authorization_created_at']}"
+        if prw.get("standing_authorization_expires_at"):
+            auth_line += f" · expires {prw['standing_authorization_expires_at']}"
+        st.caption(auth_line)
+
+        arm_line = f"{prw.get('paper_arm_label')}: **{prw.get('paper_arm_status') or 'UNKNOWN'}**"
+        if prw.get("paper_arm_created_at"):
+            arm_line += f" · created {prw['paper_arm_created_at']}"
+        if prw.get("paper_arm_expires_at"):
+            arm_line += f" · expires {prw['paper_arm_expires_at']}"
+        st.caption(arm_line)
+        st.caption(str(prw.get("explanatory_copy") or ""))
+        st.caption(
+            f"Live execution: **{prw.get('live_execution_display') or 'LIVE EXECUTION BLOCKED'}**"
+        )
     except Exception:
-        pass
+        st.caption("Standing paper authorization: **UNKNOWN**")
+        st.caption("Paper execution arm: **UNKNOWN**")
+        st.caption("Live execution: **BLOCKED**")
 
     c1, c2 = st.columns(2)
     c1.caption(f"Watchdog: {summary.get('watchdog', 'UNKNOWN')}")

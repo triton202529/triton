@@ -15,3 +15,9 @@ serverAddress = "127.0.0.1"
 
 [runner]
 fastReruns = true
+
+# Phase readiness — hide Streamlit's automatic pages/ multipage nav so the
+# Command Center Destination radio remains the single authoritative navigation.
+# Does not hide the sidebar itself; does not remove pages/ files or routes.
+[client]
+showSidebarNavigation = false
