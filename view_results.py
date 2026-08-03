@@ -24390,6 +24390,183 @@ def sidebar_controls() -> Tuple[str, str, str]:
         return "legacy", section, page
 
 
+def _render_cc_operations_broker_order_evidence() -> None:
+    """Operations page with paper-REST broker freshness + protected controls reused."""
+    from dashboard.operator_console import (
+        _render_runtime_recovery_guidance,
+        _render_start_controls,
+        _status_color,
+    )
+    from services.operator_console_status import build_operator_status
+
+    st.title("Operations")
+    st.caption(
+        "Operator console · Protected Start · Protected Stop (cooperative) · "
+        "Live execution remains blocked · Restart uses verified Stop then fresh Start."
+    )
+
+    status = build_operator_status()
+    overall = str(status.get("overall_status") or "UNKNOWN")
+    st.markdown(f"### {_status_color(overall)} TRITON overall status: **{overall}**")
+
+    live = status.get("live_execution") or {}
+    if live.get("blocked"):
+        st.success("LIVE EXECUTION BLOCKED")
+    else:
+        st.error(
+            "CRITICAL SAFETY WARNING: live execution does not appear blocked. "
+            "No enable control is provided. Investigate immediately."
+        )
+
+    c1, c2, c3, c4 = st.columns(4)
+    cont = status.get("continuous") or {}
+    wd = status.get("watchdog") or {}
+    paper = status.get("paper_arm") or {}
+    with c1:
+        st.metric("Continuous loop", "RUNNING" if cont.get("process_running") else "NOT RUNNING")
+        st.caption(f"Lock: {cont.get('lock_classification')}")
+    with c2:
+        st.metric("Watchdog", "RUNNING" if wd.get("process_running") else "NOT RUNNING")
+        st.caption(f"Lock: {wd.get('lock_classification')}")
+    with c3:
+        st.metric("Paper arm", paper.get("display_status") or "UNKNOWN")
+        st.caption(paper.get("evidence_path") or "")
+    with c4:
+        st.metric("Live execution", "BLOCKED" if live.get("blocked") else "NOT BLOCKED")
+
+    c5, c6, c7, c8 = st.columns(4)
+    broker = status.get("broker") or {}
+    cycle = status.get("cycle") or {}
+    op = status.get("orders_positions") or {}
+    alerts = status.get("alerts") or {}
+    freshness = status.get("data_freshness") or {}
+    with c5:
+        label = broker.get("display_label") or "Paper broker REST: Unknown"
+        # Metric value is the state word after the colon for compact display.
+        state = str(broker.get("state") or "UNKNOWN")
+        st.metric("Paper broker REST", state.title() if state != "UNKNOWN" else "Unknown")
+        st.caption(label)
+        age = broker.get("evidence_age_minutes")
+        age_txt = f"{age:.1f} min ago" if isinstance(age, (int, float)) else "age unknown"
+        st.caption(
+            f"Evidence: {broker.get('evidence_timestamp') or 'n/a'} · {age_txt} · "
+            f"freshness={broker.get('freshness') or 'UNKNOWN'}"
+        )
+        st.caption(str(broker.get("meaning") or ""))
+    with c6:
+        st.metric("Market status", (status.get("market") or {}).get("status") or "UNKNOWN")
+    with c7:
+        st.metric(
+            "Last cycle",
+            str(
+                cycle.get("last_cycle_number")
+                if cycle.get("last_cycle_number") is not None
+                else "UNKNOWN"
+            ),
+        )
+        st.caption(cycle.get("last_completed_at") or "No cycle timestamp evidenced")
+    with c8:
+        st.metric("Next expected cycle", "See caption")
+        st.caption(cycle.get("next_expected_at") or "Unavailable")
+
+    c9, c10, c11, c12 = st.columns(4)
+    with c9:
+        oo = op.get("open_orders")
+        st.metric("Open orders (snapshot)", oo if oo is not None else "UNKNOWN")
+        st.caption("See Orders → Current open orders for evidence freshness.")
+    with c10:
+        pc = op.get("position_count")
+        st.metric("Position count", pc if pc is not None else "UNKNOWN")
+    with c11:
+        st.metric(
+            "Active alerts",
+            alerts.get("active_count") if alerts.get("active_count") is not None else "UNKNOWN",
+        )
+    with c12:
+        st.metric("Data freshness", freshness.get("class") or "UNKNOWN")
+
+    st.markdown("---")
+    st.subheader("Operator attention")
+    attention = status.get("attention") or []
+    if not attention:
+        st.info("No evidence-backed attention items right now.")
+    else:
+        for item in attention:
+            sev = str(item.get("severity") or "INFO")
+            header = f"[{sev}] {item.get('title')}"
+            with st.expander(header, expanded=sev in ("CRITICAL", "HIGH")):
+                st.write(item.get("explanation"))
+                st.caption(f"Evidence: {item.get('evidence_source')}")
+                st.write(f"Recommended safe action: {item.get('recommended_action')}")
+
+    st.markdown("---")
+    _render_runtime_recovery_guidance()
+
+    st.markdown("---")
+    _render_start_controls()
+
+
+def _render_cc_orders_broker_order_evidence() -> None:
+    """Orders page: current open orders vs submission history (artifact-only)."""
+    from services.operator_console_status import build_orders_summary
+
+    st.title("Orders")
+    st.caption(
+        "Read-only paper/order visibility. No Submit, Cancel, Approve, Retry, or Execute controls."
+    )
+    summary = build_orders_summary()
+    st.write(summary.get("note"))
+
+    current = summary.get("current_open_orders") or {}
+    st.subheader("Current open orders")
+    st.caption(
+        f"Evidence: {current.get('evidence_timestamp') or 'n/a'} · "
+        f"freshness={current.get('freshness') or 'UNKNOWN'} · "
+        f"source={current.get('evidence_path') or 'n/a'}"
+    )
+    st.write(current.get("note") or "")
+    if current.get("message"):
+        st.info(current["message"])
+    rows = current.get("rows") or []
+    if current.get("freshness") == "FRESH" and rows:
+        st.dataframe(rows, use_container_width=True)
+    elif current.get("freshness") == "FRESH" and current.get("count") == 0:
+        pass  # message already shown
+    elif current.get("count") is not None and not current.get("details_available"):
+        st.write(
+            f"Verified current open-order count: **{current.get('count')}** "
+            "(row-level details unavailable)."
+        )
+
+    history = summary.get("submission_history") or {}
+    st.subheader("Submission history")
+    st.write(history.get("note") or "")
+    hist_rows = history.get("rows") or []
+    if hist_rows:
+        display_rows = [
+            {
+                "symbol": r.get("symbol"),
+                "side": r.get("side"),
+                "quantity": r.get("quantity"),
+                "recorded_submission_status": r.get("recorded_submission_status")
+                or r.get("status"),
+                "ui_classification": r.get("ui_classification"),
+                "final_broker_status": r.get("final_broker_status"),
+                "submitted_time": r.get("submitted_time"),
+                "broker_order_id": r.get("broker_order_id"),
+                "evidence_source": r.get("evidence_source"),
+            }
+            for r in hist_rows
+        ]
+        st.dataframe(display_rows, use_container_width=True)
+    else:
+        st.info("No evidenced submission-history rows.")
+
+    with st.expander("Evidence paths"):
+        st.write(summary.get("evidence_paths"))
+        st.write(history.get("evidence_paths"))
+
+
 def main() -> None:
     from dashboard.operator_console import OPERATOR_RENDERERS, render_diagnostics_page
 
@@ -24411,6 +24588,15 @@ def main() -> None:
                 st.rerun()
 
             render_diagnostics_page(switch_to_legacy_callback=_to_legacy)
+            return
+
+        # Evidence-contract pages (broker freshness + order separation) live here so
+        # dashboard/operator_console.py (DO-007 dirty worktree) stays untouched.
+        if page == "Operations":
+            _render_cc_operations_broker_order_evidence()
+            return
+        if page == "Orders":
+            _render_cc_orders_broker_order_evidence()
             return
 
         fn = OPERATOR_RENDERERS.get(page)

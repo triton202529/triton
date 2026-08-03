@@ -44,10 +44,120 @@ CONTINUOUS_CYCLE_OVERDUE_MINUTES = 90.0
 WATCHDOG_OVERDUE_MINUTES = 10.0
 DATA_FRESH_MINUTES = 90.0
 BROKER_FRESH_MINUTES = 120.0
+OPEN_ORDERS_FRESH_MINUTES = 120.0
+
+BROKER_REST_STATES = ("CONNECTED", "DISCONNECTED", "STALE", "UNKNOWN")
+# Material future skew: never treat as CONNECTED / DISCONNECTED.
+BROKER_FUTURE_TIMESTAMP_TOLERANCE_MINUTES = 1.0
+
+PAPER_BROKER_REST_MEANING = (
+    "Alpaca paper REST probe result at the evidence timestamp. "
+    "Streaming connectivity is not assessed."
+)
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def classify_paper_broker_rest_evidence(
+    *,
+    broker_connected: Any,
+    evidence_timestamp: Any,
+    now: Optional[datetime] = None,
+    fresh_minutes: float = BROKER_FRESH_MINUTES,
+) -> Dict[str, Any]:
+    """Classify paper REST broker evidence with explicit freshness.
+
+    Runtime process presence must not be passed here — a stopped watchdog or
+    continuous loop does not imply DISCONNECTED.
+    """
+    now = now or _utc_now()
+    ts = _parse_dt(evidence_timestamp)
+    age = _age_minutes(ts, now) if ts is not None else None
+
+    display = {
+        "CONNECTED": "Paper broker REST: Connected",
+        "DISCONNECTED": "Paper broker REST: Disconnected",
+        "STALE": "Paper broker REST: Stale",
+        "UNKNOWN": "Paper broker REST: Unknown",
+    }
+
+    def _pack(
+        state: str,
+        *,
+        freshness: str,
+        connected_compat: Optional[bool],
+    ) -> Dict[str, Any]:
+        return {
+            "state": state,
+            "display_label": display[state],
+            "connected": connected_compat,
+            "evidence_timestamp": ts.isoformat() if ts is not None else None,
+            "evidence_age_minutes": age,
+            "freshness": freshness,
+            "fresh_minutes_threshold": float(fresh_minutes),
+            "mode": "paper",
+            "meaning": PAPER_BROKER_REST_MEANING,
+            "streaming_assessed": False,
+            "streaming_connected": None,
+        }
+
+    if ts is None:
+        return _pack("UNKNOWN", freshness="UNKNOWN", connected_compat=None)
+
+    if age is not None and age < -float(BROKER_FUTURE_TIMESTAMP_TOLERANCE_MINUTES):
+        return _pack("UNKNOWN", freshness="UNKNOWN", connected_compat=None)
+
+    if age is not None and age > float(fresh_minutes):
+        return _pack("STALE", freshness="STALE", connected_compat=None)
+
+    if broker_connected is True:
+        return _pack("CONNECTED", freshness="FRESH", connected_compat=True)
+    if broker_connected is False:
+        return _pack("DISCONNECTED", freshness="FRESH", connected_compat=False)
+    return _pack(
+        "UNKNOWN", freshness="FRESH" if age is not None else "UNKNOWN", connected_compat=None
+    )
+
+
+def classify_open_orders_evidence_freshness(
+    *,
+    evidence_timestamp: Any,
+    now: Optional[datetime] = None,
+    fresh_minutes: float = OPEN_ORDERS_FRESH_MINUTES,
+) -> Dict[str, Any]:
+    """Freshness for current open-order snapshot evidence (no broker calls)."""
+    now = now or _utc_now()
+    ts = _parse_dt(evidence_timestamp)
+    age = _age_minutes(ts, now) if ts is not None else None
+    if ts is None:
+        return {
+            "freshness": "UNKNOWN",
+            "evidence_timestamp": None,
+            "evidence_age_minutes": None,
+            "fresh_minutes_threshold": float(fresh_minutes),
+        }
+    if age is not None and age < -float(BROKER_FUTURE_TIMESTAMP_TOLERANCE_MINUTES):
+        return {
+            "freshness": "UNKNOWN",
+            "evidence_timestamp": ts.isoformat(),
+            "evidence_age_minutes": age,
+            "fresh_minutes_threshold": float(fresh_minutes),
+        }
+    if age is not None and age > float(fresh_minutes):
+        return {
+            "freshness": "STALE",
+            "evidence_timestamp": ts.isoformat(),
+            "evidence_age_minutes": age,
+            "fresh_minutes_threshold": float(fresh_minutes),
+        }
+    return {
+        "freshness": "FRESH",
+        "evidence_timestamp": ts.isoformat(),
+        "evidence_age_minutes": age,
+        "fresh_minutes_threshold": float(fresh_minutes),
+    }
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
@@ -571,6 +681,26 @@ def build_operator_status(
     if broker_connected is None and isinstance(wd_status.get("heartbeat"), dict):
         broker_connected = wd_status["heartbeat"].get("broker_connected")
 
+    broker_evidence_ts = (
+        wd_status.get("timestamp")
+        or wd_status.get("as_of")
+        or wd_status.get("generated_at")
+        or (
+            (wd_status.get("heartbeat") or {}).get("timestamp")
+            if isinstance(wd_status.get("heartbeat"), dict)
+            else None
+        )
+    )
+    if wd_status.get("__malformed__") or not paths["watchdog_status"].is_file():
+        broker_connected = None
+        broker_evidence_ts = None
+    broker_rest = classify_paper_broker_rest_evidence(
+        broker_connected=broker_connected,
+        evidence_timestamp=broker_evidence_ts,
+        now=now,
+        fresh_minutes=BROKER_FRESH_MINUTES,
+    )
+
     hb_ts = _parse_dt(
         heartbeat.get("timestamp") or heartbeat.get("ts") or heartbeat.get("updated_at")
     )
@@ -582,7 +712,16 @@ def build_operator_status(
     else:
         freshness_class = "STALE"
 
-    open_orders = _csv_row_count(paths["open_orders"])
+    open_orders_mtime = _file_mtime(paths["open_orders"])
+    oo_ops_fresh = classify_open_orders_evidence_freshness(
+        evidence_timestamp=open_orders_mtime.isoformat() if open_orders_mtime else None,
+        now=now,
+    )
+    # Operations metric: verified count only when snapshot evidence is fresh.
+    if oo_ops_fresh.get("freshness") == "FRESH" and paths["open_orders"].is_file():
+        open_orders = _csv_row_count(paths["open_orders"])
+    else:
+        open_orders = None
     positions = _csv_row_count(paths["positions"])
 
     auth_status = str(gov.get("overall_authorization") or gov.get("authorization_status") or "")
@@ -649,7 +788,18 @@ def build_operator_status(
             "evidence_path": str(paths["execution_readiness"]),
         },
         "broker": {
-            "connected": broker_connected,
+            # Backward-compatible boolean: True/False only when evidence is fresh.
+            "connected": broker_rest.get("connected"),
+            "state": broker_rest.get("state"),
+            "display_label": broker_rest.get("display_label"),
+            "evidence_timestamp": broker_rest.get("evidence_timestamp"),
+            "evidence_age_minutes": broker_rest.get("evidence_age_minutes"),
+            "freshness": broker_rest.get("freshness"),
+            "fresh_minutes_threshold": broker_rest.get("fresh_minutes_threshold"),
+            "mode": broker_rest.get("mode"),
+            "meaning": broker_rest.get("meaning"),
+            "streaming_assessed": False,
+            "streaming_connected": None,
             "evidence_path": str(paths["watchdog_status"]),
             "open_orders_mtime": (
                 _file_mtime(paths["open_orders"]).isoformat()
@@ -867,8 +1017,52 @@ def normalize_order_status(raw: Any) -> str:
     return mapped if mapped in ORDER_STATUSES else "UNKNOWN"
 
 
-def build_orders_summary(*, root: Optional[Path] = None) -> Dict[str, Any]:
-    """Read-only paper/order visibility from snapshots and audits."""
+def _ingest_order_csv_rows(path: Path, source: str, *, limit: int = 500) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    if not path.is_file():
+        return rows
+    try:
+        import pandas as pd
+
+        df = pd.read_csv(path)
+        for _, row in df.head(limit).iterrows():
+            d = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
+            status = normalize_order_status(
+                d.get("status") or d.get("order_status") or d.get("state")
+            )
+            rows.append(
+                {
+                    "symbol": d.get("symbol") or d.get("ticker"),
+                    "side": d.get("side") or d.get("action"),
+                    "quantity": d.get("qty") or d.get("quantity") or d.get("shares"),
+                    "notional": d.get("notional") or d.get("market_value") or d.get("amount"),
+                    "status": status,
+                    "raw_status": d.get("status") or d.get("order_status"),
+                    "submitted_time": d.get("submitted_at")
+                    or d.get("created_at")
+                    or d.get("timestamp"),
+                    "filled_time": d.get("filled_at") or d.get("filled_time"),
+                    "broker_order_id": d.get("id")
+                    or d.get("order_id")
+                    or d.get("submitted_order_id")
+                    or d.get("broker_order_id"),
+                    "snapshot_ts": d.get("snapshot_ts"),
+                    "evidence_source": source,
+                    "evidence_path": str(path),
+                }
+            )
+    except Exception:
+        return rows
+    return rows
+
+
+def build_orders_summary(
+    *,
+    root: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Read-only paper/order visibility with separated current vs historical contracts."""
+    now = now or _utc_now()
     root = Path(root) if root is not None else ROOT
     results = root / "data" / "results"
     paths = {
@@ -877,63 +1071,119 @@ def build_orders_summary(*, root: Optional[Path] = None) -> Dict[str, Any]:
         "paper_execution_audit": results / "paper_execution_audit.csv",
         "live_orders": results / "live_orders.csv",
     }
-    orders: List[Dict[str, Any]] = []
 
-    def _ingest_csv(path: Path, source: str) -> None:
-        if not path.is_file():
-            return
-        try:
-            import pandas as pd
+    # Current open orders: snapshot artifact only (never historical SUBMITTED audits).
+    current_rows = _ingest_order_csv_rows(paths["open_orders"], "open_orders_snapshot")
+    snapshot_ts_candidates = [
+        _parse_dt(r.get("snapshot_ts") or r.get("submitted_time")) for r in current_rows
+    ]
+    snapshot_ts_candidates = [t for t in snapshot_ts_candidates if t is not None]
+    evidence_ts = (
+        max(snapshot_ts_candidates) if snapshot_ts_candidates else _file_mtime(paths["open_orders"])
+    )
+    oo_fresh = classify_open_orders_evidence_freshness(
+        evidence_timestamp=evidence_ts.isoformat() if evidence_ts is not None else None,
+        now=now,
+    )
+    path_exists = paths["open_orders"].is_file()
+    freshness = oo_fresh["freshness"]
+    count: Optional[int]
+    if not path_exists:
+        count = None
+        message = "Current open-order status unavailable."
+    elif freshness == "STALE":
+        # Stale evidence must not claim a verified current zero/open count.
+        count = None
+        message = (
+            "Current open-order status is stale. "
+            "Do not treat this snapshot as live broker working orders."
+        )
+    elif freshness == "UNKNOWN":
+        count = None
+        message = "Current open-order status unavailable."
+    else:
+        count = len(current_rows)
+        message = "No current open orders." if count == 0 else None
 
-            df = pd.read_csv(path)
-            for _, row in df.head(500).iterrows():
-                d = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
-                status = normalize_order_status(
-                    d.get("status") or d.get("order_status") or d.get("state")
-                )
-                orders.append(
-                    {
-                        "symbol": d.get("symbol") or d.get("ticker"),
-                        "side": d.get("side") or d.get("action"),
-                        "quantity": d.get("qty") or d.get("quantity") or d.get("shares"),
-                        "notional": d.get("notional") or d.get("market_value") or d.get("amount"),
-                        "status": status,
-                        "raw_status": d.get("status") or d.get("order_status"),
-                        "submitted_time": d.get("submitted_at")
-                        or d.get("created_at")
-                        or d.get("timestamp"),
-                        "filled_time": d.get("filled_at") or d.get("filled_time"),
-                        "broker_order_id": d.get("id")
-                        or d.get("order_id")
-                        or d.get("submitted_order_id")
-                        or d.get("broker_order_id"),
-                        "evidence_source": source,
-                        "evidence_path": str(path),
-                    }
-                )
-        except Exception:
-            pass
+    current_open = {
+        "rows": current_rows if freshness == "FRESH" else [],
+        "count": count,
+        "details_available": bool(current_rows) and freshness == "FRESH",
+        "freshness": freshness,
+        "evidence_timestamp": oo_fresh.get("evidence_timestamp"),
+        "evidence_age_minutes": oo_fresh.get("evidence_age_minutes"),
+        "fresh_minutes_threshold": oo_fresh.get("fresh_minutes_threshold"),
+        "evidence_path": str(paths["open_orders"]),
+        "message": message,
+        "note": (
+            "Current open orders come only from open_orders_snapshot.csv. "
+            "Historical SUBMITTED audit rows are never treated as currently open."
+        ),
+    }
 
-    _ingest_csv(paths["open_orders"], "open_orders_snapshot")
-    _ingest_csv(paths["recent_orders"], "recent_orders")
-    _ingest_csv(paths["paper_execution_audit"], "paper_execution_audit")
-    _ingest_csv(paths["live_orders"], "live_orders")
+    # Submission history: audit / recent / live_orders — not current open book.
+    history_rows: List[Dict[str, Any]] = []
+    for key, source in (
+        ("paper_execution_audit", "paper_execution_audit"),
+        ("recent_orders", "recent_orders"),
+        ("live_orders", "live_orders"),
+    ):
+        for r in _ingest_order_csv_rows(paths[key], source):
+            recorded = r.get("status")
+            final_status = "Final broker status unavailable."
+            if recorded in ("FILLED", "REJECTED", "CANCELLED"):
+                final_status = recorded
+            elif recorded == "SUBMITTED":
+                # Historical submission recorded — not Open/Working/current.
+                final_status = "Final broker status unavailable."
+            history_rows.append(
+                {
+                    **r,
+                    "recorded_submission_status": recorded,
+                    "ui_classification": (
+                        "Historical submission"
+                        if recorded == "SUBMITTED"
+                        else (recorded or "UNKNOWN")
+                    ),
+                    "final_broker_status": final_status,
+                }
+            )
 
     by_status: Dict[str, List[Dict[str, Any]]] = {s: [] for s in ORDER_STATUSES}
-    for o in orders:
+    for o in history_rows:
         by_status.setdefault(o["status"], []).append(o)
 
-    return {
-        "orders": orders,
+    submission_history = {
+        "rows": history_rows,
         "by_status": {k: len(v) for k, v in by_status.items()},
-        "open_orders": by_status.get("ACCEPTED", [])
-        + by_status.get("SUBMITTED", [])
-        + by_status.get("PARTIALLY_FILLED", []),
+        "submitted_rows": [r for r in history_rows if r.get("status") == "SUBMITTED"],
+        "note": (
+            "SUBMITTED means a historical submission was recorded. "
+            "It is not current broker open/working status and does not prove a final outcome."
+        ),
+        "evidence_paths": {
+            "paper_execution_audit": str(paths["paper_execution_audit"]),
+            "recent_orders": str(paths["recent_orders"]),
+            "live_orders": str(paths["live_orders"]),
+        },
+    }
+
+    return {
+        "current_open_orders": current_open,
+        "submission_history": submission_history,
+        # Backward-compatible fields: open_orders is current snapshot only (never audit SUBMITTED).
+        "orders": history_rows,
+        "by_status": submission_history["by_status"],
+        "open_orders": list(current_open["rows"]),
         "filled_orders": by_status.get("FILLED", []),
         "rejected_orders": by_status.get("REJECTED", []),
         "cancelled_orders": by_status.get("CANCELLED", []),
         "evidence_paths": {k: str(v) for k, v in paths.items()},
-        "note": "PLANNED/AUTHORIZED are distinct from SUBMITTED/FILLED; status is never inferred upward.",
+        "note": (
+            "Current open orders and submission history are separate evidence contracts. "
+            "PLANNED/AUTHORIZED are distinct from SUBMITTED/FILLED; status is never inferred upward. "
+            "SUBMITTED is historical submission activity, not Open/Working."
+        ),
     }
 
 
