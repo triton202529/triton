@@ -362,8 +362,14 @@ def default_launch_loop(component: str, *, root: Path = ROOT) -> Dict[str, Any]:
     try:
         creationflags = 0
         if sys.platform == "win32":
-            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
-                subprocess, "DETACHED_PROCESS", 0x00000008
+            # Streamlit/agent Python often runs inside a Windows Job Object.
+            # CREATE_BREAKAWAY_FROM_JOB is required so child runtimes survive
+            # st.rerun() / handler completion. DETACHED_PROCESS alone does not
+            # break away from the parent job and children are killed on rerun.
+            creationflags = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+                | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
             )
         proc = subprocess.Popen(
             args,
@@ -382,6 +388,10 @@ def default_launch_loop(component: str, *, root: Path = ROOT) -> Dict[str, Any]:
             "script": str(script),
             "interval_minutes": interval,
             "argv_fixed": True,
+            "creationflags": int(creationflags),
+            "breakaway_from_job": bool(
+                creationflags & getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+            ),
         }
     except OSError as exc:
         return {"ok": False, "error": f"launch_failed:{exc}", "component": component}

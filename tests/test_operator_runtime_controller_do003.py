@@ -643,3 +643,196 @@ def test_classify_loop_not_running():
         overdue_threshold_minutes=60,
     )
     assert c.state == "NOT_RUNNING"
+
+
+def test_default_launch_uses_breakaway_job_flags(tmp_path: Path, monkeypatch):
+    """Children must break away from Streamlit/agent Job Objects or st.rerun kills them."""
+    import subprocess
+
+    from services.operator_runtime_controller import default_launch_loop
+
+    _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    captured = {}
+
+    class _FakeProc:
+        pid = 424242
+
+    def fake_popen(*args, **kwargs):
+        captured["args"] = args[0] if args else kwargs.get("args")
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    rec = default_launch_loop("watchdog", root=tmp_path)
+    assert rec["ok"] is True
+    flags = int(captured["kwargs"].get("creationflags") or 0)
+    breakaway = int(getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000))
+    no_window = int(getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    new_group = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+    assert flags & breakaway, "CREATE_BREAKAWAY_FROM_JOB required for Streamlit survival"
+    assert flags & no_window
+    assert flags & new_group
+    assert rec.get("breakaway_from_job") is True
+    assert captured["kwargs"].get("cwd") == str(tmp_path)
+    assert captured["kwargs"].get("shell") is False
+    argv = captured["args"]
+    assert str(tmp_path / "scripts" / "run_watchdog_loop.ps1") in argv
+    env = captured["kwargs"].get("env") or {}
+    assert env.get("TRITON_ENABLE_LIVE_EXECUTION") == "0"
+    assert env.get("TRITON_LIVE_EXECUTION") == "0"
+    assert env.get("TRITON_ENABLE_PAPER_EXECUTION") == "1"
+
+
+def test_default_launch_continuous_repo_rooted_script(tmp_path: Path, monkeypatch):
+    import subprocess
+
+    from services.operator_runtime_controller import default_launch_loop
+
+    _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    captured = {}
+
+    class _FakeProc:
+        pid = 424243
+
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *a, **k: captured.update(args=a[0], kwargs=k) or _FakeProc(),
+    )
+    rec = default_launch_loop("continuous", root=tmp_path)
+    assert rec["ok"] is True
+    assert str(tmp_path / "scripts" / "run_continuous_loop.ps1") in captured["args"]
+    assert captured["kwargs"]["cwd"] == str(tmp_path)
+
+
+def test_ui_start_call_site_rejects_operational_kwargs():
+    """Command Center must call execute_start_triton without command/path/pid/env."""
+    import inspect
+
+    from dashboard import operator_console as oc
+
+    src = inspect.getsource(oc._render_start_controls)
+    assert "execute_start_triton(" in src
+    assert "command=" not in src
+    assert "shell_argument=" not in src
+    # path=/pid=/env= must not be passed as launch inputs (path= may appear in unrelated text)
+    assert "execute_start_triton(\n" in src or "execute_start_triton(" in src
+    call = src.split("execute_start_triton(")[1].split(")", 1)[0]
+    assert "command" not in call
+    assert "pid" not in call
+    assert "shell_argument" not in call
+    assert "env=" not in call
+
+
+def test_expired_shutdown_request_does_not_block_start(tmp_path: Path):
+    _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    live = tmp_path / "data" / "live"
+    past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    earlier = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    (live / "operator_shutdown_request.json").write_text(
+        json.dumps(
+            {
+                "request_id": "hist-1",
+                "state": "EXIT_PENDING",
+                "requested_at": earlier,
+                "expires_at": past,
+                "target": "BOTH",
+                "target_components": ["continuous", "watchdog"],
+                "expected_instances": {
+                    "watchdog": {"expected_pid": 1},
+                    "continuous": {"expected_pid": 2},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    launched = []
+    rec = execute_start_triton(
+        root=tmp_path,
+        audit_path=tmp_path / "data" / "results" / "operator_runtime_actions.jsonl",
+        guard_path=tmp_path / "data" / "live" / "operator_start_action.guard.json",
+        skip_postcondition_wait=True,
+        launch_fn=lambda c: launched.append(c) or {"ok": True, "child_pid": 1000 + len(launched)},
+        classify_fn=lambda: {
+            "overall_state": "FULLY_STOPPED",
+            "watchdog": {"state": "NOT_RUNNING"},
+            "continuous": {"state": "NOT_RUNNING"},
+        },
+    )
+    assert rec["result"] != "START_REFUSED_SHUTDOWN_IN_PROGRESS"
+    assert set(launched) == {"watchdog", "continuous"}
+
+
+def test_active_unexpired_shutdown_blocks_start(tmp_path: Path):
+    _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    live = tmp_path / "data" / "live"
+    future = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    (live / "operator_shutdown_request.json").write_text(
+        json.dumps(
+            {
+                "request_id": "active-1",
+                "state": "EXIT_PENDING",
+                "requested_at": now,
+                "expires_at": future,
+                "target": "BOTH",
+                "target_components": ["continuous", "watchdog"],
+                "action": "REQUEST_COOPERATIVE_SHUTDOWN",
+                "expected_instances": {
+                    "watchdog": {"expected_pid": 1},
+                    "continuous": {"expected_pid": 2},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    launched = []
+    rec = execute_start_triton(
+        root=tmp_path,
+        audit_path=tmp_path / "data" / "results" / "operator_runtime_actions.jsonl",
+        guard_path=tmp_path / "data" / "live" / "operator_start_action.guard.json",
+        skip_postcondition_wait=True,
+        launch_fn=lambda c: launched.append(c) or {"ok": True},
+    )
+    assert rec["result"] == "START_REFUSED_SHUTDOWN_IN_PROGRESS"
+    assert launched == []
+
+
+def test_launch_failure_recorded_sanitized(tmp_path: Path):
+    _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    audit = tmp_path / "data" / "results" / "operator_runtime_actions.jsonl"
+    rec = execute_start_triton(
+        root=tmp_path,
+        audit_path=audit,
+        guard_path=tmp_path / "data" / "live" / "operator_start_action.guard.json",
+        skip_postcondition_wait=True,
+        launch_fn=lambda c: {
+            "ok": False,
+            "error": "launch_failed:simulated",
+            "component": c,
+            "api_key": "SECRET",
+        },
+        classify_fn=lambda: {
+            "overall_state": "FULLY_STOPPED",
+            "watchdog": {"state": "NOT_RUNNING"},
+            "continuous": {"state": "NOT_RUNNING"},
+        },
+    )
+    assert rec["result"] in ("PARTIAL_START", "START_FAILED", "POSTCONDITION_FAILED")
+    assert rec.get("paper_arm_mutated") is False
+    assert rec.get("live_execution_blocked_after") is True
+    rows = read_recent_runtime_actions(path=audit, limit=10)
+    blob = json.dumps(rows)
+    assert "SECRET" not in blob
+    assert "launch_failed:simulated" in blob or rec.get("component_results")
+
+
+def test_importing_controller_has_no_side_effect_guard():
+    import importlib
+
+    from services import operator_runtime_controller as mod
+
+    before = list((Path(mod.ROOT) / "data" / "live").glob("operator_start_action.guard.json"))
+    importlib.reload(mod)
+    after = list((Path(mod.ROOT) / "data" / "live").glob("operator_start_action.guard.json"))
+    assert before == after
