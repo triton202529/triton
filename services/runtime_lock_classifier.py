@@ -48,18 +48,17 @@ def _load_json(path: Path) -> Dict[str, Any]:
 
 
 def _parse_ts(value: Any) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        s = str(value).strip().replace("Z", "+00:00")
-        if " " in s and "T" not in s:
-            s = s.replace(" ", "T")
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except (TypeError, ValueError):
-        return None
+    """Parse UTC/Z/offset JSON timestamps (heartbeat / status artifacts)."""
+    from services.command_center_status_coherence import parse_utc_timestamp
+
+    return parse_utc_timestamp(value)
+
+
+def _parse_lock_ts(value: Any) -> Optional[datetime]:
+    """Parse lock started_at/refreshed_at (naive local from loop_lock_utils.ps1)."""
+    from services.command_center_status_coherence import parse_lock_timestamp
+
+    return parse_lock_timestamp(value)
 
 
 def _minutes_since(dt: Optional[datetime], now: Optional[datetime] = None) -> Optional[float]:
@@ -159,16 +158,18 @@ def classify_runtime_lock(
         return "STALE_ORPHAN_LOCK"
 
     # lock exists and process active
+    # Lock started_at/refreshed_at ages are ownership/cycle metadata — not heartbeats.
+    # Recompute lock age with source-aware local parsing when raw timestamps exist.
     lock_ts_age = lock.get("lock_freshness_age_minutes") or lock.get("lock_age_minutes")
+    raw_refresh = lock.get("refreshed_at") or lock.get("started_at")
+    if raw_refresh:
+        recomputed = _minutes_since(_parse_lock_ts(raw_refresh))
+        if recomputed is not None:
+            lock_ts_age = recomputed
     hb_fresh = effective_hb_age is not None and effective_hb_age <= grace_minutes
 
-    if hb_fresh:
-        if (
-            lock_ts_age is not None
-            and float(lock_ts_age) > grace_minutes
-            and loop_kind == "continuous"
-        ):
-            return "LOCK_TIMESTAMP_STALE_BUT_PROCESS_ACTIVE"
+    # Matching live owner + fresh heartbeat => healthy; static lock age is informational.
+    if hb_fresh and (pid_match or process_active):
         return "LOCK_HEALTHY_ACTIVE"
 
     if pid_match and effective_hb_age is not None and effective_hb_age <= grace_minutes:
@@ -176,12 +177,15 @@ def classify_runtime_lock(
     if process_active and (pid_match or not lock_pid):
         if effective_hb_age is None or effective_hb_age <= grace_minutes:
             return "LOCK_HEALTHY_ACTIVE"
+        # Preserve classification label for diagnostics, but only when HB itself is aging
+        # and lock metadata (correctly parsed) is also old — never for fresh HB.
         if (
             lock_ts_age is not None
             and float(lock_ts_age) > grace_minutes
             and effective_hb_age is not None
             and effective_hb_age <= grace_minutes * 2
             and loop_kind == "continuous"
+            and not hb_fresh
         ):
             return "LOCK_TIMESTAMP_STALE_BUT_PROCESS_ACTIVE"
         return "STALE_ACTIVE_LOCK"

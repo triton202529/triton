@@ -15,6 +15,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from services.command_center_status_coherence import (
+    CONTINUOUS_CYCLE_OVERDUE_MINUTES,
+    CONTINUOUS_INTERVAL_MINUTES,
+    age_minutes as _coherent_age_minutes,
+    authorization_status_text,
+    cycle_deadline_utc,
+    cycle_is_overdue,
+    format_live_permission_display,
+    format_paper_certification_display,
+    parse_lock_timestamp,
+    parse_utc_timestamp,
+    resolve_market_status,
+    resolve_shutdown_presentation,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
 LIVE = ROOT / "data" / "live"
@@ -40,7 +55,6 @@ CAPITAL_PRESERVATION = RESULTS / "capital_preservation_governor.json"
 OVERALL_STATUSES = ("RUNNING", "STOPPED", "DEGRADED", "STALE", "UNKNOWN")
 PAPER_ARM_STATUSES = ("ARMED", "EXPIRED", "MISSING", "INVALID", "UNKNOWN")
 
-CONTINUOUS_CYCLE_OVERDUE_MINUTES = 90.0
 WATCHDOG_OVERDUE_MINUTES = 10.0
 DATA_FRESH_MINUTES = 90.0
 BROKER_FRESH_MINUTES = 120.0
@@ -161,20 +175,13 @@ def classify_open_orders_evidence_freshness(
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    try:
-        s = str(value).strip().replace("Z", "+00:00")
-        if " " in s and "T" not in s:
-            s = s.replace(" ", "T")
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except (TypeError, ValueError):
-        return None
+    """UTC/Z/offset JSON timestamps (heartbeats, expiry, certification)."""
+    return parse_utc_timestamp(value)
+
+
+def _parse_lock_dt(value: Any) -> Optional[datetime]:
+    """Lock started_at/refreshed_at (naive local from loop_lock_utils.ps1)."""
+    return parse_lock_timestamp(value)
 
 
 PAPER_READINESS_EXPLANATORY_COPY = (
@@ -793,19 +800,16 @@ def build_operator_status(
 
     live_blocked = not live_permitted
 
-    # Cycle evidence from continuous lock metadata
+    # Cycle evidence from continuous lock refreshed_at (not started_at ownership time)
     cl_lock = _parse_lock_file(paths["continuous_lock"])
     wd_lock = _parse_lock_file(paths["watchdog_lock"])
     cycle_num = cl_lock.get("cycle")
-    refreshed = _parse_dt(cl_lock.get("refreshed_at") or cl_lock.get("started_at"))
-    cycle_age = _age_minutes(refreshed, now)
-    cycle_overdue = cycle_age is not None and cycle_age > CONTINUOUS_CYCLE_OVERDUE_MINUTES
-
-    next_expected = None
-    if refreshed is not None:
-        from datetime import timedelta
-
-        next_expected = (refreshed + timedelta(minutes=45)).isoformat()
+    refreshed = _parse_lock_dt(cl_lock.get("refreshed_at"))
+    started_lock = _parse_lock_dt(cl_lock.get("started_at"))
+    cycle_age = _coherent_age_minutes(refreshed, now)
+    cycle_overdue = cycle_is_overdue(refreshed, now=now)
+    deadline = cycle_deadline_utc(refreshed)
+    next_expected = deadline.isoformat() if deadline is not None else None
 
     # Alerts
     active_alerts = []
@@ -866,14 +870,22 @@ def build_operator_status(
         open_orders = None
     positions = _csv_row_count(paths["positions"])
 
-    auth_status = str(gov.get("overall_authorization") or gov.get("authorization_status") or "")
+    auth_status = authorization_status_text(
+        gov.get("overall_authorization")
+        if gov.get("overall_authorization") is not None
+        else gov.get("authorization_status")
+    )
     gov_blocked = bool(gov) and auth_status.upper() not in (
         "",
         "AUTHORIZED",
         "GREEN",
         "APPROVED",
         "PASS",
+        "TRUE",
     )
+    # Boolean True overall_authorization is permitted, not a block.
+    if gov.get("overall_authorization") is True:
+        gov_blocked = False
     readiness_status = str(readiness.get("readiness_status") or readiness.get("status") or "")
     exec_ready = readiness_status.upper() in ("READY", "PASS", "GREEN", "AUTHORIZED")
     if readiness and "readiness_status" not in readiness and "status" not in readiness:
@@ -949,17 +961,19 @@ def build_operator_status(
                 else None
             ),
         },
-        "market": {
-            "status": "UNKNOWN",
-            "note": "Market session classification is informational; weekday/session checks live in start scripts.",
-        },
+        "market": resolve_market_status(now=now),
         "cycle": {
             "last_cycle_number": cycle_num,
             "last_completed_at": refreshed.isoformat() if refreshed else None,
             "age_minutes": cycle_age,
             "overdue": cycle_overdue,
             "next_expected_at": next_expected,
+            "interval_minutes": CONTINUOUS_INTERVAL_MINUTES,
+            "overdue_threshold_minutes": CONTINUOUS_CYCLE_OVERDUE_MINUTES,
+            "started_at": started_lock.isoformat() if started_lock else None,
+            "started_at_is_heartbeat": False,
             "evidence_path": str(paths["continuous_lock"]),
+            "evidence_field": "refreshed_at",
         },
         "orders_positions": {
             "open_orders": open_orders,
@@ -1013,7 +1027,22 @@ def build_operator_status(
         runtime_controls_exposed=False,
         live_execution_control_exposed=False,
     )
-    return snap.to_dict()
+    out = snap.to_dict()
+    cert_path = results / "capital_preservation_certification.json"
+    cert_doc = _read_json(cert_path)
+    paper_cert = format_paper_certification_display(cert_doc.get("certification_status"))
+    live_perm = format_live_permission_display(live_permitted=live_permitted)
+    shutdown = resolve_shutdown_presentation(root=root, now=now)
+    out["paper_certification"] = {
+        **paper_cert,
+        "evidence_path": str(cert_path),
+    }
+    out["live_permission"] = live_perm
+    out["shutdown_presentation"] = shutdown
+    # Expired/historical shutdown must never alter overall runtime health.
+    if shutdown.get("affects_current_health") is False:
+        out["shutdown_affects_current_health"] = False
+    return out
 
 
 def build_portfolio_summary(*, root: Optional[Path] = None) -> Dict[str, Any]:

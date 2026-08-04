@@ -68,20 +68,19 @@ def _utc_now() -> datetime:
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    try:
-        s = str(value).strip().replace("Z", "+00:00")
-        if " " in s and "T" not in s:
-            s = s.replace(" ", "T")
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except (TypeError, ValueError):
-        return None
+    """Parse lock timestamps with source-aware naive-local semantics."""
+    from services.command_center_status_coherence import parse_lock_timestamp
+
+    return parse_lock_timestamp(value)
+
+
+def _parse_activity_dt(lock: Dict[str, Any]) -> Optional[datetime]:
+    """Cycle/activity evidence prefers refreshed_at; started_at is ownership only."""
+    from services.command_center_status_coherence import parse_lock_timestamp
+
+    if lock.get("refreshed_at"):
+        return parse_lock_timestamp(lock.get("refreshed_at"))
+    return None
 
 
 def _age_minutes(ts: Optional[datetime], now: Optional[datetime] = None) -> Optional[float]:
@@ -162,7 +161,7 @@ def classify_loop(
     count = len(pids_list)
     lock_exists = bool(lock.get("exists")) and not lock.get("corrupt")
     lock_pid = lock.get("pid") if isinstance(lock.get("pid"), int) else None
-    refreshed = _parse_dt(lock.get("refreshed_at") or lock.get("started_at"))
+    refreshed = _parse_activity_dt(lock)
     age = _age_minutes(refreshed, now)
 
     base = LoopClassification(
@@ -249,8 +248,19 @@ def classify_loop(
         )
         return base
 
+    # Matching owner without refreshed_at: ownership/start age is not a heartbeat.
+    # Do not mark overdue from started_at alone.
     base.state = "HEALTHY_RUNNING"
-    base.explanation = f"{loop} is healthy: one matching process PID {pid}, lock agrees, activity within threshold."
+    if refreshed is None and lock.get("started_at"):
+        base.explanation = (
+            f"{loop} is healthy: one matching process PID {pid}, lock agrees; "
+            "started_at is ownership evidence only (not used as heartbeat)."
+        )
+    else:
+        base.explanation = (
+            f"{loop} is healthy: one matching process PID {pid}, lock agrees, "
+            "activity within threshold."
+        )
     return base
 
 

@@ -2188,9 +2188,12 @@ def load_dashboard_execution_posture() -> DashboardExecutionPosture:
         broker_fresh = False
 
     try:
-        from services.guard_auto import is_market_open_et
+        from services.command_center_status_coherence import resolve_market_status
 
-        market_open = is_market_open_et(datetime.now(timezone.utc))
+        _mkt = resolve_market_status()
+        market_open = (
+            bool(_mkt.get("market_open")) if _mkt.get("market_open") is not None else False
+        )
     except Exception:
         market_open = False
 
@@ -2301,29 +2304,46 @@ def render_sidebar_execution_status(
     else:
         st.info(f"ℹ️ {label}")
 
-    st.caption("Live mode: **BLOCKED** (paper-only runtime)")
+    live_perm = str(summary.get("live_permission_display") or "LIVE:BLOCKED")
+    st.caption(f"Live permission: **{live_perm}** (paper-only runtime)")
     rph = str(summary.get("runtime_pipeline_health") or "UNKNOWN")
+    market_status = str(summary.get("market_status") or "UNKNOWN")
+    market_as_of = summary.get("market_as_of") or "n/a"
+    market_source = summary.get("market_source") or "guard_auto.is_market_open_et"
     st.caption(
         f"Pipeline health: **{rph}** · "
         f"Data freshness: **{summary.get('data_freshness', 'UNKNOWN')}** · "
-        f"Market: **{summary.get('market_status', 'UNKNOWN')}**"
+        f"Market: **{market_status}**"
     )
+    st.caption(f"Market evidence: source=`{market_source}` · as_of={market_as_of}")
+    paper_cert = str(summary.get("certification_status") or "PAPER:UNKNOWN")
     st.caption(
         f"Readiness: **{posture.readiness_status}** · "
-        f"Certification: **{summary.get('certification_status', 'UNKNOWN')}**"
+        f"Paper certification: **{paper_cert}** · "
+        f"Live permission: **{live_perm}**"
     )
+    # Evaluation-gap artifact is informational only; never override paper certification.
     try:
+        from services.command_center_status_coherence import (
+            PAPER_CERTIFICATION_STATUSES,
+            format_paper_certification_display,
+        )
         from services.certification_evaluation_gap_plan import build_certification_gap_summary
 
-        cert_gap = build_certification_gap_summary()
-        if cert_gap.get("certification_status") == "NOT_CERTIFIED":
-            st.caption(
-                f"Evaluation gap: **{cert_gap.get('evaluation_gap_points')} pts** "
-                f"(score {cert_gap.get('evaluation_score')} vs threshold "
-                f"{cert_gap.get('evaluation_threshold')}) · "
-                f"primary: **{cert_gap.get('primary_gap')}** · "
-                f"paper entry blocked by **paper arm**, not certification"
-            )
+        raw_cert = str(
+            summary.get("certification_raw_status") or posture.certification_status or ""
+        )
+        paper_ok = format_paper_certification_display(raw_cert).get("paper_certified")
+        if not paper_ok and raw_cert not in PAPER_CERTIFICATION_STATUSES:
+            cert_gap = build_certification_gap_summary()
+            if cert_gap.get("certification_status") == "NOT_CERTIFIED":
+                st.caption(
+                    f"Evaluation gap (informational): **{cert_gap.get('evaluation_gap_points')} pts** "
+                    f"(score {cert_gap.get('evaluation_score')} vs threshold "
+                    f"{cert_gap.get('evaluation_threshold')}) · "
+                    f"primary: **{cert_gap.get('primary_gap')}** · "
+                    f"does not override paper certification display above"
+                )
     except Exception:
         pass
     st.caption(
@@ -24465,7 +24485,9 @@ def _render_cc_operations_broker_order_evidence() -> None:
         )
         st.caption(str(broker.get("meaning") or ""))
     with c6:
-        st.metric("Market status", (status.get("market") or {}).get("status") or "UNKNOWN")
+        market = status.get("market") or {}
+        st.metric("Market status", market.get("status") or "UNKNOWN")
+        st.caption(f"source={market.get('source') or 'n/a'} · as_of={market.get('as_of') or 'n/a'}")
     with c7:
         st.metric(
             "Last cycle",
@@ -24476,9 +24498,39 @@ def _render_cc_operations_broker_order_evidence() -> None:
             ),
         )
         st.caption(cycle.get("last_completed_at") or "No cycle timestamp evidenced")
+        if cycle.get("overdue"):
+            st.caption("Cycle overdue: yes (past interval + grace)")
+        else:
+            st.caption("Cycle overdue: no")
     with c8:
         st.metric("Next expected cycle", "See caption")
         st.caption(cycle.get("next_expected_at") or "Unavailable")
+
+    paper_cert = status.get("paper_certification") or {}
+    live_perm = status.get("live_permission") or {}
+    shutdown = status.get("shutdown_presentation") or {}
+    c_cert1, c_cert2, c_shut = st.columns(3)
+    with c_cert1:
+        st.metric(
+            "Paper certification",
+            paper_cert.get("display_status") or "PAPER:UNKNOWN",
+        )
+        st.caption(paper_cert.get("evidence_path") or "")
+    with c_cert2:
+        st.metric(
+            "Live permission",
+            live_perm.get("display_status")
+            or ("LIVE:BLOCKED" if live.get("blocked") else "LIVE:PERMITTED"),
+        )
+        st.caption("Independent of paper certification")
+    with c_shut:
+        st.metric(
+            "Shutdown request",
+            shutdown.get("display_status") or "NONE",
+        )
+        st.caption(shutdown.get("presentation") or "No shutdown presentation")
+        if shutdown.get("historical") and not shutdown.get("active"):
+            st.caption("Historical/expired — does not affect current runtime health")
 
     c9, c10, c11, c12 = st.columns(4)
     with c9:

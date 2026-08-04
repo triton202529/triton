@@ -215,12 +215,18 @@ def _portfolio_history_ok() -> bool:
 
 
 def _is_market_open() -> bool:
-    try:
-        from services.guard_auto import is_market_open_et
+    from services.command_center_status_coherence import resolve_market_status
 
-        return bool(is_market_open_et(_utc_now()))
-    except Exception:
+    market = resolve_market_status(now=_utc_now())
+    if market.get("market_open") is None:
         return False
+    return bool(market.get("market_open"))
+
+
+def _resolve_market_for_summary(*, now: Optional[datetime] = None) -> Dict[str, Any]:
+    from services.command_center_status_coherence import resolve_market_status
+
+    return resolve_market_status(now=now or _utc_now())
 
 
 def classify_runtime_pipeline_health(
@@ -285,14 +291,10 @@ def classify_runtime_pipeline_health(
 
 
 def _normalize_certification_status(raw: str) -> str:
-    status = str(raw or "").strip()
-    if status in PAPER_CERTIFICATION_STATUSES:
-        return "CERTIFIED"
-    if status == "NOT_CERTIFIED":
-        return "NOT_CERTIFIED"
-    if status:
-        return "REVIEW"
-    return "NOT_CERTIFIED"
+    """Qualified PAPER certification label — never implies LIVE permission."""
+    from services.command_center_status_coherence import format_paper_certification_display
+
+    return str(format_paper_certification_display(raw).get("display_status") or "PAPER:UNKNOWN")
 
 
 def derive_execution_block_reasons(
@@ -310,9 +312,19 @@ def derive_execution_block_reasons(
         reasons.append("MARKET_CLOSED")
     if not gate_bits.get("CONFIRM", False):
         reasons.append("CONFIRM_REQUIRED")
-    cert_norm = _normalize_certification_status(certification_status)
-    if cert_norm != "CERTIFIED":
-        reasons.append("NOT_CERTIFIED")
+    from services.command_center_status_coherence import (
+        PAPER_CERTIFICATION_STATUSES as _PAPER_CERTS,
+        format_paper_certification_display,
+    )
+
+    paper_cert = format_paper_certification_display(certification_status)
+    # Valid PAPER certification is not a failed certification; live block is separate.
+    if not paper_cert.get("paper_certified"):
+        raw = str(certification_status or "").strip()
+        if raw == "NOT_CERTIFIED" or not raw:
+            reasons.append("NOT_CERTIFIED")
+        elif raw not in _PAPER_CERTS:
+            reasons.append("NOT_CERTIFIED")
     if not live_permitted:
         pass  # live_blocked tracked separately; paper mode expects live blocked
     if runtime_pipeline_health in ("DEGRADED", "FAIL"):
@@ -456,9 +468,18 @@ def build_dashboard_health_classification(
         )
         readiness_status = str(getattr(posture, "readiness_status", "") or readiness_status)
 
-    market_open = _is_market_open()
-    if posture is not None:
-        market_open = bool(getattr(posture, "market_open", market_open))
+    market = _resolve_market_for_summary()
+    market_open = (
+        bool(market.get("market_open")) if market.get("market_open") is not None else False
+    )
+    if posture is not None and getattr(posture, "market_open", None) is not None:
+        # Posture may override open/closed for fixture tests, but keep shared source metadata.
+        market_open = bool(getattr(posture, "market_open"))
+        market = {
+            **market,
+            "status": "OPEN" if market_open else "CLOSED",
+            "market_open": market_open,
+        }
 
     gate_bits = dict(live_gate_bits or {})
     data_freshness = classify_data_freshness(
@@ -472,6 +493,16 @@ def build_dashboard_health_classification(
         market_open=market_open,
     )
     certification_status = _normalize_certification_status(certification_raw)
+    live_permission = None
+    try:
+        from services.command_center_status_coherence import format_live_permission_display
+
+        live_permission = format_live_permission_display(live_permitted=live_permitted)
+    except Exception:
+        live_permission = {
+            "display_status": "LIVE:BLOCKED" if not live_permitted else "LIVE:PERMITTED",
+            "live_execution_blocked": not live_permitted,
+        }
     execution_block_reasons = derive_execution_block_reasons(
         market_open=market_open,
         gate_bits=gate_bits,
@@ -500,9 +531,13 @@ def build_dashboard_health_classification(
         "execution_status": execution_status,
         "execution_block_reasons": execution_block_reasons,
         "certification_status": certification_status,
-        "market_status": "OPEN" if market_open else "CLOSED",
+        "certification_raw_status": certification_raw,
+        "market_status": market.get("status") or ("OPEN" if market_open else "CLOSED"),
+        "market_source": market.get("source"),
+        "market_as_of": market.get("as_of"),
         "paper_authorized": paper_permitted,
         "live_blocked": not live_permitted,
+        "live_permission_display": (live_permission or {}).get("display_status"),
         "readiness_status": readiness_status,
         "pipeline_integrity_locked": pipeline_locked,
         "pipeline_integrity_lock_reason": pipeline_lock_reason,
@@ -674,7 +709,12 @@ def build_dashboard_guard_summary(
         ),
         "live_mode": "BLOCKED",
         "market_status": health_cls.get("market_status"),
+        "market_source": health_cls.get("market_source"),
+        "market_as_of": health_cls.get("market_as_of"),
         "certification_status": health_cls.get("certification_status"),
+        "certification_raw_status": health_cls.get("certification_raw_status"),
+        "live_permission_display": health_cls.get("live_permission_display")
+        or ("LIVE:BLOCKED" if not live_permitted else "LIVE:PERMITTED"),
         "open_orders": open_orders,
         "positions_count": int(health_cls.get("positions_count") or 0),
         "positions": list(health_cls.get("positions") or []),
