@@ -759,7 +759,102 @@ def render_operations_page() -> None:
                 st.write(f"Recommended safe action: {item.get('recommended_action')}")
 
     st.markdown("---")
+    _render_runtime_recovery_guidance()
+
+    st.markdown("---")
     _render_start_controls()
+
+
+def _render_runtime_recovery_guidance() -> None:
+    """DO-007 read-only advisory section. Never submits Start/Stop/Restart."""
+    from services.operator_runtime_recovery_guidance import build_runtime_recovery_guidance
+
+    st.subheader("Runtime Recovery Guidance")
+    st.caption(
+        "Recovery guidance is advisory only. It does not start, stop, restart, terminate, "
+        "repair, authorize, or modify TRITON."
+    )
+    # Fresh read-only evaluation on each render; no auto-submit, no preflight, no tokens.
+    guidance = build_runtime_recovery_guidance()
+    sev = str(guidance.get("severity") or "INFO")
+    overall = str(guidance.get("runtime_overall_status") or "UNKNOWN")
+    if sev == "CRITICAL":
+        st.error(f"**{overall}** · severity={sev}")
+    elif sev == "HIGH":
+        st.warning(f"**{overall}** · severity={sev}")
+    else:
+        st.info(f"**{overall}** · severity={sev}")
+
+    st.write(guidance.get("operator_message") or "")
+    targets = guidance.get("affected_targets") or []
+    st.caption(
+        f"Affected targets: {', '.join(targets) if targets else 'none'} · "
+        f"Recommended safe action: **{guidance.get('safe_next_action')}** · "
+        f"Eligible protected control (advisory): "
+        f"**{guidance.get('eligible_protected_control') or 'none'}**"
+    )
+    st.caption(
+        f"Manual investigation required: **{guidance.get('manual_investigation_required')}** · "
+        f"Escalation required: **{guidance.get('escalation_required')}** · "
+        f"Confidence: {guidance.get('confidence')}"
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.caption(
+            f"Live execution blocked: **{guidance.get('live_execution_blocked')}** "
+            "(required safe state; never enable live from this page)"
+        )
+    with c2:
+        st.caption(
+            f"Paper authorization: **{guidance.get('paper_arm_status')}** "
+            "(separate prerequisite; guidance does not create or extend authorization)"
+        )
+
+    blockers = guidance.get("blockers") or []
+    warnings = [
+        w
+        for w in (guidance.get("warnings") or [])
+        if w not in ("LIVE_EXECUTION_BLOCKED (required safe state)",)
+    ]
+    if blockers:
+        st.caption("Blockers: " + ", ".join(str(b) for b in blockers))
+    if warnings:
+        st.caption("Warnings: " + ", ".join(str(w) for w in warnings[:8]))
+
+    evidence = guidance.get("evidence_summary") or []
+    with st.expander("Recovery evidence summary", expanded=False):
+        for line in evidence:
+            st.write(f"- {line}")
+        if guidance.get("restart_stage"):
+            st.caption(
+                f"Restart stage (Stop and Start are separate): stop_side="
+                f"{guidance.get('restart_stop_stage')} · start_side="
+                f"{guidance.get('restart_start_stage')} · stage="
+                f"{guidance.get('restart_stage')}"
+            )
+        st.caption(
+            "Guidance does not promise successful recovery, immediate restart, "
+            "forced termination, lock repair, paper authorization, or live enablement."
+        )
+        st.json(
+            {
+                "guidance_id": guidance.get("guidance_id"),
+                "guidance_id_is_authority": False,
+                "advisory_only": True,
+                "execution_attempted": False,
+                "fresh_start_eligibility_decision": guidance.get(
+                    "fresh_start_eligibility_decision"
+                ),
+                "fresh_stop_eligibility_decision": guidance.get("fresh_stop_eligibility_decision"),
+                "fresh_restart_eligibility_decision": guidance.get(
+                    "fresh_restart_eligibility_decision"
+                ),
+            }
+        )
+    st.info(
+        "Use the protected Start, Stop, or Restart controls below only as separate explicit "
+        "operator actions. This guidance section never submits those controls."
+    )
 
 
 def render_activity_page() -> None:
