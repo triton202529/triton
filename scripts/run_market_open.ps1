@@ -112,9 +112,13 @@ try {
     Write-Host ("LogFile  : " + $logFile)
     Write-Host ("StartedAt: " + (Get-Date).ToString("s"))
 
-    # ── 0. Paper session ARM readiness (bounded TTL; paper only) ─────────
-    Run-Step -Label "0. PAPER SESSION ARM POLICY" `
-             -PyArgs @("-m","services.paper_session_arm_policy")
+    # ── 0. Paper ARM validation (read-only; never create/renew/extend) ───
+    # Explicit operator arm is required beforehand:
+    #   python -m services.set_paper_arm_confirm --ttl <minutes>
+    # Invalid/expired/missing/malformed arm fails closed and aborts before
+    # order-capable stages below.
+    Run-Step -Label "0. PAPER ARM VALIDATE (READ-ONLY)" `
+             -PyArgs @("-m","services.paper_session_arm_policy","--validate-only","--json")
 
     # ── A. Poll order status (initial) ───────────────────────────────────
     Run-Step -Label "A. POLL ORDER STATUS (initial)" `

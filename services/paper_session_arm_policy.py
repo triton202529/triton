@@ -1,8 +1,14 @@
 """
 paper_session_arm_policy.py
-Phase 196U — Bounded paper-session ARM auto-renewal (paper only).
+Phase 196U — Paper-session ARM validation (paper only; read-only).
 
-May write data/live/paper_arm_confirm.json only.
+Validates data/live/paper_arm_confirm.json for runtime readiness.
+Does NOT create, renew, extend, or replace the paper arm.
+
+Only the explicit operator CLI may mutate the arm:
+  python -m services.set_paper_arm_confirm --ttl <minutes>
+  python -m services.set_paper_arm_confirm --ttl <minutes> --no-execute
+
 Does not write live_confirm, call execute_trades, or submit orders.
 """
 
@@ -24,8 +30,9 @@ LIVE_CONFIRM_PATH = ROOT / "data" / "live" / "live_confirm.json"
 _DEFAULT_POLICY: Dict[str, Any] = {
     "enabled": True,
     "mode": "paper_only",
-    "auto_arm_before_market_open": True,
-    "auto_renew_during_market_open": True,
+    # Auto-arm / auto-renew are permanently disabled. Kept for config compatibility.
+    "auto_arm_before_market_open": False,
+    "auto_renew_during_market_open": False,
     "pre_market_arm_minutes": 45,
     "post_market_expiry_minutes": 60,
     "renew_if_minutes_remaining_below": 90,
@@ -36,6 +43,7 @@ _DEFAULT_POLICY: Dict[str, Any] = {
     "require_auto_paper_entries_env": True,
     "require_broker_mode_paper": True,
     "write_audit": True,
+    "runtime_may_mutate_arm": False,
 }
 
 
@@ -63,6 +71,10 @@ def load_policy(path: Optional[Path] = None) -> Dict[str, Any]:
         out = dict(_DEFAULT_POLICY)
         if isinstance(doc, dict):
             out.update(doc)
+        # Hard override: runtime policy must never mutate the arm.
+        out["auto_arm_before_market_open"] = False
+        out["auto_renew_during_market_open"] = False
+        out["runtime_may_mutate_arm"] = False
         return out
     except Exception:
         return dict(_DEFAULT_POLICY)
@@ -102,7 +114,8 @@ def is_within_session_arm_window(
     policy: Dict[str, Any], now_utc: Optional[datetime] = None
 ) -> Tuple[bool, str]:
     """
-    Arm/renew permitted from (9:30 - pre_market) through (16:00 + post_market grace).
+    Session window diagnostics only (does not authorize arm mutation).
+    Window spans (9:30 - pre_market) through (16:00 + post_market grace).
     """
     now = now_utc or _utc_now()
     now_et = _et_now(now)
@@ -189,6 +202,7 @@ def _minutes_remaining() -> Optional[float]:
 
 
 def _bounded_ttl_minutes(policy: Dict[str, Any], *, minutes_remaining: Optional[float]) -> int:
+    """Informational TTL bound for operator CLI guidance only (never applied by runtime)."""
     default_ttl = int(policy.get("default_ttl_minutes", 600) or 600)
     max_ttl = int(policy.get("max_ttl_minutes", 600) or 600)
     ttl = min(default_ttl, max_ttl)
@@ -213,13 +227,20 @@ def run_paper_session_arm_policy(
     json_mode: bool = False,
     policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Evaluate session window and renew paper_arm_confirm when appropriate."""
+    """
+    Read-only arm validation for runtime / market-open readiness.
+
+    Never creates, renews, extends, or replaces paper_arm_confirm.json.
+    dry_run is accepted for CLI compatibility and has no write side effects.
+    """
+    del dry_run  # no mutation path remains
     policy = policy or load_policy()
     now = _utc_now()
     result: Dict[str, Any] = {
         "ok": True,
         "timestamp": _utc_iso(),
-        "dry_run": dry_run,
+        "dry_run": True,
+        "validate_only": True,
         "policy_enabled": bool(policy.get("enabled")),
         "mode": str(policy.get("mode") or "paper_only"),
         "action": "none",
@@ -227,7 +248,11 @@ def run_paper_session_arm_policy(
         "live_confirm_written": False,
         "live_execution": False,
         "ttl_minutes": None,
-        "notes": [],
+        "runtime_may_mutate_arm": False,
+        "notes": [
+            "Read-only validation: runtime will not create or renew paper_arm_confirm.json.",
+            "Explicit operator CLI required to arm: python -m services.set_paper_arm_confirm --ttl <minutes>",
+        ],
     }
 
     if not policy.get("enabled"):
@@ -261,13 +286,12 @@ def run_paper_session_arm_policy(
     result["paper_env_source"] = env_flags.get("env_source")
     result["supervisor_runtime_active"] = env_flags.get("supervisor_runtime_active")
     if not env_ok:
-        result["action"] = "skipped_env"
+        # Env is advisory for validation; arm validity remains the hard gate below.
         result["notes"].append(env_reason)
         if env_flags.get("supervisor_runtime_active"):
             result["notes"].append(
-                "continuous loop has paper env; shell env unset — policy skipped in this process"
+                "continuous loop has paper env; shell env unset — noted for diagnostics"
             )
-        return result
 
     if policy.get("require_broker_mode_paper"):
         broker_ok, broker_reason = _broker_mode_paper()
@@ -279,13 +303,20 @@ def run_paper_session_arm_policy(
         result["broker_mode"] = broker_reason
 
     from services.paper_arm_status import classify_paper_arm_confirm_status
+    from services.arm_mode import read_paper_arm_confirm
 
     arm_status = classify_paper_arm_confirm_status()
     minutes_left = _minutes_remaining()
+    doc = read_paper_arm_confirm() or {}
     result["paper_arm_confirm_status_before"] = arm_status
+    result["paper_arm_confirm_status_after"] = arm_status
     result["minutes_remaining_before"] = (
         round(minutes_left, 1) if minutes_left is not None else None
     )
+    result["minutes_remaining_after"] = result["minutes_remaining_before"]
+    result["arm_created_at"] = doc.get("timestamp")
+    result["arm_expires_at"] = doc.get("expires_at")
+    result["arm_allow_execute"] = doc.get("allow_execute")
     result["market_open"] = is_market_open_et(now)
     result["near_market_open"] = is_near_market_open_et(
         now, pre_market_minutes=int(policy.get("pre_market_arm_minutes", 45) or 45)
@@ -294,72 +325,49 @@ def run_paper_session_arm_policy(
     in_window, window_reason = is_within_session_arm_window(policy, now)
     result["session_arm_window"] = in_window
     result["session_window_reason"] = window_reason
-
-    if not in_window:
-        result["action"] = "skipped_outside_session_window"
-        result["notes"].append(f"window={window_reason}")
-        return result
-
-    renew_below = int(policy.get("renew_if_minutes_remaining_below", 90) or 90)
-    auto_pre = bool(policy.get("auto_arm_before_market_open"))
-    auto_renew = bool(policy.get("auto_renew_during_market_open"))
-
-    needs_fresh_arm = arm_status in ("MISSING", "EXPIRED", "INVALID")
-    needs_renew = arm_status == "VALID" and minutes_left is not None and minutes_left < renew_below
-
-    should_write = False
-    if needs_fresh_arm:
-        if result["near_market_open"] and auto_pre:
-            should_write = True
-        elif result["market_open"] and auto_renew:
-            should_write = True
-        elif window_reason == "post_market_grace" and auto_renew:
-            should_write = True
-    elif needs_renew and auto_renew:
-        should_write = True
-
-    if not should_write:
-        if arm_status == "VALID":
-            result["action"] = "skipped_arm_fresh"
-            result["notes"].append(
-                f"arm VALID with {minutes_left} min remaining (renew below {renew_below})"
-            )
-        else:
-            result["action"] = "skipped_no_renew_trigger"
-        return result
-
-    ttl = _bounded_ttl_minutes(policy, minutes_remaining=minutes_left)
-    result["ttl_minutes"] = ttl
+    result["ttl_minutes"] = int(policy.get("max_ttl_minutes", 600) or 600)
     result["never_expiring_arm"] = False
-
-    if dry_run:
-        result["action"] = "dry_run_would_renew"
-        result["notes"].append(f"would write paper_arm_confirm ttl={ttl}m")
-        return result
-
-    from services.set_paper_arm_confirm import write_confirm
-
-    path = write_confirm(ttl, allow_execute=True)
-    result["paper_arm_confirm_written"] = True
-    result["paper_arm_confirm_path"] = str(path.relative_to(ROOT)).replace("\\", "/")
-    result["action"] = "renewed" if arm_status == "VALID" else "armed"
-    result["paper_arm_confirm_status_after"] = classify_paper_arm_confirm_status()
-    result["minutes_remaining_after"] = _minutes_remaining()
 
     if LIVE_CONFIRM_PATH.is_file():
         result["notes"].append("live_confirm.json exists unchanged (not written by policy)")
 
+    if arm_status == "VALID":
+        result["action"] = "validated_arm_ok"
+        result["ok"] = True
+        result["notes"].append(
+            f"arm VALID with fixed expires_at={doc.get('expires_at')} "
+            f"({minutes_left} min remaining); expiry not extended"
+        )
+        return result
+
+    result["ok"] = False
+    result["action"] = f"blocked_arm_{str(arm_status).lower()}"
+    result["notes"].append(
+        f"arm status={arm_status}; PAPER order-authority stages must fail closed. "
+        "Create or renew only via: python -m services.set_paper_arm_confirm --ttl <minutes>"
+    )
     return result
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="Paper session ARM auto-renewal (paper only)")
+    ap = argparse.ArgumentParser(
+        description="Paper session ARM validation (read-only; does not renew arm)"
+    )
     ap.add_argument("--json", action="store_true", help="Emit JSON result on stdout only")
-    ap.add_argument("--dry-run", action="store_true", help="Evaluate without writing confirm")
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Accepted for compatibility; validation is always non-mutating",
+    )
+    ap.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Explicit read-only validation (default behavior)",
+    )
     args = ap.parse_args(argv)
 
     policy = load_policy()
-    result = run_paper_session_arm_policy(dry_run=args.dry_run, json_mode=args.json, policy=policy)
+    result = run_paper_session_arm_policy(dry_run=True, json_mode=args.json, policy=policy)
 
     if policy.get("write_audit", True):
         audit = dict(result)
@@ -375,7 +383,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "timestamp": result.get("timestamp"),
                 "action": result.get("action"),
                 "ttl_minutes": result.get("ttl_minutes"),
-                "written": result.get("paper_arm_confirm_written"),
+                "written": False,
             }
         )
         audit["history"] = history[-50:]
