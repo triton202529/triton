@@ -110,6 +110,22 @@ def _render_start_controls() -> None:
     if "restart_in_progress" not in st.session_state:
         st.session_state["restart_in_progress"] = False
 
+    # Durable controller guards/transactions are authoritative; session flags are presentation.
+    # Always attempt stale-guard reconciliation (no-op when no expired guard exists).
+    try:
+        from services.operator_runtime_controller import reconcile_stale_start_transaction
+
+        recon = reconcile_stale_start_transaction()
+        if recon.get("reconciled"):
+            st.session_state["start_in_progress"] = False
+            st.session_state["start_confirm_pending"] = False
+            eligibility = start_eligibility()
+    except Exception:
+        pass
+    if st.session_state.get("start_in_progress") and not eligibility.get("guard_active"):
+        # Presentation latch without an active authoritative transaction.
+        st.session_state["start_in_progress"] = False
+
     restart_busy = bool(
         st.session_state.get("restart_in_progress")
         or st.session_state.get("restart_confirm_pending")
@@ -123,12 +139,13 @@ def _render_start_controls() -> None:
         or eligibility.get("decision") == "START_REFUSED_SHUTDOWN_IN_PROGRESS"
         or restart_busy
     )
-    start_busy = bool(
-        st.session_state.get("start_in_progress")
-        or st.session_state.get("start_confirm_pending")
-        or eligibility.get("guard_active")
-        or restart_busy
+    # Confirmation-pending must NOT be treated as "in progress" for Start column rendering,
+    # or Confirm Start becomes unreachable after the first click.
+    start_confirm_open = bool(st.session_state.get("start_confirm_pending"))
+    start_executing = bool(
+        st.session_state.get("start_in_progress") or eligibility.get("guard_active")
     )
+    start_busy = bool(start_executing or start_confirm_open or restart_busy)
 
     last = st.session_state.get("start_last_result")
     if last:
@@ -198,14 +215,14 @@ def _render_start_controls() -> None:
                 if restart_busy
                 else "Start unavailable while Stop is active or unresolved."
             )
-        elif start_busy:
+        elif start_executing:
             st.button("Start TRITON", key="start_triton_disabled_busy", disabled=True)
             st.caption("Start action in progress…")
-        elif not eligibility.get("start_button_enabled"):
+        elif not eligibility.get("start_button_enabled") and not start_confirm_open:
             st.button("Start TRITON", key="start_triton_disabled_unsafe", disabled=True)
             st.caption("Start disabled: unsafe, ambiguous, or not eligible.")
         else:
-            if not st.session_state.get("start_confirm_pending"):
+            if not start_confirm_open:
                 if st.button("Start TRITON", key="start_triton_request", type="primary"):
                     import uuid
 
@@ -213,26 +230,47 @@ def _render_start_controls() -> None:
                     st.session_state["start_idempotency_key"] = str(uuid.uuid4())
                     st.rerun()
             else:
+                targets = eligibility.get("components_to_start") or []
+                preserved = eligibility.get("preserved_components") or []
                 st.warning(
                     "This starts TRITON’s local watchdog and continuous runtime in its existing "
                     "paper-only configuration. Live execution will remain blocked. "
                     "This does **not** create or extend paper-arm authorization."
                 )
+                if targets or preserved:
+                    st.caption(
+                        f"Will start: {targets or 'none'} · Will preserve: {preserved or 'none'}"
+                    )
                 conf_a, conf_b = st.columns(2)
                 with conf_a:
                     if st.button("Confirm Start", key="start_triton_confirm", type="primary"):
                         st.session_state["start_in_progress"] = True
                         st.session_state["start_confirm_pending"] = False
-                        with st.spinner("Starting and validating TRITON…"):
-                            result = execute_start_triton(
-                                action=ACTION_START,
-                                idempotency_key=st.session_state.get("start_idempotency_key"),
-                                source="operator_console",
-                                operator_context={"ui": "operations"},
-                            )
-                        st.session_state["start_last_result"] = result
-                        st.session_state["start_in_progress"] = False
-                        st.session_state["start_idempotency_key"] = None
+                        result = {
+                            "result": "START_FAILED",
+                            "safe_message": "Start did not complete a terminal controller result.",
+                        }
+                        try:
+                            with st.spinner("Starting and validating TRITON…"):
+                                result = execute_start_triton(
+                                    action=ACTION_START,
+                                    idempotency_key=st.session_state.get("start_idempotency_key"),
+                                    source="operator_console",
+                                    operator_context={"ui": "operations"},
+                                )
+                        except Exception as exc:
+                            result = {
+                                "result": "START_FAILED",
+                                "error_code": "UI_START_EXCEPTION",
+                                "safe_message": (
+                                    "Start failed in the operator console before a durable "
+                                    f"controller result was recorded ({type(exc).__name__})."
+                                ),
+                            }
+                        finally:
+                            st.session_state["start_last_result"] = result
+                            st.session_state["start_in_progress"] = False
+                            st.session_state["start_idempotency_key"] = None
                         st.rerun()
                 with conf_b:
                     if st.button("Cancel", key="start_triton_cancel"):
@@ -454,19 +492,34 @@ def _render_stop_control_column(
         ):
             st.session_state["stop_in_progress"] = True
             st.session_state["stop_confirm_pending"] = False
-            with st.spinner("Requesting cooperative shutdown and validating…"):
-                result = execute_stop_triton(
-                    action=ACTION_STOP,
-                    confirmation_phrase=phrase,
-                    confirmation_checked=True,
-                    preflight_token=st.session_state.get("stop_preflight_token"),
-                    request_nonce=st.session_state.get("stop_request_nonce"),
-                    source="operator_console",
-                )
-            st.session_state["stop_last_result"] = result
-            st.session_state["stop_in_progress"] = False
-            st.session_state["stop_preflight_token"] = None
-            st.session_state["stop_request_nonce"] = None
+            result = {
+                "result": "STOP_FAILED",
+                "safe_message": "Stop did not complete a terminal controller result.",
+            }
+            try:
+                with st.spinner("Requesting cooperative shutdown and validating…"):
+                    result = execute_stop_triton(
+                        action=ACTION_STOP,
+                        confirmation_phrase=phrase,
+                        confirmation_checked=True,
+                        preflight_token=st.session_state.get("stop_preflight_token"),
+                        request_nonce=st.session_state.get("stop_request_nonce"),
+                        source="operator_console",
+                    )
+            except Exception as exc:
+                result = {
+                    "result": "STOP_FAILED",
+                    "error_code": "UI_STOP_EXCEPTION",
+                    "safe_message": (
+                        "Stop failed in the operator console before a durable "
+                        f"controller result was recorded ({type(exc).__name__})."
+                    ),
+                }
+            finally:
+                st.session_state["stop_last_result"] = result
+                st.session_state["stop_in_progress"] = False
+                st.session_state["stop_preflight_token"] = None
+                st.session_state["stop_request_nonce"] = None
             st.rerun()
     with conf_b:
         if st.button("Cancel", key="stop_triton_cancel"):
@@ -574,19 +627,34 @@ def _render_restart_control_column(
         ):
             st.session_state["restart_in_progress"] = True
             st.session_state["restart_confirm_pending"] = False
-            with st.spinner("Orchestrating cooperative Stop then fresh Start…"):
-                result = execute_restart_triton(
-                    action=ACTION_RESTART,
-                    confirmation_phrase=phrase,
-                    confirmation_checked=True,
-                    preflight_token=st.session_state.get("restart_preflight_token"),
-                    request_nonce=st.session_state.get("restart_request_nonce"),
-                    source="operator_console",
-                )
-            st.session_state["restart_last_result"] = result
-            st.session_state["restart_in_progress"] = False
-            st.session_state["restart_preflight_token"] = None
-            st.session_state["restart_request_nonce"] = None
+            result = {
+                "result": "RESTART_FAILED",
+                "safe_message": "Restart did not complete a terminal controller result.",
+            }
+            try:
+                with st.spinner("Orchestrating cooperative Stop then fresh Start…"):
+                    result = execute_restart_triton(
+                        action=ACTION_RESTART,
+                        confirmation_phrase=phrase,
+                        confirmation_checked=True,
+                        preflight_token=st.session_state.get("restart_preflight_token"),
+                        request_nonce=st.session_state.get("restart_request_nonce"),
+                        source="operator_console",
+                    )
+            except Exception as exc:
+                result = {
+                    "result": "RESTART_FAILED",
+                    "error_code": "UI_RESTART_EXCEPTION",
+                    "safe_message": (
+                        "Restart failed in the operator console before a durable "
+                        f"controller result was recorded ({type(exc).__name__})."
+                    ),
+                }
+            finally:
+                st.session_state["restart_last_result"] = result
+                st.session_state["restart_in_progress"] = False
+                st.session_state["restart_preflight_token"] = None
+                st.session_state["restart_request_nonce"] = None
             st.rerun()
     with conf_b:
         if st.button("Cancel", key="restart_triton_cancel"):

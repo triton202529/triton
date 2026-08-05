@@ -1024,7 +1024,8 @@ def test_52_frontend_cannot_supply_environment_values():
 
 
 def test_53_start_refuses_during_active_shutdown(tmp_path):
-    _write_fixture(tmp_path)
+    # Keep a verified process present so reconcile cannot mark the request complete.
+    _write_fixture(tmp_path, cont_pids=[101], cont_lock_pid=101, write_wd_lock=False)
     live = tmp_path / "data" / "live"
     future = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
     atomic_write_json(

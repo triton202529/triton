@@ -541,36 +541,17 @@ def _consume_restart_token(
 
 
 def _identity_fingerprint(classifications: Dict[str, Any], targets: List[str]) -> Dict[str, Any]:
-    """Restart identity: DO-005 fingerprint plus immutable process/lock creation time."""
-    base = _stop_identity_fingerprint(classifications, targets)
-    for c, info in base.items():
-        loop = classifications.get(c) or {}
-        evidence = loop.get("evidence") if isinstance(loop.get("evidence"), dict) else {}
-        lock = evidence.get("lock") if isinstance(evidence.get("lock"), dict) else {}
-        # Process/lock creation time is distinct from lock_pid identity and command fingerprint.
-        info["process_creation_time"] = lock.get("started_at") or loop.get("lock_refreshed_at")
-    return base
+    """Restart identity uses the same stable fingerprint as protected Stop."""
+    return _stop_identity_fingerprint(classifications, targets)
 
 
 def _identities_match(
     expected: Dict[str, Any], current: Dict[str, Any], targets: List[str]
 ) -> bool:
-    for c in targets or expected.keys():
-        e = expected.get(c) or {}
-        cur = current.get(c) or {}
-        if list(e.get("pids") or []) != list(cur.get("pids") or []):
-            return False
-        if e.get("lock_pid") != cur.get("lock_pid"):
-            return False
-        if e.get("command_fingerprint") != cur.get("command_fingerprint"):
-            return False
-        if e.get("process_creation_time") and cur.get("process_creation_time"):
-            if e.get("process_creation_time") != cur.get("process_creation_time"):
-                return False
-        if e.get("lock_refreshed_at") and cur.get("lock_refreshed_at"):
-            if e.get("lock_refreshed_at") != cur.get("lock_refreshed_at"):
-                return False
-    return True
+    """Stable identity only — heartbeat/lock_refreshed_at must not refuse Restart."""
+    from services.operator_stop_action import _identities_match as _stop_match
+
+    return _stop_match(expected, current, list(targets or expected.keys()))
 
 
 def _verify_stop_postconditions(

@@ -269,6 +269,74 @@ def release_start_guard(
             pass
 
 
+def reconcile_stale_start_transaction(
+    *,
+    root: Optional[Path] = None,
+    audit_path: Optional[Path] = None,
+    guard_path: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """
+    Supported recovery when a Start guard has expired and no worker remains.
+
+    Writes an audited terminal transition and releases the guard via the controller.
+    Does not delete audit history. Does not touch runtime loop locks.
+    """
+    root = Path(root) if root is not None else ROOT
+    guard_path = guard_path or (root / "data" / "live" / "operator_start_action.guard.json")
+    audit_path = audit_path or (root / "data" / "results" / "operator_runtime_actions.jsonl")
+    now = now or _utc_now()
+    guard = _read_guard(guard_path)
+    if not guard or guard.get("corrupt"):
+        return {"reconciled": False, "reason": "NO_GUARD", "guard_active": False}
+    exp_dt = None
+    try:
+        exp_dt = datetime.fromisoformat(str(guard.get("expires_at")).replace("Z", "+00:00"))
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        exp_dt = None
+    if exp_dt is not None and exp_dt > now:
+        return {
+            "reconciled": False,
+            "reason": "GUARD_STILL_ACTIVE",
+            "guard_active": True,
+            "guard": guard,
+        }
+    action_id = str(guard.get("action_id") or uuid.uuid4())
+    rec = {
+        "schema_version": SCHEMA_VERSION,
+        "action_id": action_id,
+        "idempotency_key": guard.get("idempotency_key"),
+        "requested_at": guard.get("created_at"),
+        "completed_at": _iso(now),
+        "action": ACTION_START,
+        "source": "operator_runtime_controller",
+        "result": "START_TIMED_OUT",
+        "error_code": "START_GUARD_EXPIRED_RECONCILED",
+        "safe_message": (
+            "Start transaction reconciled: action guard expired with no active worker. "
+            "Controls may proceed from a fresh eligibility evaluation."
+        ),
+        "safe_to_retry": True,
+        "paper_arm_mutated": False,
+        "runtime_locks_deleted": False,
+        "processes_terminated": False,
+        "launched_components": [],
+        "preserved_components": [],
+        "component_results": {},
+        "evidence": {"reconciled_guard": _sanitize_for_audit(guard)},
+    }
+    append_runtime_action_audit(rec, path=audit_path)
+    release_start_guard(action_id=action_id, path=guard_path)
+    return {
+        "reconciled": True,
+        "reason": "START_GUARD_EXPIRED_RECONCILED",
+        "guard_active": False,
+        "result": rec,
+    }
+
+
 def _find_recent_idempotent(
     idempotency_key: str,
     *,
@@ -290,9 +358,11 @@ def _find_recent_idempotent(
             "ALREADY_RUNNING",
             "START_FAILED",
             "POSTCONDITION_FAILED",
+            "START_TIMED_OUT",
             "START_REFUSED_UNSAFE_STATE",
             "START_REFUSED_LIVE_SAFETY",
             "START_REFUSED_EXISTING_UNHEALTHY_PROCESS",
+            "START_REFUSED_SHUTDOWN_IN_PROGRESS",
         ):
             continue
         completed = rec.get("completed_at") or rec.get("requested_at")
@@ -444,8 +514,13 @@ def start_eligibility(
 
     # DO-004: refuse Start while cooperative shutdown is unresolved
     try:
-        from services.operator_shutdown_controller import shutdown_active
+        from services.operator_shutdown_controller import (
+            reconcile_resolved_shutdown_request,
+            shutdown_active,
+        )
 
+        # If processes/locks are already gone, reconcile a stuck non-terminal request.
+        reconcile_resolved_shutdown_request(root=root, process_snapshot=process_snapshot)
         shut = shutdown_active(root=root)
         if shut.get("active"):
             decision = {
@@ -986,6 +1061,27 @@ def execute_start_triton(
             evidence={"decision": decision, "fixed_paths": paths},
         )
         append_runtime_action_audit(rec, path=audit_path)
+        return rec
+    except Exception as exc:
+        rec = _result(
+            result="START_FAILED",
+            error_code="START_EXCEPTION",
+            safe_message=(
+                "Start failed due to an unexpected controller exception. "
+                "The action guard was released; no claim of success is made."
+            ),
+            safe_to_retry=True,
+            live_execution_blocked_before=not live_execution_appears_enabled(root=root),
+            live_execution_blocked_after=not live_execution_appears_enabled(root=root),
+            launched_components=[],
+            preserved_components=[],
+            component_results={},
+            evidence={"exception_type": type(exc).__name__},
+        )
+        try:
+            append_runtime_action_audit(rec, path=audit_path)
+        except Exception:
+            pass
         return rec
     finally:
         release_start_guard(action_id=action_id, path=guard_path)

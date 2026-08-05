@@ -243,20 +243,92 @@ def evaluate_stop_decision(
     }
 
 
+def _lock_evidence(loop: Dict[str, Any]) -> Dict[str, Any]:
+    evidence = loop.get("evidence") if isinstance(loop.get("evidence"), dict) else {}
+    lock = evidence.get("lock") if isinstance(evidence.get("lock"), dict) else {}
+    return lock
+
+
 def _identity_fingerprint(classifications: Dict[str, Any], targets: List[str]) -> Dict[str, Any]:
+    """
+    Stable process identity for Stop confirmation binding.
+
+    Material identity excludes ordinary liveness movement (cycle, heartbeat /
+    lock_refreshed_at, phase, safe-boundary). PID-reuse resistance uses lock
+    ownership started_at as process_creation_time when available.
+    """
     out: Dict[str, Any] = {}
     for c in targets:
         loop = classifications.get(c) or {}
+        lock = _lock_evidence(loop)
+        script = loop.get("expected_script")
+        pids = list(loop.get("process_pids") or [])
         out[c] = {
-            "state": loop.get("state"),
-            "pids": list(loop.get("process_pids") or []),
+            "component": c,
+            "pids": pids,
             "lock_pid": loop.get("lock_pid"),
             "lock_exists": loop.get("lock_exists"),
-            "expected_script": loop.get("expected_script"),
-            "lock_refreshed_at": loop.get("lock_refreshed_at"),
-            "command_fingerprint": f"ps1:{loop.get('expected_script')}:pids={loop.get('process_pids')}",
+            "expected_script": script,
+            "process_creation_time": lock.get("started_at"),
+            "lock_owner_source": lock.get("source"),
+            "command_fingerprint": f"ps1:{script}:pids={pids}",
         }
     return out
+
+
+def _liveness_snapshot(classifications: Dict[str, Any], targets: List[str]) -> Dict[str, Any]:
+    """Non-identity liveness fields recorded separately from identity match."""
+    out: Dict[str, Any] = {}
+    for c in targets:
+        loop = classifications.get(c) or {}
+        lock = _lock_evidence(loop)
+        out[c] = {
+            "state": loop.get("state"),
+            "lock_refreshed_at": loop.get("lock_refreshed_at"),
+            "activity_age_minutes": loop.get("activity_age_minutes"),
+            "cycle": lock.get("cycle"),
+        }
+    return out
+
+
+def _identity_changed_fields(
+    expected: Dict[str, Any], current: Dict[str, Any], targets: List[str]
+) -> Dict[str, Any]:
+    changed: Dict[str, Any] = {}
+    material_keys = (
+        "pids",
+        "lock_pid",
+        "expected_script",
+        "command_fingerprint",
+        "process_creation_time",
+        "lock_owner_source",
+    )
+    for c in targets:
+        e = expected.get(c) or {}
+        cur = current.get(c) or {}
+        diffs = {}
+        for k in material_keys:
+            if e.get(k) != cur.get(k):
+                diffs[k] = {"expected": e.get(k), "current": cur.get(k)}
+        if diffs:
+            changed[c] = diffs
+    return changed
+
+
+def _liveness_drift(
+    expected: Dict[str, Any], current: Dict[str, Any], targets: List[str]
+) -> Dict[str, Any]:
+    drift: Dict[str, Any] = {}
+    for c in targets:
+        e = expected.get(c) or {}
+        cur = current.get(c) or {}
+        diffs = {}
+        for k in ("state", "lock_refreshed_at", "activity_age_minutes", "cycle"):
+            if e.get(k) != cur.get(k):
+                diffs[k] = {"expected": e.get(k), "current": cur.get(k)}
+        if diffs:
+            drift[c] = diffs
+    return drift
 
 
 def _load_token_store(path: Path) -> Dict[str, Any]:
@@ -322,7 +394,9 @@ def issue_stop_preflight(
                 }
 
     targets = list(decision.get("target_components") or [])
-    identity = _identity_fingerprint(classifications, targets or ["continuous", "watchdog"])
+    bind_targets = targets or ["continuous", "watchdog"]
+    identity = _identity_fingerprint(classifications, bind_targets)
+    liveness = _liveness_snapshot(classifications, bind_targets)
     raw_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(raw_token)
     record = {
@@ -332,6 +406,7 @@ def issue_stop_preflight(
         "decision": decision.get("decision"),
         "target_components": targets,
         "identity": identity,
+        "liveness": liveness,
         "live_execution_blocked": live_blocked,
         "start_guard_active": start_g,
         "shutdown_guard_active": shut_g,
@@ -482,6 +557,7 @@ def _consume_token(
 def _identities_match(
     expected: Dict[str, Any], current: Dict[str, Any], targets: List[str]
 ) -> bool:
+    """True when stable identity matches. Ignores liveness-only drift."""
     for c in targets:
         e = expected.get(c) or {}
         cur = current.get(c) or {}
@@ -493,10 +569,12 @@ def _identities_match(
             return False
         if e.get("command_fingerprint") != cur.get("command_fingerprint"):
             return False
-        # lock refresh may drift slightly; if creation/refreshed identity changed materially refuse
-        if e.get("lock_refreshed_at") and cur.get("lock_refreshed_at"):
-            if e.get("lock_refreshed_at") != cur.get("lock_refreshed_at"):
-                # allow only if pids still match and state still eligible — still refuse for DO-005 strictness
+        # PID-reuse-resistant ownership start time (not heartbeat/refreshed_at)
+        if e.get("process_creation_time") and cur.get("process_creation_time"):
+            if e.get("process_creation_time") != cur.get("process_creation_time"):
+                return False
+        if e.get("lock_owner_source") and cur.get("lock_owner_source"):
+            if e.get("lock_owner_source") != cur.get("lock_owner_source"):
                 return False
     return True
 
@@ -765,6 +843,9 @@ def execute_stop_triton(
         return rec
 
     current_identity = _identity_fingerprint(classifications, expected_targets)
+    current_liveness = _liveness_snapshot(classifications, expected_targets)
+    expected_liveness = token_rec.get("liveness") or {}
+    liveness_drift = _liveness_drift(expected_liveness, current_liveness, expected_targets)
     if set(expected_targets) != set(decision.get("target_components") or []):
         rec = _base(
             result="STOP_REFUSED_STATE_CHANGED",
@@ -778,11 +859,13 @@ def execute_stop_triton(
             completed_at=_iso(),
             live_execution_blocked_before=live_before,
             live_execution_blocked_after=live_before,
+            liveness_drift=_sanitize(liveness_drift) if liveness_drift else None,
         )
         append_stop_audit(rec, path=audit_path)
         return rec
 
     if not _identities_match(expected_identity, current_identity, expected_targets):
+        changed = _identity_changed_fields(expected_identity, current_identity, expected_targets)
         rec = _base(
             result="STOP_REFUSED_STATE_CHANGED",
             error_code="IDENTITY_CHANGED",
@@ -800,6 +883,10 @@ def execute_stop_triton(
             live_execution_blocked_after=live_before,
             expected_instances=_sanitize(expected_identity),
             submission_classification=_sanitize(current_identity),
+            identity_changed_fields=_sanitize(changed),
+            liveness_drift=_sanitize(liveness_drift) if liveness_drift else None,
+            material_identity_changed=True,
+            volatile_liveness_only_changed=False,
         )
         append_stop_audit(rec, path=audit_path)
         return rec

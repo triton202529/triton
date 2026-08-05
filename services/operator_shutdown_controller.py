@@ -44,6 +44,7 @@ __all__ = [
     "evaluate_shutdown_decision",
     "prepare_cooperative_shutdown",
     "read_recent_shutdown_actions",
+    "reconcile_resolved_shutdown_request",
     "shutdown_active",
     "shutdown_eligibility",
 ]
@@ -267,6 +268,97 @@ def shutdown_active(
     }
 
 
+def reconcile_resolved_shutdown_request(
+    *,
+    root: Optional[Path] = None,
+    process_snapshot: Optional[Callable[[], Dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
+    audit_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Supported recovery when a non-terminal shutdown request remains after verified
+    cooperative exit (no target processes, owner-cleaned locks, no active guard).
+
+    Does not delete the request or audit history. Marks the request COMPLETED.
+    """
+    from services.operator_runtime_classifier import classify_runtime_loops
+
+    root = Path(root) if root is not None else ROOT
+    live = root / "data" / "live"
+    now = now or _utc_now()
+    request_path = live / "operator_shutdown_request.json"
+    guard_path = live / "operator_shutdown_action.guard.json"
+    audit_path = audit_path or (root / "data" / "results" / "operator_shutdown_actions.jsonl")
+
+    active = shutdown_active(root=root, now=now)
+    if not active.get("active"):
+        return {"reconciled": False, "reason": "NO_ACTIVE_SHUTDOWN", "shutdown_active": False}
+
+    if is_guard_active(guard_path, now=now):
+        return {"reconciled": False, "reason": "SHUTDOWN_GUARD_ACTIVE", "shutdown_active": True}
+
+    classifications = classify_runtime_loops(root=root, process_snapshot=process_snapshot)
+    for component in ("continuous", "watchdog"):
+        loop = classifications.get(component) or {}
+        if list(loop.get("process_pids") or []):
+            return {
+                "reconciled": False,
+                "reason": "PROCESS_STILL_PRESENT",
+                "component": component,
+                "shutdown_active": True,
+            }
+        if loop.get("lock_exists"):
+            return {
+                "reconciled": False,
+                "reason": "LOCK_STILL_PRESENT",
+                "component": component,
+                "shutdown_active": True,
+            }
+
+    req = read_json(request_path)
+    if not req or req.get("__malformed__"):
+        return {
+            "reconciled": False,
+            "reason": "NO_REQUEST",
+            "shutdown_active": bool(active.get("active")),
+        }
+
+    prior_state = req.get("state")
+    req["state"] = "COMPLETED"
+    req["reconciled_at"] = _iso(now)
+    req["reconcile_reason"] = "VERIFIED_RUNTIME_FULLY_STOPPED"
+    wr = atomic_write_json(request_path, req)
+    if not wr.get("ok"):
+        return {"reconciled": False, "reason": "REQUEST_WRITE_FAILED", "shutdown_active": True}
+
+    append_shutdown_audit(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "controller_version": CONTROLLER_VERSION,
+            "action": ACTION_PREPARE,
+            "result": "SHUTDOWN_RECONCILED_COMPLETED",
+            "request_id": req.get("request_id"),
+            "prior_state": prior_state,
+            "safe_message": (
+                "Shutdown request reconciled to COMPLETED after verified process exit "
+                "and owner-cleaned lock release. Historical request evidence retained."
+            ),
+            "completed_at": _iso(now),
+            "forced_termination_used": False,
+            "runtime_locks_deleted_by_controller": False,
+            "paper_arm_mutated": False,
+        },
+        path=audit_path,
+    )
+    return {
+        "reconciled": True,
+        "reason": "VERIFIED_RUNTIME_FULLY_STOPPED",
+        "shutdown_active": False,
+        "request_id": req.get("request_id"),
+        "prior_state": prior_state,
+    }
+
+
 def shutdown_eligibility(
     *,
     root: Optional[Path] = None,
@@ -360,6 +452,7 @@ def _poll_completion(
     lock_timeout: float,
     poll_sec: float,
     sleep_fn: Callable[[float], None],
+    request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     live = root / "data" / "live"
     ack_paths = {
@@ -374,8 +467,9 @@ def _poll_completion(
     exit_results: Dict[str, Any] = {}
     lock_results: Dict[str, Any] = {}
     forced_termination_used = False
+    expected_request_id = str(request_id) if request_id else None
 
-    # Phase 1: acknowledgements
+    # Phase 1: acknowledgements — ignore historical acks for other request_ids.
     while time.time() < deadline_ack:
         for c in targets:
             if c in ack_results:
@@ -383,7 +477,10 @@ def _poll_completion(
             ack = read_json(ack_paths[c])
             if not ack or ack.get("__malformed__"):
                 continue
-            rid_ok = True  # request_id checked by caller via expected
+            ack_rid = str(ack.get("request_id") or "")
+            if expected_request_id and ack_rid and ack_rid != expected_request_id:
+                # Historical/expired acknowledgement for a prior request — keep waiting.
+                continue
             state = str(ack.get("state") or "")
             if state in (
                 "ACCEPTED",
@@ -811,6 +908,7 @@ def prepare_cooperative_shutdown(
         lock_timeout=lock_timeout_sec,
         poll_sec=poll_sec,
         sleep_fn=sleep_fn,
+        request_id=request_id,
     )
 
     result = completion.get("result") or "UNKNOWN"

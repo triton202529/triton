@@ -532,7 +532,8 @@ def test_38_token_bound_to_verified_identities(tmp_path):
     assert "continuous" in identity
     assert identity["continuous"].get("pids") == [101]
     assert identity["continuous"].get("lock_pid") == 101
-    assert identity["continuous"].get("lock_refreshed_at")
+    assert identity["continuous"].get("process_creation_time")
+    assert "lock_refreshed_at" not in identity["continuous"]
     assert identity["continuous"].get("command_fingerprint")
 
 
@@ -613,13 +614,13 @@ def test_42_changed_lock_identity_refuses(tmp_path):
 
 
 def test_43_changed_process_creation_time_refuses(tmp_path):
-    """Identity timestamp is lock_refreshed_at (lock creation/refresh time proxy)."""
+    """PID-reuse resistance: lock ownership started_at change refuses Stop."""
     _write_fixture(tmp_path, cont_pids=[101], cont_lock_pid=101, write_wd_lock=False)
     pre = issue_stop_preflight(root=tmp_path)
     store_path = tmp_path / "data" / "live" / "operator_stop_preflight_tokens.json"
     store = _load_token_store(store_path)
     th = _hash_token(pre["preflight_token"])
-    store["tokens"][th]["identity"]["continuous"]["lock_refreshed_at"] = (
+    store["tokens"][th]["identity"]["continuous"]["process_creation_time"] = (
         datetime.now(timezone.utc) - timedelta(hours=5)
     ).isoformat()
     atomic_write_json(store_path, store)
