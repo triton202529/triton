@@ -72,6 +72,42 @@ def _processed_row_count(symbol: str) -> int:
         return 0
 
 
+def _raw_last_date(symbol: str):
+    """Return normalized last raw date, or None when unavailable."""
+    path = RAW / f"{symbol.upper()}.csv"
+    if not path.is_file():
+        return None
+    try:
+        import pandas as pd
+
+        df = pd.read_csv(path, low_memory=False)
+        if df.empty:
+            return None
+        col = "date" if "date" in df.columns else ("Date" if "Date" in df.columns else None)
+        if not col:
+            return None
+        last_dt = pd.to_datetime(df[col], errors="coerce").max()
+        if pd.isna(last_dt):
+            return None
+        return last_dt.normalize()
+    except Exception:
+        return None
+
+
+def _as_of_date_normalized():
+    """Trading as-of date used by preprocess (local, no broker/network)."""
+    try:
+        import pandas as pd
+        from run_preprocessing import get_as_of_date
+
+        as_of = pd.to_datetime(get_as_of_date(), errors="coerce")
+        if pd.isna(as_of):
+            return None
+        return as_of.normalize()
+    except Exception:
+        return None
+
+
 def _skipped_ticker_reason(symbol: str) -> str:
     path = RESULTS / "skipped_tickers.csv"
     if not path.is_file():
@@ -159,6 +195,22 @@ def classify_symbol_quarantine(symbol: str) -> Tuple[Optional[str], str, Dict[st
         )
 
     if raw_rows >= TRAIN_MIN_ROWS:
+        # IPO-band names can cross train_min_rows yet remain unhydratable when
+        # vendor history is stale vs as-of (preprocess skips stale_last_date and
+        # formerly surfaced as HYDRATION_INCOMPLETE / preprocess_failed).
+        if raw_rows <= IPO_HISTORY_MAX_ROWS:
+            last_dt = _raw_last_date(sym)
+            as_of_dt = _as_of_date_normalized()
+            if last_dt is not None and as_of_dt is not None and last_dt < as_of_dt:
+                details["raw_last_date"] = str(last_dt.date())
+                details["as_of_date"] = str(as_of_dt.date())
+                return (
+                    "QUARANTINED_IPO_EDGE",
+                    f"stale_or_insufficient_history raw_rows={raw_rows} "
+                    f"processed_rows={proc_rows} raw_last_date={last_dt.date()} "
+                    f"as_of={as_of_dt.date()} train_min_rows={TRAIN_MIN_ROWS}",
+                    details,
+                )
         details["artifact_gap"] = "PIPELINE_ARTIFACT_MISSING"
         return None, "", details
 

@@ -87,6 +87,12 @@ function Run-Step {
 # aborting the whole sequence on failure. Returns $true on success and
 # $false on failure so the caller can safe-block (skip risk-acting stages,
 # still snapshot/report) instead of placing orders on stale inputs.
+#
+# Capture python stdout/stderr before returning the boolean. Otherwise
+# Write-Host-only logging is fine, but native python success-stream output
+# is included in the function's return value; `if (-not (Run-RefreshStep))`
+# then treats a non-empty array as $true and silently ignores the failure
+# (observed: D1a REFRESH_FAIL followed by "refresh complete" then E0 abort).
 function Run-RefreshStep {
     param(
         [Parameter(Mandatory = $true)] [string]   $Label,
@@ -95,14 +101,43 @@ function Run-RefreshStep {
     Write-Host ""
     Write-Host "[$Label]" -ForegroundColor Yellow
     Write-Host (">>> python " + ($PyArgs -join " ")) -ForegroundColor Cyan
-    & python @PyArgs
-    if ($LASTEXITCODE -ne 0) {
+    $output = & python @PyArgs 2>&1
+    $code = $LASTEXITCODE
+    $script:LastRefreshStepExitCode = $code
+    foreach ($line in @($output)) {
+        Write-Host $line
+    }
+    if ($code -ne 0) {
         Write-Host ""
-        Write-Host ("[REFRESH_FAIL] Step '" + $Label + "' failed (exit $LASTEXITCODE).") -ForegroundColor Red
+        Write-Host ("[REFRESH_FAIL] Step '" + $Label + "' failed (exit $code).") -ForegroundColor Red
         Write-Host ("[REFRESH_FAIL] Command: python " + ($PyArgs -join " ")) -ForegroundColor Red
         return $false
     }
     return $true
+}
+
+function Write-MarketOpenSequenceStatus {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Status,
+        [string] $FailedStep = "",
+        [string] $Reason = "",
+        [int] $ExitCode = 0
+    )
+    $statusDir = Join-Path $repoRoot "data\results"
+    if (-not (Test-Path $statusDir)) {
+        New-Item -ItemType Directory -Path $statusDir -Force | Out-Null
+    }
+    $statusPath = Join-Path $statusDir "market_open_sequence_status.json"
+    $payload = [ordered]@{
+        generated_at             = (Get-Date).ToUniversalTime().ToString("o")
+        status                   = $Status
+        failed_step              = $FailedStep
+        reason                   = $Reason
+        exit_code                = $ExitCode
+        broker_orders_submitted  = $false
+        live_execution_permitted = $false
+    }
+    ($payload | ConvertTo-Json) | Set-Content -Path $statusPath -Encoding UTF8
 }
 
 $exitCode = 0
@@ -147,30 +182,45 @@ try {
     $refreshOk = $true
     $refreshFailReason = ""
     $refreshFailRc = 0
+    $script:LastRefreshStepExitCode = 0
     Write-Host ""
     Write-Host "[D1. SIGNAL + LIFECYCLE REFRESH]" -ForegroundColor Yellow
+    # Compare explicitly to $true so a polluted multi-value return can never
+    # be treated as success (see Run-RefreshStep capture contract).
     if ($refreshOk) {
-        if (-not (Run-RefreshStep -Label "D1a. GENERATE SIGNALS" -PyArgs @("-m","services.generate_signals"))) {
-            $refreshOk = $false; $refreshFailReason = "generate_signals_failed"; $refreshFailRc = $LASTEXITCODE
+        $stepOk = Run-RefreshStep -Label "D1a. GENERATE SIGNALS" -PyArgs @("-m","services.generate_signals")
+        if ($stepOk -ne $true) {
+            $refreshOk = $false
+            $refreshFailReason = "generate_signals_failed"
+            $refreshFailRc = [int]$script:LastRefreshStepExitCode
         }
     }
     if ($refreshOk) {
-        if (-not (Run-RefreshStep -Label "D1b. APPLY SIGNAL LIFECYCLE" -PyArgs @("-m","services.apply_signal_lifecycle"))) {
-            $refreshOk = $false; $refreshFailReason = "apply_signal_lifecycle_failed"; $refreshFailRc = $LASTEXITCODE
+        $stepOk = Run-RefreshStep -Label "D1b. APPLY SIGNAL LIFECYCLE" -PyArgs @("-m","services.apply_signal_lifecycle")
+        if ($stepOk -ne $true) {
+            $refreshOk = $false
+            $refreshFailReason = "apply_signal_lifecycle_failed"
+            $refreshFailRc = [int]$script:LastRefreshStepExitCode
         }
     }
     if ($refreshOk) {
-        if (-not (Run-RefreshStep -Label "D1c. BUILD EFFECTIVE LIFECYCLE" -PyArgs @("-m","services.build_effective_lifecycle"))) {
-            $refreshOk = $false; $refreshFailReason = "build_effective_lifecycle_failed"; $refreshFailRc = $LASTEXITCODE
+        $stepOk = Run-RefreshStep -Label "D1c. BUILD EFFECTIVE LIFECYCLE" -PyArgs @("-m","services.build_effective_lifecycle")
+        if ($stepOk -ne $true) {
+            $refreshOk = $false
+            $refreshFailReason = "build_effective_lifecycle_failed"
+            $refreshFailRc = [int]$script:LastRefreshStepExitCode
         }
     }
 
-    if (-not $refreshOk) {
+    if ($refreshOk -ne $true) {
         if ($refreshFailRc -eq 0) { $refreshFailRc = 1 }
         Write-Host ""
         Write-Host ("[REFRESH_SAFE_BLOCK] reason=" + $refreshFailReason + " rc=" + $refreshFailRc) -ForegroundColor Red
         Write-Host "[REFRESH_SAFE_BLOCK] readiness=SAFE_BLOCKED; skipping allocation / position management." -ForegroundColor Red
         Write-Host "[REFRESH_SAFE_BLOCK] No broker orders, no approval/auth artifacts. Broker snapshot already captured." -ForegroundColor Red
+        Write-MarketOpenSequenceStatus -Status "REFRESH_SAFE_BLOCKED" `
+            -FailedStep ("D1. SIGNAL + LIFECYCLE REFRESH (" + $refreshFailReason + ")") `
+            -Reason $refreshFailReason -ExitCode $refreshFailRc
         # Still touch heartbeat so dashboards report the (safe-blocked) cycle.
         Run-Step -Label "G. TOUCH PIPELINE HEARTBEAT (post safe-block)" `
                  -PyArgs @("-m","services.touch_pipeline_heartbeat")
@@ -209,6 +259,7 @@ try {
     Write-Host "=== TRITON MARKET OPEN SEQUENCE COMPLETE ===" -ForegroundColor Green
     Write-Host ("FinishedAt: " + (Get-Date).ToString("s"))
     Write-Host ("LogFile   : " + $logFile)
+    Write-MarketOpenSequenceStatus -Status "COMPLETE" -FailedStep "" -Reason "ok" -ExitCode 0
 }
 catch {
     # Run-Step throws "STEP_FAILED:<label>:<rc>" on the first non-zero
@@ -221,10 +272,14 @@ catch {
         Write-Host ""
         Write-Host ("[ABORT] Market-open sequence aborted at step: " + $failedLabel) -ForegroundColor Red
         Write-Host ("[ABORT] Exit code: " + $exitCode) -ForegroundColor Red
+        Write-MarketOpenSequenceStatus -Status "ABORTED" -FailedStep $failedLabel `
+            -Reason "step_failed" -ExitCode $exitCode
     } else {
         Write-Host ""
         Write-Host ("[ABORT] Unexpected error: " + $msg) -ForegroundColor Red
         $exitCode = 1
+        Write-MarketOpenSequenceStatus -Status "ABORTED" -FailedStep "UNEXPECTED" `
+            -Reason $msg -ExitCode $exitCode
     }
     Write-Host ("FinishedAt: " + (Get-Date).ToString("s"))
     Write-Host ("LogFile   : " + $logFile)

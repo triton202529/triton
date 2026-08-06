@@ -158,7 +158,25 @@ try {
                 Log-Line "[PAPER_ENTRY_STAGE] exit_code=$paperEntryRc"
                 if ($paperEntryRc -ne 0) { $cycleRc = $paperEntryRc }
             } else {
-                Log-Line "[PAPER_ENTRY_EXECUTION_BLOCKED] reason=market_open_sequence_failed exit_code=$rc"
+                # Prefer sanitized failed-step detail from the sequence status
+                # artifact over the generic failure label alone.
+                $failedStep = ""
+                $failReason = "market_open_sequence_failed"
+                $statusFile = "data\results\market_open_sequence_status.json"
+                if (Test-Path $statusFile) {
+                    try {
+                        $st = Get-Content $statusFile -Raw | ConvertFrom-Json
+                        if ($st.failed_step) { $failedStep = [string]$st.failed_step }
+                        if ($st.reason) { $failReason = [string]$st.reason }
+                    } catch {
+                        $failedStep = ""
+                    }
+                }
+                if ($failedStep) {
+                    Log-Line "[PAPER_ENTRY_EXECUTION_BLOCKED] reason=market_open_sequence_failed failed_step=$failedStep detail=$failReason exit_code=$rc"
+                } else {
+                    Log-Line "[PAPER_ENTRY_EXECUTION_BLOCKED] reason=market_open_sequence_failed exit_code=$rc"
+                }
             }
 
             if ($cycleRc -ne 0) {
