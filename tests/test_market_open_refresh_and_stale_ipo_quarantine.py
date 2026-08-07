@@ -30,11 +30,85 @@ def test_run_market_open_refresh_step_captures_python_output_before_bool_return(
     ]
     assert "$output = & python @PyArgs 2>&1" in fn
     assert "$code = $LASTEXITCODE" in fn
-    assert "$script:LastRefreshStepExitCode = $code" in fn
+    assert '$ErrorActionPreference = "Continue"' in fn
+    assert "$script:LastRefreshStepExitCode = [int]$code" in fn
     assert "return $false" in fn
     assert "return $true" in fn
     # Must not invoke python on the bare success stream without capture.
     assert "& python @PyArgs\n" not in fn.replace("$output = & python @PyArgs 2>&1", "")
+
+
+def test_refresh_step_stderr_under_stop_does_not_terminate_before_safe_block():
+    """
+    Cycle 3 defect: with EAP=Stop, `2>&1` turns python Traceback stderr into a
+    terminating ErrorRecord before REFRESH_FAIL / REFRESH_SAFE_BLOCK.
+    """
+    script = textwrap.dedent(
+        r"""
+        $ErrorActionPreference = 'Stop'
+        $py = $env:HARNESS_PY
+        function Run-RefreshStep {
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $output = & python $py 2>&1
+                $code = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $prevEap
+            }
+            if ($null -eq $code) { $code = 1 }
+            $script:LastRefreshStepExitCode = [int]$code
+            foreach ($line in @($output)) { Write-Host ([string]$line) }
+            if ($code -ne 0) {
+                Write-Host '[REFRESH_FAIL] exit'
+                return $false
+            }
+            return $true
+        }
+        try {
+            $stepOk = Run-RefreshStep
+            if ($stepOk -ne $true) {
+                Write-Host ('SAFE_BLOCK_REACHED rc=' + $script:LastRefreshStepExitCode)
+            } else {
+                Write-Host 'UNEXPECTED_SUCCESS'
+            }
+        } catch {
+            Write-Host ('UNEXPECTED_TERMINATING=' + $_.Exception.Message)
+        }
+        """
+    )
+    with tempfile.TemporaryDirectory() as td:
+        py = Path(td) / "fail.py"
+        py.write_text(
+            "import sys\n"
+            "print('stdout_ok')\n"
+            "print('Traceback (most recent call last):', file=sys.stderr)\n"
+            "print('RuntimeError: boom', file=sys.stderr)\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+        path = Path(td) / "refresh_stderr.ps1"
+        path.write_text(script, encoding="utf-8")
+        env = dict(**{k: v for k, v in __import__("os").environ.items()})
+        env["HARNESS_PY"] = str(py)
+        proc = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "SAFE_BLOCK_REACHED rc=1" in proc.stdout
+    assert "UNEXPECTED_TERMINATING=" not in proc.stdout
+    assert "REFRESH_FAIL" in proc.stdout
 
 
 def test_run_market_open_refresh_failure_uses_explicit_true_compare():

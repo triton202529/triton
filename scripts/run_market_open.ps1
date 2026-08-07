@@ -101,11 +101,28 @@ function Run-RefreshStep {
     Write-Host ""
     Write-Host "[$Label]" -ForegroundColor Yellow
     Write-Host (">>> python " + ($PyArgs -join " ")) -ForegroundColor Cyan
-    $output = & python @PyArgs 2>&1
-    $code = $LASTEXITCODE
-    $script:LastRefreshStepExitCode = $code
+    # Capture stdout/stderr so the boolean return is not polluted by python
+    # output. Under Windows PowerShell 5.1, `2>&1` turns stderr lines into
+    # ErrorRecords; with $ErrorActionPreference=Stop those become terminating
+    # errors (Cycle 3 / D1a: "Unexpected error: Traceback...") before we can
+    # apply REFRESH_SAFE_BLOCK. Temporarily Continue for the native invoke only.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & python @PyArgs 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($null -eq $code) { $code = 1 }
+    $script:LastRefreshStepExitCode = [int]$code
+    $script:LastRefreshStepStderrHint = ""
     foreach ($line in @($output)) {
-        Write-Host $line
+        $text = if ($null -eq $line) { "" } else { [string]$line }
+        Write-Host $text
+        if (-not $script:LastRefreshStepStderrHint -and $text -match 'Traceback|Error|Exception|FAIL') {
+            $script:LastRefreshStepStderrHint = $text.Substring(0, [Math]::Min(160, $text.Length))
+        }
     }
     if ($code -ne 0) {
         Write-Host ""
@@ -183,6 +200,7 @@ try {
     $refreshFailReason = ""
     $refreshFailRc = 0
     $script:LastRefreshStepExitCode = 0
+    $script:LastRefreshStepStderrHint = ""
     Write-Host ""
     Write-Host "[D1. SIGNAL + LIFECYCLE REFRESH]" -ForegroundColor Yellow
     # Compare explicitly to $true so a polluted multi-value return can never
@@ -214,13 +232,15 @@ try {
 
     if ($refreshOk -ne $true) {
         if ($refreshFailRc -eq 0) { $refreshFailRc = 1 }
+        $hint = [string]$script:LastRefreshStepStderrHint
+        if (-not $hint) { $hint = $refreshFailReason }
         Write-Host ""
         Write-Host ("[REFRESH_SAFE_BLOCK] reason=" + $refreshFailReason + " rc=" + $refreshFailRc) -ForegroundColor Red
         Write-Host "[REFRESH_SAFE_BLOCK] readiness=SAFE_BLOCKED; skipping allocation / position management." -ForegroundColor Red
         Write-Host "[REFRESH_SAFE_BLOCK] No broker orders, no approval/auth artifacts. Broker snapshot already captured." -ForegroundColor Red
         Write-MarketOpenSequenceStatus -Status "REFRESH_SAFE_BLOCKED" `
             -FailedStep ("D1. SIGNAL + LIFECYCLE REFRESH (" + $refreshFailReason + ")") `
-            -Reason $refreshFailReason -ExitCode $refreshFailRc
+            -Reason $hint -ExitCode $refreshFailRc
         # Still touch heartbeat so dashboards report the (safe-blocked) cycle.
         Run-Step -Label "G. TOUCH PIPELINE HEARTBEAT (post safe-block)" `
                  -PyArgs @("-m","services.touch_pipeline_heartbeat")
