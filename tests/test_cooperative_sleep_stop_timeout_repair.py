@@ -221,7 +221,7 @@ def test_06_ps1_exits_cooperatively_after_ack_contract():
             )
         ]
         assert "$code = $LASTEXITCODE" in sleep_fn
-        assert "return $code" in sleep_fn
+        assert ("return $code" in sleep_fn) or ("return ,$code" in sleep_fn)
         assert "| ForEach-Object" not in sleep_fn
         assert "if ($sleepCode -eq 10)" in src
 

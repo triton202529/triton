@@ -83,7 +83,9 @@ def test_cooperative_wait_checks_do_not_create_additional_work_cycles():
         # Defect repair: capture $LASTEXITCODE before logging output (pipe clobber).
         assert "| ForEach-Object" not in sleep_fn
         assert "$code = $LASTEXITCODE" in sleep_fn
-        assert "return $code" in sleep_fn
+        # Scalar exit code; unary comma form (return ,$code) is preferred to
+        # avoid accidental multi-value unwrap when callers compare -eq 10.
+        assert ("return $code" in sleep_fn) or ("return ,$code" in sleep_fn)
         # Unexpected helper failure must not open a new cycle.
         assert "[SHUTDOWN_HELPER_DEGRADED]" in src
         assert "($pollCode -ne 0) -and ($pollCode -ne 11)" in src
