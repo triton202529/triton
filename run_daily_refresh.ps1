@@ -3,11 +3,12 @@
 # TRITON — Daily Prediction Refresh Owner (TRITON_DailyRefresh)
 #
 # Canonical stages (strict order; stop on first failure):
+#   0) capture current-run baseline (pre-fetch)
 #   1) fetch_raw_data
 #   2) stale_data_gate
 #   3) preprocess
 #   4) train_model
-#   5) daily_prediction_refresh_validate  (advancement / coverage gate)
+#   5) daily_prediction_refresh_validate  (symbol-set + current-run advancement)
 #
 # Safety:
 #   - Market-data network only during fetch_raw_data.
@@ -15,10 +16,7 @@
 #   - Resolves repo root from this script's location (caller WD independent).
 #   - Uses .venv\Scripts\python.exe when present.
 #   - Propagates the first native nonzero exit code.
-#   - Exit 0 without target-session advancement fails validation.
-#
-# Usage:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File .\run_daily_refresh.ps1
+#   - Exit 0 without current-run output advancement fails validation.
 # ------------------------------------------------------------
 
 [CmdletBinding()]
@@ -30,7 +28,6 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [Console]::OutputEncoding
 try { chcp 65001 | Out-Null } catch { }
 
-# Pin to repo root regardless of Scheduled Task WorkingDirectory.
 $repoRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path
 Set-Location $repoRoot
@@ -46,8 +43,13 @@ New-Item -ItemType Directory -Force -Path $logsDir, $resultsDir | Out-Null
 
 $runStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $runId = "daily_prediction_refresh_" + $runStamp
+$runStartedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $logPath = Join-Path $logsDir ("daily_refresh_" + $runStamp + ".log")
 $summaryPath = Join-Path $resultsDir "daily_prediction_refresh_summary.json"
+$baselinePath = Join-Path $resultsDir ("daily_prediction_refresh_baseline_" + $runId + ".json")
+$receiptsPath = Join-Path $resultsDir ("daily_prediction_refresh_stage_receipts_" + $runId + ".json")
+
+$script:StageReceipts = @()
 
 function Log([string]$msg) {
     $line = "$(Get-Date -Format s)  $msg"
@@ -55,12 +57,17 @@ function Log([string]$msg) {
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
 }
 
-# Invoke a python module; capture native exit code without PS success-stream pollution.
+function Write-StageReceipts {
+    $payload = @($script:StageReceipts)
+    ($payload | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $receiptsPath -Encoding UTF8
+}
+
 function Run-PyStep {
     param(
         [Parameter(Mandatory = $true)] [string] $Name,
         [Parameter(Mandatory = $true)] [string[]] $PyArgs
     )
+    $started = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     Log (">> " + $Name)
     Log ("CMD: " + $py + " " + ($PyArgs -join " "))
     $prevEap = $ErrorActionPreference
@@ -76,7 +83,16 @@ function Run-PyStep {
         $ErrorActionPreference = $prevEap
     }
     if ($null -eq $code) { $code = 1 }
+    $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     Log ("EXIT: " + $Name + " code=" + $code)
+    $script:StageReceipts += [ordered]@{
+        name       = $Name
+        started_at = $started
+        ended_at   = $ended
+        exit_code  = [int]$code
+        outcome    = $(if ([int]$code -eq 0) { "ok" } else { "failed" })
+    }
+    Write-StageReceipts
     if ([int]$code -ne 0) {
         Log ("FAILED: " + $Name + " (exit=" + $code + "). See log: " + $logPath)
         throw ("STEP_FAILED:" + $Name + ":" + $code)
@@ -89,15 +105,30 @@ try {
     Log ("repo_root=" + $repoRoot)
     Log ("python=" + $py)
     Log ("run_id=" + $runId)
+    Log ("run_started_at_utc=" + $runStartedAt)
     Log ("log_path=" + $logPath)
+    Log ("baseline_path=" + $baselinePath)
     Log ("summary_path=" + $summaryPath)
 
-    # Hard disable execution enablement for this process only.
     $env:TRITON_ENABLE_PAPER_EXECUTION = "0"
     $env:TRITON_ENABLE_AUTO_PAPER_ENTRIES = "0"
     $env:TRITON_ENABLE_AUTO_PAPER_APPROVAL = "0"
     $env:TRITON_ENABLE_LIVE_EXECUTION = "0"
     $env:TRITON_LIVE_EXECUTION = "0"
+
+    # 0) Pre-fetch baseline — binds later validation to this run.
+    Run-PyStep -Name "capture_baseline" -PyArgs @(
+        "-m", "services.daily_prediction_refresh_validate",
+        "--capture-baseline",
+        "--repo-root", $repoRoot,
+        "--run-id", $runId,
+        "--run-started-at", $runStartedAt,
+        "--baseline-out", $baselinePath,
+        "--json"
+    )
+    # Baseline is not part of the refresh pipeline receipt order for validator.
+    $script:StageReceipts = @()
+    Write-StageReceipts
 
     Run-PyStep -Name "fetch_raw_data" -PyArgs @("-m", "services.fetch_raw_data", "--verbose", "--min-ok", "10")
     Run-PyStep -Name "stale_data_gate" -PyArgs @("-m", "services.stale_data_gate")
@@ -107,6 +138,9 @@ try {
         "-m", "services.daily_prediction_refresh_validate",
         "--repo-root", $repoRoot,
         "--run-id", $runId,
+        "--run-started-at", $runStartedAt,
+        "--baseline-in", $baselinePath,
+        "--stage-receipts", $receiptsPath,
         "--summary-out", $summaryPath,
         "--json"
     )
