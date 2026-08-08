@@ -594,3 +594,136 @@ def test_validator_module_has_no_network_or_broker_side_effects():
     assert "place_order" not in src
     assert "broker_called" in src
     assert "network_called" in src
+    assert 'decode("utf-8-sig")' in src or "decode('utf-8-sig')" in src
+
+
+def _write_receipt_bytes(path: Path, payload: list | dict, *, with_bom: bool) -> None:
+    raw = json.dumps(payload, indent=2).encode("utf-8")
+    path.write_bytes((b"\xef\xbb\xbf" + raw) if with_bom else raw)
+
+
+def test_pre_repair_bom_receipt_rejected_by_plain_utf8():
+    """Document the controlled-run failure: plain utf-8 + BOM → JSONDecodeError."""
+    payload = _receipts_ok()
+    with tempfile.TemporaryDirectory() as td:
+        bom = Path(td) / "receipts_bom.json"
+        nobom = Path(td) / "receipts_nobom.json"
+        _write_receipt_bytes(bom, payload, with_bom=True)
+        _write_receipt_bytes(nobom, payload, with_bom=False)
+        assert bom.read_bytes()[:3] == b"\xef\xbb\xbf"
+        assert json.loads(nobom.read_text(encoding="utf-8")) == payload
+        with pytest.raises(json.JSONDecodeError) as ei:
+            json.loads(bom.read_text(encoding="utf-8"))
+        assert "BOM" in str(ei.value) or "utf-8-sig" in str(ei.value)
+
+
+def test_bom_and_bom_free_receipts_parse_identically_after_repair():
+    from services.daily_prediction_refresh_validate import load_owner_evidence_json
+
+    payload = _receipts_ok()
+    with tempfile.TemporaryDirectory() as td:
+        bom = Path(td) / "receipts_bom.json"
+        nobom = Path(td) / "receipts_nobom.json"
+        _write_receipt_bytes(bom, payload, with_bom=True)
+        _write_receipt_bytes(nobom, payload, with_bom=False)
+        a = load_owner_evidence_json(bom)
+        b = load_owner_evidence_json(nobom)
+        assert a == b == payload
+
+
+def test_invalid_utf8_and_malformed_json_rejected():
+    from services.daily_prediction_refresh_validate import load_owner_evidence_json
+
+    with tempfile.TemporaryDirectory() as td:
+        bad_utf = Path(td) / "bad_utf.json"
+        bad_utf.write_bytes(b'[{"name":"fetch_raw_data",\xff')
+        with pytest.raises(UnicodeDecodeError):
+            load_owner_evidence_json(bad_utf)
+
+        bad_json = Path(td) / "bad_json.json"
+        bad_json.write_bytes(b"\xef\xbb\xbf[not-json")
+        with pytest.raises(json.JSONDecodeError):
+            load_owner_evidence_json(bad_json)
+
+
+def test_bom_cannot_bypass_run_id_or_stage_order():
+    from services.daily_prediction_refresh_validate import (
+        capture_baseline,
+        load_owner_evidence_json,
+        validate_refresh,
+    )
+
+    target = date(2026, 8, 7)
+    with tempfile.TemporaryDirectory() as td:
+        root = _seed_repo(Path(td), target=target)
+        started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        baseline = capture_baseline(repo_root=root, run_id="runA", run_started_at=started)
+        _advance_all(root, target)
+
+        receipts_path = root / "receipts_bom.json"
+        _write_receipt_bytes(receipts_path, _receipts_ok(), with_bom=True)
+        assert load_owner_evidence_json(receipts_path) == _receipts_ok()
+
+        bad_id = validate_refresh(
+            repo_root=root,
+            target_session=target,
+            run_id="runB",
+            run_started_at=started,
+            baseline=baseline,
+            stage_receipts=load_owner_evidence_json(receipts_path),
+        )
+        assert bad_id["passed"] is False
+        assert "baseline_run_id_mismatch" in bad_id["binding_errors"]
+
+        out_of_order = [
+            {"name": "preprocess", "exit_code": 0, "outcome": "ok"},
+            {"name": "fetch_raw_data", "exit_code": 0, "outcome": "ok"},
+            {"name": "stale_data_gate", "exit_code": 0, "outcome": "ok"},
+            {"name": "train_model", "exit_code": 0, "outcome": "ok"},
+        ]
+        _write_receipt_bytes(receipts_path, out_of_order, with_bom=True)
+        bad_order = validate_refresh(
+            repo_root=root,
+            target_session=target,
+            run_id="runA",
+            run_started_at=started,
+            baseline=baseline,
+            stage_receipts=load_owner_evidence_json(receipts_path),
+        )
+        assert bad_order["passed"] is False
+        assert bad_order.get("receipt_errors") or bad_order.get("first_failure")
+
+
+def test_bom_receipt_cli_passes_with_current_run_advancement():
+    from services.daily_prediction_refresh_validate import capture_baseline, main
+
+    target = date(2026, 8, 7)
+    with tempfile.TemporaryDirectory() as td:
+        root = _seed_repo(Path(td), target=target)
+        started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        baseline = capture_baseline(repo_root=root, run_id="runBom", run_started_at=started)
+        _advance_all(root, target)
+        (root / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
+        _write_receipt_bytes(root / "receipts.json", _receipts_ok(), with_bom=True)
+        rc = main(
+            [
+                "--repo-root",
+                str(root),
+                "--target-session",
+                target.isoformat(),
+                "--run-id",
+                "runBom",
+                "--run-started-at",
+                started,
+                "--baseline-in",
+                str(root / "baseline.json"),
+                "--stage-receipts",
+                str(root / "receipts.json"),
+                "--summary-out",
+                str(root / "summary.json"),
+            ]
+        )
+        assert rc == 0
+        doc = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+        assert doc["passed"] is True
+        assert doc["predictions"]["required_count"] == 65

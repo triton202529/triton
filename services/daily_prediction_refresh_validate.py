@@ -61,6 +61,18 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def load_owner_evidence_json(path: Path) -> Any:
+    """Load owner-generated current-run JSON evidence.
+
+    Accepts UTF-8 with or without a single leading BOM (Windows PowerShell 5.1
+    ``Set-Content -Encoding UTF8``). Uses strict ``json.loads``; does not
+    swallow decode or JSON errors; does not apply lossy decoding.
+    """
+    raw = Path(path).read_bytes()
+    text = raw.decode("utf-8-sig")  # UTF-8; strips one leading BOM if present
+    return json.loads(text)
+
+
 def _file_identity(path: Path) -> Optional[Dict[str, Any]]:
     if not path.is_file():
         return None
@@ -361,7 +373,9 @@ def validate_refresh(
     sets = required_symbol_sets(_load_tickers(tickers_path))
 
     if baseline is None and baseline_path is not None and Path(baseline_path).is_file():
-        baseline = json.loads(Path(baseline_path).read_text(encoding="utf-8"))
+        baseline = load_owner_evidence_json(Path(baseline_path))
+        if not isinstance(baseline, dict):
+            raise ValueError("baseline evidence must be a JSON object")
     baseline = baseline or {}
     baseline_artifacts = dict(baseline.get("artifacts") or {})
 
@@ -559,7 +573,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     target = date.fromisoformat(args.target_session) if args.target_session else None
     receipts = []
     if args.stage_receipts:
-        receipts = json.loads(Path(args.stage_receipts).read_text(encoding="utf-8"))
+        receipts = load_owner_evidence_json(Path(args.stage_receipts))
         if not isinstance(receipts, list):
             raise SystemExit("stage receipts must be a JSON list")
 
