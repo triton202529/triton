@@ -1,9 +1,10 @@
 """
 operator_console.py
-Phase DO-002/DO-003/DO-004/DO-005 — Streamlit operator-console pages.
+Phase DO-002/DO-003/DO-004/DO-005/DO-006/DO-007 + UIR-001 — Streamlit operator-console pages.
 
 DO-005 adds confirmation-protected STOP_TRITON (maps to DO-004 cooperative shutdown).
-Restart/Arm/Approve/Execute remain unavailable.
+UIR-001 is presentation-only: visual foundation, Operations command layout, Reports nav stub.
+Runtime-control callbacks and eligibility decisions are unchanged.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ OPERATOR_PAGES = [
     "Operations",
     "Activity",
     "Portfolio",
+    "Reports",
     "Orders",
     "Risk & Alerts",
     "Diagnostics",
@@ -44,13 +46,14 @@ def operator_page_list() -> List[str]:
 
 def _status_color(status: str) -> str:
     s = str(status or "").upper()
-    if s in ("RUNNING", "ARMED", "FRESH", "SUCCESS", "LIVE EXECUTION BLOCKED"):
+    if s in ("RUNNING", "ARMED", "FRESH", "SUCCESS"):
         return "🟢"
     if s in ("DEGRADED", "EXPIRED", "STALE", "WARN"):
         return "🟡"
     if s in ("STOPPED", "MISSING"):
         return "⚪"
-    if s in ("CRITICAL", "INVALID") or "NOT BLOCKED" in s:
+    # Live-execution BLOCKED is a required safety lock — never green.
+    if s in ("CRITICAL", "INVALID", "BLOCKED", "LIVE EXECUTION BLOCKED") or "NOT BLOCKED" in s:
         return "🔴"
     return "⚫"
 
@@ -68,14 +71,28 @@ def _render_start_controls() -> None:
     eligibility = start_eligibility()
     stop_el = stop_eligibility()
     restart_el = restart_eligibility()
-    st.subheader("Runtime controls")
-    st.caption(
-        f"Start eligibility: **{eligibility.get('decision')}** · "
-        f"Stop eligibility: **{stop_el.get('decision')}** · "
-        f"Restart eligibility: **{restart_el.get('decision')}** · "
-        f"Paper arm (not modified by Start/Stop/Restart): **{eligibility.get('paper_arm_status')}**"
+    from dashboard.operator_ui import section_header
+
+    section_header(
+        "Protected runtime controls",
+        "Confirmation required · eligibility-gated · existing callbacks unchanged",
     )
-    st.write(eligibility.get("explanation") or "")
+    st.markdown(
+        '<div class="triton-ctrl-legend">'
+        '<span class="start">Start</span>'
+        '<span class="stop">Stop</span>'
+        '<span class="restart">Restart</span>'
+        '<span class="unavailable">Unavailable / muted when ineligible</span>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"Start: **{eligibility.get('decision')}** · "
+        f"Stop: **{stop_el.get('decision')}** · "
+        f"Restart: **{restart_el.get('decision')}**"
+    )
+    if eligibility.get("explanation"):
+        st.caption(str(eligibility.get("explanation")))
 
     if "start_idempotency_key" not in st.session_state:
         st.session_state["start_idempotency_key"] = None
@@ -204,79 +221,88 @@ def _render_start_controls() -> None:
                 }
             )
 
+    st.caption(
+        "Confirmation required before Start/Stop/Restart submits. "
+        "Blocking reasons appear under each action when unavailable."
+    )
+
     ctrl1, ctrl2, ctrl3 = st.columns(3)
     with ctrl1:
-        if eligibility.get("already_running"):
-            st.info("TRITON is already running")
-        elif stop_busy:
-            st.button("Start TRITON", key="start_triton_disabled_stop_busy", disabled=True)
-            st.caption(
-                "Start unavailable while Stop or Restart is active or unresolved."
-                if restart_busy
-                else "Start unavailable while Stop is active or unresolved."
-            )
-        elif start_executing:
-            st.button("Start TRITON", key="start_triton_disabled_busy", disabled=True)
-            st.caption("Start action in progress…")
-        elif not eligibility.get("start_button_enabled") and not start_confirm_open:
-            st.button("Start TRITON", key="start_triton_disabled_unsafe", disabled=True)
-            st.caption("Start disabled: unsafe, ambiguous, or not eligible.")
-        else:
-            if not start_confirm_open:
-                if st.button("Start TRITON", key="start_triton_request", type="primary"):
-                    import uuid
-
-                    st.session_state["start_confirm_pending"] = True
-                    st.session_state["start_idempotency_key"] = str(uuid.uuid4())
-                    st.rerun()
-            else:
-                targets = eligibility.get("components_to_start") or []
-                preserved = eligibility.get("preserved_components") or []
-                st.warning(
-                    "This starts TRITON’s local watchdog and continuous runtime in its existing "
-                    "paper-only configuration. Live execution will remain blocked. "
-                    "This does **not** create or extend paper-arm authorization."
+        with st.container(key="triton_ctrl_start"):
+            st.caption("Action: **Start** · confirmation required")
+            if eligibility.get("already_running"):
+                st.info("TRITON is already running")
+            elif stop_busy:
+                st.button("Start TRITON", key="start_triton_disabled_stop_busy", disabled=True)
+                st.caption(
+                    "Start unavailable while Stop or Restart is active or unresolved."
+                    if restart_busy
+                    else "Start unavailable while Stop is active or unresolved."
                 )
-                if targets or preserved:
-                    st.caption(
-                        f"Will start: {targets or 'none'} · Will preserve: {preserved or 'none'}"
+            elif start_executing:
+                st.button("Start TRITON", key="start_triton_disabled_busy", disabled=True)
+                st.caption("Start action in progress…")
+            elif not eligibility.get("start_button_enabled") and not start_confirm_open:
+                st.button("Start TRITON", key="start_triton_disabled_unsafe", disabled=True)
+                st.caption("Start disabled: unsafe, ambiguous, or not eligible.")
+            else:
+                if not start_confirm_open:
+                    if st.button("Start TRITON", key="start_triton_request", type="primary"):
+                        import uuid
+
+                        st.session_state["start_confirm_pending"] = True
+                        st.session_state["start_idempotency_key"] = str(uuid.uuid4())
+                        st.rerun()
+                else:
+                    targets = eligibility.get("components_to_start") or []
+                    preserved = eligibility.get("preserved_components") or []
+                    st.warning(
+                        "This starts TRITON’s local watchdog and continuous runtime in its existing "
+                        "paper-only configuration. Live execution will remain blocked. "
+                        "This does **not** create or extend paper-arm authorization."
                     )
-                conf_a, conf_b = st.columns(2)
-                with conf_a:
-                    if st.button("Confirm Start", key="start_triton_confirm", type="primary"):
-                        st.session_state["start_in_progress"] = True
-                        st.session_state["start_confirm_pending"] = False
-                        result = {
-                            "result": "START_FAILED",
-                            "safe_message": "Start did not complete a terminal controller result.",
-                        }
-                        try:
-                            with st.spinner("Starting and validating TRITON…"):
-                                result = execute_start_triton(
-                                    action=ACTION_START,
-                                    idempotency_key=st.session_state.get("start_idempotency_key"),
-                                    source="operator_console",
-                                    operator_context={"ui": "operations"},
-                                )
-                        except Exception as exc:
+                    if targets or preserved:
+                        st.caption(
+                            f"Will start: {targets or 'none'} · Will preserve: {preserved or 'none'}"
+                        )
+                    conf_a, conf_b = st.columns(2)
+                    with conf_a:
+                        if st.button("Confirm Start", key="start_triton_confirm", type="primary"):
+                            st.session_state["start_in_progress"] = True
+                            st.session_state["start_confirm_pending"] = False
                             result = {
                                 "result": "START_FAILED",
-                                "error_code": "UI_START_EXCEPTION",
-                                "safe_message": (
-                                    "Start failed in the operator console before a durable "
-                                    f"controller result was recorded ({type(exc).__name__})."
-                                ),
+                                "safe_message": "Start did not complete a terminal controller result.",
                             }
-                        finally:
-                            st.session_state["start_last_result"] = result
-                            st.session_state["start_in_progress"] = False
+                            try:
+                                with st.spinner("Starting and validating TRITON…"):
+                                    result = execute_start_triton(
+                                        action=ACTION_START,
+                                        idempotency_key=st.session_state.get(
+                                            "start_idempotency_key"
+                                        ),
+                                        source="operator_console",
+                                        operator_context={"ui": "operations"},
+                                    )
+                            except Exception as exc:
+                                result = {
+                                    "result": "START_FAILED",
+                                    "error_code": "UI_START_EXCEPTION",
+                                    "safe_message": (
+                                        "Start failed in the operator console before a durable "
+                                        f"controller result was recorded ({type(exc).__name__})."
+                                    ),
+                                }
+                            finally:
+                                st.session_state["start_last_result"] = result
+                                st.session_state["start_in_progress"] = False
+                                st.session_state["start_idempotency_key"] = None
+                            st.rerun()
+                    with conf_b:
+                        if st.button("Cancel", key="start_triton_cancel"):
+                            st.session_state["start_confirm_pending"] = False
                             st.session_state["start_idempotency_key"] = None
-                        st.rerun()
-                with conf_b:
-                    if st.button("Cancel", key="start_triton_cancel"):
-                        st.session_state["start_confirm_pending"] = False
-                        st.session_state["start_idempotency_key"] = None
-                        st.rerun()
+                            st.rerun()
 
     restart_last = st.session_state.get("restart_last_result")
     if restart_last:
@@ -365,33 +391,59 @@ def _render_start_controls() -> None:
             )
 
     with ctrl2:
-        _render_stop_control_column(
-            stop_el, start_busy=start_busy or restart_busy, restart_busy=restart_busy
-        )
+        with st.container(key="triton_ctrl_stop"):
+            st.caption("Action: **Stop** · confirmation phrase required")
+            _render_stop_control_column(
+                stop_el, start_busy=start_busy or restart_busy, restart_busy=restart_busy
+            )
 
     with ctrl3:
-        _render_restart_control_column(
-            restart_el, start_busy=start_busy, stop_busy=stop_busy and not restart_busy
+        with st.container(key="triton_ctrl_restart"):
+            st.caption("Action: **Restart** · confirmation phrase required")
+            _render_restart_control_column(
+                restart_el, start_busy=start_busy, stop_busy=stop_busy and not restart_busy
+            )
+
+    with st.expander("Control rules and eligibility evidence", expanded=False):
+        st.caption(
+            f"allowed_start={eligibility.get('allowed_action')} · "
+            f"allowed_stop={stop_el.get('allowed_dashboard_action')} · "
+            f"allowed_restart={restart_el.get('allowed_dashboard_action')} · "
+            f"stop_enabled={stop_el.get('stop_button_enabled')} · "
+            f"restart_enabled={restart_el.get('restart_button_enabled')} · "
+            f"paper_arm={eligibility.get('paper_arm_status')}"
+        )
+        st.caption(
+            "Stop uses verified cooperative shutdown: active bounded work may finish at its "
+            "documented safe boundary; TRITON is never force-terminated by this control. "
+            "Restart is a verified cooperative Stop followed by a fresh protected Start; "
+            "it does not delete locks, bypass Start eligibility, arm paper, or enable live execution."
         )
 
-    st.caption(
-        f"allowed_start={eligibility.get('allowed_action')} · "
-        f"allowed_stop={stop_el.get('allowed_dashboard_action')} · "
-        f"allowed_restart={restart_el.get('allowed_dashboard_action')} · "
-        f"stop_enabled={stop_el.get('stop_button_enabled')} · "
-        f"restart_enabled={restart_el.get('restart_button_enabled')}"
-    )
-    st.info(
-        "Restart TRITON uses two separately verified transactions: a cooperative Stop followed "
-        "by a fresh protected Start. Restart does not force-terminate processes, delete locks, "
-        "bypass Start eligibility, arm paper execution, or enable live execution."
-    )
-    st.info(
-        "Stop TRITON uses verified cooperative shutdown. Active bounded work is allowed to "
-        "reach its documented safe boundary. TRITON is never force-terminated by this control."
-    )
+    with st.expander("Cooperative shutdown details", expanded=False):
+        _render_cooperative_shutdown_status()
 
-    _render_cooperative_shutdown_status()
+    with st.expander("Control acknowledgement evidence", expanded=False):
+        stop_ack = st.session_state.get("stop_last_result") or {}
+        restart_ack = st.session_state.get("restart_last_result") or {}
+        start_ack = st.session_state.get("start_last_result") or {}
+        st.caption(
+            f"Latest Start result: **{start_ack.get('result') or 'none'}** · "
+            f"Stop: **{stop_ack.get('result') or 'none'}** · "
+            f"Restart: **{restart_ack.get('result') or 'none'}**"
+        )
+        st.caption(
+            f"Stop ui_state: {stop_ack.get('ui_state') or 'n/a'} · "
+            f"acknowledgement_results present: "
+            f"{'yes' if stop_ack.get('acknowledgement_results') else 'no'}"
+        )
+        if stop_ack.get("acknowledgement_results") or restart_ack.get("stages"):
+            st.json(
+                {
+                    "stop_acknowledgement_results": stop_ack.get("acknowledgement_results"),
+                    "restart_stages": restart_ack.get("stages"),
+                }
+            )
 
 
 def _render_stop_control_column(
@@ -432,7 +484,8 @@ def _render_stop_control_column(
         return
 
     if not st.session_state.get("stop_confirm_pending"):
-        if st.button("Stop TRITON Safely", key="stop_triton_request", type="primary"):
+        # secondary + keyed-container CSS (red); avoid Streamlit primary red colliding with Start
+        if st.button("Stop TRITON Safely", key="stop_triton_request", type="secondary"):
             import uuid
 
             pre = issue_stop_preflight()
@@ -487,7 +540,7 @@ def _render_stop_control_column(
         if st.button(
             "Confirm Stop",
             key="stop_triton_confirm",
-            type="primary",
+            type="secondary",
             disabled=not can_submit,
         ):
             st.session_state["stop_in_progress"] = True
@@ -560,7 +613,8 @@ def _render_restart_control_column(
         return
 
     if not st.session_state.get("restart_confirm_pending"):
-        if st.button("Restart TRITON Safely", key="restart_triton_request", type="primary"):
+        # secondary + keyed-container CSS (amber); Start keeps primary (blue)
+        if st.button("Restart TRITON Safely", key="restart_triton_request", type="secondary"):
             import uuid
 
             pre = issue_restart_preflight()
@@ -622,7 +676,7 @@ def _render_restart_control_column(
         if st.button(
             "Confirm Restart",
             key="restart_triton_confirm",
-            type="primary",
+            type="secondary",
             disabled=not can_submit,
         ):
             st.session_state["restart_in_progress"] = True
@@ -665,14 +719,14 @@ def _render_restart_control_column(
 
 
 def _render_cooperative_shutdown_status() -> None:
-    """Read-only DO-004/DO-005 cooperative shutdown visibility."""
+    """Read-only DO-004/DO-005 cooperative shutdown visibility (collapsed by caller)."""
     from services.operator_shutdown_controller import shutdown_eligibility
     from services.operator_stop_action import stop_eligibility
 
     status = shutdown_eligibility()
     stop_el = stop_eligibility()
-    st.subheader("Cooperative Shutdown / Protected Stop")
-    st.info(stop_el.get("safe_message") or status.get("safe_message") or "")
+    st.markdown("**Cooperative Shutdown / Protected Stop evidence**")
+    st.caption(stop_el.get("safe_message") or status.get("safe_message") or "")
     st.caption(
         f"Stop decision: **{stop_el.get('decision')}** · "
         f"shutdown decision: **{status.get('decision')}** · "
@@ -680,14 +734,13 @@ def _render_cooperative_shutdown_status() -> None:
         f"protected_stop={stop_el.get('protected_stop_exposed')} · "
         f"restart={stop_el.get('restart_exposed')}"
     )
-    st.write(stop_el.get("explanation") or status.get("explanation") or "")
-    st.write(stop_el.get("recommended_action") or "")
+    with st.expander("Operator-facing explanation", expanded=False):
+        st.write(stop_el.get("explanation") or status.get("explanation") or "")
+        st.write(stop_el.get("recommended_action") or "")
 
     req = status.get("active_request") or {}
     active = status.get("shutdown_active") or {}
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("**Request / guard**")
+    with st.expander("Request / guard JSON", expanded=False):
         st.json(
             {
                 "shutdown_active": active.get("active"),
@@ -701,8 +754,7 @@ def _render_cooperative_shutdown_status() -> None:
                 "shutdown_guard_active": status.get("shutdown_guard_active"),
             }
         )
-    with col_b:
-        st.markdown("**Acknowledgements / progress**")
+    with st.expander("Acknowledgements / progress JSON", expanded=False):
         st.json(
             {
                 "continuous": status.get("ack_continuous") or {},
@@ -732,162 +784,406 @@ def _render_cooperative_shutdown_status() -> None:
 
 
 def render_operations_page() -> None:
-    from services.operator_console_status import build_operator_status
+    from dashboard import operator_ui as oui
+    from services.operator_console_status import DATA_FRESH_MINUTES, build_operator_status
+    from services.operator_console_status import build_portfolio_summary
+    from services.operator_runtime_controller import start_eligibility
 
-    st.title("Operations")
-    st.caption(
-        "Operator console · Protected Start · Protected Stop (cooperative) · "
-        "Live execution remains blocked · Restart uses verified Stop then fresh Start."
-    )
-
+    oui.inject_operator_theme()
     status = build_operator_status()
-    overall = str(status.get("overall_status") or "UNKNOWN")
-    st.markdown(f"### {_status_color(overall)} TRITON overall status: **{overall}**")
-
+    start_el = start_eligibility()
+    portfolio = build_portfolio_summary()
     live = status.get("live_execution") or {}
-    if live.get("blocked"):
-        st.success("LIVE EXECUTION BLOCKED")
-    else:
-        st.error(
-            "CRITICAL SAFETY WARNING: live execution does not appear blocked. "
-            "No enable control is provided. Investigate immediately."
-        )
-
-    c1, c2, c3, c4 = st.columns(4)
+    paper = status.get("paper_arm") or {}
     cont = status.get("continuous") or {}
     wd = status.get("watchdog") or {}
-    paper = status.get("paper_arm") or {}
-    with c1:
-        st.metric("Continuous loop", "RUNNING" if cont.get("process_running") else "NOT RUNNING")
-        st.caption(f"Lock: {cont.get('lock_classification')}")
-    with c2:
-        st.metric("Watchdog", "RUNNING" if wd.get("process_running") else "NOT RUNNING")
-        st.caption(f"Lock: {wd.get('lock_classification')}")
-    with c3:
-        st.metric("Paper arm", paper.get("display_status") or "UNKNOWN")
-        st.caption(paper.get("evidence_path") or "")
-    with c4:
-        st.metric("Live execution", "BLOCKED" if live.get("blocked") else "NOT BLOCKED")
-
-    c5, c6, c7, c8 = st.columns(4)
     broker = status.get("broker") or {}
     cycle = status.get("cycle") or {}
     op = status.get("orders_positions") or {}
     alerts = status.get("alerts") or {}
     freshness = status.get("data_freshness") or {}
-    with c5:
-        conn = broker.get("connected")
-        st.metric(
-            "Broker connection",
-            "CONNECTED" if conn is True else ("DISCONNECTED" if conn is False else "UNKNOWN"),
-        )
-    with c6:
-        st.metric("Market status", (status.get("market") or {}).get("status") or "UNKNOWN")
-    with c7:
-        st.metric(
-            "Last cycle",
-            str(
-                cycle.get("last_cycle_number")
-                if cycle.get("last_cycle_number") is not None
-                else "UNKNOWN"
+    market = status.get("market") or {}
+    paper_cert = status.get("paper_certification") or {}
+    live_perm = status.get("live_permission") or {}
+    shutdown = status.get("shutdown_presentation") or {}
+    overall = str(status.get("overall_status") or "UNKNOWN")
+    attention = list(status.get("attention") or [])
+
+    # Authoritative evidence timestamp for the header (prefer cycle lock refresh, then heartbeat).
+    evidence_ts = oui.format_timestamp(
+        cycle.get("last_completed_at")
+        or freshness.get("heartbeat_timestamp")
+        or status.get("generated_at")
+    )
+    market_state = oui.display_or_unknown(market.get("status"))
+    # Pipeline heartbeat = heartbeat.json class from operator status (not watchdog).
+    pipeline_hb = oui.present_pipeline_heartbeat_label(freshness_class=freshness.get("class"))
+    # Watchdog heartbeat = watchdog_status.json via existing read-only loader (banner source).
+    from services.dashboard_status_sync import load_runtime_heartbeat
+
+    watchdog_hb = oui.present_watchdog_heartbeat_label(load_runtime_heartbeat())
+    portfolio_freshness = oui.classify_portfolio_freshness_label(
+        last_refresh_time=portfolio.get("last_refresh_time"),
+        fresh_minutes=float(DATA_FRESH_MINUTES),
+    )
+    next_expected = cycle.get("next_expected_at") or "Unavailable"
+    watchdog_alert_count = (
+        alerts.get("active_count") if alerts.get("active_count") is not None else "UNKNOWN"
+    )
+    attention_count = len(attention)
+
+    hdr_l, hdr_r = st.columns([6.2, 1.0])
+    with hdr_l:
+        oui.render_command_header(
+            title="Operations",
+            context=(
+                "Daily operator workspace · Protected Start/Stop/Restart · "
+                "Live execution remains blocked unless evidence shows otherwise"
             ),
+            market_state=market_state,
+            evidence_ts=evidence_ts,
         )
-        st.caption(cycle.get("last_completed_at") or "No cycle timestamp evidenced")
-    with c8:
-        st.metric("Next expected cycle", "See caption")
-        st.caption(cycle.get("next_expected_at") or "Unavailable")
+    with hdr_r:
+        st.write("")
+        if st.button("Refresh", key="cc_ops_refresh", use_container_width=True):
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.session_state.pop("contract_results", None)
+            st.session_state.pop("contract_summary", None)
+            st.session_state.pop("pipeline_health", None)
+            st.session_state.pop("activity_feed_cache", None)
+            st.rerun()
 
-    c9, c10, c11, c12 = st.columns(4)
-    with c9:
-        oo = op.get("open_orders")
-        st.metric("Open orders", oo if oo is not None else "UNKNOWN")
-    with c10:
-        pc = op.get("position_count")
-        st.metric("Position count", pc if pc is not None else "UNKNOWN")
-    with c11:
-        st.metric(
-            "Active alerts",
-            alerts.get("active_count") if alerts.get("active_count") is not None else "UNKNOWN",
+    live_value = "BLOCKED" if live.get("blocked") else "NOT BLOCKED"
+    paper_value = oui.display_or_unknown(paper.get("display_status"))
+    # Continuous stale warning uses pipeline heartbeat only (heartbeat.json).
+    # Watchdog stale warning uses watchdog heartbeat only (watchdog_status.json).
+    cont_card = oui.loop_process_card_state(
+        process_running=cont.get("process_running"),
+        heartbeat_class=pipeline_hb["label"],
+    )
+    wd_card = oui.loop_process_card_state(
+        process_running=wd.get("process_running"),
+        heartbeat_class=watchdog_hb["label"],
+    )
+    # Permanent six-card strip (Live remains the safety lock surface; no full-width banner).
+    oui.render_safety_strip(
+        [
+            {
+                "label": "Live execution",
+                "value": live_value,
+                "tone": oui.tone_for_live_execution(live_value),
+                "note": "Required safety lock" if live_value == "BLOCKED" else None,
+            },
+            {
+                "label": "Paper authorization",
+                "value": paper_value,
+                "tone": oui.tone_for_status(paper_value),
+            },
+            {
+                "label": "Market",
+                "value": market_state,
+                "tone": oui.tone_for_market(market_state),
+            },
+            {
+                "label": "Continuous loop",
+                "value": cont_card["label"],
+                "tone": cont_card["tone"],
+                "note": cont_card.get("stale_warning"),
+            },
+            {
+                "label": "Watchdog",
+                "value": wd_card["label"],
+                "tone": wd_card["tone"],
+                "note": wd_card.get("stale_warning"),
+            },
+            {
+                "label": "Portfolio data freshness",
+                "value": portfolio_freshness,
+                "tone": oui.tone_for_status(portfolio_freshness),
+            },
+        ]
+    )
+
+    # Only surface a critical alert when the safety lock appears missing.
+    if not live.get("blocked"):
+        st.error(
+            "CRITICAL SAFETY WARNING: live execution does not appear blocked. "
+            "No enable control is provided. Investigate immediately."
         )
-    with c12:
-        st.metric("Data freshness", freshness.get("class") or "UNKNOWN")
 
-    st.markdown("---")
-    st.subheader("Operator attention")
-    attention = status.get("attention") or []
-    if not attention:
-        st.info("No evidence-backed attention items right now.")
-    else:
-        for item in attention:
-            sev = str(item.get("severity") or "INFO")
-            header = f"[{sev}] {item.get('title')}"
-            with st.expander(header, expanded=sev in ("CRITICAL", "HIGH")):
-                st.write(item.get("explanation"))
-                st.caption(f"Evidence: {item.get('evidence_source')}")
-                st.write(f"Recommended safe action: {item.get('recommended_action')}")
+    # Compact supporting summary — stacked label/value rows (no inline collision).
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        oui.render_compact_panel(
+            "Runtime",
+            [
+                {"label": "Overall runtime", "value": overall},
+                {"label": "Pipeline heartbeat", "value": pipeline_hb["display"]},
+                {"label": "Next expected cycle", "value": next_expected},
+            ],
+        )
+    with s2:
+        oui.render_compact_panel(
+            "Readiness",
+            [
+                {
+                    "label": "Certification / readiness",
+                    "value": oui.display_or_unknown(
+                        paper_cert.get("display_status") or "PAPER:UNKNOWN"
+                    ),
+                },
+                {"label": "Watchdog heartbeat", "value": watchdog_hb["display"]},
+                {
+                    "label": "Cycle overdue",
+                    "value": "yes" if cycle.get("overdue") else "no",
+                },
+            ],
+        )
+    with s3:
+        broker_state = oui.display_or_unknown(broker.get("state"))
+        oui.render_compact_panel(
+            "Evidence",
+            [
+                {"label": "Broker evidence state", "value": broker_state},
+                {
+                    "label": "Start eligibility",
+                    "value": start_el.get("decision") or "UNKNOWN",
+                },
+                {
+                    "label": "Attention items",
+                    "value": attention_count,
+                },
+            ],
+        )
+    with s4:
+        oui.render_compact_panel(
+            "Portfolio counts",
+            [
+                {
+                    "label": "Position count",
+                    "value": (
+                        op.get("position_count")
+                        if op.get("position_count") is not None
+                        else "UNKNOWN"
+                    ),
+                },
+                {
+                    "label": "Open orders",
+                    "value": (
+                        op.get("open_orders") if op.get("open_orders") is not None else "UNKNOWN"
+                    ),
+                },
+                {
+                    "label": "Watchdog active alerts",
+                    "value": watchdog_alert_count,
+                },
+            ],
+        )
 
-    st.markdown("---")
-    _render_runtime_recovery_guidance()
-
-    st.markdown("---")
+    # Protected controls immediately after summary — exact existing callbacks reused.
     _render_start_controls()
+
+    attention_summary = oui.summarize_attention_items(attention)
+    top_issue = attention_summary.get("top_item")
+
+    center, right = st.columns([3.35, 1.15], gap="medium")
+    with center:
+        _render_runtime_recovery_guidance()
+
+        with st.expander(
+            f"Operator Attention details — {attention_count} items",
+            expanded=False,
+        ):
+            if not attention:
+                st.info("No evidence-backed attention items right now.")
+            else:
+                for item in attention_summary.get("ordered") or []:
+                    oui.render_attention_item(
+                        item,
+                        start_decision=start_el.get("decision"),
+                        start_button_enabled=start_el.get("start_button_enabled"),
+                    )
+
+        with st.expander("Technical evidence", expanded=False):
+            st.caption("Raw classifier / lock / cycle / broker evidence (read-only).")
+            st.json(
+                {
+                    "overall_status": overall,
+                    "continuous": cont,
+                    "watchdog": wd,
+                    "paper_arm": paper,
+                    "live_execution": live,
+                    "broker": broker,
+                    "market": market,
+                    "cycle": cycle,
+                    "pipeline_heartbeat": {
+                        "channel": pipeline_hb.get("channel"),
+                        "source": pipeline_hb.get("source"),
+                        "label": pipeline_hb.get("label"),
+                        "from_status_data_freshness_class": freshness.get("class"),
+                        "heartbeat_timestamp": freshness.get("heartbeat_timestamp"),
+                    },
+                    "watchdog_heartbeat": {
+                        "channel": watchdog_hb.get("channel"),
+                        "source": watchdog_hb.get("source"),
+                        "label": watchdog_hb.get("label"),
+                        "age_minutes": watchdog_hb.get("age_minutes"),
+                        "display": watchdog_hb.get("display"),
+                    },
+                    "portfolio_data_freshness": {
+                        "class": portfolio_freshness,
+                        "last_refresh_time": portfolio.get("last_refresh_time"),
+                    },
+                    "paper_certification": paper_cert,
+                    "live_permission": live_perm,
+                    "shutdown_presentation": shutdown,
+                    "orders_positions": op,
+                    "alerts": {
+                        "active_count": alerts.get("active_count"),
+                        "critical_count": alerts.get("critical_count"),
+                        "note": "watchdog artifact active-alert count",
+                    },
+                    "attention_item_count": attention_count,
+                    "evidence_paths": status.get("evidence_paths"),
+                    "generated_at": status.get("generated_at"),
+                    "start_eligibility_decision": start_el.get("decision"),
+                    "start_button_enabled": start_el.get("start_button_enabled"),
+                }
+            )
+
+    with right:
+        counts = attention_summary.get("counts") or {}
+        oui.render_compact_panel(
+            "Operator Attention",
+            [
+                {"label": "Total items", "value": attention_count},
+                {
+                    "label": "Severity counts",
+                    "value": (
+                        f"C{counts.get('CRITICAL', 0)}/"
+                        f"H{counts.get('HIGH', 0)}/"
+                        f"M{counts.get('MEDIUM', 0) + counts.get('WARN', 0)}/"
+                        f"I{counts.get('INFO', 0)}"
+                    ),
+                },
+                {
+                    "label": "Top issue",
+                    "value": (
+                        f"[{top_issue.get('severity')}] {top_issue.get('title')}"
+                        if top_issue
+                        else "None"
+                    ),
+                },
+            ],
+        )
+        if top_issue:
+            presented = oui.present_attention_recommendation(
+                top_issue,
+                start_decision=start_el.get("decision"),
+                start_button_enabled=start_el.get("start_button_enabled"),
+            )
+            st.caption(
+                f"Recommended safe action: {presented.get('current_action') or 'Review evidence.'}"
+            )
+        else:
+            st.caption("No evidence-backed attention items.")
+        st.caption("Full issue explanations are in Operator Attention details below-left.")
+
+        with st.expander("Current action status", expanded=False):
+            # Unique fields only — Live / Paper / Market / loops already on the strip.
+            oui.render_compact_panel(
+                "Action status",
+                [
+                    {
+                        "label": "Shutdown request",
+                        "value": shutdown.get("display_status") or "NONE",
+                    },
+                    {
+                        "label": "Shutdown historical",
+                        "value": "yes" if shutdown.get("historical") else "no",
+                    },
+                    {
+                        "label": "Start eligibility",
+                        "value": start_el.get("decision") or "UNKNOWN",
+                    },
+                ],
+            )
+            if shutdown.get("historical") and not shutdown.get("active"):
+                st.caption("Historical/expired shutdown — does not affect current runtime health")
+            st.caption(
+                f"Market evidence: source={market.get('source') or 'n/a'} · "
+                f"as_of={market.get('as_of') or 'n/a'}"
+            )
+            if watchdog_hb.get("age_note"):
+                st.caption(
+                    f"Watchdog heartbeat age: {watchdog_hb['age_note']} · "
+                    f"source={watchdog_hb.get('source')}"
+                )
+            label = broker.get("display_label") or "Paper broker REST: Unknown"
+            st.caption(label)
+            st.caption(str(broker.get("meaning") or ""))
+            st.write(status.get("evidence_paths") or {})
+            st.caption("Market CLOSED is a neutral market state, not a critical runtime failure.")
 
 
 def _render_runtime_recovery_guidance() -> None:
     """DO-007 read-only advisory section. Never submits Start/Stop/Restart."""
     from services.operator_runtime_recovery_guidance import build_runtime_recovery_guidance
 
-    st.subheader("Runtime Recovery Guidance")
-    st.caption(
-        "Recovery guidance is advisory only. It does not start, stop, restart, terminate, "
-        "repair, authorize, or modify TRITON."
-    )
     # Fresh read-only evaluation on each render; no auto-submit, no preflight, no tokens.
     guidance = build_runtime_recovery_guidance()
     sev = str(guidance.get("severity") or "INFO")
     overall = str(guidance.get("runtime_overall_status") or "UNKNOWN")
+    action = guidance.get("safe_next_action") or "none"
+
+    st.markdown("**Runtime Recovery Guidance**")
     if sev == "CRITICAL":
         st.error(f"**{overall}** · severity={sev}")
     elif sev == "HIGH":
         st.warning(f"**{overall}** · severity={sev}")
     else:
-        st.info(f"**{overall}** · severity={sev}")
+        st.caption(f"**{overall}** · severity={sev}")
+    st.caption(f"Recommended safe action: **{action}**")
+    st.caption(
+        "Recovery guidance is advisory only. It does not start, stop, restart, terminate, "
+        "delete locks, create paper authorization, or enable live execution."
+    )
 
-    st.write(guidance.get("operator_message") or "")
-    targets = guidance.get("affected_targets") or []
-    st.caption(
-        f"Affected targets: {', '.join(targets) if targets else 'none'} · "
-        f"Recommended safe action: **{guidance.get('safe_next_action')}** · "
-        f"Eligible protected control (advisory): "
-        f"**{guidance.get('eligible_protected_control') or 'none'}**"
-    )
-    st.caption(
-        f"Manual investigation required: **{guidance.get('manual_investigation_required')}** · "
-        f"Escalation required: **{guidance.get('escalation_required')}** · "
-        f"Confidence: {guidance.get('confidence')}"
-    )
-    c1, c2 = st.columns(2)
-    with c1:
+    # Keep active blockers visible when present; details otherwise collapsed.
+    blockers = guidance.get("blockers") or []
+    if blockers:
+        st.caption("Blockers: " + ", ".join(str(b) for b in blockers[:6]))
+
+    with st.expander("Runtime recovery details", expanded=False):
+        st.write(guidance.get("operator_message") or "")
+        targets = guidance.get("affected_targets") or []
+        st.caption(f"Affected targets: {', '.join(targets) if targets else 'none'}")
+        st.caption(
+            f"Eligible protected control (advisory): "
+            f"**{guidance.get('eligible_protected_control') or 'none'}**"
+        )
+        st.caption(
+            f"Manual investigation required: **{guidance.get('manual_investigation_required')}** · "
+            f"Escalation required: **{guidance.get('escalation_required')}** · "
+            f"Confidence: {guidance.get('confidence')}"
+        )
         st.caption(
             f"Live execution blocked: **{guidance.get('live_execution_blocked')}** "
             "(required safe state; never enable live from this page)"
         )
-    with c2:
         st.caption(
             f"Paper authorization: **{guidance.get('paper_arm_status')}** "
             "(separate prerequisite; guidance does not create or extend authorization)"
         )
-
-    blockers = guidance.get("blockers") or []
-    warnings = [
-        w
-        for w in (guidance.get("warnings") or [])
-        if w not in ("LIVE_EXECUTION_BLOCKED (required safe state)",)
-    ]
-    if blockers:
-        st.caption("Blockers: " + ", ".join(str(b) for b in blockers))
-    if warnings:
-        st.caption("Warnings: " + ", ".join(str(w) for w in warnings[:8]))
+        warnings = [
+            w
+            for w in (guidance.get("warnings") or [])
+            if w not in ("LIVE_EXECUTION_BLOCKED (required safe state)",)
+        ]
+        st.caption("Warnings: " + (", ".join(str(w) for w in warnings[:8]) if warnings else "none"))
 
     evidence = guidance.get("evidence_summary") or []
     with st.expander("Recovery evidence summary", expanded=False):
@@ -904,6 +1200,8 @@ def _render_runtime_recovery_guidance() -> None:
             "Guidance does not promise successful recovery, immediate restart, "
             "forced termination, lock repair, paper authorization, or live enablement."
         )
+
+    with st.expander("Recovery technical evidence", expanded=False):
         st.json(
             {
                 "guidance_id": guidance.get("guidance_id"),
@@ -919,9 +1217,35 @@ def _render_runtime_recovery_guidance() -> None:
                 ),
             }
         )
-    st.info(
-        "Use the protected Start, Stop, or Restart controls below only as separate explicit "
-        "operator actions. This guidance section never submits those controls."
+
+
+def render_reports_page() -> None:
+    """UIR-001 Reports stub — navigation reserved; no invented performance numbers."""
+    from dashboard import operator_ui as oui
+
+    oui.inject_operator_theme()
+    oui.render_command_header(
+        title="Reports",
+        context="Reconciled portfolio reporting is not yet available",
+        market_state="n/a",
+        evidence_ts="n/a",
+    )
+    oui.render_empty_state(
+        "Reports not available yet",
+        (
+            "Reconciled portfolio reports are not yet available. "
+            "This page is a truthful placeholder only — no performance values are calculated, "
+            "estimated, or displayed. Reporting is not marked complete."
+        ),
+        reserved=[
+            "Daily",
+            "Weekly",
+            "Monthly",
+            "Quarterly",
+            "Half-year",
+            "Yearly",
+            "Custom date range",
+        ],
     )
 
 
@@ -932,7 +1256,9 @@ def render_activity_page() -> None:
         collect_activity_events,
         filter_activity_events,
     )
+    from dashboard import operator_ui as oui
 
+    oui.inject_operator_theme()
     st.title("Activity")
     st.caption(
         "Plain-language events derived only from real logs and artifacts. Nothing is invented."
@@ -1027,8 +1353,10 @@ def render_activity_page() -> None:
 
 
 def render_portfolio_page() -> None:
+    from dashboard import operator_ui as oui
     from services.operator_console_status import build_portfolio_summary
 
+    oui.inject_operator_theme()
     st.title("Portfolio")
     st.caption("Read-only portfolio view from trusted artifacts.")
     summary = build_portfolio_summary()
@@ -1080,8 +1408,10 @@ def render_portfolio_page() -> None:
 
 
 def render_orders_page() -> None:
+    from dashboard import operator_ui as oui
     from services.operator_console_status import build_orders_summary
 
+    oui.inject_operator_theme()
     st.title("Orders")
     st.caption(
         "Read-only paper/order visibility. No Submit, Cancel, Approve, Retry, or Execute controls."
@@ -1107,8 +1437,10 @@ def render_orders_page() -> None:
 
 
 def render_risk_alerts_page() -> None:
+    from dashboard import operator_ui as oui
     from services.operator_console_status import build_risk_alerts_summary
 
+    oui.inject_operator_theme()
     st.title("Risk & Alerts")
     st.caption(
         "Read-only risk and watchdog posture. Alerts cannot be dismissed or overridden here."
@@ -1152,8 +1484,10 @@ def render_risk_alerts_page() -> None:
 
 
 def render_diagnostics_page(*, switch_to_legacy_callback=None) -> None:
+    from dashboard import operator_ui as oui
     from services.operator_console_status import build_operator_status
 
+    oui.inject_operator_theme()
     st.title("Diagnostics")
     st.caption("Technical evidence for operators. Secrets and credentials are not displayed.")
 
@@ -1385,6 +1719,7 @@ OPERATOR_RENDERERS = {
     "Operations": render_operations_page,
     "Activity": render_activity_page,
     "Portfolio": render_portfolio_page,
+    "Reports": render_reports_page,
     "Orders": render_orders_page,
     "Risk & Alerts": render_risk_alerts_page,
     "Diagnostics": render_diagnostics_page,

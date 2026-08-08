@@ -2544,19 +2544,19 @@ def render_heartbeat_freshness_banner() -> None:
     rt_ts = runtime.get("timestamp")
     rt_age = runtime.get("age_minutes")
     if rt_ts is None:
-        st.warning("⚠ Runtime watchdog heartbeat unknown (`watchdog_status.json`).")
+        st.warning("⚠ Watchdog heartbeat unknown (`watchdog_status.json`).")
     else:
         rt_disp = dt_to_et_str(rt_ts)
         src = str(runtime.get("refresh_source") or "watchdog")
         if rt_age is not None and float(rt_age) > 60:
             st.warning(
-                f"Runtime watchdog heartbeat is **{float(rt_age):.0f} minutes** old "
-                f"(source: watchdog_status.json)."
+                f"Watchdog heartbeat is **{float(rt_age):.0f} minutes** old "
+                f"(source: watchdog_status.json). Separate from pipeline heartbeat."
             )
         else:
             st.caption(
-                f"Runtime watchdog heartbeat · **{rt_disp}** · source **{src}** · "
-                f"status **{runtime.get('status') or '—'}**"
+                f"Watchdog heartbeat · **{rt_disp}** · source **{src}** · "
+                f"status **{runtime.get('status') or '—'}** · separate from pipeline heartbeat"
             )
 
 
@@ -24318,26 +24318,82 @@ COMMAND_CENTER_DESTINATIONS: List[str] = [
     "Operations",
     "Activity",
     "Portfolio",
+    "Reports",
     "Orders",
     "Risk & Alerts",
     "Diagnostics",
     "Advanced Dashboard",
 ]
 ADVANCED_DASHBOARD_DESTINATION = "Advanced Dashboard"
+OPERATOR_CONSOLE_MODE = "Operator Console"
+ADVANCED_CONSOLE_MODE = "Advanced Dashboard"
+
+
+def _render_compact_left_rail_status() -> None:
+    """Compact always-visible system summary for the left rail (presentation only)."""
+    from dashboard.operator_ui import (
+        compact_system_status_lines,
+        escape,
+        status_badge,
+        tone_for_live_execution,
+        tone_for_status,
+    )
+    from services.operator_console_status import build_operator_status
+
+    try:
+        status = build_operator_status()
+        lines = compact_system_status_lines(status)
+        overall = lines["overall"]
+        live = lines["live"]
+        paper = lines["paper"]
+        freshness = lines["freshness"]
+        live_note = (
+            '<div style="color:#95A2B2;font-size:0.7rem;margin-top:0.15rem;">Required safety lock</div>'
+            if live == "BLOCKED"
+            else ""
+        )
+        st.markdown(
+            f'<div class="triton-panel">'
+            f'<div class="triton-panel-title">System status</div>'
+            f'<div class="triton-kv"><span class="k">Runtime</span>'
+            f'<span class="v">{status_badge(overall, tone=tone_for_status(overall))}</span></div>'
+            f'<div class="triton-kv"><span class="k">Live</span>'
+            f'<span class="v">{status_badge(live, tone=tone_for_live_execution(live))}</span></div>'
+            f"{live_note}"
+            f'<div class="triton-kv"><span class="k">Paper</span>'
+            f'<span class="v">{status_badge(paper, tone=tone_for_status(paper))}</span></div>'
+            f'<div class="triton-kv"><span class="k">Freshness</span>'
+            f'<span class="v">{status_badge(freshness, tone=tone_for_status(freshness))}</span></div>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Mode: {escape(status.get('overall_status') or 'UNKNOWN')}")
+    except Exception:
+        st.caption("System status: UNKNOWN")
+
+    with st.expander("Status details", expanded=False):
+        pipeline_locked, pipeline_reason = compute_execution_lock()
+        posture = load_dashboard_execution_posture()
+        render_sidebar_execution_status(posture, pipeline_locked, pipeline_reason)
 
 
 def sidebar_controls() -> Tuple[str, str, str]:
     """Return (mode, section_or_operator_page, legacy_page_label).
 
     mode is 'operator' (default) or 'legacy' (Advanced Dashboard).
-    One top-level destination selector; Operator and Advanced trees are never
-    rendered in the same run.
+    Compact left rail: identity, mode switch, operator nav, runtime mode, status.
+    Operator and Advanced trees are never rendered in the same run.
     """
     from dashboard.operator_console import DEFAULT_OPERATOR_PAGE, OPERATOR_PAGES
+    from dashboard.operator_ui import inject_operator_theme
 
     with st.sidebar:
-        st.title("TRITON Command Center")
-        st.caption(f"Build: {APP_VERSION}")
+        inject_operator_theme()
+        st.markdown(
+            '<div class="triton-rail-brand">TRITON</div>'
+            f'<div class="triton-rail-sub">Operator Console · build {APP_VERSION}</div>',
+            unsafe_allow_html=True,
+        )
 
         # Fresh sessions land on Operations. Preserve Advanced if already selected
         # via dashboard_nav_mode (Diagnostics switch / prior session).
@@ -24354,24 +24410,61 @@ def sidebar_controls() -> Tuple[str, str, str]:
             current_dest = DEFAULT_OPERATOR_PAGE
             st.session_state["cc_top_destination"] = current_dest
 
-        destination = st.radio(
-            "Destination",
-            COMMAND_CENTER_DESTINATIONS,
-            index=COMMAND_CENTER_DESTINATIONS.index(current_dest),
-            key="cc_destination_radio",
+        initial_mode = (
+            ADVANCED_CONSOLE_MODE
+            if (
+                st.session_state.get("dashboard_nav_mode") == "legacy"
+                or current_dest == ADVANCED_DASHBOARD_DESTINATION
+            )
+            else OPERATOR_CONSOLE_MODE
+        )
+        console_mode = st.radio(
+            "Console mode",
+            [OPERATOR_CONSOLE_MODE, ADVANCED_CONSOLE_MODE],
+            index=0 if initial_mode == OPERATOR_CONSOLE_MODE else 1,
+            key="cc_console_mode_radio",
             help=(
-                "Operations is the default Command Center landing page. "
+                "Operator Console is the default daily operations workspace. "
                 "Advanced Dashboard opens the existing research/system navigation "
                 "(formerly Advanced / Legacy Dashboard)."
             ),
         )
-        st.session_state["cc_top_destination"] = destination
-        if destination == ADVANCED_DASHBOARD_DESTINATION:
+
+        if console_mode == ADVANCED_CONSOLE_MODE:
             st.session_state["dashboard_nav_mode"] = "legacy"
+            st.session_state["cc_top_destination"] = ADVANCED_DASHBOARD_DESTINATION
+            destination = ADVANCED_DASHBOARD_DESTINATION
         else:
             st.session_state["dashboard_nav_mode"] = "operator"
+            # Heal stale Destination widget values from pre-Reports sessions.
+            stored_dest = st.session_state.get("cc_destination_radio")
+            if stored_dest is not None and stored_dest not in OPERATOR_PAGES:
+                st.session_state["cc_destination_radio"] = (
+                    current_dest if current_dest in OPERATOR_PAGES else DEFAULT_OPERATOR_PAGE
+                )
+            if current_dest not in OPERATOR_PAGES:
+                current_dest = DEFAULT_OPERATOR_PAGE
+                st.session_state["cc_top_destination"] = current_dest
+            # Destination radio remains the operator-page selector (preserves key contract).
+            op_index = OPERATOR_PAGES.index(
+                current_dest if current_dest in OPERATOR_PAGES else DEFAULT_OPERATOR_PAGE
+            )
+            st.caption("Operator pages (exact order)")
+            destination = st.radio(
+                "Destination",
+                list(OPERATOR_PAGES),
+                index=op_index,
+                key="cc_destination_radio",
+                help=(
+                    "Required order: Operations, Activity, Portfolio, Reports, Orders, "
+                    "Risk & Alerts, Diagnostics."
+                ),
+            )
+            st.session_state["cc_top_destination"] = destination
+            if "Reports" not in OPERATOR_PAGES:
+                st.error("Reports navigation missing from OPERATOR_PAGES — configuration error.")
 
-        if st.button("⟳ Refresh data", key="refresh"):
+        if st.button("Refresh data", key="refresh"):
             try:
                 st.cache_data.clear()
             except Exception:
@@ -24382,19 +24475,14 @@ def sidebar_controls() -> Tuple[str, str, str]:
             st.session_state.pop("activity_feed_cache", None)
             st.rerun()
 
-        pipeline_locked, pipeline_reason = compute_execution_lock()
-        posture = load_dashboard_execution_posture()
-        render_sidebar_execution_status(posture, pipeline_locked, pipeline_reason)
+        _render_compact_left_rail_status()
 
         st.markdown("---")
         if destination != ADVANCED_DASHBOARD_DESTINATION:
-            # Destination itself is the Operator page (no second page radio).
             if destination not in OPERATOR_PAGES:
-                st.error(f"❌ Unknown Command Center destination: {destination}")
+                st.error(f"Unknown Command Center destination: {destination}")
                 destination = DEFAULT_OPERATOR_PAGE
-            st.caption("Command Center · routine operator pages")
-            st.markdown("---")
-            st.caption(f"Repo root: {PROJECT_ROOT}")
+            st.caption("Operator navigation · routine pages only")
             return "operator", destination, ""
 
         # Advanced Dashboard — reuse SECTIONS / PAGE_REGISTRY; default Portfolio (read-only).
@@ -24416,157 +24504,25 @@ def sidebar_controls() -> Tuple[str, str, str]:
             index=0,
             key="cc_advanced_view",
         )
-        st.markdown("---")
         st.caption(f"Repo root: {PROJECT_ROOT}")
         return "legacy", section, page
 
 
 def _render_cc_operations_broker_order_evidence() -> None:
-    """Operations page with paper-REST broker freshness + protected controls reused."""
+    """Operations page with paper-REST broker freshness + protected controls reused.
+
+    UIR-001: presentation shell lives in dashboard.operator_console.render_operations_page.
+    LIVE EXECUTION BLOCKED remains an authoritative safety display from status evidence.
+    Protected Start/Stop/Restart remain wired through _render_start_controls.
+    """
     from dashboard.operator_console import (
-        _render_runtime_recovery_guidance,
-        _render_start_controls,
-        _status_color,
-    )
-    from services.operator_console_status import build_operator_status
-
-    st.title("Operations")
-    st.caption(
-        "Operator console · Protected Start · Protected Stop (cooperative) · "
-        "Live execution remains blocked · Restart uses verified Stop then fresh Start."
+        _render_start_controls,  # noqa: F401 — authority-gate contract anchor
+        render_operations_page,
     )
 
-    status = build_operator_status()
-    overall = str(status.get("overall_status") or "UNKNOWN")
-    st.markdown(f"### {_status_color(overall)} TRITON overall status: **{overall}**")
-
-    live = status.get("live_execution") or {}
-    if live.get("blocked"):
-        st.success("LIVE EXECUTION BLOCKED")
-    else:
-        st.error(
-            "CRITICAL SAFETY WARNING: live execution does not appear blocked. "
-            "No enable control is provided. Investigate immediately."
-        )
-
-    c1, c2, c3, c4 = st.columns(4)
-    cont = status.get("continuous") or {}
-    wd = status.get("watchdog") or {}
-    paper = status.get("paper_arm") or {}
-    with c1:
-        st.metric("Continuous loop", "RUNNING" if cont.get("process_running") else "NOT RUNNING")
-        st.caption(f"Lock: {cont.get('lock_classification')}")
-    with c2:
-        st.metric("Watchdog", "RUNNING" if wd.get("process_running") else "NOT RUNNING")
-        st.caption(f"Lock: {wd.get('lock_classification')}")
-    with c3:
-        st.metric("Paper arm", paper.get("display_status") or "UNKNOWN")
-        st.caption(paper.get("evidence_path") or "")
-    with c4:
-        st.metric("Live execution", "BLOCKED" if live.get("blocked") else "NOT BLOCKED")
-
-    c5, c6, c7, c8 = st.columns(4)
-    broker = status.get("broker") or {}
-    cycle = status.get("cycle") or {}
-    op = status.get("orders_positions") or {}
-    alerts = status.get("alerts") or {}
-    freshness = status.get("data_freshness") or {}
-    with c5:
-        label = broker.get("display_label") or "Paper broker REST: Unknown"
-        # Metric value is the state word after the colon for compact display.
-        state = str(broker.get("state") or "UNKNOWN")
-        st.metric("Paper broker REST", state.title() if state != "UNKNOWN" else "Unknown")
-        st.caption(label)
-        age = broker.get("evidence_age_minutes")
-        age_txt = f"{age:.1f} min ago" if isinstance(age, (int, float)) else "age unknown"
-        st.caption(
-            f"Evidence: {broker.get('evidence_timestamp') or 'n/a'} · {age_txt} · "
-            f"freshness={broker.get('freshness') or 'UNKNOWN'}"
-        )
-        st.caption(str(broker.get("meaning") or ""))
-    with c6:
-        market = status.get("market") or {}
-        st.metric("Market status", market.get("status") or "UNKNOWN")
-        st.caption(f"source={market.get('source') or 'n/a'} · as_of={market.get('as_of') or 'n/a'}")
-    with c7:
-        st.metric(
-            "Last cycle",
-            str(
-                cycle.get("last_cycle_number")
-                if cycle.get("last_cycle_number") is not None
-                else "UNKNOWN"
-            ),
-        )
-        st.caption(cycle.get("last_completed_at") or "No cycle timestamp evidenced")
-        if cycle.get("overdue"):
-            st.caption("Cycle overdue: yes (past interval + grace)")
-        else:
-            st.caption("Cycle overdue: no")
-    with c8:
-        st.metric("Next expected cycle", "See caption")
-        st.caption(cycle.get("next_expected_at") or "Unavailable")
-
-    paper_cert = status.get("paper_certification") or {}
-    live_perm = status.get("live_permission") or {}
-    shutdown = status.get("shutdown_presentation") or {}
-    c_cert1, c_cert2, c_shut = st.columns(3)
-    with c_cert1:
-        st.metric(
-            "Paper certification",
-            paper_cert.get("display_status") or "PAPER:UNKNOWN",
-        )
-        st.caption(paper_cert.get("evidence_path") or "")
-    with c_cert2:
-        st.metric(
-            "Live permission",
-            live_perm.get("display_status")
-            or ("LIVE:BLOCKED" if live.get("blocked") else "LIVE:PERMITTED"),
-        )
-        st.caption("Independent of paper certification")
-    with c_shut:
-        st.metric(
-            "Shutdown request",
-            shutdown.get("display_status") or "NONE",
-        )
-        st.caption(shutdown.get("presentation") or "No shutdown presentation")
-        if shutdown.get("historical") and not shutdown.get("active"):
-            st.caption("Historical/expired — does not affect current runtime health")
-
-    c9, c10, c11, c12 = st.columns(4)
-    with c9:
-        oo = op.get("open_orders")
-        st.metric("Open orders (snapshot)", oo if oo is not None else "UNKNOWN")
-        st.caption("See Orders → Current open orders for evidence freshness.")
-    with c10:
-        pc = op.get("position_count")
-        st.metric("Position count", pc if pc is not None else "UNKNOWN")
-    with c11:
-        st.metric(
-            "Active alerts",
-            alerts.get("active_count") if alerts.get("active_count") is not None else "UNKNOWN",
-        )
-    with c12:
-        st.metric("Data freshness", freshness.get("class") or "UNKNOWN")
-
-    st.markdown("---")
-    st.subheader("Operator attention")
-    attention = status.get("attention") or []
-    if not attention:
-        st.info("No evidence-backed attention items right now.")
-    else:
-        for item in attention:
-            sev = str(item.get("severity") or "INFO")
-            header = f"[{sev}] {item.get('title')}"
-            with st.expander(header, expanded=sev in ("CRITICAL", "HIGH")):
-                st.write(item.get("explanation"))
-                st.caption(f"Evidence: {item.get('evidence_source')}")
-                st.write(f"Recommended safe action: {item.get('recommended_action')}")
-
-    st.markdown("---")
-    _render_runtime_recovery_guidance()
-
-    st.markdown("---")
-    _render_start_controls()
+    # Delegate presentation; control callbacks stay inside _render_start_controls.
+    assert callable(_render_start_controls)
+    render_operations_page()
 
 
 def _render_cc_orders_broker_order_evidence() -> None:
@@ -24636,10 +24592,14 @@ def main() -> None:
     mode, section_or_page, legacy_page = sidebar_controls()
 
     if mode == "operator":
-        st.markdown("### TRITON Command Center")
+        from dashboard.operator_ui import inject_operator_theme
+
+        inject_operator_theme()
         st.caption(
-            "Live execution remains blocked · Protected runtime controls require confirmation"
+            "TRITON Operator Console · Live execution remains blocked · "
+            "Protected runtime controls require confirmation"
         )
+        # Freshness banner retained; presentation-only and does not mutate controls.
         render_heartbeat_freshness_banner()
 
         page = section_or_page
@@ -24653,8 +24613,8 @@ def main() -> None:
             render_diagnostics_page(switch_to_legacy_callback=_to_legacy)
             return
 
-        # Evidence-contract pages (broker freshness + order separation) live here so
-        # dashboard/operator_console.py (DO-007 dirty worktree) stays untouched.
+        # Operations retains the broker-evidence entrypoint name for contract tests;
+        # implementation delegates to the UIR-001 Operations presentation.
         if page == "Operations":
             _render_cc_operations_broker_order_evidence()
             return
@@ -24664,7 +24624,7 @@ def main() -> None:
 
         fn = OPERATOR_RENDERERS.get(page)
         if fn is None:
-            st.error(f"❌ Operator page not wired: {page}")
+            st.error(f"Operator page not wired: {page}")
             return
         fn()
         return

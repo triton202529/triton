@@ -1310,8 +1310,9 @@ def test_94_diagnostics_remains_read_only():
 
 
 def test_95_six_page_navigation_unchanged():
-    assert len(OPERATOR_PAGES) == 6
+    assert len(OPERATOR_PAGES) == 7
     assert DEFAULT_OPERATOR_PAGE == "Operations"
+    assert "Reports" in OPERATOR_PAGES
 
 
 def test_96_advanced_legacy_dashboard_available():
@@ -1346,7 +1347,7 @@ def test_100_do003_start_surface_intact():
 
 
 def test_101_do002_console_surface_intact():
-    assert len(OPERATOR_PAGES) == 6
+    assert len(OPERATOR_PAGES) == 7
     assert DEFAULT_OPERATOR_PAGE == "Operations"
 
 

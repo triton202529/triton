@@ -31,12 +31,13 @@ from services.operator_console_status import (
 )
 
 
-def test_operator_navigation_exactly_six_pages():
-    assert len(OPERATOR_PAGES) == 6
+def test_operator_navigation_exactly_seven_pages():
+    assert len(OPERATOR_PAGES) == 7
     assert OPERATOR_PAGES == [
         "Operations",
         "Activity",
         "Portfolio",
+        "Reports",
         "Orders",
         "Risk & Alerts",
         "Diagnostics",

@@ -1550,7 +1550,10 @@ def test_104_operations_never_claims_immediate_restart():
     assert "enable live execution" in combined  # as a negative promise
     assert "force termination" not in restart_prose.lower()
     assert "lock repair" not in combined.lower()
-    assert "paper authorization" not in combined.lower()
+    # Restart control prose must not claim it creates/extends paper authorization.
+    # Operations may display paper-authorization *status* as a read-only safety field.
+    assert "paper authorization" not in restart_prose.lower()
+    assert "create or extend paper" in controls.lower() or "arm paper" in combined
     assert "live enablement" not in combined.lower()
     assert "Repair" not in restart_col
     assert "arm paper" in combined  # negative promise wording
@@ -1566,7 +1569,8 @@ def test_105_diagnostics_is_read_only():
 
 
 def test_106_six_page_navigation_remains_intact():
-    assert len(OPERATOR_PAGES) == 6 and DEFAULT_OPERATOR_PAGE == "Operations"
+    assert len(OPERATOR_PAGES) == 7 and DEFAULT_OPERATOR_PAGE == "Operations"
+    assert "Reports" in OPERATOR_PAGES
 
 
 def test_107_advanced_legacy_navigation_remains_available():

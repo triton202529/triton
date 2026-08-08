@@ -25,6 +25,7 @@ COMMAND_CENTER_DESTINATIONS = [
     "Operations",
     "Activity",
     "Portfolio",
+    "Reports",
     "Orders",
     "Risk & Alerts",
     "Diagnostics",

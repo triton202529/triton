@@ -1243,12 +1243,13 @@ def test_65_diagnostics_readonly():
 
 
 def test_66_six_page_nav_unchanged():
-    assert len(OPERATOR_PAGES) == 6
+    assert len(OPERATOR_PAGES) == 7
     assert DEFAULT_OPERATOR_PAGE == "Operations"
     assert list(OPERATOR_PAGES) == [
         "Operations",
         "Activity",
         "Portfolio",
+        "Reports",
         "Orders",
         "Risk & Alerts",
         "Diagnostics",
@@ -1284,7 +1285,7 @@ def test_69_do003_start_regression_surface_intact(tmp_path):
 
 def test_70_do002_console_regression_surface_intact():
     """Scenario 70: DO-002 console surface remains; full suite run separately."""
-    assert len(OPERATOR_PAGES) == 6
+    assert len(OPERATOR_PAGES) == 7
     assert DEFAULT_OPERATOR_PAGE == "Operations"
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
     assert "render_operations_page" in src

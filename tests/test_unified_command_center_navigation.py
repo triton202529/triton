@@ -44,6 +44,7 @@ def test_top_level_destinations_order_and_default():
         "Operations",
         "Activity",
         "Portfolio",
+        "Reports",
         "Orders",
         "Risk & Alerts",
         "Diagnostics",
@@ -59,6 +60,7 @@ def test_advanced_dashboard_reachable_same_sidebar():
     src = _view_src()
     assert "Advanced Dashboard" in src
     assert "ADVANCED_DASHBOARD_DESTINATION" in src
+    assert "cc_console_mode_radio" in src
     assert "cc_destination_radio" in src
     assert "cc_advanced_section" in src
     assert "cc_advanced_view" in src
@@ -127,7 +129,8 @@ def test_widget_keys_namespaced_and_unique_in_sidebar():
         r'key="(cc_[^"]+|refresh|operator_page_choice|dashboard_mode_radio|section_choice|sub_choice)"',
         src,
     )
-    # New nav keys present; old dual-mode radio removed
+    # Compact left-rail mode switch + destination nav; old dual-mode radio removed
+    assert "cc_console_mode_radio" in keys
     assert "cc_destination_radio" in keys
     assert "cc_advanced_section" in keys
     assert "cc_advanced_view" in keys

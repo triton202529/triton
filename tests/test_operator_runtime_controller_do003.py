@@ -102,6 +102,7 @@ def test_operator_nav_unchanged():
         "Operations",
         "Activity",
         "Portfolio",
+        "Reports",
         "Orders",
         "Risk & Alerts",
         "Diagnostics",
