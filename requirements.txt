@@ -3,3 +3,4 @@ pandas==2.2.*
 requests>=2.32.0,<3.0.0
 python-dotenv>=1.0.0
 vaderSentiment==3.3.2
+exchange-calendars==4.12

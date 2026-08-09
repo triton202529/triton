@@ -38,12 +38,16 @@ def test_operator_console_default_and_seven_page_order():
     assert "Reports" in OPERATOR_RENDERERS
 
 
-def test_reports_renderer_is_empty_state_only():
+def test_reports_renderer_delegates_to_uir002_engine():
     src = inspect.getsource(render_reports_page)
-    assert "Reconciled portfolio reports are not yet available" in src
-    assert "Daily" in src and "Weekly" in src and "Custom date range" in src
+    assert "render_operator_reports_page" in src
+    assert "Reports not available yet" not in src
+    from dashboard import operator_reports as oreports
+
+    page_src = inspect.getsource(oreports.render_operator_reports_page)
+    assert "Daily" in page_src or "PERIOD_TYPES" in page_src
     banned = ("total_return", "sharpe", "cagr", "pnl_pct", "fake_return")
-    lower = src.lower()
+    lower = page_src.lower()
     for token in banned:
         assert token not in lower
 

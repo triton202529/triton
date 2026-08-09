@@ -3,7 +3,7 @@ operator_console.py
 Phase DO-002/DO-003/DO-004/DO-005/DO-006/DO-007 + UIR-001 — Streamlit operator-console pages.
 
 DO-005 adds confirmation-protected STOP_TRITON (maps to DO-004 cooperative shutdown).
-UIR-001 is presentation-only: visual foundation, Operations command layout, Reports nav stub.
+UIR-001 presentation foundation + UIR-002 Reports (read-only reconciled reporting).
 Runtime-control callbacks and eligibility decisions are unchanged.
 """
 
@@ -1220,33 +1220,10 @@ def _render_runtime_recovery_guidance() -> None:
 
 
 def render_reports_page() -> None:
-    """UIR-001 Reports stub — navigation reserved; no invented performance numbers."""
-    from dashboard import operator_ui as oui
+    """UIR-002 Reports — read-only reconciled portfolio reporting engine presentation."""
+    from dashboard.operator_reports import render_operator_reports_page
 
-    oui.inject_operator_theme()
-    oui.render_command_header(
-        title="Reports",
-        context="Reconciled portfolio reporting is not yet available",
-        market_state="n/a",
-        evidence_ts="n/a",
-    )
-    oui.render_empty_state(
-        "Reports not available yet",
-        (
-            "Reconciled portfolio reports are not yet available. "
-            "This page is a truthful placeholder only — no performance values are calculated, "
-            "estimated, or displayed. Reporting is not marked complete."
-        ),
-        reserved=[
-            "Daily",
-            "Weekly",
-            "Monthly",
-            "Quarterly",
-            "Half-year",
-            "Yearly",
-            "Custom date range",
-        ],
-    )
+    render_operator_reports_page()
 
 
 def render_activity_page() -> None:

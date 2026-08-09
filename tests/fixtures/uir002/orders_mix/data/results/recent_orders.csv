@@ -1,0 +1,6 @@
+id,client_order_id,symbol,qty,filled_qty,filled_avg_price,side,status,submitted_at,filled_at,canceled_at
+f1,triton-f,AAA,10,10,1,buy,filled,2026-08-07T14:00:00Z,2026-08-07T14:01:00Z,
+p1,other,BBB,10,4,2,buy,partially_filled,2026-08-07T14:00:00Z,2026-08-07T14:02:00Z,
+c1,x,CCC,5,0,,sell,canceled,2026-08-07T14:00:00Z,,2026-08-07T14:05:00Z
+r1,y,DDD,5,0,,buy,rejected,2026-08-07T14:00:00Z,,
+u1,broker-only,EEE,1,1,9,buy,filled,2026-08-07T14:00:00Z,2026-08-07T14:03:00Z,
