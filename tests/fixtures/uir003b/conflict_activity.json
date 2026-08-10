@@ -1,0 +1,14 @@
+{
+  "id": "act-fill-001",
+  "activity_type": "FILL",
+  "amount": "-9999.99",
+  "net_amount": "-9999.99",
+  "currency": "USD",
+  "symbol": "AAPL",
+  "side": "buy",
+  "qty": "10",
+  "price": "999.999",
+  "effective_timestamp": "2026-08-05T15:30:00Z",
+  "transaction_timestamp": "2026-08-05T15:30:01Z",
+  "description": "Conflicting payload for same id"
+}

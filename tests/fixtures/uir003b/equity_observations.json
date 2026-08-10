@@ -1,0 +1,35 @@
+{
+  "page_index": 0,
+  "has_more": false,
+  "page_token": null,
+  "observations": [
+    {
+      "id": "eq-instant-001",
+      "source_observation_type": "ACCOUNT_SNAPSHOT",
+      "observation_timestamp": "2026-08-09T04:17:08Z",
+      "cash": "78143.71",
+      "market_value": "49692.58",
+      "equity": "127836.29",
+      "currency": "USD",
+      "boundary_classification": "INSTANTANEOUS_ACCOUNT_OBSERVATION"
+    },
+    {
+      "id": "eq-date-only-001",
+      "source_observation_type": "LOCAL_PORTFOLIO_HISTORY",
+      "session_date": "2026-08-07",
+      "cash": "78143.71",
+      "market_value": "49158.83",
+      "equity": "127302.54",
+      "currency": "USD",
+      "boundary_classification": "RECORDED_DATE_ONLY_OBSERVATION"
+    },
+    {
+      "source_observation_type": "BROKER_PORTFOLIO_HISTORY",
+      "observation_timestamp": "2026-08-06T20:00:00Z",
+      "cash": "78143.71",
+      "market_value": "49550.41",
+      "equity": "127694.12",
+      "currency": "USD"
+    }
+  ]
+}

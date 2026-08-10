@@ -1,0 +1,42 @@
+{
+  "page_index": 0,
+  "has_more": true,
+  "page_token": "page-1",
+  "activities": [
+    {
+      "id": "act-fill-001",
+      "activity_type": "FILL",
+      "amount": "-1500.25",
+      "net_amount": "-1500.25",
+      "currency": "USD",
+      "symbol": "AAPL",
+      "side": "buy",
+      "qty": "10",
+      "price": "150.025",
+      "effective_timestamp": "2026-08-05T15:30:00Z",
+      "transaction_timestamp": "2026-08-05T15:30:01Z",
+      "description": "Buy fill AAPL"
+    },
+    {
+      "id": "act-div-001",
+      "activity_type": "DIV",
+      "amount": "12.50",
+      "net_amount": "12.50",
+      "currency": "USD",
+      "symbol": "MSFT",
+      "effective_timestamp": "2026-08-01T04:00:00Z",
+      "transaction_timestamp": "2026-08-01T04:00:00Z",
+      "description": "Cash dividend"
+    },
+    {
+      "id": "act-fee-001",
+      "activity_type": "FEE",
+      "amount": "-1.00",
+      "net_amount": "-1.00",
+      "currency": "USD",
+      "effective_timestamp": "2026-08-02T12:00:00Z",
+      "transaction_timestamp": "2026-08-02T12:00:00Z",
+      "description": "Regulatory fee"
+    }
+  ]
+}

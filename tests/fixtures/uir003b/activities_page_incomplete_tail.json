@@ -1,0 +1,21 @@
+{
+  "page_index": 0,
+  "has_more": true,
+  "page_token": "truncated",
+  "activities": [
+    {
+      "id": "act-fill-trunc-001",
+      "activity_type": "FILL",
+      "amount": "-100.00",
+      "net_amount": "-100.00",
+      "currency": "USD",
+      "symbol": "SPY",
+      "side": "buy",
+      "qty": "1",
+      "price": "100.00",
+      "effective_timestamp": "2026-08-04T14:00:00Z",
+      "transaction_timestamp": "2026-08-04T14:00:01Z",
+      "description": "Truncated page fill"
+    }
+  ]
+}

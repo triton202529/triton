@@ -1,0 +1,33 @@
+{
+  "page_index": 1,
+  "has_more": false,
+  "page_token": null,
+  "activities": [
+    {
+      "id": "act-csd-001",
+      "activity_type": "CSD",
+      "amount": "100000.00",
+      "net_amount": "100000.00",
+      "currency": "USD",
+      "effective_timestamp": "2026-04-08T22:30:00Z",
+      "transaction_timestamp": "2026-04-08T22:30:00Z",
+      "description": "Paper deposit"
+    },
+    {
+      "activity_type": "JNLC",
+      "amount": "5.00",
+      "net_amount": "5.00",
+      "currency": "USD",
+      "effective_timestamp": "2026-07-15T18:00:00Z",
+      "transaction_timestamp": "2026-07-15T18:00:00Z",
+      "description": "Journal credit — unmapped"
+    },
+    {
+      "id": "act-reset-001",
+      "activity_type": "PAPER_RESET",
+      "description": "Paper account reset marker",
+      "effective_timestamp": "2026-04-08T22:21:43Z",
+      "transaction_timestamp": "2026-04-08T22:21:43Z"
+    }
+  ]
+}

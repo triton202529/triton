@@ -1,0 +1,9 @@
+{
+  "environment": "paper",
+  "account_fingerprint": "fp_paper_test_001",
+  "broker_account_created_timestamp": "2026-04-08T22:21:43Z",
+  "explicit_reset_marker": null,
+  "source_epoch_claim": "broker-claimed-epoch-paper-001",
+  "source_epoch_verification_claim": "EPOCH_UNVERIFIED",
+  "source_provenance": "uir003b_fixture"
+}
