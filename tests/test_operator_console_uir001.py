@@ -56,9 +56,11 @@ def test_operations_reuses_exact_start_controls():
     import dashboard.operator_console as oc
 
     src = inspect.getsource(render_operations_page)
-    assert "_render_start_controls()" in src
+    assert "_render_start_controls(" in src
     # Controls must appear before Attention / recovery in the Operations body.
-    assert src.index("_render_start_controls()") < src.index("_render_runtime_recovery_guidance()")
+    assert src.index("_render_start_controls(") < src.index("_render_runtime_recovery_guidance()")
+    # UIR-003C: pass the same evidence snapshot used by Operations cards.
+    assert "status_snapshot=status" in src
     controls = inspect.getsource(oc._render_start_controls)
     stop_col = inspect.getsource(oc._render_stop_control_column)
     restart_col = inspect.getsource(oc._render_restart_control_column)
@@ -72,7 +74,7 @@ def test_operations_reuses_exact_start_controls():
 
 def test_operations_page_load_does_not_submit_controls():
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
-    load = src[src.index("def render_operations_page") : src.index("_render_start_controls()")]
+    load = src[src.index("def render_operations_page") : src.index("_render_start_controls(")]
     assert "execute_start_triton" not in load
     assert "execute_stop_triton" not in load
     assert "execute_restart_triton" not in load
@@ -128,20 +130,25 @@ def test_process_card_semantic_state_mapping():
 def test_loop_process_card_preserves_label_and_stale_warning():
     running = oui.loop_process_card_state(process_running=True, heartbeat_class="FRESH")
     assert running["label"] == "RUNNING"
+    assert running["display"] == "RUNNING · 1 / 1 INSTANCE"
     assert running["tone"] == "ok"
     assert running["stale_warning"] is None
 
+    # UIR-003C: exactly one process with stale heartbeat presents as STALE, not healthy RUNNING.
     stale = oui.loop_process_card_state(process_running=True, heartbeat_class="STALE")
-    assert stale["label"] == "RUNNING"  # authoritative label preserved
-    assert stale["tone"] == "warn"  # not unconditionally healthy
+    assert stale["label"] == "STALE"
+    assert stale["display"] == "STALE · 1 / 1 INSTANCE"
+    assert stale["tone"] == "warn"
     assert stale["stale_warning"] == "Heartbeat STALE"
 
     stopped = oui.loop_process_card_state(process_running=False)
-    assert stopped["label"] == "NOT RUNNING"
+    assert stopped["label"] == "STOPPED"
+    assert stopped["display"] == "STOPPED · 0 / 1 INSTANCE"
     assert stopped["tone"] == "crit"
 
     unknown = oui.loop_process_card_state(process_running=None)
     assert unknown["label"] == "UNKNOWN"
+    assert "COUNT UNAVAILABLE" in unknown["display"]
     assert unknown["tone"] == "muted"
 
     # Exact provided labels are not reinterpreted/merged.
@@ -194,10 +201,13 @@ def test_runtime_summary_card_stacked_layout_preserves_full_values():
     labels = re.findall(r'"label":\s*"([^"]+)"', runtime_panel)
     assert labels == [
         "Overall runtime",
+        "Trading cycle",
+        "Session context",
         "Pipeline heartbeat",
         "Next expected cycle",
     ]
     assert "overall" in runtime_panel
+    assert "session_phase" in runtime_panel
     assert 'pipeline_hb["display"]' in runtime_panel
     assert "next_expected" in runtime_panel
     # Values are passed through unabbreviated — no slicing / truncation helpers.

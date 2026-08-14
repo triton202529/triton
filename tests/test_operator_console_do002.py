@@ -279,7 +279,8 @@ def test_submitted_not_filled(tmp_path: Path):
     seen: set[str] = set()
     events = _events_from_paper_execution_audit(csv_path, seen)
     assert len(events) == 1
-    assert events[0].title == "Paper order was submitted"
+    assert events[0].title == "Paper order was submitted on 2026-07-28"
+    assert events[0].occurred_date == "2026-07-28"
     assert "filled" not in events[0].title.lower()
 
 

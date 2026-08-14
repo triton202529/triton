@@ -53,6 +53,28 @@ def _lock_text(
     )
 
 
+def _write_valid_paper_arm(root: Path, *, expires_minutes: float = 120.0) -> Path:
+    live = root / "data" / "live"
+    live.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    path = live / "paper_arm_confirm.json"
+    path.write_text(
+        json.dumps(
+            {
+                "timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "expires_at": (now + timedelta(minutes=expires_minutes)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "mode": "ASSISTED",
+                "allow_execute": True,
+                "confirmed": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _write_fixture(
     root: Path,
     *,
@@ -168,6 +190,7 @@ def test_04_frontend_cannot_inject_command_path_pid_env_timeout():
 
 def test_05_full_start_launches_exactly_one_of_each(tmp_path):
     _write_fixture(tmp_path, cont_pids=[], wd_pids=[], write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     launched = []
 
     def launch(component):
@@ -200,6 +223,7 @@ def test_05_full_start_launches_exactly_one_of_each(tmp_path):
 
 def test_06_watchdog_only_start_preserves_continuous_pid(tmp_path):
     _write_fixture(tmp_path, cont_pids=[4008], cont_lock_pid=4008, wd_pids=[], write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     launched = []
 
     def launch(component):
@@ -230,6 +254,7 @@ def test_06_watchdog_only_start_preserves_continuous_pid(tmp_path):
 
 def test_07_continuous_only_start_preserves_watchdog_pid(tmp_path):
     _write_fixture(tmp_path, cont_pids=[], write_cont_lock=False, wd_pids=[77], wd_lock_pid=77)
+    _write_valid_paper_arm(tmp_path)
     launched = []
 
     def launch(component):
@@ -285,6 +310,7 @@ def test_09_10_child_launch_uses_breakaway_job_flags():
 
 def test_11_launch_failure_terminal(tmp_path):
     _write_fixture(tmp_path, cont_pids=[], wd_pids=[], write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     r = execute_start_triton(
         action=ACTION_START,
         root=tmp_path,
@@ -299,6 +325,7 @@ def test_11_launch_failure_terminal(tmp_path):
 
 def test_12_verification_timeout_terminal(tmp_path):
     _write_fixture(tmp_path, cont_pids=[], wd_pids=[], write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
 
     def launch(component):
         return {"ok": True, "component": component, "child_pid": 1}
@@ -500,6 +527,7 @@ def test_28_stop_timeout_never_force_terminates(tmp_path):
 
 def test_29_expired_shutdown_history_does_not_block_start(tmp_path):
     _write_fixture(tmp_path, cont_pids=[], wd_pids=[], write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     live = tmp_path / "data" / "live"
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     (live / "operator_shutdown_request.json").write_text(
@@ -583,6 +611,7 @@ def test_31_restart_never_starts_after_incomplete_stop(tmp_path):
 
 def test_32_restart_fresh_start_after_completed_stop(tmp_path):
     _write_fixture(tmp_path, cont_pids=[101], cont_lock_pid=101, wd_pids=[202], wd_lock_pid=202)
+    _write_valid_paper_arm(tmp_path)
     pre = issue_restart_preflight(root=tmp_path)
 
     def stop_fn(**kwargs):
@@ -702,6 +731,7 @@ def test_37_tests_do_not_write_production_audit(tmp_path):
     )
     before = prod.read_bytes() if prod.is_file() else b""
     _write_fixture(tmp_path, cont_pids=[], wd_pids=[], write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     execute_start_triton(
         action=ACTION_START,
         root=tmp_path,

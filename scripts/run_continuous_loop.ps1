@@ -147,6 +147,35 @@ try {
             Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_ENTRIES=1"
             Log-Line "[LOOP_ENV] TRITON_ENABLE_AUTO_PAPER_APPROVAL=1"
 
+            $sessionOpen = $false
+            $sessionState = "UNKNOWN"
+            $sessionReason = "session_check_failed"
+            $sessionRaw = python -m services.paper_runtime_session_gate --check --json
+            $sessionCode = $LASTEXITCODE
+            Log-Line "[SESSION_CHECK] exit_code=$sessionCode output=$sessionRaw"
+            if ($sessionCode -eq 0 -and $sessionRaw) {
+                try {
+                    $sessionText = ($sessionRaw | Out-String)
+                    $sessionObj = $sessionText | ConvertFrom-Json
+                    if ($sessionObj.session_state) { $sessionState = [string]$sessionObj.session_state }
+                    $sessionOpen = ($sessionState -eq "OPEN")
+                    if ($sessionObj.reason) { $sessionReason = [string]$sessionObj.reason }
+                } catch {
+                    $sessionOpen = $false
+                    $sessionState = "UNKNOWN"
+                    $sessionReason = "session_json_unreadable"
+                }
+            }
+
+            if ($sessionState -ne "OPEN" -and $sessionState -ne "CLOSED") {
+                Log-Line "[PAPER_ENTRY_BLOCKED_SESSION_UNKNOWN] reason=$sessionReason session_state=$sessionState session_open=false"
+                python -m services.paper_runtime_session_gate --record-cycle --outcome session_unknown --reason "PAPER_ENTRY_BLOCKED_SESSION_UNKNOWN" --session-open false | Out-Null
+                Log-Line "[CYCLE_BLOCKED_SESSION_UNKNOWN] cycle=$cycle reason=$sessionReason"
+            } elseif (-not $sessionOpen) {
+                Log-Line "[PAPER_ENTRY_SKIPPED_MARKET_CLOSED] reason=$sessionReason session_open=false"
+                python -m services.paper_runtime_session_gate --record-cycle --outcome skipped_market_closed --reason $sessionReason --session-open false | Out-Null
+                Log-Line "[CYCLE_SKIPPED_MARKET_CLOSED] cycle=$cycle reason=$sessionReason"
+            } else {
             powershell -ExecutionPolicy Bypass -File .\scripts\run_market_open.ps1
             $rc = $LASTEXITCODE
             if ($rc -ne 0) { $cycleRc = $rc }
@@ -180,10 +209,13 @@ try {
             }
 
             if ($cycleRc -ne 0) {
+                python -m services.paper_runtime_session_gate --record-cycle --outcome fail --reason "market_hours_cycle_fail" --session-open true | Out-Null
                 Log-Line "[CYCLE_FAIL] cycle=$cycle exit_code=$cycleRc (continuing after sleep)"
             } else {
+                python -m services.paper_runtime_session_gate --record-cycle --outcome ok --reason "market_hours_cycle_ok" --session-open true | Out-Null
                 Log-Line "[CYCLE_OK] cycle=$cycle"
             }
+            } # end regular-session entry path
         }
         catch {
             Log-Line "[CYCLE_ERROR] cycle=$cycle error=$($_.Exception.Message) (continuing after sleep)"

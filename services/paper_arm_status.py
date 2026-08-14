@@ -33,25 +33,37 @@ def _parse_dt(value: Any) -> Optional[datetime]:
         return None
 
 
-def classify_paper_arm_confirm_status() -> str:
-    """Return VALID | EXPIRED | MISSING | INVALID."""
-    try:
-        from services.arm_mode import (
-            is_paper_arm_confirm_valid,
-            load_arm_config,
-            read_paper_arm_confirm,
-        )
+def classify_paper_arm_confirm_status(
+    *,
+    confirm_path: Optional[Path] = None,
+    now: Optional[datetime] = None,
+    root: Optional[Path] = None,
+) -> str:
+    """Return VALID | EXPIRED | MISSING | INVALID.
 
-        doc = read_paper_arm_confirm()
-        if doc is None:
-            return "MISSING"
+    Canonical classifier used by execution step 0, Protected Start, and the dashboard.
+    Optional confirm_path/root/now support isolated tests without changing default ROOT behavior.
+    """
+    path = confirm_path
+    if path is None and root is not None:
+        path = Path(root) / "data" / "live" / "paper_arm_confirm.json"
+    path = path or PAPER_ARM_CONFIRM_PATH
+    if not path.is_file():
+        return "MISSING"
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        doc = json.loads(raw)
+        if not isinstance(doc, dict):
+            return "INVALID"
+        from services.arm_mode import is_paper_arm_confirm_valid, load_arm_config
+
         if not bool(doc.get("allow_execute", True)):
             return "INVALID"
-        if is_paper_arm_confirm_valid(load_arm_config()):
+        if is_paper_arm_confirm_valid(load_arm_config(), confirm_path=path, now=now):
             return "VALID"
         return "EXPIRED"
     except Exception:
-        return "MISSING"
+        return "INVALID"
 
 
 def classify_live_confirm_status(*, ttl_minutes: int = 10) -> str:

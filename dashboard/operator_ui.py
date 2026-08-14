@@ -66,13 +66,26 @@ def inject_operator_theme() -> None:
   section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] label {{
     color: {t["text"]};
   }}
-  /* Use available desktop width; avoid large empty gutters at 2048px. */
+  /*
+   * Single top-clearance rule for Streamlit's fixed toolbar.
+   * Do not reduce this on child headers/banners — clearance lives only here.
+   */
+  :root {{
+    --triton-toolbar-clearance: 4rem;
+  }}
+  section.main .block-container,
+  [data-testid="stMain"] .block-container,
   .block-container {{
-    padding-top: 1.0rem;
+    padding-top: var(--triton-toolbar-clearance) !important;
     padding-bottom: 1.5rem;
     padding-left: 1.25rem;
     padding-right: 1.25rem;
     max-width: min(100%, 1920px);
+  }}
+  /* Keep sticky status stacks below the fixed toolbar while scrolling. */
+  .triton-topwrap,
+  .triton-clock {{
+    top: var(--triton-toolbar-clearance) !important;
   }}
   h1, h2, h3, h4, h5, h6, p, label, span, div {{
     font-family: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
@@ -175,20 +188,32 @@ def inject_operator_theme() -> None:
     letter-spacing: 0.04em;
   }}
   .triton-safety-value {{
-    font-size: 0.92rem;
+    font-size: 0.82rem;
     font-weight: 650;
     margin-top: 0.15rem;
     color: {t["text"]};
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }}
   .triton-safety-note {{
     margin-top: 0.25rem;
     font-size: 0.72rem;
     font-weight: 600;
     color: {t["muted"]};
+    overflow-wrap: anywhere;
   }}
   .triton-safety-note.warn {{
     color: {t["amber"]};
     font-weight: 650;
+  }}
+  .triton-safety-count {{
+    display: block;
+    margin-top: 0.12rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: {t["muted"]};
+    letter-spacing: 0.02em;
   }}
   .triton-panel {{
     background: {t["panel"]};
@@ -416,67 +441,406 @@ def tone_for_market(value: Any) -> str:
 
 def tone_for_process_status(value: Any) -> str:
     """Semantic tones for Continuous loop / Watchdog safety cards only."""
-    s = str(value or "").strip().upper()
-    if not s or s in ("UNKNOWN", "N/A", "UNAVAILABLE", "NONE"):
+    s = str(value or "").strip().upper().replace("·", " ").replace("/", " ")
+    # Prefer primary token before count suffixes (e.g. "STALE · 1 / 1 INSTANCE").
+    primary = s.split()[0] if s else ""
+    if not primary or primary in ("UNKNOWN", "N/A", "UNAVAILABLE", "NONE"):
         return "muted"
-    if s == "RUNNING":
+    if primary == "RUNNING":
         return "ok"
-    if s in ("STOPPED", "NOT RUNNING", "MISSING"):
+    if primary in ("STOPPED", "MISSING") or s.startswith("NOT RUNNING") or primary == "DUPLICATE":
         return "crit"
-    if s in ("STARTING", "STOPPING", "DEGRADED"):
+    if primary in ("STARTING", "STOPPING", "DEGRADED", "STALE"):
         return "warn"
     return "muted"
 
 
+def _instance_noun(count: int) -> str:
+    return "INSTANCE" if count <= 1 else "INSTANCES"
+
+
+def format_instance_count_label(*, count: int, expected: int = 1) -> str:
+    """Always-visible instance fraction for Operations cards."""
+    noun = _instance_noun(int(count))
+    return f"{int(count)} / {int(expected)} {noun}"
+
+
 def loop_process_card_state(
     *,
-    process_running: Optional[bool],
+    process_running: Optional[bool] = None,
+    process_count: Optional[int] = None,
+    discovery_available: bool = True,
     heartbeat_class: Any = None,
+    heartbeat_age_minutes: Any = None,
     status_label: Any = None,
+    expected_instances: int = 1,
 ) -> Dict[str, Any]:
-    """Presentation-only Continuous/Watchdog card fields.
+    """Presentation-only Continuous/Watchdog card fields (UIR-003C).
 
-    Preserves the authoritative display label. Does not merge backend
-    classifications. RUNNING + STALE heartbeat is never shown as unconditionally healthy.
+    Process discovery counts are authoritative for instance fractions.
+    Locks and prior action messages never invent a count.
     """
-    if status_label is not None and str(status_label).strip() != "":
-        label = str(status_label).strip()
-    elif process_running is True:
-        label = "RUNNING"
-    elif process_running is False:
-        label = "NOT RUNNING"
-    else:
+    hb = str(heartbeat_class or "").strip().upper()
+    expected = max(1, int(expected_instances or 1))
+    note: Optional[str] = None
+    count: Optional[int] = None
+    count_label: Optional[str] = None
+
+    if not discovery_available:
         label = "UNKNOWN"
+        display = "UNKNOWN · COUNT UNAVAILABLE"
+        count_label = "COUNT UNAVAILABLE"
+    elif status_label is not None and str(status_label).strip() != "":
+        label = str(status_label).strip()
+        if process_count is not None:
+            count = max(0, int(process_count))
+            count_label = format_instance_count_label(count=count, expected=expected)
+            display = f"{label} · {count_label}"
+        else:
+            display = label
+    else:
+        if process_count is not None:
+            count = max(0, int(process_count))
+        elif process_running is True:
+            count = 1
+        elif process_running is False:
+            count = 0
+        else:
+            count = None
+
+        if count is None:
+            label = "UNKNOWN"
+            display = "UNKNOWN · COUNT UNAVAILABLE"
+            count_label = "COUNT UNAVAILABLE"
+        elif count >= 2:
+            label = "DUPLICATE RUNTIME"
+            count_label = format_instance_count_label(count=count, expected=expected)
+            display = f"{label} · {count_label}"
+        elif count == 0:
+            label = "STOPPED"
+            count_label = format_instance_count_label(count=0, expected=expected)
+            display = f"{label} · {count_label}"
+        elif hb == "STALE":
+            label = "STALE"
+            count_label = format_instance_count_label(count=1, expected=expected)
+            display = f"{label} · {count_label}"
+            try:
+                age_f = float(heartbeat_age_minutes)
+                note = f"Heartbeat STALE · {age_f:.0f} min old"
+            except (TypeError, ValueError):
+                note = "Heartbeat STALE"
+        else:
+            label = "RUNNING"
+            count_label = format_instance_count_label(count=1, expected=expected)
+            display = f"{label} · {count_label}"
 
     tone = tone_for_process_status(label)
-    stale_warning = None
-    hb = str(heartbeat_class or "").strip().upper()
-    if label.upper() == "RUNNING" and hb == "STALE":
-        # Keep authoritative RUNNING label; downgrade visual health + warn.
-        tone = "warn"
-        stale_warning = "Heartbeat STALE"
     return {
         "label": label,
+        "display": display,
+        "value": display,
         "tone": tone,
-        "stale_warning": stale_warning,
+        "stale_warning": note,
+        "note": note,
         "heartbeat_class": hb or "UNKNOWN",
+        "process_count": count,
+        "count_label": count_label,
+        "discovery_available": bool(discovery_available),
     }
+
+
+CURRENT_STOPPED_RUNTIME_MESSAGE = (
+    "TRITON is stopped. The continuous loop and watchdog are not running, "
+    "and their locks are released. Live execution remains blocked."
+)
+
+_START_RUNNING_CLAIM_MARKERS = (
+    "one continuous loop and one watchdog are running",
+    "triton started successfully",
+    "triton was already running safely",
+)
+
+
+def present_current_runtime_action_message(
+    *,
+    overall_status: Any,
+    continuous_process_count: Optional[int],
+    watchdog_process_count: Optional[int],
+    continuous_lock_exists: bool = False,
+    watchdog_lock_exists: bool = False,
+    live_execution_blocked: bool = True,
+    start_last_result: Optional[Mapping[str, Any]] = None,
+    stop_last_result: Optional[Mapping[str, Any]] = None,
+    restart_last_result: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Reconcile action latches with current process evidence (presentation only).
+
+    A Start success that claims both loops are running must never remain the
+    current banner when process evidence shows the runtime is stopped.
+    """
+    overall = str(overall_status or "").strip().upper()
+    cont_n = continuous_process_count
+    wd_n = watchdog_process_count
+    both_stopped = (
+        overall == "STOPPED"
+        and cont_n == 0
+        and wd_n == 0
+        and not continuous_lock_exists
+        and not watchdog_lock_exists
+    )
+    both_running = cont_n == 1 and wd_n == 1
+
+    historical: List[Dict[str, Any]] = []
+
+    def _hist(source: str, payload: Optional[Mapping[str, Any]]) -> None:
+        if not payload:
+            return
+        historical.append(
+            {
+                "source": source,
+                "result": payload.get("result"),
+                "safe_message": payload.get("safe_message"),
+                "action_id": payload.get("action_id"),
+            }
+        )
+
+    start = dict(start_last_result or {}) if start_last_result else {}
+    stop = dict(stop_last_result or {}) if stop_last_result else {}
+    restart = dict(restart_last_result or {}) if restart_last_result else {}
+
+    start_res = str(start.get("result") or "")
+    stop_res = str(stop.get("result") or "")
+    restart_res = str(restart.get("result") or "")
+    start_msg = str(start.get("safe_message") or "")
+    start_claims_running = any(m in start_msg.lower() for m in _START_RUNNING_CLAIM_MARKERS) or start_res in (
+        "STARTED",
+        "ALREADY_RUNNING",
+    )
+
+    # Prefer restart terminal result when present and not contradicted.
+    if restart_res == "RESTART_COMPLETED" and both_running:
+        _hist("start", start or None)
+        _hist("stop", stop or None)
+        return {
+            "current": {
+                "level": "success",
+                "source": "restart",
+                "result": restart_res,
+                "message": restart.get("safe_message") or restart_res,
+            },
+            "historical": historical,
+            "start_suppressed": True,
+        }
+
+    if stop_res in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED") or both_stopped:
+        if start and start_claims_running:
+            _hist("start", start)
+        if restart:
+            _hist("restart", restart)
+        msg = CURRENT_STOPPED_RUNTIME_MESSAGE
+        if stop_res in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED"):
+            # Keep stop evidence as current when it succeeded; prefer explicit stopped truth.
+            stop_msg = str(stop.get("safe_message") or "").strip()
+            if stop_msg and "live execution remains blocked" in stop_msg.lower():
+                msg = stop_msg
+            elif stop_msg:
+                msg = CURRENT_STOPPED_RUNTIME_MESSAGE
+            level = "success"
+            source = "stop" if stop else "evidence"
+            result = stop_res or "STOPPED"
+        else:
+            level = "info"
+            source = "evidence"
+            result = "STOPPED"
+            if stop:
+                _hist("stop", stop)
+        return {
+            "current": {
+                "level": level,
+                "source": source,
+                "result": result,
+                "message": msg,
+            },
+            "historical": historical,
+            "start_suppressed": True,
+        }
+
+    if start_res in ("STARTED", "ALREADY_RUNNING") and both_running:
+        if stop:
+            _hist("stop", stop)
+        if restart:
+            _hist("restart", restart)
+        return {
+            "current": {
+                "level": "success",
+                "source": "start",
+                "result": start_res,
+                "message": start.get("safe_message") or start_res,
+            },
+            "historical": historical,
+            "start_suppressed": False,
+        }
+
+    # Contradictory Start latch while evidence disagrees — never show as current.
+    if start and start_claims_running and not both_running:
+        _hist("start", start)
+        if stop:
+            current_stop = {
+                "level": (
+                    "success"
+                    if stop_res in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED")
+                    else "error"
+                    if stop_res
+                    else "info"
+                ),
+                "source": "stop" if stop_res else "evidence",
+                "result": stop_res or overall or "UNKNOWN",
+                "message": (
+                    CURRENT_STOPPED_RUNTIME_MESSAGE
+                    if (cont_n == 0 and wd_n == 0)
+                    else (stop.get("safe_message") or "Runtime evidence no longer matches the Start success message.")
+                ),
+            }
+            return {
+                "current": current_stop,
+                "historical": historical,
+                "start_suppressed": True,
+            }
+        return {
+            "current": {
+                "level": "info",
+                "source": "evidence",
+                "result": overall or "UNKNOWN",
+                "message": (
+                    CURRENT_STOPPED_RUNTIME_MESSAGE
+                    if (cont_n == 0 and wd_n == 0)
+                    else "Current runtime evidence no longer matches the previous Start success message. Live execution remains blocked."
+                ),
+            },
+            "historical": historical,
+            "start_suppressed": True,
+        }
+
+    # Default: surface the most recent non-success-start latch without inventing runtime truth.
+    if stop:
+        level = "success" if stop_res in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED") else (
+            "warning"
+            if stop_res in ("STOP_PARTIAL_COMPLETION", "STOP_TIMED_OUT", "STOP_IN_PROGRESS")
+            else "error"
+        )
+        if start:
+            _hist("start", start)
+        return {
+            "current": {
+                "level": level,
+                "source": "stop",
+                "result": stop_res,
+                "message": stop.get("safe_message") or stop_res,
+            },
+            "historical": historical,
+            "start_suppressed": bool(start),
+        }
+    if start:
+        level = (
+            "success"
+            if start_res in ("STARTED", "ALREADY_RUNNING")
+            else "warning"
+            if start_res in ("PARTIAL_START", "START_IN_PROGRESS")
+            else "error"
+        )
+        return {
+            "current": {
+                "level": level,
+                "source": "start",
+                "result": start_res,
+                "message": start.get("safe_message") or start_res,
+            },
+            "historical": historical,
+            "start_suppressed": False,
+        }
+    if restart:
+        return {
+            "current": {
+                "level": "success" if restart_res == "RESTART_COMPLETED" else "warning",
+                "source": "restart",
+                "result": restart_res,
+                "message": restart.get("safe_message") or restart_res,
+            },
+            "historical": historical,
+            "start_suppressed": False,
+        }
+    if both_stopped or (cont_n == 0 and wd_n == 0 and overall == "STOPPED"):
+        return {
+            "current": {
+                "level": "info",
+                "source": "evidence",
+                "result": "STOPPED",
+                "message": CURRENT_STOPPED_RUNTIME_MESSAGE
+                if live_execution_blocked
+                else (
+                    "TRITON is stopped. The continuous loop and watchdog are not running, "
+                    "and their locks are released."
+                ),
+            },
+            "historical": historical,
+            "start_suppressed": False,
+        }
+    return {"current": None, "historical": historical, "start_suppressed": False}
 
 
 # Matches the existing Operations banner threshold in view_results.render_heartbeat_freshness_banner.
 WATCHDOG_HEARTBEAT_STALE_MINUTES = 60.0
+HEARTBEAT_FUTURE_TOLERANCE_MINUTES = 5.0
+HEARTBEAT_INACTIVE_STOPPED_LABEL = "INACTIVE — COMPONENT STOPPED"
 
 
-def present_pipeline_heartbeat_label(*, freshness_class: Any) -> Dict[str, Any]:
+def present_pipeline_heartbeat_label(
+    *,
+    freshness_class: Any,
+    process_count: Optional[int] = None,
+    discovery_available: bool = True,
+    lock_held: bool = False,
+    expected_after_hours_stop: bool = False,
+    age_minutes: Any = None,
+    evidence_path: Any = None,
+) -> Dict[str, Any]:
     """Presentation-only: pipeline heartbeat.json class (never a watchdog aggregate)."""
+    source = str(evidence_path or "heartbeat.json")
+    if (
+        expected_after_hours_stop
+        and discovery_available
+        and process_count == 0
+        and not lock_held
+    ):
+        age_note = None
+        try:
+            if age_minutes is not None:
+                age_note = f"{float(age_minutes):.0f} min old"
+        except (TypeError, ValueError):
+            age_note = None
+        display = HEARTBEAT_INACTIVE_STOPPED_LABEL
+        if age_note:
+            display = f"{HEARTBEAT_INACTIVE_STOPPED_LABEL} ({age_note})"
+        return {
+            "channel": "pipeline",
+            "source": source,
+            "label": HEARTBEAT_INACTIVE_STOPPED_LABEL,
+            "tone": "info",
+            "age_minutes": age_minutes,
+            "display": display,
+            "age_note": age_note,
+            "actionable_stale_banner": False,
+        }
     label = display_or_unknown(freshness_class)
     return {
         "channel": "pipeline",
-        "source": "heartbeat.json",
+        "source": source,
         "label": label,
         "tone": tone_for_status(label),
-        "age_minutes": None,
+        "age_minutes": age_minutes,
         "display": label,
+        "age_note": None,
+        "actionable_stale_banner": str(label).upper() == "STALE",
     }
 
 
@@ -484,14 +848,74 @@ def present_watchdog_heartbeat_label(
     runtime_hb: Mapping[str, Any],
     *,
     stale_after_minutes: float = WATCHDOG_HEARTBEAT_STALE_MINUTES,
+    process_count: Optional[int] = None,
+    discovery_available: bool = True,
+    lock_held: bool = False,
+    expected_after_hours_stop: bool = False,
+    future_tolerance_minutes: float = HEARTBEAT_FUTURE_TOLERANCE_MINUTES,
 ) -> Dict[str, Any]:
-    """Presentation-only: watchdog_status.json heartbeat age → FRESH/STALE/UNKNOWN.
+    """Presentation-only: watchdog_status.json heartbeat age → FRESH/STALE/INACTIVE/UNKNOWN.
 
     Does not invent an aggregate runtime heartbeat. Does not alter backend age calculation.
+    Expected after-hours stop with process count 0 presents inactive, not stale failure.
     """
+    from services.dashboard_status_sync import classify_heartbeat_banner_presentation
+
     age = runtime_hb.get("age_minutes")
     ts = runtime_hb.get("timestamp")
     source = str(runtime_hb.get("path") or "watchdog_status.json")
+    exists = bool(runtime_hb.get("exists", ts is not None or age is not None))
+    malformed = bool(exists and ts is None)
+
+    banner = classify_heartbeat_banner_presentation(
+        age_minutes=float(age) if age is not None else None,
+        timestamp_present=ts is not None,
+        process_count=process_count,
+        discovery_available=discovery_available,
+        lock_held=lock_held,
+        expected_after_hours_stop=expected_after_hours_stop,
+        stale_after_minutes=stale_after_minutes,
+        future_tolerance_minutes=future_tolerance_minutes,
+        timestamp_malformed=malformed,
+    )
+
+    if banner.get("presentation_label") == HEARTBEAT_INACTIVE_STOPPED_LABEL:
+        age_note = None
+        age_f = None
+        try:
+            if age is not None:
+                age_f = float(age)
+                age_note = f"{age_f:.0f} min old"
+        except (TypeError, ValueError):
+            age_f = None
+        display = HEARTBEAT_INACTIVE_STOPPED_LABEL
+        if age_note:
+            display = f"{HEARTBEAT_INACTIVE_STOPPED_LABEL} ({age_note})"
+        return {
+            "channel": "watchdog",
+            "source": source,
+            "label": HEARTBEAT_INACTIVE_STOPPED_LABEL,
+            "tone": "info",
+            "age_minutes": age_f,
+            "display": display,
+            "age_note": age_note,
+            "actionable_stale_banner": False,
+            "banner_kind": None,
+        }
+
+    if banner.get("banner_kind") == "evidence_integrity":
+        return {
+            "channel": "watchdog",
+            "source": source,
+            "label": "EVIDENCE INTEGRITY",
+            "tone": "warn",
+            "age_minutes": None if malformed else age,
+            "display": "EVIDENCE INTEGRITY",
+            "age_note": None,
+            "actionable_stale_banner": True,
+            "banner_kind": "evidence_integrity",
+        }
+
     if ts is None or age is None:
         return {
             "channel": "watchdog",
@@ -501,6 +925,8 @@ def present_watchdog_heartbeat_label(
             "age_minutes": None,
             "display": "UNKNOWN",
             "age_note": None,
+            "actionable_stale_banner": bool(banner.get("show_actionable_warning")),
+            "banner_kind": banner.get("banner_kind"),
         }
     try:
         age_f = float(age)
@@ -508,11 +934,13 @@ def present_watchdog_heartbeat_label(
         return {
             "channel": "watchdog",
             "source": source,
-            "label": "UNKNOWN",
-            "tone": "muted",
+            "label": "EVIDENCE INTEGRITY",
+            "tone": "warn",
             "age_minutes": None,
-            "display": "UNKNOWN",
+            "display": "EVIDENCE INTEGRITY",
             "age_note": None,
+            "actionable_stale_banner": True,
+            "banner_kind": "evidence_integrity",
         }
     label = "STALE" if age_f > float(stale_after_minutes) else "FRESH"
     age_note = f"{age_f:.0f} min old"
@@ -524,6 +952,8 @@ def present_watchdog_heartbeat_label(
         "age_minutes": age_f,
         "display": f"{label} ({age_note})",
         "age_note": age_note,
+        "actionable_stale_banner": bool(banner.get("show_actionable_warning")),
+        "banner_kind": banner.get("banner_kind"),
     }
 
 
@@ -746,15 +1176,45 @@ def runtime_mode_label(status: Mapping[str, Any]) -> str:
     return f"Runtime: {overall}"
 
 
+def compact_loop_sidebar_line(loop: Mapping[str, Any]) -> str:
+    """Compact sidebar token: ON · 1 / OFF · 0 / DUP · N / UNKNOWN."""
+    if loop.get("process_discovery_available") is False:
+        return "UNKNOWN"
+    count = loop.get("process_count")
+    if count is None:
+        pids = loop.get("pids")
+        if isinstance(pids, list):
+            count = len(pids)
+        elif loop.get("process_running") is True:
+            count = 1
+        elif loop.get("process_running") is False:
+            count = 0
+        else:
+            return "UNKNOWN"
+    try:
+        n = int(count)
+    except (TypeError, ValueError):
+        return "UNKNOWN"
+    if n >= 2:
+        return f"DUP · {n}"
+    if n == 1:
+        return "ON · 1"
+    return "OFF · 0"
+
+
 def compact_system_status_lines(status: Mapping[str, Any]) -> Dict[str, str]:
     live = status.get("live_execution") or {}
     paper = status.get("paper_arm") or {}
     freshness = status.get("data_freshness") or {}
+    cont = status.get("continuous") or {}
+    wd = status.get("watchdog") or {}
     return {
         "overall": display_or_unknown(status.get("overall_status")),
         "live": "BLOCKED" if live.get("blocked") else "NOT BLOCKED",
         "paper": display_or_unknown(paper.get("display_status")),
         "freshness": display_or_unknown(freshness.get("class")),
+        "continuous": compact_loop_sidebar_line(cont),
+        "watchdog": compact_loop_sidebar_line(wd),
     }
 
 
@@ -771,6 +1231,8 @@ def render_live_execution_blocked_banner() -> None:
 
 def summarize_attention_items(items: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     """Compact Operator Attention summary for the right utility panel."""
+    from services.operator_console_status import group_attention_items
+
     counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "WARN": 0, "INFO": 0, "OTHER": 0}
 
     def _rank(item: Mapping[str, Any]) -> int:
@@ -798,10 +1260,21 @@ def summarize_attention_items(items: Sequence[Mapping[str, Any]]) -> Dict[str, A
             counts["INFO"] += 1
         else:
             counts["OTHER"] += 1
-    top = ordered[0] if ordered else None
+    groups = group_attention_items([dict(x) for x in ordered])
+    # Top issue prefers action-required-now, then before-open, then informational.
+    top = None
+    for key in ("action_required_now", "before_next_market_open", "informational"):
+        bucket_items = groups.get(key) or []
+        if bucket_items:
+            top = sorted(bucket_items, key=_rank)[0]
+            break
     return {
         "total": len(ordered),
         "counts": counts,
         "top_item": top,
         "ordered": ordered,
+        "groups": groups,
+        "action_required_now_count": groups.get("action_required_now_count", 0),
+        "before_next_market_open_count": groups.get("before_next_market_open_count", 0),
+        "informational_count": groups.get("informational_count", 0),
     }

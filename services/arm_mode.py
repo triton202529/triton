@@ -118,30 +118,41 @@ def is_auto_mode() -> bool:
     return get_arm_mode() == "AUTO"
 
 
-def read_paper_arm_confirm() -> Optional[Dict[str, Any]]:
+def read_paper_arm_confirm(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    target = Path(path) if path is not None else CONFIRM_PATH
     try:
-        if not CONFIRM_PATH.is_file():
+        if not target.is_file():
             return None
-        d = json.loads(CONFIRM_PATH.read_text(encoding="utf-8", errors="replace"))
+        d = json.loads(target.read_text(encoding="utf-8", errors="replace"))
         return d if isinstance(d, dict) else None
     except Exception:
         return None
 
 
-def is_paper_arm_confirm_valid(arm_cfg: Optional[Dict[str, Any]] = None) -> bool:
+def is_paper_arm_confirm_valid(
+    arm_cfg: Optional[Dict[str, Any]] = None,
+    *,
+    confirm_path: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> bool:
     arm_cfg = arm_cfg or load_arm_config()
-    doc = read_paper_arm_confirm()
+    doc = read_paper_arm_confirm(confirm_path)
     if not doc:
         return False
     if not bool(doc.get("allow_execute", True)):
         return False
+    clock = now if now is not None else _utc_now()
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    else:
+        clock = clock.astimezone(timezone.utc)
     exp = _parse_dt(doc.get("expires_at"))
-    if exp is not None and _utc_now() >= exp:
+    if exp is not None and clock >= exp:
         return False
     ttl = int(arm_cfg.get("confirmation_ttl_minutes", 30) or 30)
     ts = _parse_dt(doc.get("timestamp"))
     if ts is not None and exp is None:
-        if (_utc_now() - ts).total_seconds() / 60.0 > ttl:
+        if (clock - ts).total_seconds() / 60.0 > ttl:
             return False
     return True
 

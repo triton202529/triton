@@ -11,9 +11,10 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from services.command_center_status_coherence import (
     CONTINUOUS_CYCLE_OVERDUE_MINUTES,
@@ -29,6 +30,21 @@ from services.command_center_status_coherence import (
     resolve_market_status,
     resolve_shutdown_presentation,
 )
+
+ET = ZoneInfo("America/New_York")
+
+# Presentation-only session phases (UIR-003D). Does not alter execution market gates.
+SESSION_MARKET_OPEN = "MARKET_OPEN"
+SESSION_PRE_MARKET = "PRE_MARKET"
+SESSION_AFTER_HOURS = "AFTER_HOURS"
+SESSION_NON_TRADING_DAY = "MARKET_CLOSED_NON_TRADING_DAY"
+SESSION_UNKNOWN = "UNKNOWN"
+
+BUCKET_ACTION_NOW = "ACTION_REQUIRED_NOW"
+BUCKET_BEFORE_OPEN = "BEFORE_NEXT_MARKET_OPEN"
+BUCKET_INFO = "INFORMATIONAL"
+
+EXPECTED_AFTER_HOURS_STOP = "EXPECTED_AFTER_HOURS_STOP"
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
@@ -481,9 +497,192 @@ class AttentionItem:
     explanation: str
     evidence_source: str
     recommended_action: str
+    bucket: str = BUCKET_ACTION_NOW
+    classification_code: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def _nyse_is_session_day(day) -> Optional[bool]:
+    """True/False when calendar available; None when unavailable (fail closed to UNKNOWN phase)."""
+    try:
+        import pandas_market_calendars as mcal  # type: ignore
+
+        cal = mcal.get_calendar("NYSE")
+        sched = cal.schedule(start_date=day.isoformat(), end_date=day.isoformat())
+        return bool(sched is not None and not sched.empty)
+    except Exception:
+        return None
+
+
+def classify_operator_session_context(
+    *,
+    now: Optional[datetime] = None,
+    market_open: Optional[bool] = None,
+    market_status: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Presentation-only session phase from authoritative OPEN/CLOSED + ET clock/calendar.
+
+    Does not change execution market-hours decisions.
+    """
+    now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    now_et = now_utc.astimezone(ET)
+    market = dict(market_status or {})
+    if market_open is None:
+        if "market_open" in market:
+            market_open = market.get("market_open")
+        else:
+            try:
+                from services.guard_auto import is_market_open_et
+
+                market_open = bool(is_market_open_et(now_utc))
+            except Exception:
+                market_open = None
+
+    status = str(market.get("status") or "").upper()
+    if market_open is None and status not in ("OPEN", "CLOSED"):
+        phase = SESSION_UNKNOWN
+    elif market_open is True or status == "OPEN":
+        phase = SESSION_MARKET_OPEN
+        market_open = True
+        status = "OPEN"
+    else:
+        market_open = False
+        status = "CLOSED"
+        session_day = _nyse_is_session_day(now_et.date())
+        t = now_et.time()
+        open_t = time(9, 30)
+        close_t = time(16, 0)
+        if session_day is False or now_et.weekday() >= 5:
+            phase = SESSION_NON_TRADING_DAY
+        elif session_day is None and now_et.weekday() >= 5:
+            phase = SESSION_NON_TRADING_DAY
+        elif t < open_t:
+            phase = SESSION_PRE_MARKET
+        elif t >= close_t:
+            phase = SESSION_AFTER_HOURS
+        elif session_day is None:
+            # Weekday inside 09:30–16:00 but classifier said closed — ambiguous.
+            phase = SESSION_UNKNOWN
+        else:
+            # Session day but closed inside regular window (e.g. early close residual).
+            phase = SESSION_AFTER_HOURS if t >= close_t else SESSION_UNKNOWN
+
+    return {
+        "session_phase": phase,
+        "status": status if status in ("OPEN", "CLOSED") else ("OPEN" if market_open else "CLOSED" if market_open is False else "UNKNOWN"),
+        "market_open": market_open,
+        "as_of_et": now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
+        "as_of": now_utc.isoformat(),
+        "source": "guard_auto.is_market_open_et+et_clock+nyse_calendar",
+        "note": "Presentation-only session context; execution gates unchanged",
+    }
+
+
+def _loop_process_count(loop: Dict[str, Any]) -> Tuple[Optional[int], bool]:
+    """Return (count|None, discovery_ok)."""
+    if loop.get("process_discovery_available") is False:
+        return None, False
+    count = loop.get("process_count")
+    if count is not None:
+        try:
+            return max(0, int(count)), True
+        except (TypeError, ValueError):
+            return None, True
+    if loop.get("process_running") is True:
+        return 1, True
+    if loop.get("process_running") is False:
+        return 0, True
+    pids = loop.get("pids")
+    if isinstance(pids, list):
+        return len(pids), True
+    return None, True
+
+
+def _loop_has_orphan_lock(loop: Dict[str, Any], count: Optional[int]) -> bool:
+    lc = str(loop.get("lock_classification") or "")
+    if lc == "STALE_ORPHAN_LOCK":
+        return True
+    if (
+        bool(loop.get("lock_exists"))
+        and count == 0
+        and loop.get("process_discovery_available") is not False
+    ):
+        return True
+    return False
+
+
+def classify_expected_after_hours_stop(snapshot_parts: Dict[str, Any]) -> Dict[str, Any]:
+    """True only when a clean after-hours/non-trading stopped state is proven."""
+    market = snapshot_parts.get("market") or {}
+    phase = str(market.get("session_phase") or SESSION_UNKNOWN)
+    live = snapshot_parts.get("live_execution") or {}
+    cont = snapshot_parts.get("continuous") or {}
+    wd = snapshot_parts.get("watchdog") or {}
+    cont_n, cont_ok = _loop_process_count(cont)
+    wd_n, wd_ok = _loop_process_count(wd)
+    reasons: List[str] = []
+
+    if phase == SESSION_UNKNOWN or market.get("market_open") is None:
+        reasons.append("session_unknown")
+    if phase == SESSION_MARKET_OPEN or market.get("market_open") is True:
+        reasons.append("market_open")
+    if phase == SESSION_PRE_MARKET:
+        # Pre-market clean stop is expected-as-stopped but not AFTER_HOURS_STOP.
+        reasons.append("pre_market")
+    if not cont_ok or not wd_ok:
+        reasons.append("process_discovery_unavailable")
+    if cont_n is None or wd_n is None:
+        reasons.append("process_count_unavailable")
+    if cont_n not in (0,) or wd_n not in (0,):
+        reasons.append("component_not_stopped")
+    if cont_n is not None and cont_n >= 2:
+        reasons.append("duplicate_continuous")
+    if wd_n is not None and wd_n >= 2:
+        reasons.append("duplicate_watchdog")
+    if _loop_has_orphan_lock(cont, cont_n) or _loop_has_orphan_lock(wd, wd_n):
+        reasons.append("orphaned_lock")
+    if live.get("permitted") is True or live.get("blocked") is False:
+        reasons.append("live_execution_not_blocked")
+
+    expected = (not reasons) and phase in (SESSION_AFTER_HOURS, SESSION_NON_TRADING_DAY)
+
+    return {
+        "expected": expected,
+        "classification": EXPECTED_AFTER_HOURS_STOP if expected else "",
+        "session_phase": phase,
+        "reasons_not_expected": reasons,
+        "continuous_count": cont_n,
+        "watchdog_count": wd_n,
+    }
+
+
+def _paper_arm_valid_through_close(
+    *,
+    expires_at: Any,
+    now: Optional[datetime] = None,
+) -> Optional[bool]:
+    """None when expiration evidence missing/unparseable."""
+    exp = _parse_dt(expires_at) if not isinstance(expires_at, datetime) else expires_at
+    if exp is None:
+        return None
+    now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    now_et = now_utc.astimezone(ET)
+    # Coming regular-session close (today if before close, else next weekday close approx).
+    close_et = datetime.combine(now_et.date(), time(16, 0), tzinfo=ET)
+    if now_et.time() >= time(16, 0):
+        # Next calendar day close — presentation readiness for next session.
+        from datetime import timedelta
+
+        d = now_et.date()
+        d = d + timedelta(days=1)
+        while d.weekday() >= 5:
+            d = d + timedelta(days=1)
+        close_et = datetime.combine(d, time(16, 0), tzinfo=ET)
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return exp.astimezone(timezone.utc) >= close_et.astimezone(timezone.utc)
 
 
 @dataclass
@@ -511,72 +710,154 @@ class OperatorStatusSnapshot:
 
 
 def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
+    """Session-aware Operator Attention (UIR-003D). Presentation classification only."""
     items: List[AttentionItem] = []
-    paper = snapshot_parts["paper_arm"]
-    cont = snapshot_parts["continuous"]
-    wd = snapshot_parts["watchdog"]
-    live = snapshot_parts["live_execution"]
-    broker = snapshot_parts["broker"]
-    freshness = snapshot_parts["data_freshness"]
-    alerts = snapshot_parts["alerts"]
-    gov = snapshot_parts["governance"]
-    cycle = snapshot_parts["cycle"]
+    paper = snapshot_parts.get("paper_arm") or {}
+    cont = snapshot_parts.get("continuous") or {}
+    wd = snapshot_parts.get("watchdog") or {}
+    live = snapshot_parts.get("live_execution") or {}
+    broker = snapshot_parts.get("broker") or {}
+    freshness = snapshot_parts.get("data_freshness") or {}
+    alerts = snapshot_parts.get("alerts") or {}
+    gov = snapshot_parts.get("governance") or {}
+    cycle = snapshot_parts.get("cycle") or {}
+    market = snapshot_parts.get("market") or {}
+    orders = snapshot_parts.get("orders_positions") or {}
 
-    if paper.get("display_status") == "EXPIRED":
+    # Ensure session phase present for fixtures that omit enrichment.
+    if not market.get("session_phase"):
+        market = {
+            **market,
+            **classify_operator_session_context(
+                market_open=market.get("market_open"),
+                market_status=market,
+            ),
+        }
+        snapshot_parts = {**snapshot_parts, "market": market}
+
+    phase = str(market.get("session_phase") or SESSION_UNKNOWN)
+    market_open = market.get("market_open")
+    expected_meta = classify_expected_after_hours_stop(snapshot_parts)
+    expected_stop = bool(expected_meta.get("expected"))
+    cont_n, cont_ok = _loop_process_count(cont)
+    wd_n, wd_ok = _loop_process_count(wd)
+    clean_premarket_stop = (
+        phase == SESSION_PRE_MARKET
+        and market_open is False
+        and cont_ok
+        and wd_ok
+        and cont_n == 0
+        and wd_n == 0
+        and not _loop_has_orphan_lock(cont, cont_n)
+        and not _loop_has_orphan_lock(wd, wd_n)
+        and live.get("blocked") is not False
+        and live.get("permitted") is not True
+    )
+
+    # --- Always-critical safety ---
+    if live.get("permitted") is True or live.get("blocked") is False:
+        items.append(
+            AttentionItem(
+                "CRITICAL",
+                "Live execution appears permitted",
+                "Evidence indicates live execution is not blocked. This violates the operator-console safety expectation.",
+                str(live.get("evidence_path") or EXECUTION_READINESS),
+                "Treat as a critical safety incident. Do not enable trading. Investigate readiness/governance immediately.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="LIVE_EXECUTION_UNEXPECTEDLY_PERMITTED",
+            )
+        )
+
+    trading = snapshot_parts.get("trading_pipeline") or {}
+    trading_status = str(trading.get("status") or "").upper()
+    last_outcome = str(trading.get("last_outcome") or "").strip().lower()
+    last_mh = str(trading.get("last_market_hours_outcome") or "").strip().lower()
+    attention_code = str(trading.get("operator_attention_code") or "").strip()
+    if trading_status == "DEGRADED" and (
+        last_outcome == "session_unknown" or attention_code == "SESSION_CALENDAR_UNKNOWN"
+    ):
         items.append(
             AttentionItem(
                 "HIGH",
-                "Paper arm expired",
-                "The paper-arm confirmation latch is expired. Paper execution may be blocked until re-armed via the approved CLI.",
-                str(PAPER_ARM_CONFIRM),
-                "Review paper-arm status with the operator CLI; do not use the dashboard to arm in this phase.",
+                str(trading.get("operator_attention_title") or "Session calendar unavailable — paper entry blocked"),
+                "XNYS could not authoritatively prove OPEN or CLOSED. Paper entry is blocked until the calendar is available. "
+                "This is not an ordinary closed-market skip. Watchdog process health does not clear this.",
+                str(trading.get("evidence_path") or ""),
+                "Do not invoke paper entry. Restore exchange_calendars XNYS. Do not treat weekday clock heuristics as session proof.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="SESSION_CALENDAR_UNKNOWN",
             )
         )
-    elif paper.get("display_status") == "MISSING":
-        items.append(
-            AttentionItem(
-                "MEDIUM",
-                "Paper arm missing",
-                "No paper_arm_confirm.json latch was found.",
-                str(PAPER_ARM_CONFIRM),
-                "If paper entries are expected, create a latch using the approved paper-arm CLI outside this dashboard.",
-            )
-        )
-    elif paper.get("display_status") == "INVALID":
+    if trading_status == "DEGRADED" and last_mh == "fail":
         items.append(
             AttentionItem(
                 "HIGH",
-                "Paper arm invalid",
-                "Paper-arm confirm artifact exists but failed validity checks.",
-                str(PAPER_ARM_CONFIRM),
-                "Inspect the confirm artifact and re-issue via approved CLI if appropriate.",
+                "Latest market-hours trading cycle failed",
+                "A genuine market-hours CYCLE_FAIL remains unresolved. Watchdog process health does not clear this. "
+                "Paper arm state is independent: a currently valid arm does not mean the last applicable cycle succeeded.",
+                str(trading.get("evidence_path") or ""),
+                "Review Activity for the failed cycle. Do not treat watchdog HEALTHY or Paper ARMED as trade-ready until a later market-hours cycle succeeds.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="MARKET_HOURS_CYCLE_FAIL",
             )
         )
 
-    if not cont.get("process_running"):
+    # --- Duplicates (any session) ---
+    if cont_ok and cont_n is not None and cont_n >= 2:
         items.append(
             AttentionItem(
-                "CRITICAL" if snapshot_parts["overall_status"] != "STOPPED" else "HIGH",
-                "Continuous loop missing",
-                "No continuous-loop process matching run_continuous_loop.ps1 was detected.",
+                "CRITICAL",
+                "Duplicate continuous runtime",
+                f"{cont_n} continuous-loop processes matching run_continuous_loop.ps1 were detected; expected exactly 1.",
                 "services.runtime_process_detector",
-                "Use approved runtime start scripts or Task Scheduler backup; dashboard Start is not available yet.",
+                "Use protected Stop/Restart only after reviewing Diagnostics. Do not start another continuous loop.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="DUPLICATE_CONTINUOUS",
             )
         )
-    if not wd.get("process_running"):
+    if wd_ok and wd_n is not None and wd_n >= 2:
         items.append(
             AttentionItem(
-                "CRITICAL" if snapshot_parts["overall_status"] != "STOPPED" else "HIGH",
-                "Watchdog missing",
-                "No watchdog-loop process matching run_watchdog_loop.ps1 was detected.",
+                "CRITICAL",
+                "Duplicate watchdog runtime",
+                f"{wd_n} watchdog-loop processes matching run_watchdog_loop.ps1 were detected; expected exactly 1.",
                 "services.runtime_process_detector",
-                "Use approved runtime start scripts; dashboard Start is not available yet.",
+                "Use protected Stop/Restart only after reviewing Diagnostics. Do not start another watchdog.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="DUPLICATE_WATCHDOG",
             )
         )
 
-    for label, loop in (("Continuous", cont), ("Watchdog", wd)):
+    # --- Process discovery unavailable ---
+    if not cont_ok:
+        items.append(
+            AttentionItem(
+                "HIGH",
+                "Continuous process discovery unavailable",
+                "Canonical continuous-loop process discovery failed or is unavailable; instance count cannot be confirmed.",
+                "services.runtime_process_detector",
+                "Refresh Operations evidence. Do not invent a zero-instance reading from locks or prior Start messages.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="PROCESS_DISCOVERY_UNAVAILABLE",
+            )
+        )
+    if not wd_ok:
+        items.append(
+            AttentionItem(
+                "HIGH",
+                "Watchdog process discovery unavailable",
+                "Canonical watchdog process discovery failed or is unavailable; instance count cannot be confirmed.",
+                "services.runtime_process_detector",
+                "Refresh Operations evidence. Do not invent a zero-instance reading from locks or prior Start messages.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="PROCESS_DISCOVERY_UNAVAILABLE",
+            )
+        )
+
+    # --- Orphan / mismatch locks ---
+    for label, loop, count in (("Continuous", cont, cont_n), ("Watchdog", wd, wd_n)):
         lc = str(loop.get("lock_classification") or "")
-        if lc == "STALE_ORPHAN_LOCK":
+        if _loop_has_orphan_lock(loop, count):
             items.append(
                 AttentionItem(
                     "HIGH",
@@ -584,6 +865,8 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
                     f"{label} lock file exists without a matching live process.",
                     str(loop.get("lock_path") or ""),
                     "Do not delete the lock from the dashboard. Use approved recovery/start paths that clear orphan locks safely.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="ORPHANED_LOCK",
                 )
             )
         elif lc in ("NO_LOCK_RUNNING", "MISSING_ACTIVE_LOCK", "STALE_ACTIVE_LOCK", "CORRUPT_LOCK"):
@@ -594,21 +877,303 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
                     f"{label} process and lock state disagree ({lc}).",
                     str(loop.get("lock_path") or "runtime_lock_classifier"),
                     "Inspect Diagnostics evidence; do not force-clear locks from the dashboard.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="PROCESS_LOCK_MISMATCH",
                 )
             )
 
-    if cycle.get("overdue"):
+    # --- Missing runtime components (session-aware) ---
+    missing_high = market_open is True or phase == SESSION_MARKET_OPEN
+    session_unknown = phase == SESSION_UNKNOWN or market_open is None
+    suppress_missing = expected_stop or clean_premarket_stop
+
+    if cont_ok and cont_n == 0 and not _loop_has_orphan_lock(cont, cont_n):
+        if missing_high:
+            items.append(
+                AttentionItem(
+                    "HIGH",
+                    "Continuous loop missing",
+                    "No continuous-loop process matching run_continuous_loop.ps1 was detected during the active market session.",
+                    "services.runtime_process_detector",
+                    "Start TRITON using the protected Start control only when eligibility allows.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="RUNTIME_MISSING_MARKET_OPEN",
+                )
+            )
+        elif session_unknown and not suppress_missing:
+            items.append(
+                AttentionItem(
+                    "HIGH",
+                    "Continuous loop missing",
+                    "No continuous-loop process was detected and market-session context is UNKNOWN; treating conservatively.",
+                    "services.runtime_process_detector",
+                    "Confirm market-session evidence and runtime intent before assuming a safe stop.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="RUNTIME_MISSING_SESSION_UNKNOWN",
+                )
+            )
+        elif not suppress_missing and phase == SESSION_PRE_MARKET:
+            items.append(
+                AttentionItem(
+                    "INFO",
+                    "Continuous loop not running before market open",
+                    "Continuous loop is stopped in pre-market. Start only at the appropriate activation time.",
+                    "services.runtime_process_detector",
+                    "Use the protected Start control before unattended paper activation when eligibility allows.",
+                    bucket=BUCKET_BEFORE_OPEN,
+                    classification_code="PREMARKET_RUNTIME_STOPPED",
+                )
+            )
+
+    if wd_ok and wd_n == 0 and not _loop_has_orphan_lock(wd, wd_n):
+        if missing_high:
+            items.append(
+                AttentionItem(
+                    "HIGH",
+                    "Watchdog missing",
+                    "No watchdog-loop process matching run_watchdog_loop.ps1 was detected during the active market session.",
+                    "services.runtime_process_detector",
+                    "Start TRITON using the protected Start control only when eligibility allows.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="RUNTIME_MISSING_MARKET_OPEN",
+                )
+            )
+        elif session_unknown and not suppress_missing:
+            items.append(
+                AttentionItem(
+                    "HIGH",
+                    "Watchdog missing",
+                    "No watchdog process was detected and market-session context is UNKNOWN; treating conservatively.",
+                    "services.runtime_process_detector",
+                    "Confirm market-session evidence and runtime intent before assuming a safe stop.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="RUNTIME_MISSING_SESSION_UNKNOWN",
+                )
+            )
+        elif not suppress_missing and phase == SESSION_PRE_MARKET:
+            items.append(
+                AttentionItem(
+                    "INFO",
+                    "Watchdog not running before market open",
+                    "Watchdog is stopped in pre-market. Start only at the appropriate activation time.",
+                    "services.runtime_process_detector",
+                    "Use the protected Start control before unattended paper activation when eligibility allows.",
+                    bucket=BUCKET_BEFORE_OPEN,
+                    classification_code="PREMARKET_RUNTIME_STOPPED",
+                )
+            )
+
+    # Deduplicate: one expected-stop informational banner for after-hours/non-trading clean stop.
+    if expected_stop:
+        items.append(
+            AttentionItem(
+                "INFO",
+                "TRITON is safely stopped after market close",
+                (
+                    "Market is closed. Continuous loop and watchdog process counts are 0, "
+                    "runtime locks are released, and live execution remains blocked. "
+                    f"Session context: {phase}."
+                ),
+                "services.operator_console_status.EXPECTED_AFTER_HOURS_STOP",
+                "No urgent runtime action. Renew the paper arm and start TRITON before the next market-open activation when ready.",
+                bucket=BUCKET_INFO,
+                classification_code=EXPECTED_AFTER_HOURS_STOP,
+            )
+        )
+    elif clean_premarket_stop:
+        items.append(
+            AttentionItem(
+                "INFO",
+                "TRITON is stopped before market open",
+                "Pre-market: runtime is cleanly stopped with locks released. Live execution remains blocked.",
+                "services.operator_console_status",
+                "Complete next-session preparation (paper arm + protected Start) before activation.",
+                bucket=BUCKET_INFO,
+                classification_code="EXPECTED_PREMARKET_STOP",
+            )
+        )
+
+    # After-hours component still running (not a failure solely for closed market).
+    if market_open is False and phase in (SESSION_AFTER_HOURS, SESSION_NON_TRADING_DAY):
+        if cont_ok and cont_n == 1:
+            items.append(
+                AttentionItem(
+                    "INFO",
+                    "Continuous loop still running after hours",
+                    "Continuous loop process count is 1 while the market is closed. This is not classified as a missing-runtime failure.",
+                    "services.runtime_process_detector",
+                    "Review whether after-hours runtime is intentional; use protected Stop if a clean stop is desired.",
+                    bucket=BUCKET_INFO,
+                    classification_code="AFTER_HOURS_RUNTIME_ACTIVE",
+                )
+            )
+        if wd_ok and wd_n == 1:
+            items.append(
+                AttentionItem(
+                    "INFO",
+                    "Watchdog still running after hours",
+                    "Watchdog process count is 1 while the market is closed. This is not classified as a missing-runtime failure.",
+                    "services.runtime_process_detector",
+                    "Review whether after-hours runtime is intentional; use protected Stop if a clean stop is desired.",
+                    bucket=BUCKET_INFO,
+                    classification_code="AFTER_HOURS_RUNTIME_ACTIVE",
+                )
+            )
+
+    # --- Paper arm (session-aware) ---
+    paper_status = str(paper.get("display_status") or paper.get("raw_status") or "").upper()
+    arm_through_close = _paper_arm_valid_through_close(
+        expires_at=paper.get("expires_at"),
+        now=_parse_dt(snapshot_parts.get("generated_at")) if snapshot_parts.get("generated_at") else None,
+    )
+
+    if paper_status == "INVALID" or paper_status == "UNKNOWN":
+        items.append(
+            AttentionItem(
+                "HIGH" if paper_status == "INVALID" else "MEDIUM",
+                "Paper arm evidence integrity warning",
+                "Paper-arm state is invalid or unknown and cannot be treated as an expected after-hours expiration.",
+                str(paper.get("evidence_path") or PAPER_ARM_CONFIRM),
+                "Inspect the confirm artifact. Do not assume paper trading is authorized.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="PAPER_ARM_EVIDENCE_INTEGRITY",
+            )
+        )
+    elif paper_status == "EXPIRED":
+        if market_open is True or phase == SESSION_MARKET_OPEN:
+            items.append(
+                AttentionItem(
+                    "HIGH",
+                    "Paper arm expired",
+                    "Paper arm is expired while the market session is open. Paper entry is not safely armed.",
+                    str(paper.get("evidence_path") or PAPER_ARM_CONFIRM),
+                    "Renew the paper arm via the approved CLI before paper activation. Do not use the dashboard to arm.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="PAPER_ARM_EXPIRED_MARKET_OPEN",
+                )
+            )
+        else:
+            items.append(
+                AttentionItem(
+                    "INFO",
+                    "Paper arm expired after the trading session",
+                    "Paper arm expired after the trading session. Renew before the next market-open activation.",
+                    str(paper.get("evidence_path") or PAPER_ARM_CONFIRM),
+                    "Renew with the approved paper-arm CLI before the next session. Do not claim paper trading is currently active.",
+                    bucket=BUCKET_BEFORE_OPEN,
+                    classification_code="PAPER_ARM_EXPIRED_AFTER_HOURS",
+                )
+            )
+    elif paper_status == "MISSING":
+        if market_open is True or phase == SESSION_MARKET_OPEN:
+            items.append(
+                AttentionItem(
+                    "HIGH",
+                    "Paper arm missing",
+                    "No paper-arm latch was found during the active market session.",
+                    str(paper.get("evidence_path") or PAPER_ARM_CONFIRM),
+                    "Create a latch using the approved paper-arm CLI outside this dashboard.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="PAPER_ARM_MISSING_MARKET_OPEN",
+                )
+            )
+        else:
+            items.append(
+                AttentionItem(
+                    "INFO",
+                    "Paper arm missing for next session",
+                    "No paper-arm latch is present. Renew/create before the next market-open activation.",
+                    str(paper.get("evidence_path") or PAPER_ARM_CONFIRM),
+                    "Create a latch using the approved paper-arm CLI before unattended paper activation.",
+                    bucket=BUCKET_BEFORE_OPEN,
+                    classification_code="PAPER_ARM_MISSING_NEXT_SESSION",
+                )
+            )
+    elif paper_status == "ARMED" and phase == SESSION_PRE_MARKET and arm_through_close is False:
+        items.append(
+            AttentionItem(
+                "MEDIUM",
+                "Paper arm not valid through market close",
+                "Paper arm is present but does not extend through the coming regular-session close.",
+                str(paper.get("evidence_path") or PAPER_ARM_CONFIRM),
+                "Renew with a TTL that covers the session before activation. Do not report READY for unattended paper entry.",
+                bucket=BUCKET_BEFORE_OPEN,
+                classification_code="PAPER_ARM_NOT_THROUGH_CLOSE",
+            )
+        )
+
+    # Next-session start preparation when cleanly stopped after hours / pre-market.
+    if expected_stop or clean_premarket_stop:
+        items.append(
+            AttentionItem(
+                "INFO",
+                "Start TRITON before next market-open activation",
+                "Runtime is intentionally stopped. Use the protected Start control at the appropriate time; Start eligibility follows existing rules.",
+                "dashboard.operator_console",
+                "Do not start early unless intentionally operating. Confirm paper arm first when paper entries are planned.",
+                bucket=BUCKET_BEFORE_OPEN,
+                classification_code="NEXT_SESSION_START_PREP",
+            )
+        )
+
+    # --- Heartbeat / freshness when stopped vs running ---
+    if freshness.get("class") == "STALE":
+        if expected_stop or clean_premarket_stop or (cont_n == 0 and wd_n == 0 and cont_ok and wd_ok):
+            items.append(
+                AttentionItem(
+                    "INFO",
+                    "Heartbeat inactive while runtime is stopped",
+                    "Heartbeat/freshness is stale or inactive because runtime components are confirmed stopped. Not an active-session stale-runtime incident.",
+                    str(freshness.get("evidence_path") or HEARTBEAT),
+                    "No heartbeat remediation required for a verified stopped state.",
+                    bucket=BUCKET_INFO,
+                    classification_code="HEARTBEAT_INACTIVE_STOPPED",
+                )
+            )
+        else:
+            items.append(
+                AttentionItem(
+                    "MEDIUM",
+                    "Stale market data",
+                    "Data freshness classification is STALE based on heartbeat/freshness evidence.",
+                    str(freshness.get("evidence_path") or HEARTBEAT),
+                    "Allow the data-freshness scheduled task to run, or inspect freshness audit artifacts.",
+                    bucket=BUCKET_ACTION_NOW,
+                    classification_code="DATA_FRESHNESS_STALE",
+                )
+            )
+
+    # Running + stale is handled by Operations cards; keep attention if a loop is up with overall STALE/DEGRADED.
+    if (cont_n == 1 or wd_n == 1) and str(snapshot_parts.get("overall_status") or "").upper() in (
+        "STALE",
+        "DEGRADED",
+    ):
+        items.append(
+            AttentionItem(
+                "HIGH",
+                "Runtime heartbeat degraded while process is running",
+                "At least one runtime process is present but overall runtime health is STALE/DEGRADED.",
+                "services.operator_console_status",
+                "Inspect process cards, locks, and heartbeats. Do not ignore stale evidence for a live process.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="RUNNING_PROCESS_STALE_HEALTH",
+            )
+        )
+
+    if cycle.get("overdue") and (cont_n or 0) >= 1:
         items.append(
             AttentionItem(
                 "MEDIUM",
                 "Cycle overdue",
                 f"Last evidenced continuous cycle is older than {CONTINUOUS_CYCLE_OVERDUE_MINUTES:.0f} minutes.",
                 str(cycle.get("evidence_path") or ""),
-                "Check continuous-loop health and logs; do not restart from the dashboard in this phase.",
+                "Check continuous-loop health and logs.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="CYCLE_OVERDUE",
             )
         )
 
-    if broker.get("connected") is False:
+    if broker.get("connected") is False and (wd_n or 0) >= 1:
         items.append(
             AttentionItem(
                 "HIGH",
@@ -616,17 +1181,27 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
                 "Watchdog/broker evidence indicates the broker is not connected.",
                 str(WATCHDOG_STATUS),
                 "Verify broker connectivity outside the dashboard; do not place orders.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="BROKER_DISCONNECTED",
             )
         )
 
-    if freshness.get("class") == "STALE":
+    # Open orders — never suppress after hours.
+    try:
+        oo = orders.get("open_orders")
+        oo_n = int(oo) if oo is not None else 0
+    except (TypeError, ValueError):
+        oo_n = 0
+    if oo_n > 0:
         items.append(
             AttentionItem(
-                "MEDIUM",
-                "Stale market data",
-                "Data freshness classification is STALE based on heartbeat/freshness evidence.",
-                str(freshness.get("evidence_path") or HEARTBEAT),
-                "Allow the data-freshness scheduled task to run, or inspect freshness audit artifacts.",
+                "HIGH",
+                "Open orders require attention",
+                f"{oo_n} open order(s) are present in the verified snapshot.",
+                str(orders.get("open_orders_path") or OPEN_ORDERS),
+                "Review Orders evidence. Do not suppress because the market is closed.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="OPEN_ORDERS_REQUIRE_ATTENTION",
             )
         )
 
@@ -638,10 +1213,12 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
                 f"{alerts.get('critical_count')} critical watchdog alert(s) are active.",
                 str(WATCHDOG_ALERTS),
                 "Open Risk & Alerts and follow the recommended operator response; do not dismiss from this console.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="CRITICAL_ALERT_ACTIVE",
             )
         )
 
-    if gov.get("blocked"):
+    if gov.get("blocked") and not expected_stop:
         items.append(
             AttentionItem(
                 "HIGH",
@@ -649,32 +1226,78 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
                 "Governance authorization is not fully authorized.",
                 str(GOVERNANCE_AUTH),
                 "Review Governance Authorization evidence; do not override from the dashboard.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="GOVERNANCE_BLOCK",
             )
         )
 
-    if gov.get("execution_readiness_ready") is False:
+    if gov.get("execution_readiness_ready") is False and (
+        market_open is True or phase in (SESSION_MARKET_OPEN, SESSION_PRE_MARKET)
+    ):
         items.append(
             AttentionItem(
                 "MEDIUM",
                 "Execution readiness not ready",
                 "execution_readiness.json does not indicate a ready posture.",
                 str(EXECUTION_READINESS),
-                "Review readiness details on Risk & Alerts / Diagnostics.",
+                "Review readiness details on Risk & Alerts / Diagnostics before activation.",
+                bucket=BUCKET_BEFORE_OPEN if phase == SESSION_PRE_MARKET else BUCKET_ACTION_NOW,
+                classification_code="EXECUTION_READINESS_NOT_READY",
             )
         )
 
-    if live.get("permitted") is True:
+    if phase == SESSION_UNKNOWN and market_open is None:
         items.append(
             AttentionItem(
-                "CRITICAL",
-                "Live execution appears permitted",
-                "Evidence indicates live_execution_permitted is true. This violates the operator-console safety expectation.",
-                str(EXECUTION_READINESS),
-                "Treat as a critical safety incident. Do not enable trading. Investigate readiness/governance immediately.",
+                "HIGH",
+                "Market-session evidence unavailable",
+                "Authoritative market-session context could not be classified. After-hours assumptions are refused.",
+                "services.command_center_status_coherence.resolve_market_status",
+                "Refresh Operations evidence and confirm the market clock/classifier before treating the stop as expected.",
+                bucket=BUCKET_ACTION_NOW,
+                classification_code="SESSION_EVIDENCE_UNKNOWN",
             )
         )
 
-    return items
+    # Deduplicate titles within the same bucket+severity (keep first).
+    seen = set()
+    deduped: List[AttentionItem] = []
+    for item in items:
+        key = (item.bucket, item.severity, item.title)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def group_attention_items(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Split attention into action-now / before-open / informational groups."""
+    now_items: List[Dict[str, Any]] = []
+    before: List[Dict[str, Any]] = []
+    info: List[Dict[str, Any]] = []
+    for raw in items or []:
+        item = dict(raw)
+        bucket = str(item.get("bucket") or BUCKET_ACTION_NOW)
+        sev = str(item.get("severity") or "").upper()
+        if sev in ("CRITICAL", "HIGH"):
+            item["bucket"] = BUCKET_ACTION_NOW
+            now_items.append(item)
+        elif bucket == BUCKET_BEFORE_OPEN:
+            before.append(item)
+        elif bucket == BUCKET_INFO or sev == "INFO":
+            item["bucket"] = BUCKET_INFO
+            info.append(item)
+        else:
+            now_items.append(item)
+    return {
+        "action_required_now": now_items,
+        "before_next_market_open": before,
+        "informational": info,
+        "action_required_now_count": len(now_items),
+        "before_next_market_open_count": len(before),
+        "informational_count": len(info),
+    }
 
 
 def build_operator_status(
@@ -744,7 +1367,10 @@ def build_operator_status(
             "continuous_loop_running": cl_running,
             "detected_watchdog_process_ids": wd_pids,
             "detected_continuous_process_ids": cl_pids,
+            "watchdog_detection_method": "fixture",
+            "continuous_detection_method": "fixture",
             "process_detection_confidence": "high",
+            "process_detection_warnings": [],
             "watchdog_lock_classification": wd_class,
             "continuous_lock_classification": cl_class,
             "watchdog_lock_healthy": is_lock_healthy(wd_class),
@@ -753,33 +1379,18 @@ def build_operator_status(
             "continuous_lock_exists": paths["continuous_lock"].is_file(),
         }
 
-    # Paper arm
-    if root == ROOT:
-        try:
-            from services.paper_arm_status import classify_paper_arm_confirm_status
+    # Paper arm — always the canonical execution classifier.
+    try:
+        from services.paper_arm_status import classify_paper_arm_confirm_status
 
-            paper_raw = classify_paper_arm_confirm_status()
-        except Exception:
-            paper_raw = "UNKNOWN"
-    else:
-        arm_path = paths["paper_arm"]
-        if not arm_path.is_file():
-            paper_raw = "MISSING"
-        else:
-            doc = _read_json(arm_path)
-            if doc.get("__malformed__"):
-                paper_raw = "INVALID"
-            elif doc.get("allow_execute") is False:
-                paper_raw = "INVALID"
-            else:
-                exp = _parse_dt(doc.get("expires_at"))
-                if exp is None:
-                    paper_raw = "INVALID"
-                elif exp < now:
-                    paper_raw = "EXPIRED"
-                else:
-                    paper_raw = "VALID"
+        paper_raw = classify_paper_arm_confirm_status(root=root, now=now)
+    except Exception:
+        paper_raw = "UNKNOWN"
     paper_display = map_paper_arm_display(paper_raw)
+    paper_expires_at = None
+    paper_doc = _read_json(paths["paper_arm"]) if paths["paper_arm"].is_file() else {}
+    if paper_doc and not paper_doc.get("__malformed__"):
+        paper_expires_at = paper_doc.get("expires_at")
 
     readiness = _read_json(paths["execution_readiness"])
     gov = _read_json(paths["governance_authorization"])
@@ -901,12 +1512,43 @@ def build_operator_status(
         continuous_cycle_age_minutes=cycle_age,
         detection_confidence=str(proc.get("process_detection_confidence") or "high"),
     )
+    process_overall = overall
+    try:
+        from services.paper_runtime_session_gate import load_trading_cycle_health
+
+        trading_health = load_trading_cycle_health(root=root)
+    except Exception:
+        trading_health = {
+            "trading_pipeline_status": "UNKNOWN",
+            "exists": False,
+        }
+    trading_pipeline_status = str(
+        trading_health.get("trading_pipeline_status") or "UNKNOWN"
+    ).upper()
+    if process_overall == "RUNNING" and trading_pipeline_status == "DEGRADED":
+        overall = "DEGRADED"
+
+    cl_pids = list(proc.get("detected_continuous_process_ids") or [])
+    wd_pids = list(proc.get("detected_watchdog_process_ids") or [])
+    cl_method = str(proc.get("continuous_detection_method") or "unknown")
+    wd_method = str(proc.get("watchdog_detection_method") or "unknown")
+    cl_discovery_ok = cl_method not in ("failed", "unavailable")
+    wd_discovery_ok = wd_method not in ("failed", "unavailable")
+    # Low confidence alone does not hide a successful PID scan; only failed/unavailable methods do.
+    if str(proc.get("process_detection_confidence") or "").lower() == "low":
+        if cl_method in ("failed", "unavailable"):
+            cl_discovery_ok = False
+        if wd_method in ("failed", "unavailable"):
+            wd_discovery_ok = False
 
     parts = {
         "overall_status": overall,
         "continuous": {
-            "process_running": bool(proc.get("continuous_loop_running")),
-            "pids": list(proc.get("detected_continuous_process_ids") or []),
+            "process_running": bool(proc.get("continuous_loop_running")) if cl_discovery_ok else None,
+            "process_count": len(cl_pids) if cl_discovery_ok else None,
+            "pids": cl_pids if cl_discovery_ok else [],
+            "process_discovery_available": cl_discovery_ok,
+            "process_detection_method": cl_method,
             "lock_exists": bool(proc.get("continuous_lock_exists")),
             "lock_classification": proc.get("continuous_lock_classification"),
             "lock_healthy": bool(proc.get("continuous_lock_healthy")),
@@ -916,8 +1558,11 @@ def build_operator_status(
             "refreshed_at": refreshed.isoformat() if refreshed else None,
         },
         "watchdog": {
-            "process_running": bool(proc.get("watchdog_loop_running")),
-            "pids": list(proc.get("detected_watchdog_process_ids") or []),
+            "process_running": bool(proc.get("watchdog_loop_running")) if wd_discovery_ok else None,
+            "process_count": len(wd_pids) if wd_discovery_ok else None,
+            "pids": wd_pids if wd_discovery_ok else [],
+            "process_discovery_available": wd_discovery_ok,
+            "process_detection_method": wd_method,
             "lock_exists": bool(proc.get("watchdog_lock_exists")),
             "lock_classification": proc.get("watchdog_lock_classification"),
             "lock_healthy": bool(proc.get("watchdog_lock_healthy")),
@@ -928,8 +1573,22 @@ def build_operator_status(
         "paper_arm": {
             "raw_status": paper_raw,
             "display_status": paper_display,
+            "currently_valid": paper_raw == "VALID",
+            "expires_at": paper_expires_at,
             "evidence_path": str(paths["paper_arm"]),
             "exists": paths["paper_arm"].is_file(),
+        },
+        "process_overall_status": process_overall,
+        "trading_pipeline": {
+            "status": trading_pipeline_status,
+            "last_outcome": trading_health.get("last_outcome"),
+            "last_market_hours_outcome": trading_health.get("last_market_hours_outcome"),
+            "last_market_hours_at": trading_health.get("last_market_hours_at"),
+            "last_reason": trading_health.get("last_reason"),
+            "operator_attention_code": trading_health.get("operator_attention_code"),
+            "operator_attention_title": trading_health.get("operator_attention_title"),
+            "watchdog_does_not_override": True,
+            "evidence_path": trading_health.get("evidence_path"),
         },
         "live_execution": {
             "permitted": live_permitted,
@@ -961,7 +1620,12 @@ def build_operator_status(
                 else None
             ),
         },
-        "market": resolve_market_status(now=now),
+        "market": (
+            lambda _m: {
+                **_m,
+                **classify_operator_session_context(now=now, market_status=_m),
+            }
+        )(resolve_market_status(now=now)),
         "cycle": {
             "last_cycle_number": cycle_num,
             "last_completed_at": refreshed.isoformat() if refreshed else None,
@@ -1006,7 +1670,10 @@ def build_operator_status(
             },
         },
     }
+    parts["generated_at"] = now.isoformat()
     attention = [a.to_dict() for a in _build_attention(parts)]
+    attention_groups = group_attention_items(attention)
+    expected_runtime = classify_expected_after_hours_stop(parts)
 
     snap = OperatorStatusSnapshot(
         generated_at=now.isoformat(),
@@ -1028,6 +1695,8 @@ def build_operator_status(
         live_execution_control_exposed=False,
     )
     out = snap.to_dict()
+    out["process_overall_status"] = process_overall
+    out["trading_pipeline"] = parts.get("trading_pipeline") or {}
     cert_path = results / "capital_preservation_certification.json"
     cert_doc = _read_json(cert_path)
     paper_cert = format_paper_certification_display(cert_doc.get("certification_status"))
@@ -1039,6 +1708,8 @@ def build_operator_status(
     }
     out["live_permission"] = live_perm
     out["shutdown_presentation"] = shutdown
+    out["attention_groups"] = attention_groups
+    out["runtime_expectation"] = expected_runtime
     # Expired/historical shutdown must never alter overall runtime health.
     if shutdown.get("affects_current_health") is False:
         out["shutdown_affects_current_health"] = False

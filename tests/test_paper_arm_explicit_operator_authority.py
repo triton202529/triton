@@ -177,7 +177,7 @@ def test_near_expiry_valid_arm_not_extended(arm_env):
         ("expired", "blocked_arm_expired"),
         ("disarmed", "blocked_arm_invalid"),
         ("missing", "blocked_arm_missing"),
-        ("malformed", "blocked_arm_missing"),
+        ("malformed", "blocked_arm_invalid"),
     ],
 )
 def test_non_valid_arm_fails_closed(arm_env, setup, expected_action):

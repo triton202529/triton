@@ -54,6 +54,28 @@ def _lock_text(pid: int, *, minutes_ago: float = 1.0, cycle: int = 1) -> str:
     )
 
 
+def _write_valid_paper_arm(root: Path, *, expires_minutes: float = 120.0) -> Path:
+    live = root / "data" / "live"
+    live.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    path = live / "paper_arm_confirm.json"
+    path.write_text(
+        json.dumps(
+            {
+                "timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "expires_at": (now + timedelta(minutes=expires_minutes)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "mode": "ASSISTED",
+                "allow_execute": True,
+                "confirmed": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _write_fixture(
     root: Path,
     *,
@@ -1047,6 +1069,7 @@ def test_53_start_refuses_during_active_shutdown(tmp_path):
 
 def test_54_start_reeval_after_clean_shutdown(tmp_path):
     _write_fixture(tmp_path)  # both absent
+    _write_valid_paper_arm(tmp_path)
     el = start_eligibility(root=tmp_path)
     assert el["decision"] == "START_ALLOWED"
 
@@ -1273,6 +1296,7 @@ def test_69_do003_start_regression_surface_intact(tmp_path):
     """Scenario 69: DO-003 Start surface remains; full suite run separately."""
     assert ACTION_START == "START_TRITON"
     _write_fixture(tmp_path)
+    _write_valid_paper_arm(tmp_path)
     el = start_eligibility(root=tmp_path)
     assert el["allowed_action"] == ACTION_START
     assert el["stop_available"] is False

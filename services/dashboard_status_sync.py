@@ -42,6 +42,10 @@ PAPER_CERTIFICATION_STATUSES = frozenset(
 RUNTIME_PIPELINE_FAIL_MINUTES = 360.0
 RUNTIME_PIPELINE_DEGRADED_MINUTES = 90.0
 BROKER_SNAPSHOT_FRESH_MINUTES = 120.0
+HEARTBEAT_STALE_BANNER_MINUTES = 60.0
+HEARTBEAT_FUTURE_TOLERANCE_MINUTES = 5.0
+HEARTBEAT_INACTIVE_STOPPED_LABEL = "INACTIVE — COMPONENT STOPPED"
+SIDEBAR_EXPECTED_AFTER_HOURS_LABEL = "PIPELINE INACTIVE · EXPECTED AFTER-HOURS STOP"
 
 
 def _utc_now() -> datetime:
@@ -560,6 +564,203 @@ def build_dashboard_health_classification(
     }
 
 
+def build_expected_after_hours_snapshot_parts(
+    *,
+    loops: Dict[str, Any],
+    lock_audit: Optional[Dict[str, Any]] = None,
+    market: Optional[Dict[str, Any]] = None,
+    live_permitted: bool = False,
+    live_blocked: Optional[bool] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Shape dashboard loop/market evidence for UIR-003D clean-stop classifier."""
+    from services.operator_console_status import classify_operator_session_context
+
+    lock_audit = dict(lock_audit or {})
+    market_in = dict(market or {})
+    market_open = market_in.get("market_open")
+    if market_open is None and market_in.get("status") is not None:
+        status_u = str(market_in.get("status") or "").upper()
+        if status_u == "OPEN":
+            market_open = True
+        elif status_u in ("CLOSED", "AFTER_HOURS", "PRE_MARKET"):
+            market_open = False
+    session = classify_operator_session_context(
+        now=now,
+        market_open=market_open,
+        market_status=market_in,
+    )
+    market_out = {
+        **market_in,
+        **session,
+        "market_open": market_open if market_open is not None else session.get("market_open"),
+        "status": market_in.get("status")
+        or ("OPEN" if market_open else ("CLOSED" if market_open is False else "UNKNOWN")),
+    }
+    discovery_ok = str(loops.get("process_detection_confidence") or "high").lower() != "low"
+    wd_pids = list(loops.get("detected_watchdog_process_ids") or [])
+    cl_pids = list(loops.get("detected_continuous_process_ids") or [])
+    if live_blocked is None:
+        live_blocked = not bool(live_permitted)
+    wd_lock_class = str(
+        lock_audit.get("watchdog_lock_classification")
+        or loops.get("watchdog_lock_classification")
+        or ""
+    )
+    cl_lock_class = str(
+        lock_audit.get("continuous_lock_classification")
+        or loops.get("continuous_lock_classification")
+        or ""
+    )
+    cont_lock = bool(loops.get("continuous_lock_present") or loops.get("continuous_lock_exists"))
+    wd_lock = bool(loops.get("watchdog_lock_present") or loops.get("watchdog_lock_exists"))
+    return {
+        "market": market_out,
+        "live_execution": {
+            "permitted": bool(live_permitted),
+            "blocked": bool(live_blocked),
+        },
+        "continuous": {
+            "process_count": len(cl_pids) if discovery_ok else None,
+            "process_running": bool(loops.get("continuous_process_running")) if discovery_ok else None,
+            "pids": cl_pids if discovery_ok else [],
+            "process_discovery_available": discovery_ok,
+            "lock_exists": cont_lock,
+            "lock_classification": cl_lock_class,
+        },
+        "watchdog": {
+            "process_count": len(wd_pids) if discovery_ok else None,
+            "process_running": bool(loops.get("watchdog_process_running")) if discovery_ok else None,
+            "pids": wd_pids if discovery_ok else [],
+            "process_discovery_available": discovery_ok,
+            "lock_exists": wd_lock,
+            "lock_classification": wd_lock_class,
+        },
+    }
+
+
+def resolve_expected_after_hours_stop(
+    *,
+    loops: Optional[Dict[str, Any]] = None,
+    lock_audit: Optional[Dict[str, Any]] = None,
+    market: Optional[Dict[str, Any]] = None,
+    live_permitted: bool = False,
+    live_blocked: Optional[bool] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Reuse authoritative UIR-003D EXPECTED_AFTER_HOURS_STOP evidence (presentation)."""
+    from services.operator_console_status import classify_expected_after_hours_stop
+
+    parts = build_expected_after_hours_snapshot_parts(
+        loops=loops or {},
+        lock_audit=lock_audit,
+        market=market,
+        live_permitted=live_permitted,
+        live_blocked=live_blocked,
+        now=now,
+    )
+    return classify_expected_after_hours_stop(parts)
+
+
+def classify_heartbeat_banner_presentation(
+    *,
+    age_minutes: Optional[float],
+    timestamp_present: bool,
+    process_count: Optional[int],
+    discovery_available: bool = True,
+    lock_held: bool = False,
+    expected_after_hours_stop: bool = False,
+    stale_after_minutes: float = HEARTBEAT_STALE_BANNER_MINUTES,
+    future_tolerance_minutes: float = HEARTBEAT_FUTURE_TOLERANCE_MINUTES,
+    timestamp_malformed: bool = False,
+) -> Dict[str, Any]:
+    """Presentation-only heartbeat banner lifecycle (UIR-003E).
+
+    Suppresses actionable stale banners only for proven EXPECTED_AFTER_HOURS_STOP
+    with process count 0 and released lock. Never fabricates heartbeat evidence.
+    """
+    if timestamp_malformed:
+        return {
+            "show_actionable_warning": True,
+            "banner_kind": "evidence_integrity",
+            "presentation_label": "EVIDENCE INTEGRITY",
+            "suppress_stale_for_expected_stop": False,
+        }
+    if age_minutes is not None:
+        try:
+            age_f = float(age_minutes)
+        except (TypeError, ValueError):
+            return {
+                "show_actionable_warning": True,
+                "banner_kind": "evidence_integrity",
+                "presentation_label": "EVIDENCE INTEGRITY",
+                "suppress_stale_for_expected_stop": False,
+            }
+        if age_f < -float(future_tolerance_minutes):
+            return {
+                "show_actionable_warning": True,
+                "banner_kind": "evidence_integrity",
+                "presentation_label": "EVIDENCE INTEGRITY",
+                "suppress_stale_for_expected_stop": False,
+            }
+
+    if not discovery_available or process_count is None:
+        missing = not timestamp_present
+        stale = (
+            age_minutes is not None
+            and float(age_minutes) > float(stale_after_minutes)
+        )
+        return {
+            "show_actionable_warning": bool(missing or stale),
+            "banner_kind": "unknown" if missing else ("stale" if stale else None),
+            "presentation_label": "UNKNOWN",
+            "suppress_stale_for_expected_stop": False,
+        }
+
+    if int(process_count) == 0 and lock_held:
+        return {
+            "show_actionable_warning": True,
+            "banner_kind": "orphaned_lock",
+            "presentation_label": "ORPHANED LOCK",
+            "suppress_stale_for_expected_stop": False,
+        }
+
+    if (
+        expected_after_hours_stop
+        and int(process_count) == 0
+        and not lock_held
+    ):
+        return {
+            "show_actionable_warning": False,
+            "banner_kind": None,
+            "presentation_label": "INACTIVE — COMPONENT STOPPED",
+            "suppress_stale_for_expected_stop": True,
+        }
+
+    if not timestamp_present:
+        return {
+            "show_actionable_warning": True,
+            "banner_kind": "missing",
+            "presentation_label": "UNKNOWN",
+            "suppress_stale_for_expected_stop": False,
+        }
+
+    if age_minutes is not None and float(age_minutes) > float(stale_after_minutes):
+        return {
+            "show_actionable_warning": True,
+            "banner_kind": "stale",
+            "presentation_label": "STALE",
+            "suppress_stale_for_expected_stop": False,
+        }
+
+    return {
+        "show_actionable_warning": False,
+        "banner_kind": None,
+        "presentation_label": "FRESH",
+        "suppress_stale_for_expected_stop": False,
+    }
+
+
 def choose_sidebar_label(
     *,
     data_freshness: str,
@@ -570,10 +771,15 @@ def choose_sidebar_label(
     readiness_status: str,
     live_permitted: bool,
     execution_blocked_reasons: List[str],
+    expected_after_hours_stop: bool = False,
 ) -> Tuple[str, str]:
     """Return (label, level) where level is success|warning|error|info."""
     if live_permitted:
         return "LIVE RUNTIME ENABLED", "error"
+
+    # Proven clean after-hours stop is inactive — not a degraded active pipeline.
+    if expected_after_hours_stop:
+        return SIDEBAR_EXPECTED_AFTER_HOURS_LABEL, "info"
 
     if runtime_pipeline_health in ("FAIL", "DEGRADED"):
         return "PIPELINE DEGRADED · EXECUTION BLOCKED", "error"
@@ -657,6 +863,20 @@ def build_dashboard_guard_summary(
     gate_bits = live_gate_bits or {}
     execution_gate = str(health_cls.get("execution_status") or "BLOCKED")
 
+    runtime_expectation = resolve_expected_after_hours_stop(
+        loops=loops,
+        lock_audit=lock_audit,
+        market={
+            "status": health_cls.get("market_status"),
+            "market_open": market_open,
+            "source": health_cls.get("market_source"),
+            "as_of": health_cls.get("market_as_of"),
+        },
+        live_permitted=live_permitted,
+        live_blocked=not live_permitted,
+    )
+    expected_after_hours_stop = bool(runtime_expectation.get("expected"))
+
     sidebar_label, sidebar_level = choose_sidebar_label(
         data_freshness=data_freshness,
         runtime_pipeline_health=runtime_pipeline_health,
@@ -666,6 +886,37 @@ def build_dashboard_guard_summary(
         readiness_status=readiness_status,
         live_permitted=live_permitted,
         execution_blocked_reasons=execution_block_reasons,
+        expected_after_hours_stop=expected_after_hours_stop,
+    )
+
+    wd_pids = list(loops.get("detected_watchdog_process_ids") or [])
+    cl_pids = list(loops.get("detected_continuous_process_ids") or [])
+    discovery_ok = str(loops.get("process_detection_confidence") or "high").lower() != "low"
+    wd_count = len(wd_pids) if discovery_ok else None
+    cl_count = len(cl_pids) if discovery_ok else None
+    wd_lock_held = bool(loops.get("watchdog_lock_present"))
+    cl_lock_held = bool(loops.get("continuous_lock_present"))
+    pipeline_banner = classify_heartbeat_banner_presentation(
+        age_minutes=pipeline_hb.get("age_minutes"),
+        timestamp_present=pipeline_hb.get("timestamp") is not None,
+        process_count=cl_count,
+        discovery_available=discovery_ok,
+        lock_held=cl_lock_held,
+        expected_after_hours_stop=expected_after_hours_stop,
+        timestamp_malformed=bool(
+            pipeline_hb.get("exists") and pipeline_hb.get("timestamp") is None
+        ),
+    )
+    watchdog_banner = classify_heartbeat_banner_presentation(
+        age_minutes=runtime_hb.get("age_minutes"),
+        timestamp_present=runtime_hb.get("timestamp") is not None,
+        process_count=wd_count,
+        discovery_available=discovery_ok,
+        lock_held=wd_lock_held,
+        expected_after_hours_stop=expected_after_hours_stop,
+        timestamp_malformed=bool(
+            runtime_hb.get("exists") and runtime_hb.get("timestamp") is None
+        ),
     )
 
     watchdog_state = (
@@ -720,6 +971,10 @@ def build_dashboard_guard_summary(
         "positions": list(health_cls.get("positions") or []),
         "sidebar_label": sidebar_label,
         "sidebar_level": sidebar_level,
+        "runtime_expectation": runtime_expectation,
+        "expected_after_hours_stop": expected_after_hours_stop,
+        "pipeline_heartbeat_banner": pipeline_banner,
+        "watchdog_heartbeat_banner": watchdog_banner,
         "execution_blocked_reasons": execution_block_reasons,
         "top_guard_message": health_cls.get("top_guard_message"),
         "live_gate_bits": gate_bits,
@@ -728,9 +983,9 @@ def build_dashboard_guard_summary(
         "pipeline_lock_reason": pipeline_lock_reason,
         "readiness_status": readiness_status,
         "approval_status_label": approval_label,
-        "dashboard_stale_warning_truthful": (
-            pipeline_hb.get("age_minutes") is not None
-            and float(pipeline_hb.get("age_minutes")) > 60.0
+        "dashboard_stale_warning_truthful": bool(
+            (pipeline_banner.get("show_actionable_warning") and pipeline_banner.get("banner_kind") == "stale")
+            or (watchdog_banner.get("show_actionable_warning") and watchdog_banner.get("banner_kind") == "stale")
         ),
     }
 

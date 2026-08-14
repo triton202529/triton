@@ -57,6 +57,32 @@ DENIED_ACTIONS = frozenset(
 
 ALLOWED_ACTIONS = frozenset({ACTION_START})
 
+# Canonical paper-arm Start refusals. Start must not launch when the same
+# classifier used by execution step 0 reports anything other than VALID.
+_PAPER_ARM_START_REFUSALS = {
+    "MISSING": (
+        "START_REFUSED_PAPER_ARM_REQUIRED",
+        "PAPER_ARM_REQUIRED",
+        "Start refused: paper BUY/ADD arm is absent. Arm paper execution first "
+        "(python -m services.set_paper_arm_confirm --ttl <minutes>), then Start. "
+        "Live execution remains blocked. No process was started.",
+    ),
+    "EXPIRED": (
+        "START_REFUSED_PAPER_ARM_EXPIRED",
+        "PAPER_ARM_EXPIRED",
+        "Start refused: paper BUY/ADD arm is expired. Arm paper execution first "
+        "(python -m services.set_paper_arm_confirm --ttl <minutes>), then Start. "
+        "Live execution remains blocked. No process was started.",
+    ),
+    "INVALID": (
+        "START_REFUSED_PAPER_ARM_MALFORMED",
+        "PAPER_ARM_MALFORMED",
+        "Start refused: paper BUY/ADD arm is malformed or invalid. Replace it with a "
+        "valid operator arm (python -m services.set_paper_arm_confirm --ttl <minutes>), "
+        "then Start. Live execution remains blocked. No process was started.",
+    ),
+}
+
 AUDIT_PATH = RESULTS / "operator_runtime_actions.jsonl"
 GUARD_PATH = LIVE / "operator_start_action.guard.json"
 SCHEMA_VERSION = 1
@@ -118,6 +144,47 @@ def live_execution_appears_enabled(
         except Exception:
             pass
     return False
+
+
+def classify_paper_arm_for_start(
+    *,
+    root: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> str:
+    """Canonical paper-arm classifier for Protected Start (same as execution step 0)."""
+    from services.paper_arm_status import classify_paper_arm_confirm_status
+
+    root = Path(root) if root is not None else ROOT
+    try:
+        status = classify_paper_arm_confirm_status(root=root, now=now)
+    except Exception:
+        status = "UNKNOWN"
+    return str(status or "UNKNOWN").upper()
+
+
+def paper_arm_start_refusal(status: str) -> Optional[Dict[str, str]]:
+    """Return refusal payload when status is not VALID; None when Start may proceed."""
+    canonical = str(status or "UNKNOWN").upper()
+    if canonical == "VALID":
+        return None
+    result, error_code, message = _PAPER_ARM_START_REFUSALS.get(
+        canonical,
+        (
+            "START_REFUSED_PAPER_ARM_MALFORMED",
+            "PAPER_ARM_MALFORMED",
+            "Start refused: paper BUY/ADD arm classifier returned an unsupported status "
+            f"({canonical}). Arm paper execution first, then Start. "
+            "Live execution remains blocked. No process was started.",
+        ),
+    )
+    return {
+        "decision": result,
+        "result": result,
+        "error_code": error_code,
+        "safe_message": message,
+        "explanation": message,
+        "paper_arm_canonical": canonical,
+    }
 
 
 def _sanitize_for_audit(obj: Any) -> Any:
@@ -550,17 +617,25 @@ def start_eligibility(
             "safe_to_retry": False,
         }
 
-    paper_status = "UNKNOWN"
+    paper_canonical = "UNKNOWN"
     try:
-        if root == ROOT:
-            from services.paper_arm_status import classify_paper_arm_confirm_status
-
-            paper_status = map_paper_arm_display(classify_paper_arm_confirm_status())
-        else:
-            arm = root / "data" / "live" / "paper_arm_confirm.json"
-            paper_status = "MISSING" if not arm.is_file() else "UNKNOWN"
+        paper_canonical = classify_paper_arm_for_start(root=root)
+        paper_status = map_paper_arm_display(paper_canonical)
     except Exception:
+        paper_canonical = "UNKNOWN"
         paper_status = "UNKNOWN"
+
+    if decision["decision"] in ("START_ALLOWED", "PARTIAL_START_ALLOWED"):
+        arm_refusal = paper_arm_start_refusal(paper_canonical)
+        if arm_refusal is not None:
+            decision = {
+                **decision,
+                "decision": arm_refusal["decision"],
+                "components_to_start": [],
+                "explanation": arm_refusal["explanation"],
+                "safe_to_retry": True,
+                "error_code": arm_refusal["error_code"],
+            }
 
     guard = _read_guard(root / "data" / "live" / "operator_start_action.guard.json")
     guard_active = False
@@ -590,6 +665,7 @@ def start_eligibility(
         "classifications": classifications,
         "live_execution_blocked": not live_enabled,
         "paper_arm_status": paper_status,
+        "paper_arm_canonical": paper_canonical,
         "fixed_paths": paths,
         "guard_active": guard_active,
         "guard": guard if guard_active else {},
@@ -841,6 +917,33 @@ def execute_start_triton(
             append_runtime_action_audit(rec, path=audit_path)
             return rec
 
+        # Canonical paper-arm gate: same classifier as execution step 0.
+        # Must run before audit START_BEGIN and before any process creation.
+        arm_status = classify_paper_arm_for_start(root=root)
+        arm_refusal = paper_arm_start_refusal(arm_status)
+        if arm_refusal is not None:
+            rec = _result(
+                result=arm_refusal["result"],
+                error_code=arm_refusal["error_code"],
+                safe_message=arm_refusal["safe_message"],
+                safe_to_retry=True,
+                live_execution_blocked_before=True,
+                live_execution_blocked_after=True,
+                paper_arm_status=arm_status,
+                preflight_classification=pre,
+                requested_components=[],
+                preserved_components=[],
+                launched_components=[],
+                component_results={},
+                evidence={
+                    "decision": decision,
+                    "paper_arm_canonical": arm_status,
+                    "paper_arm_gate": "pre_audit",
+                },
+            )
+            append_runtime_action_audit(rec, path=audit_path)
+            return rec
+
         # Audit must be writable before launch (fail-safe)
         probe = {
             "schema_version": SCHEMA_VERSION,
@@ -872,6 +975,34 @@ def execute_start_triton(
                 preserved_components=decision.get("preserved_components") or [],
                 component_results={},
             )
+            return rec
+
+        # Re-validate immediately before process creation so a stale earlier
+        # observation cannot authorize Start.
+        arm_status_launch = classify_paper_arm_for_start(root=root)
+        arm_refusal_launch = paper_arm_start_refusal(arm_status_launch)
+        if arm_refusal_launch is not None:
+            rec = _result(
+                result=arm_refusal_launch["result"],
+                error_code=arm_refusal_launch["error_code"],
+                safe_message=arm_refusal_launch["safe_message"],
+                safe_to_retry=True,
+                live_execution_blocked_before=True,
+                live_execution_blocked_after=True,
+                paper_arm_status=arm_status_launch,
+                preflight_classification=pre,
+                requested_components=[],
+                preserved_components=[],
+                launched_components=[],
+                component_results={},
+                evidence={
+                    "decision": decision,
+                    "paper_arm_canonical": arm_status_launch,
+                    "paper_arm_gate": "pre_launch",
+                    "paper_arm_canonical_pre_audit": arm_status,
+                },
+            )
+            append_runtime_action_audit(rec, path=audit_path)
             return rec
 
         to_start = list(decision.get("components_to_start") or [])
@@ -1031,16 +1162,14 @@ def execute_start_triton(
             result = "POSTCONDITION_FAILED"
             msg = "Start did not meet verified process and lock postconditions."
 
-        # Paper arm status (read-only)
-        paper_arm_status = "UNKNOWN"
+        # Paper arm status (read-only; canonical classifier)
+        paper_arm_status = classify_paper_arm_for_start(root=root)
         try:
-            if root == ROOT:
-                from services.paper_arm_status import classify_paper_arm_confirm_status
-                from services.operator_console_status import map_paper_arm_display
+            from services.operator_console_status import map_paper_arm_display
 
-                paper_arm_status = map_paper_arm_display(classify_paper_arm_confirm_status())
+            paper_arm_status_display = map_paper_arm_display(paper_arm_status)
         except Exception:
-            pass
+            paper_arm_status_display = paper_arm_status
 
         rec = _result(
             result=result,
@@ -1051,14 +1180,18 @@ def execute_start_triton(
             safe_to_retry=result in ("START_FAILED", "POSTCONDITION_FAILED", "PARTIAL_START"),
             live_execution_blocked_before=True,
             live_execution_blocked_after=True,
-            paper_arm_status=paper_arm_status,
+            paper_arm_status=paper_arm_status_display,
             preflight_classification=pre,
             postcondition_classification=post,
             requested_components=ordered,
             preserved_components=preserved,
             launched_components=launched,
             component_results=component_results,
-            evidence={"decision": decision, "fixed_paths": paths},
+            evidence={
+                "decision": decision,
+                "fixed_paths": paths,
+                "paper_arm_canonical": paper_arm_status,
+            },
         )
         append_runtime_action_audit(rec, path=audit_path)
         return rec

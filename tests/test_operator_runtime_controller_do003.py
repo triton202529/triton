@@ -37,6 +37,28 @@ def _lock_text(pid: int, *, minutes_ago: float = 1.0, cycle: int = 1) -> str:
     )
 
 
+def _write_valid_paper_arm(root: Path, *, expires_minutes: float = 120.0) -> Path:
+    live = root / "data" / "live"
+    live.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    path = live / "paper_arm_confirm.json"
+    path.write_text(
+        json.dumps(
+            {
+                "timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "expires_at": (now + timedelta(minutes=expires_minutes)).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "mode": "ASSISTED",
+                "allow_execute": True,
+                "confirmed": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _write_fixture(
     root: Path,
     *,
@@ -316,6 +338,7 @@ def test_already_running_execute(tmp_path: Path):
 
 def test_start_launches_both_with_mocks(tmp_path: Path):
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     state = {"cont": [], "wd": []}
     launched = []
 
@@ -357,6 +380,7 @@ def test_start_launches_both_with_mocks(tmp_path: Path):
 
 def test_partial_start_preserves_healthy(tmp_path: Path):
     _write_fixture(tmp_path, cont_pids=[111], wd_pids=[], write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     state = {"cont": [111], "wd": []}
     launched = []
 
@@ -391,6 +415,7 @@ def test_partial_start_preserves_healthy(tmp_path: Path):
 
 def test_idempotency_no_relaunch(tmp_path: Path):
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     state = {"cont": [], "wd": []}
     launched = []
 
@@ -467,6 +492,7 @@ def test_concurrent_start_in_progress(tmp_path: Path):
 def test_scheduled_task_race_preserves(tmp_path: Path):
     """If loop becomes healthy before launch, do not duplicate."""
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     state = {"cont": [], "wd": []}
     calls = {"n": 0}
 
@@ -504,6 +530,7 @@ def test_scheduled_task_race_preserves(tmp_path: Path):
 
 def test_postcondition_fail_without_lock(tmp_path: Path):
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     state = {"cont": [], "wd": []}
 
     def snapshot():
@@ -535,6 +562,7 @@ def test_postcondition_fail_without_lock(tmp_path: Path):
 
 def test_partial_start_on_second_failure(tmp_path: Path):
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     state = {"cont": [], "wd": []}
 
     def snapshot():
@@ -586,6 +614,7 @@ def test_audit_records_and_sanitizes(tmp_path: Path):
 
 def test_audit_failure_refuses_launch(tmp_path: Path, monkeypatch):
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     bad_audit = tmp_path / "missing_dir_not_created" / "nope.jsonl"
     # Make parent a file so mkdir/write fails
     parent = bad_audit.parent
@@ -727,6 +756,7 @@ def test_ui_start_call_site_rejects_operational_kwargs():
 
 def test_expired_shutdown_request_does_not_block_start(tmp_path: Path):
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     live = tmp_path / "data" / "live"
     past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     earlier = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
@@ -801,6 +831,7 @@ def test_active_unexpired_shutdown_blocks_start(tmp_path: Path):
 
 def test_launch_failure_recorded_sanitized(tmp_path: Path):
     _write_fixture(tmp_path, write_cont_lock=False, write_wd_lock=False)
+    _write_valid_paper_arm(tmp_path)
     audit = tmp_path / "data" / "results" / "operator_runtime_actions.jsonl"
     rec = execute_start_triton(
         root=tmp_path,

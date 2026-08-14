@@ -58,7 +58,7 @@ def _status_color(status: str) -> str:
     return "⚫"
 
 
-def _render_start_controls() -> None:
+def _render_start_controls(status_snapshot: dict | None = None) -> None:
     """Protected START (DO-003), STOP (DO-005), and RESTART (DO-006) orchestration."""
     from services.operator_runtime_controller import (
         ACTION_START,
@@ -164,17 +164,54 @@ def _render_start_controls() -> None:
     )
     start_busy = bool(start_executing or start_confirm_open or restart_busy)
 
-    last = st.session_state.get("start_last_result")
-    if last:
-        res = str(last.get("result") or "")
-        msg = last.get("safe_message") or res
-        if res in ("STARTED", "ALREADY_RUNNING"):
+    # UIR-003C: action banners reconciled against current process evidence.
+    # Never present a Start "both are running" latch as current truth after Stop.
+    from dashboard import operator_ui as _oui_actions
+    from services.operator_console_status import build_operator_status as _build_ops_status
+
+    _status_for_actions = status_snapshot if isinstance(status_snapshot, dict) else _build_ops_status()
+    _cont_a = _status_for_actions.get("continuous") or {}
+    _wd_a = _status_for_actions.get("watchdog") or {}
+    _live_a = _status_for_actions.get("live_execution") or {}
+    action_view = _oui_actions.present_current_runtime_action_message(
+        overall_status=_status_for_actions.get("overall_status"),
+        continuous_process_count=_cont_a.get("process_count"),
+        watchdog_process_count=_wd_a.get("process_count"),
+        continuous_lock_exists=bool(_cont_a.get("lock_exists")),
+        watchdog_lock_exists=bool(_wd_a.get("lock_exists")),
+        live_execution_blocked=bool(_live_a.get("blocked")),
+        start_last_result=st.session_state.get("start_last_result"),
+        stop_last_result=st.session_state.get("stop_last_result"),
+        restart_last_result=st.session_state.get("restart_last_result"),
+    )
+    # Drop contradicted Start latch from session so refresh cannot resurrect it.
+    if action_view.get("start_suppressed") and st.session_state.get("start_last_result"):
+        st.session_state["start_result_history"] = st.session_state.get("start_last_result")
+        st.session_state["start_last_result"] = None
+
+    current_action = action_view.get("current")
+    if current_action:
+        level = str(current_action.get("level") or "info")
+        msg = current_action.get("message") or current_action.get("result") or ""
+        if level == "success":
             st.success(msg)
-        elif res in ("PARTIAL_START", "START_IN_PROGRESS"):
-            st.warning(msg) if res == "PARTIAL_START" else st.info(msg)
-        else:
+        elif level == "warning":
+            st.warning(msg)
+        elif level == "error":
             st.error(msg)
-        with st.expander("Start technical evidence", expanded=False):
+        else:
+            st.info(msg)
+
+    last = st.session_state.get("start_last_result") or st.session_state.get("start_result_history")
+    if last and (
+        not action_view.get("start_suppressed")
+        or st.session_state.get("start_result_history") is last
+    ):
+        with st.expander(
+            "Start technical evidence"
+            + (" (historical — not current runtime status)" if action_view.get("start_suppressed") else ""),
+            expanded=False,
+        ):
             st.json(
                 {
                     "result": last.get("result"),
@@ -185,21 +222,16 @@ def _render_start_controls() -> None:
                     "paper_arm_status": last.get("paper_arm_status"),
                     "paper_arm_mutated": last.get("paper_arm_mutated"),
                     "error_code": last.get("error_code"),
+                    "presentation_note": (
+                        "Suppressed as current status because process evidence disagrees"
+                        if action_view.get("start_suppressed")
+                        else None
+                    ),
                 }
             )
 
     stop_last = st.session_state.get("stop_last_result")
     if stop_last:
-        sres = str(stop_last.get("result") or "")
-        smsg = stop_last.get("safe_message") or sres
-        if sres in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED"):
-            st.success(smsg)
-        elif sres in ("STOP_PARTIAL_COMPLETION", "STOP_TIMED_OUT", "STOP_IN_PROGRESS"):
-            st.warning(smsg)
-        elif sres == "STOP_AUDIT_FAILED":
-            st.error(smsg)
-        else:
-            st.error(smsg)
         with st.expander("Stop technical evidence", expanded=False):
             st.json(
                 {
@@ -220,6 +252,12 @@ def _render_start_controls() -> None:
                     "error_code": stop_last.get("error_code"),
                 }
             )
+
+    hist = list(action_view.get("historical") or [])
+    if hist:
+        with st.expander("Prior runtime action messages (historical)", expanded=False):
+            st.caption("Historical only — not current runtime status.")
+            st.json(hist)
 
     st.caption(
         "Confirmation required before Start/Stop/Restart submits. "
@@ -297,6 +335,17 @@ def _render_start_controls() -> None:
                                 st.session_state["start_last_result"] = result
                                 st.session_state["start_in_progress"] = False
                                 st.session_state["start_idempotency_key"] = None
+                                # Start becomes current; demote prior Stop/Restart banners.
+                                if str(result.get("result") or "") in (
+                                    "STARTED",
+                                    "ALREADY_RUNNING",
+                                ):
+                                    if st.session_state.get("stop_last_result"):
+                                        st.session_state["stop_result_history"] = (
+                                            st.session_state.get("stop_last_result")
+                                        )
+                                    st.session_state["stop_last_result"] = None
+                                    st.session_state["restart_last_result"] = None
                             st.rerun()
                     with conf_b:
                         if st.button("Cancel", key="start_triton_cancel"):
@@ -305,20 +354,24 @@ def _render_start_controls() -> None:
                             st.rerun()
 
     restart_last = st.session_state.get("restart_last_result")
+    # Banner text is owned by present_current_runtime_action_message; keep stage captions/evidence.
     if restart_last:
         rres = str(restart_last.get("result") or "")
         rmsg = restart_last.get("safe_message") or rres
-        if rres == "RESTART_COMPLETED":
-            st.success(rmsg)
-        elif rres in (
-            "RESTART_PARTIAL_COMPLETION",
-            "RESTART_TIMED_OUT",
-            "RESTART_IN_PROGRESS",
-            "RESTART_STOP_IN_PROGRESS",
-        ):
-            st.warning(rmsg)
-        else:
-            st.error(rmsg)
+        current_src = str((action_view.get("current") or {}).get("source") or "")
+        if current_src != "restart":
+            # Non-current restart outcomes still need operator visibility when failed/partial.
+            if rres == "RESTART_COMPLETED":
+                pass
+            elif rres in (
+                "RESTART_PARTIAL_COMPLETION",
+                "RESTART_TIMED_OUT",
+                "RESTART_IN_PROGRESS",
+                "RESTART_STOP_IN_PROGRESS",
+            ):
+                st.warning(rmsg)
+            elif rres:
+                st.error(rmsg)
         stages = list(restart_last.get("stages") or [])
         stage_names = [str(s.get("stage") or s) if isinstance(s, dict) else str(s) for s in stages]
         stop_done = any(s in stage_names for s in ("STOP_COMPLETED", "STOP_NOT_REQUIRED")) or str(
@@ -573,6 +626,16 @@ def _render_stop_control_column(
                 st.session_state["stop_in_progress"] = False
                 st.session_state["stop_preflight_token"] = None
                 st.session_state["stop_request_nonce"] = None
+                # Stop supersedes Start success so refresh cannot resurrect "both running".
+                if str(result.get("result") or "") in (
+                    "STOP_COMPLETED",
+                    "STOP_ALREADY_STOPPED",
+                ):
+                    if st.session_state.get("start_last_result"):
+                        st.session_state["start_result_history"] = st.session_state.get(
+                            "start_last_result"
+                        )
+                    st.session_state["start_last_result"] = None
             st.rerun()
     with conf_b:
         if st.button("Cancel", key="stop_triton_cancel"):
@@ -709,6 +772,18 @@ def _render_restart_control_column(
                 st.session_state["restart_in_progress"] = False
                 st.session_state["restart_preflight_token"] = None
                 st.session_state["restart_request_nonce"] = None
+                if str(result.get("result") or "") == "RESTART_COMPLETED":
+                    # Fresh runtime ownership; prior Start/Stop latches are historical.
+                    if st.session_state.get("start_last_result"):
+                        st.session_state["start_result_history"] = st.session_state.get(
+                            "start_last_result"
+                        )
+                    st.session_state["start_last_result"] = None
+                    if st.session_state.get("stop_last_result"):
+                        st.session_state["stop_result_history"] = st.session_state.get(
+                            "stop_last_result"
+                        )
+                    st.session_state["stop_last_result"] = None
             st.rerun()
     with conf_b:
         if st.button("Cancel", key="restart_triton_cancel"):
@@ -816,12 +891,28 @@ def render_operations_page() -> None:
         or status.get("generated_at")
     )
     market_state = oui.display_or_unknown(market.get("status"))
+    runtime_expectation = status.get("runtime_expectation") or {}
+    expected_after_hours_stop = bool(runtime_expectation.get("expected"))
     # Pipeline heartbeat = heartbeat.json class from operator status (not watchdog).
-    pipeline_hb = oui.present_pipeline_heartbeat_label(freshness_class=freshness.get("class"))
+    pipeline_hb = oui.present_pipeline_heartbeat_label(
+        freshness_class=freshness.get("class"),
+        process_count=cont.get("process_count"),
+        discovery_available=cont.get("process_discovery_available", True),
+        lock_held=bool(cont.get("lock_exists")),
+        expected_after_hours_stop=expected_after_hours_stop,
+        age_minutes=freshness.get("heartbeat_age_minutes"),
+        evidence_path=freshness.get("evidence_path") or "heartbeat.json",
+    )
     # Watchdog heartbeat = watchdog_status.json via existing read-only loader (banner source).
     from services.dashboard_status_sync import load_runtime_heartbeat
 
-    watchdog_hb = oui.present_watchdog_heartbeat_label(load_runtime_heartbeat())
+    watchdog_hb = oui.present_watchdog_heartbeat_label(
+        load_runtime_heartbeat(),
+        process_count=wd.get("process_count"),
+        discovery_available=wd.get("process_discovery_available", True),
+        lock_held=bool(wd.get("lock_exists")),
+        expected_after_hours_stop=expected_after_hours_stop,
+    )
     portfolio_freshness = oui.classify_portfolio_freshness_label(
         last_refresh_time=portfolio.get("last_refresh_time"),
         fresh_minutes=float(DATA_FRESH_MINUTES),
@@ -862,13 +953,20 @@ def render_operations_page() -> None:
     # Watchdog stale warning uses watchdog heartbeat only (watchdog_status.json).
     cont_card = oui.loop_process_card_state(
         process_running=cont.get("process_running"),
+        process_count=cont.get("process_count"),
+        discovery_available=cont.get("process_discovery_available", True),
         heartbeat_class=pipeline_hb["label"],
+        heartbeat_age_minutes=freshness.get("heartbeat_age_minutes"),
     )
     wd_card = oui.loop_process_card_state(
         process_running=wd.get("process_running"),
+        process_count=wd.get("process_count"),
+        discovery_available=wd.get("process_discovery_available", True),
         heartbeat_class=watchdog_hb["label"],
+        heartbeat_age_minutes=watchdog_hb.get("age_minutes"),
     )
     # Permanent six-card strip (Live remains the safety lock surface; no full-width banner).
+    # Continuous/Watchdog always show process-derived instance counts (UIR-003C).
     oui.render_safety_strip(
         [
             {
@@ -889,15 +987,15 @@ def render_operations_page() -> None:
             },
             {
                 "label": "Continuous loop",
-                "value": cont_card["label"],
+                "value": cont_card.get("display") or cont_card["label"],
                 "tone": cont_card["tone"],
-                "note": cont_card.get("stale_warning"),
+                "note": cont_card.get("note") or cont_card.get("stale_warning"),
             },
             {
                 "label": "Watchdog",
-                "value": wd_card["label"],
+                "value": wd_card.get("display") or wd_card["label"],
                 "tone": wd_card["tone"],
-                "note": wd_card.get("stale_warning"),
+                "note": wd_card.get("note") or wd_card.get("stale_warning"),
             },
             {
                 "label": "Portfolio data freshness",
@@ -921,6 +1019,18 @@ def render_operations_page() -> None:
             "Runtime",
             [
                 {"label": "Overall runtime", "value": overall},
+                {
+                    "label": "Trading cycle",
+                    "value": oui.display_or_unknown(
+                        (status.get("trading_pipeline") or {}).get("status")
+                    ),
+                },
+                {
+                    "label": "Session context",
+                    "value": oui.display_or_unknown(
+                        (market.get("session_phase") or market_state)
+                    ),
+                },
                 {"label": "Pipeline heartbeat", "value": pipeline_hb["display"]},
                 {"label": "Next expected cycle", "value": next_expected},
             ],
@@ -984,28 +1094,58 @@ def render_operations_page() -> None:
         )
 
     # Protected controls immediately after summary — exact existing callbacks reused.
-    _render_start_controls()
+    _render_start_controls(status_snapshot=status)
 
     attention_summary = oui.summarize_attention_items(attention)
     top_issue = attention_summary.get("top_item")
+    attention_groups = status.get("attention_groups") or attention_summary.get("groups") or {}
+    action_now_n = int(
+        attention_groups.get("action_required_now_count")
+        or attention_summary.get("action_required_now_count")
+        or 0
+    )
+    before_open_n = int(
+        attention_groups.get("before_next_market_open_count")
+        or attention_summary.get("before_next_market_open_count")
+        or 0
+    )
+    info_n = int(
+        attention_groups.get("informational_count")
+        or attention_summary.get("informational_count")
+        or 0
+    )
 
     center, right = st.columns([3.35, 1.15], gap="medium")
     with center:
         _render_runtime_recovery_guidance()
 
         with st.expander(
-            f"Operator Attention details — {attention_count} items",
-            expanded=False,
+            f"Operator Attention details — {attention_count} items "
+            f"(Now {action_now_n} · Before open {before_open_n} · Info {info_n})",
+            expanded=bool(action_now_n),
         ):
             if not attention:
                 st.info("No evidence-backed attention items right now.")
             else:
-                for item in attention_summary.get("ordered") or []:
-                    oui.render_attention_item(
-                        item,
-                        start_decision=start_el.get("decision"),
-                        start_button_enabled=start_el.get("start_button_enabled"),
-                    )
+                sections = (
+                    ("Action required now", attention_groups.get("action_required_now") or []),
+                    (
+                        "Before next market open",
+                        attention_groups.get("before_next_market_open") or [],
+                    ),
+                    ("Informational / expected", attention_groups.get("informational") or []),
+                )
+                for section_title, section_items in sections:
+                    st.markdown(f"**{section_title}** · {len(section_items)}")
+                    if not section_items:
+                        st.caption("None")
+                        continue
+                    for item in section_items:
+                        oui.render_attention_item(
+                            item,
+                            start_decision=start_el.get("decision"),
+                            start_button_enabled=start_el.get("start_button_enabled"),
+                        )
 
         with st.expander("Technical evidence", expanded=False):
             st.caption("Raw classifier / lock / cycle / broker evidence (read-only).")
@@ -1019,12 +1159,15 @@ def render_operations_page() -> None:
                     "broker": broker,
                     "market": market,
                     "cycle": cycle,
+                    "runtime_expectation": runtime_expectation,
                     "pipeline_heartbeat": {
                         "channel": pipeline_hb.get("channel"),
                         "source": pipeline_hb.get("source"),
                         "label": pipeline_hb.get("label"),
                         "from_status_data_freshness_class": freshness.get("class"),
                         "heartbeat_timestamp": freshness.get("heartbeat_timestamp"),
+                        "age_minutes": pipeline_hb.get("age_minutes"),
+                        "display": pipeline_hb.get("display"),
                     },
                     "watchdog_heartbeat": {
                         "channel": watchdog_hb.get("channel"),
@@ -1032,6 +1175,7 @@ def render_operations_page() -> None:
                         "label": watchdog_hb.get("label"),
                         "age_minutes": watchdog_hb.get("age_minutes"),
                         "display": watchdog_hb.get("display"),
+                        "actionable_stale_banner": watchdog_hb.get("actionable_stale_banner"),
                     },
                     "portfolio_data_freshness": {
                         "class": portfolio_freshness,
@@ -1059,6 +1203,9 @@ def render_operations_page() -> None:
         oui.render_compact_panel(
             "Operator Attention",
             [
+                {"label": "Action required now", "value": action_now_n},
+                {"label": "Before next market open", "value": before_open_n},
+                {"label": "Informational / expected", "value": info_n},
                 {"label": "Total items", "value": attention_count},
                 {
                     "label": "Severity counts",
@@ -1297,10 +1444,17 @@ def render_activity_page() -> None:
         return
 
     for ev in events:
+        date_label = ev.get("occurred_date") or (
+            str(ev.get("occurred_at") or "")[:10] if ev.get("occurred_at") else ""
+        )
         title = f"{ev.get('severity')} · {ev.get('category')} · {ev.get('title')}"
+        if ev.get("category") == "ORDER" and date_label:
+            title = f"{title} · {date_label}"
         with st.expander(title, expanded=False):
             st.write(ev.get("message"))
             meta = []
+            if date_label and ev.get("category") == "ORDER":
+                meta.append(f"Date: {date_label}")
             if ev.get("occurred_at"):
                 meta.append(f"When: {ev['occurred_at']}")
             if ev.get("cycle_number") is not None:

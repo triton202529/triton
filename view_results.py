@@ -76,10 +76,14 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 3.2rem; }
+    /* Single top-clearance for Streamlit's fixed toolbar (main content only). */
+    :root { --triton-toolbar-clearance: 4rem; }
+    section.main .block-container,
+    [data-testid="stMain"] .block-container,
+    .block-container { padding-top: var(--triton-toolbar-clearance) !important; }
 
     @keyframes tritonPulse {0%{transform:scale(1);opacity:1;}50%{transform:scale(1.004);opacity:.96;}100%{transform:scale(1);opacity:1;}}
-    .triton-clock{position:sticky;top:0;z-index:999;border-radius:12px;border:1px solid rgba(148,163,184,.35);padding:.55rem .75rem;margin:.25rem 0 .85rem 0;backdrop-filter:blur(8px);background:rgba(15,23,42,.62);}
+    .triton-clock{position:sticky;top:var(--triton-toolbar-clearance)!important;z-index:999;border-radius:12px;border:1px solid rgba(148,163,184,.35);padding:.55rem .75rem;margin:.25rem 0 .85rem 0;backdrop-filter:blur(8px);background:rgba(15,23,42,.62);}
     .triton-clock .row{display:flex;gap:.65rem;align-items:center;justify-content:space-between;flex-wrap:wrap;}
     .triton-clock .left{font-weight:700;letter-spacing:.2px;}
     .triton-clock .mid{opacity:.92;font-size:.92rem;}
@@ -89,7 +93,7 @@ st.markdown(
     .triton-pill.fresh{border-color:rgba(34,197,94,.55);} .triton-pill.aging{border-color:rgba(234,179,8,.55);} .triton-pill.stale{border-color:rgba(239,68,68,.65);} .triton-pill.unknown{border-color:rgba(148,163,184,.45);}
 
     /* Top status stack (Freshness Clock + Execution Gate) */
-    .triton-topwrap{position:sticky;top:0;z-index:9999;}
+    .triton-topwrap{position:sticky;top:var(--triton-toolbar-clearance)!important;z-index:9999;}
     .triton-topwrap .triton-clock{margin:.25rem 0 .35rem 0;}
     .triton-execbar{border-radius:10px;border:1px solid rgba(148,163,184,.35);padding:.40rem .75rem;margin:0 0 .85rem 0;backdrop-filter:blur(8px);background:rgba(15,23,42,.62);}
     .triton-execbar .row{display:flex;gap:.65rem;align-items:center;justify-content:space-between;flex-wrap:wrap;}
@@ -2307,6 +2311,9 @@ def render_sidebar_execution_status(
     live_perm = str(summary.get("live_permission_display") or "LIVE:BLOCKED")
     st.caption(f"Live permission: **{live_perm}** (paper-only runtime)")
     rph = str(summary.get("runtime_pipeline_health") or "UNKNOWN")
+    if summary.get("expected_after_hours_stop"):
+        # Presentation label only — underlying health taxonomy unchanged.
+        rph = "INACTIVE_EXPECTED"
     market_status = str(summary.get("market_status") or "UNKNOWN")
     market_as_of = summary.get("market_as_of") or "n/a"
     market_source = summary.get("market_source") or "guard_auto.is_market_open_et"
@@ -2515,49 +2522,131 @@ def _read_pipeline_heartbeat_file() -> Optional[Dict[str, Any]]:
 
 def render_heartbeat_freshness_banner() -> None:
     """
-    Pipeline vs runtime heartbeat banners (60-minute pipeline threshold).
-    Does not suppress stale warnings when pipeline heartbeat is truly old.
+    Pipeline vs runtime heartbeat banners (60-minute threshold).
+
+    UIR-003E: actionable stale banners are suppressed only for proven
+    EXPECTED_AFTER_HOURS_STOP with process count 0 and released locks.
+    Heartbeat evidence remains visible as inactive / expandable captions.
     """
-    from services.dashboard_status_sync import load_pipeline_heartbeat, load_runtime_heartbeat
+    from services.dashboard_status_sync import (
+        HEARTBEAT_INACTIVE_STOPPED_LABEL,
+        build_dashboard_guard_summary,
+        classify_heartbeat_banner_presentation,
+        load_pipeline_heartbeat,
+        load_runtime_heartbeat,
+    )
 
     pipeline = load_pipeline_heartbeat()
     runtime = load_runtime_heartbeat()
+    summary: Dict[str, Any] = {}
+    try:
+        summary = build_dashboard_guard_summary()
+    except Exception:
+        summary = {}
+
+    expected_stop = bool(summary.get("expected_after_hours_stop"))
+    loops = summary.get("loops") or {}
+    discovery_ok = str(loops.get("process_detection_confidence") or "high").lower() != "low"
+    cl_pids = list(loops.get("detected_continuous_process_ids") or [])
+    wd_pids = list(loops.get("detected_watchdog_process_ids") or [])
+    cl_count = len(cl_pids) if discovery_ok else None
+    wd_count = len(wd_pids) if discovery_ok else None
+    cl_lock = bool(loops.get("continuous_lock_present"))
+    wd_lock = bool(loops.get("watchdog_lock_present"))
+
+    pipeline_banner = summary.get("pipeline_heartbeat_banner") or classify_heartbeat_banner_presentation(
+        age_minutes=pipeline.get("age_minutes"),
+        timestamp_present=pipeline.get("timestamp") is not None,
+        process_count=cl_count,
+        discovery_available=discovery_ok,
+        lock_held=cl_lock,
+        expected_after_hours_stop=expected_stop,
+        timestamp_malformed=bool(pipeline.get("exists") and pipeline.get("timestamp") is None),
+    )
+    watchdog_banner = summary.get("watchdog_heartbeat_banner") or classify_heartbeat_banner_presentation(
+        age_minutes=runtime.get("age_minutes"),
+        timestamp_present=runtime.get("timestamp") is not None,
+        process_count=wd_count,
+        discovery_available=discovery_ok,
+        lock_held=wd_lock,
+        expected_after_hours_stop=expected_stop,
+        timestamp_malformed=bool(runtime.get("exists") and runtime.get("timestamp") is None),
+    )
 
     ph_ts = pipeline.get("timestamp")
     ph_age = pipeline.get("age_minutes")
-    if ph_ts is None:
+    if pipeline_banner.get("banner_kind") == "evidence_integrity":
+        st.warning(
+            "⚠ Pipeline heartbeat evidence integrity issue "
+            "(`heartbeat.json` timestamp malformed or materially future-dated)."
+        )
+    elif pipeline_banner.get("show_actionable_warning") and pipeline_banner.get("banner_kind") == "missing":
+        st.warning("⚠ No pipeline heartbeat found (`heartbeat.json`). Pipeline freshness unknown.")
+    elif pipeline_banner.get("show_actionable_warning") and pipeline_banner.get("banner_kind") == "stale":
+        st.error(
+            f"⚠ Pipeline data may be stale. Last **pipeline** heartbeat is "
+            f"**{float(ph_age):.0f} minutes** old (source: `heartbeat.json`)."
+        )
+    elif pipeline_banner.get("suppress_stale_for_expected_stop"):
+        ph_disp = dt_to_et_str(ph_ts) if ph_ts is not None else "—"
+        age_txt = f"{float(ph_age):.0f} min old" if ph_age is not None else "age unknown"
+        with st.expander(
+            f"Pipeline heartbeat · {HEARTBEAT_INACTIVE_STOPPED_LABEL}",
+            expanded=False,
+        ):
+            st.caption(
+                f"Last heartbeat · **{ph_disp}** · {age_txt} · "
+                f"source `{pipeline.get('path') or 'heartbeat.json'}` · "
+                f"stage **{pipeline.get('stage') or '—'}** · status **{pipeline.get('status') or '—'}**"
+            )
+    elif ph_ts is None:
         st.warning("⚠ No pipeline heartbeat found (`heartbeat.json`). Pipeline freshness unknown.")
     else:
         ph_disp = dt_to_et_str(ph_ts)
         stage = str(pipeline.get("stage") or "—")
         status = str(pipeline.get("status") or "—")
-        if ph_age is not None and float(ph_age) > 60:
-            st.error(
-                f"⚠ Pipeline data may be stale. Last **pipeline** heartbeat is "
-                f"**{float(ph_age):.0f} minutes** old (source: `heartbeat.json`)."
-            )
-        else:
-            st.caption(
-                f"Pipeline heartbeat · **{ph_disp}** · stage **{stage}** · status **{status}**"
-            )
+        st.caption(
+            f"Pipeline heartbeat · **{ph_disp}** · stage **{stage}** · status **{status}**"
+        )
 
     rt_ts = runtime.get("timestamp")
     rt_age = runtime.get("age_minutes")
-    if rt_ts is None:
+    if watchdog_banner.get("banner_kind") == "evidence_integrity":
+        st.warning(
+            "⚠ Watchdog heartbeat evidence integrity issue "
+            "(`watchdog_status.json` timestamp malformed or materially future-dated)."
+        )
+    elif watchdog_banner.get("show_actionable_warning") and watchdog_banner.get("banner_kind") == "missing":
+        st.warning("⚠ Watchdog heartbeat unknown (`watchdog_status.json`).")
+    elif watchdog_banner.get("show_actionable_warning") and watchdog_banner.get("banner_kind") == "stale":
+        st.warning(
+            f"Watchdog heartbeat is **{float(rt_age):.0f} minutes** old "
+            f"(source: watchdog_status.json). Separate from pipeline heartbeat."
+        )
+    elif watchdog_banner.get("suppress_stale_for_expected_stop"):
+        rt_disp = dt_to_et_str(rt_ts) if rt_ts is not None else "—"
+        age_txt = f"{float(rt_age):.0f} min old" if rt_age is not None else "age unknown"
+        src = str(runtime.get("refresh_source") or "watchdog")
+        with st.expander(
+            f"Watchdog heartbeat · {HEARTBEAT_INACTIVE_STOPPED_LABEL}",
+            expanded=False,
+        ):
+            st.caption(
+                f"Last heartbeat · **{rt_disp}** · {age_txt} · source **{src}** · "
+                f"status **{runtime.get('status') or '—'}** · "
+                f"path `{runtime.get('path') or 'watchdog_status.json'}` · "
+                "separate from pipeline heartbeat"
+            )
+    elif rt_ts is None:
         st.warning("⚠ Watchdog heartbeat unknown (`watchdog_status.json`).")
     else:
         rt_disp = dt_to_et_str(rt_ts)
         src = str(runtime.get("refresh_source") or "watchdog")
-        if rt_age is not None and float(rt_age) > 60:
-            st.warning(
-                f"Watchdog heartbeat is **{float(rt_age):.0f} minutes** old "
-                f"(source: watchdog_status.json). Separate from pipeline heartbeat."
-            )
-        else:
-            st.caption(
-                f"Watchdog heartbeat · **{rt_disp}** · source **{src}** · "
-                f"status **{runtime.get('status') or '—'}** · separate from pipeline heartbeat"
-            )
+        st.caption(
+            f"Watchdog heartbeat · **{rt_disp}** · source **{src}** · "
+            f"status **{runtime.get('status') or '—'}** · separate from pipeline heartbeat"
+        )
+
 
 
 def render_top_status_stack() -> None:
@@ -24347,11 +24436,22 @@ def _render_compact_left_rail_status() -> None:
         live = lines["live"]
         paper = lines["paper"]
         freshness = lines["freshness"]
+        continuous = lines.get("continuous") or "UNKNOWN"
+        watchdog = lines.get("watchdog") or "UNKNOWN"
         live_note = (
             '<div style="color:#95A2B2;font-size:0.7rem;margin-top:0.15rem;">Required safety lock</div>'
             if live == "BLOCKED"
             else ""
         )
+
+        def _loop_tone(token: str) -> str:
+            t = str(token or "").upper()
+            if t.startswith("ON"):
+                return "ok"
+            if t.startswith("OFF") or t.startswith("DUP"):
+                return "crit"
+            return "muted"
+
         st.markdown(
             f'<div class="triton-panel">'
             f'<div class="triton-panel-title">System status</div>'
@@ -24364,6 +24464,10 @@ def _render_compact_left_rail_status() -> None:
             f'<span class="v">{status_badge(paper, tone=tone_for_status(paper))}</span></div>'
             f'<div class="triton-kv"><span class="k">Freshness</span>'
             f'<span class="v">{status_badge(freshness, tone=tone_for_status(freshness))}</span></div>'
+            f'<div class="triton-kv"><span class="k">Watchdog</span>'
+            f'<span class="v">{status_badge(watchdog, tone=_loop_tone(watchdog))}</span></div>'
+            f'<div class="triton-kv"><span class="k">Continuous loop</span>'
+            f'<span class="v">{status_badge(continuous, tone=_loop_tone(continuous))}</span></div>'
             f"</div>",
             unsafe_allow_html=True,
         )

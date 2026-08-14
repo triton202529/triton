@@ -56,6 +56,7 @@ class ActivityEvent:
     symbol: Optional[str] = None
     order_id: Optional[str] = None
     raw_reference: str = ""
+    occurred_date: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -81,6 +82,15 @@ def _parse_dt(value: Any) -> Optional[datetime]:
         return dt.astimezone(timezone.utc)
     except (TypeError, ValueError):
         return None
+
+
+def _event_calendar_date(ts: datetime) -> str:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ts.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except Exception:
+        return ts.date().isoformat()
 
 
 def _event_id(*parts: Any) -> str:
@@ -199,6 +209,19 @@ def _parse_continuous_log(path: Path, seen: Set[str]) -> List[ActivityEvent]:
                 "WARN",
                 f"Cycle {cycle} failed" if cycle is not None else "Cycle failed",
                 "Cycle failure evidenced by [CYCLE_FAIL].",
+            )
+        if re.search(r"\[CYCLE_SKIPPED_MARKET_CLOSED\]", line) or re.search(
+            r"\[PAPER_ENTRY_SKIPPED_MARKET_CLOSED\]", line
+        ):
+            add(
+                "CYCLE",
+                "INFO",
+                (
+                    f"Cycle {cycle} skipped — market closed"
+                    if cycle is not None
+                    else "Paper entry skipped — market closed"
+                ),
+                "Expected closed-session skip. This is not a CYCLE_FAIL.",
             )
         if "SIGNAL_UNIVERSE" in line or "tickers_processed=" in line:
             m_n = re.search(r"tickers_processed[=:\s]+(\d+)", line, re.I)
@@ -487,12 +510,16 @@ def _events_from_paper_execution_audit(path: Path, seen: Set[str]) -> List[Activ
                         source="paper_execution_audit",
                         category="ORDER",
                         severity="SUCCESS",
-                        title="Paper order was submitted",
-                        message=f"Audit row evidences submitted_order_id with status={status or 'UNKNOWN'}.",
+                        title=f"Paper order was submitted on {_event_calendar_date(ts)}",
+                        message=(
+                            f"Audit row evidences submitted_order_id with status={status or 'UNKNOWN'} "
+                            f"on {_event_calendar_date(ts)} (occurred_at={ts.isoformat()})."
+                        ),
                         evidence_path=str(path),
                         symbol=str(sym) if sym else None,
                         order_id=str(oid),
                         raw_reference=json.dumps(dict(list(row.items())[:12]))[:400],
+                        occurred_date=_event_calendar_date(ts),
                     )
                 )
         if oid and status in ("FILLED", "PARTIAL", "PARTIALLY_FILLED"):
@@ -508,15 +535,16 @@ def _events_from_paper_execution_audit(path: Path, seen: Set[str]) -> List[Activ
                         category="ORDER",
                         severity="SUCCESS",
                         title=(
-                            "Paper order was filled"
+                            f"Paper order was filled on {_event_calendar_date(ts)}"
                             if status == "FILLED"
-                            else "Paper order was partially filled"
+                            else f"Paper order was partially filled on {_event_calendar_date(ts)}"
                         ),
-                        message=f"Audit row evidences fill status={status}.",
+                        message=f"Audit row evidences fill status={status} on {_event_calendar_date(ts)}.",
                         evidence_path=str(path),
                         symbol=str(sym) if sym else None,
                         order_id=str(oid),
                         raw_reference=json.dumps(dict(list(row.items())[:12]))[:400],
+                        occurred_date=_event_calendar_date(ts),
                     )
                 )
         if skip and "RISK" in skip.upper():
