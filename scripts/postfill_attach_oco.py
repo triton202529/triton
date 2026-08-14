@@ -115,6 +115,11 @@ def attach_oco_for_symbol(
     if dry_run:
         return {"symbol": sym, "attached": True, "dry_run": True, "payload": payload}
 
+    from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+    gate_raw_paper_sell(
+        side="sell", symbol=sym, qty=qty, source="scripts.postfill_attach_oco"
+    )
     r = requests.post(f"{base}/v2/orders", headers=hdrs, json=payload, timeout=30)
     ok = r.status_code in (200, 201)
     return {

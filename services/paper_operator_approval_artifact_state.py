@@ -16,7 +16,11 @@ RESULTS = ROOT / "data" / "results"
 GOVERNANCE = ROOT / "data" / "governance"
 PREVIEW_JSON = RESULTS / "defensive_exit_capped_batch_preview.json"
 OPERATOR_PACKET_JSON = RESULTS / "defensive_exit_operator_approval_packet.json"
-APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
+# Phase 198I-FIX — classify hardened canonical authority only.
+APPROVAL_PATH = GOVERNANCE / "paper_sell_arm_authority.json"
+LEGACY_197W_APPROVAL_PATH = (
+    GOVERNANCE / "operator_paper_defensive_exit_approval_legacy_197w.json"
+)
 
 PAPER_APPROVAL_ABSENT = "PAPER_APPROVAL_ABSENT"
 PAPER_APPROVAL_VALID_CURRENT = "PAPER_APPROVAL_VALID_CURRENT"
@@ -26,6 +30,8 @@ PAPER_APPROVAL_SCOPE_INVALID = "PAPER_APPROVAL_SCOPE_INVALID"
 PAPER_APPROVAL_PACKET_MISMATCH = "PAPER_APPROVAL_PACKET_MISMATCH"
 PAPER_APPROVAL_LIVE_AUTH_INVALID = "PAPER_APPROVAL_LIVE_AUTH_INVALID"
 PAPER_APPROVAL_EXECUTION_AUTH_INVALID = "PAPER_APPROVAL_EXECUTION_AUTH_INVALID"
+# Phase 198I — legacy 197W artifacts are historical only (non-authoritative).
+PAPER_APPROVAL_LEGACY_RETIRED = "PAPER_APPROVAL_LEGACY_RETIRED"
 
 APPROVE_ACTION = "APPROVE_CAPPED_PAPER_DEFENSIVE_BATCH"
 APPROVED_STATUS = "APPROVED"
@@ -108,10 +114,14 @@ def classify_paper_operator_approval_artifact(
 ) -> Tuple[str, str, Dict[str, Any]]:
     """Classify paper-only operator approval artifact lifecycle state."""
     path = contract_path or APPROVAL_PATH
-    details: Dict[str, Any] = {
-        "artifact_path": (
+    try:
+        artifact_path_display = (
             str(path.relative_to(ROOT)).replace("\\", "/") if path.is_file() else None
-        ),
+        )
+    except ValueError:
+        artifact_path_display = str(path) if path.is_file() else None
+    details: Dict[str, Any] = {
+        "artifact_path": artifact_path_display,
         "artifact_exists": path.is_file(),
         "broker_snapshot_ok": broker_snapshot_ok,
     }
@@ -134,6 +144,34 @@ def classify_paper_operator_approval_artifact(
 
     if bool(contract.get("template_only")):
         return PAPER_APPROVAL_MALFORMED, "template_only_not_runtime_authority", details
+
+    # Phase 198I — hardened sell arm is the only VALID_CURRENT runtime authority.
+    try:
+        from services.paper_sell_arm_authority import (
+            is_hardened_sell_arm_contract,
+            validate_paper_sell_arm_authority,
+        )
+        from services.paper_sell_arm_runtime_enforcement import (
+            LEGACY_197W_RETIRED,
+            looks_like_legacy_197w_approval,
+        )
+
+        if is_hardened_sell_arm_contract(contract):
+            ok, reason, hdetails = validate_paper_sell_arm_authority(contract)
+            details["hardened_sell_arm"] = True
+            details["hardened_details"] = hdetails
+            if ok:
+                return PAPER_APPROVAL_VALID_CURRENT, "hardened_paper_sell_arm_valid", details
+            if reason == "authority_expired":
+                return PAPER_APPROVAL_EXPIRED, reason, details
+            return PAPER_APPROVAL_SCOPE_INVALID, f"hardened_sell_arm_invalid:{reason}", details
+        if looks_like_legacy_197w_approval(contract):
+            details["legacy_197w"] = True
+            details["runtime_authoritative"] = False
+            details["historical_evidence_only"] = True
+            return PAPER_APPROVAL_LEGACY_RETIRED, LEGACY_197W_RETIRED, details
+    except Exception as exc:
+        details["hardened_classify_error"] = str(exc)
 
     for field in (
         "approval_status",
@@ -319,15 +357,22 @@ def classify_paper_operator_approval_artifact(
     except Exception:
         pass
 
+    # Phase 198I — never return VALID_CURRENT for non-hardened schemas.
     details.update(
         {
             "approved_symbols": approved,
             "deferred_symbols": deferred,
-            "approval_valid": True,
+            "approval_valid": False,
             "approval_expired": False,
+            "historical_evidence_only": True,
+            "runtime_authoritative": False,
         }
     )
-    return PAPER_APPROVAL_VALID_CURRENT, "paper_approval_valid_current", details
+    return (
+        PAPER_APPROVAL_LEGACY_RETIRED,
+        "legacy_or_nonhardened_schema_retired_for_runtime",
+        details,
+    )
 
 
 def is_paper_approval_valid_current(**kwargs: Any) -> bool:

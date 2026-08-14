@@ -1561,6 +1561,63 @@ def _coerce_order_id(resp: Any) -> str:
     return oid
 
 
+def enforce_and_consume_paper_sells_before_submit(
+    *,
+    planned: list,
+    mode: str = "paper",
+    store_root: Optional[Path] = None,
+    results_root: Optional[Path] = None,
+    live_root: Optional[Path] = None,
+    live_override: Optional[Dict[str, Any]] = None,
+    explicit_runtime_write: Optional[bool] = None,
+    now: Optional[Any] = None,
+):
+    """
+    Phase 198I-FIX — real place_live_orders sell boundary (testable).
+    Uses independent runtime evidence; consumes before any broker submit.
+    """
+    from services.paper_sell_arm_authority import LIVE_GOVERNANCE
+    from services.paper_sell_arm_runtime_enforcement import (
+        NO_SELLS,
+        PaperSellDispatchBlocked,
+        begin_paper_sell_dispatch,
+        build_broker_view_from_runtime_snapshots,
+        planned_rows_include_paper_sells,
+    )
+
+    if str(mode).lower() != "paper" or not planned:
+        return None, None
+    if not planned_rows_include_paper_sells(planned):
+        return None, None
+
+    root = store_root or LIVE_GOVERNANCE
+    write_flag = (
+        True if explicit_runtime_write is None and root == LIVE_GOVERNANCE else bool(explicit_runtime_write)
+    )
+    broker_view = build_broker_view_from_runtime_snapshots(
+        store_root=root,
+        results_root=results_root,
+        live_root=live_root,
+        live_override=live_override,
+    )
+    guard = begin_paper_sell_dispatch(
+        store_root=root,
+        planned=planned,
+        broker_view=broker_view,
+        mode="paper",
+        readiness_packet_hash_current=broker_view.readiness_packet_hash,
+        explicit_runtime_write=write_flag,
+        caller_live_blocked=None,
+        live_override=live_override,
+        results_root=results_root,
+        live_root=live_root,
+        now=now,
+    )
+    if not guard.permitted and guard.reason != NO_SELLS:
+        raise PaperSellDispatchBlocked(guard.reason, guard.details)
+    return guard, root if guard.consumed else None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["paper", "live"], default="paper")
@@ -2322,6 +2379,33 @@ def main() -> None:
     failed = 0
     _ei_cfg = ExecutionIntelligenceConfig()
 
+    # Phase 198I-FIX — hardened paper sell-arm: consume before first broker submit.
+    _sell_dispatch_guard = None
+    _sell_store_root = None
+    if str(mode).lower() == "paper" and planned:
+        from services.paper_sell_arm_runtime_enforcement import (
+            PaperSellDispatchBlocked,
+        )
+
+        try:
+            _sell_dispatch_guard, _sell_store_root = (
+                enforce_and_consume_paper_sells_before_submit(
+                    planned=planned,
+                    mode=mode,
+                )
+            )
+        except PaperSellDispatchBlocked as blocked:
+            die(
+                f"[PAPER_SELL_ARM] dispatch blocked before submit: {blocked.reason}",
+                2,
+            )
+        if _sell_dispatch_guard is not None and _sell_dispatch_guard.consumed:
+            print(
+                "[PAPER_SELL_ARM] authority consumed pre-submit "
+                f"intent={_sell_dispatch_guard.dispatch_intent_id}",
+                flush=True,
+            )
+
     def _emit_execution_intelligence(
         p: PlannedOrder, *, action: str, status: str, order_id: str, fill_price: Any = None
     ) -> None:
@@ -2527,6 +2611,29 @@ def main() -> None:
             )
             _emit_execution_intelligence(p, action="submit", status="error", order_id="")
             print(f"[FAIL] {p.symbol} {p.side} qty={p.qty} err={e}")
+
+    if _sell_dispatch_guard is not None and _sell_store_root is not None:
+        if placed > 0 and failed == 0:
+            _sell_outcome = "SUCCESS"
+        elif placed > 0 and failed > 0:
+            _sell_outcome = "PARTIAL"
+        elif placed == 0 and failed > 0:
+            _sell_outcome = "REJECTION"
+        else:
+            _sell_outcome = "INDETERMINATE"
+        try:
+            from services.paper_sell_arm_runtime_enforcement import (
+                finalize_paper_sell_dispatch,
+            )
+
+            finalize_paper_sell_dispatch(
+                store_root=_sell_store_root,
+                outcome=_sell_outcome,
+                explicit_runtime_write=True,
+                detail={"placed": placed, "failed": failed},
+            )
+        except Exception as _fin_exc:
+            print(f"[PAPER_SELL_ARM] finalize warning: {_fin_exc}", flush=True)
 
     ok = placed > 0 and failed == 0
     record_batch(st, fingerprint, ok=ok, placed=placed, failed=failed, session=placement_session)

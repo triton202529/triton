@@ -1,9 +1,15 @@
-import os, requests
+"""
+Cancel-all helper.
 
-H = {
-    "APCA-API-KEY-ID": os.getenv("ALPACA_API_KEY"),
-    "APCA-API-SECRET-KEY": os.getenv("ALPACA_API_SECRET"),
-}
-B = os.getenv("ALPACA_ENDPOINT", "https://paper-api.alpaca.markets").rstrip("/")
-r = requests.delete(f"{B}/v2/orders", headers=H)
-print("Cancel all status:", r.status_code, r.text[:200])
+DISABLED fail-closed: the previous raw REST cancel-all path bypassed
+AlpacaBroker.cancel_all_orders paper-SELL cancel gating.
+
+Operators must use the hardened broker boundary:
+  AlpacaBroker(mode="paper").cancel_all_orders()
+"""
+
+raise SystemExit(
+    "DISABLED_FAIL_CLOSED: scripts/cancel_all.py raw cancel-all is disabled. "
+    "Use services.broker_alpaca.AlpacaBroker.cancel_all_orders() so paper SELL "
+    "cancels require a hardened dispatch permit."
+)

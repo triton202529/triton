@@ -88,6 +88,11 @@ def attach_oco(sym, qty, tp_pct, sl_pct, tif="gtc"):
         "take_profit": {"limit_price": f"{tp:.2f}"},
         "stop_loss": {"stop_price": f"{sl:.2f}"},
     }
+    from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+    gate_raw_paper_sell(
+        side="sell", symbol=sym, qty=qty, source="scripts.oco_watch.attach_oco"
+    )
     r = requests.post(f"{base()}/v2/orders", headers=H(), json=payload, timeout=30)
     ok = r.status_code in (200, 201)
     return {

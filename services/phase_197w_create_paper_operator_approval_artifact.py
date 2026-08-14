@@ -25,7 +25,10 @@ SOAK_JSON = RESULTS / "phase_197t_safe_continuous_observation_soak.json"
 S197_JSON = RESULTS / "phase_197s_post_interlock_runtime_verification.json"
 PREVIEW_JSON = RESULTS / "defensive_exit_capped_batch_preview.json"
 OPERATOR_PACKET_JSON = RESULTS / "defensive_exit_operator_approval_packet.json"
-REAL_APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
+# Phase 198I-FIX — 197W writes historical evidence only (never hardened authority).
+REAL_APPROVAL_PATH = (
+    GOVERNANCE / "operator_paper_defensive_exit_approval_legacy_197w.json"
+)
 PREVIOUS_COMMIT = "9e5e1b1e"
 PREVIOUS_PHASE = "197V"
 
@@ -558,6 +561,7 @@ def run_phase_197w_create(
                 json.dumps(contract, indent=2, default=str), encoding="utf-8"
             )
             ap_status, ap_reason, _ = validate_operator_approval_contract(
+                authority_policy="legacy_historical_review",
                 broker_snapshot_ok=True,
                 contract_path=temp_contract_path,
             )
@@ -585,9 +589,17 @@ def run_phase_197w_create(
         else:
             write_paper_only_defensive_exit_approval(contract)
             approval_created = True
-            ap_status, ap_reason, _ = validate_operator_approval_contract(broker_snapshot_ok=True)
+            # Historical review validation only — 198I runtime dispatch requires
+            # hardened 198H authority and will reject this legacy schema.
+            ap_status, ap_reason, _ = validate_operator_approval_contract(
+                broker_snapshot_ok=True,
+                authority_policy="legacy_historical_review",
+            )
             approval_valid = ap_status == APPROVAL_STATUS_VALID
             approval_status = ap_status
+            notes.append(
+                "198I_note:legacy_197w_artifact_not_runtime_authoritative_use_hardened_sell_arm"
+            )
             if not approval_valid:
                 final_state = PAPER_OPERATOR_APPROVAL_BLOCKED_PACKET_MISMATCH
                 block_reasons.append(f"post_write_validation_failed={ap_reason}")

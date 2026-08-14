@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
 GOVERNANCE = ROOT / "data" / "governance"
-REAL_APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
+# Phase 198I-FIX — hardened canonical authority (legacy 197W uses a separate file).
+REAL_APPROVAL_PATH = GOVERNANCE / "paper_sell_arm_authority.json"
 PREVIEW_JSON = RESULTS / "defensive_exit_capped_batch_preview.json"
 
 DISPATCH_READY = "DISPATCH_READY"
@@ -273,44 +274,77 @@ def evaluate_defensive_exit_dispatch_interlock(
             DISPATCH_BLOCKED_ORDER_GUARD,
             str(authority.get("order_guard_authority_reason") or auth_state),
         )
-    elif not real_approval_exists or operator_status != APPROVAL_STATUS_VALID:
-        state, reason = DISPATCH_BLOCKED_APPROVAL_REQUIRED, (
-            "real_approval_artifact_absent"
-            if not real_approval_exists
-            else f"operator_approval_status={operator_status}"
-        )
     else:
+        # Phase 198I — sole runtime authority is hardened 198H sell arm.
+        # Legacy 197W / missing / non-hardened artifacts cannot authorize dispatch.
         from services.paper_operator_approval_artifact_state import (
+            PAPER_APPROVAL_LEGACY_RETIRED,
             PAPER_APPROVAL_VALID_CURRENT,
             classify_paper_operator_approval_artifact,
         )
-
-        ap_state, _, _ = classify_paper_operator_approval_artifact(
-            broker_snapshot_ok=broker_snapshot_ok
+        from services.paper_sell_arm_runtime_enforcement import (
+            LEGACY_197W_RETIRED,
+            validate_runtime_sell_authority,
         )
-        if ap_state == PAPER_APPROVAL_VALID_CURRENT:
-            from services.phase_197y_loop_mediated_paper_execution_gate import (
-                GATE_READY_LOOP_MEDIATED,
-                evaluate_loop_mediated_paper_execution_gate,
-                map_gate_state_to_dispatch,
-            )
 
-            paper_execution_gate = evaluate_loop_mediated_paper_execution_gate(
-                broker_snapshot_ok=broker_snapshot_ok,
-                open_orders_count=open_orders,
-                live_blocked=bool(live_payload.get("live_blocked")),
-                market_open=market_open,
+        hardened_ok, hardened_reason, hardened_details = validate_runtime_sell_authority()
+        base["hardened_sell_arm_ok"] = hardened_ok
+        base["hardened_sell_arm_reason"] = hardened_reason
+        base["hardened_sell_arm_details"] = hardened_details
+        if hardened_reason == LEGACY_197W_RETIRED:
+            base["legacy_197w_retired"] = True
+
+        if not hardened_ok:
+            state, reason = DISPATCH_BLOCKED_APPROVAL_REQUIRED, (
+                "real_approval_artifact_absent"
+                if hardened_reason == "approval_contract_missing"
+                else hardened_reason
             )
-            gate_state = str(paper_execution_gate.get("final_state") or "")
-            if gate_state == GATE_READY_LOOP_MEDIATED:
-                gate_ready = True
-            else:
-                state, reason = map_gate_state_to_dispatch(gate_state)
-        elif not governance_authorized:
+        elif operator_status != APPROVAL_STATUS_VALID:
             state, reason = (
-                DISPATCH_BLOCKED_GOVERNANCE,
-                str(criteria.get("governance_review_reason") or "governance_authorized=false"),
+                DISPATCH_BLOCKED_APPROVAL_REQUIRED,
+                f"operator_approval_status={operator_status}",
             )
+        else:
+            ap_state, ap_reason, _ = classify_paper_operator_approval_artifact(
+                broker_snapshot_ok=broker_snapshot_ok
+            )
+            if ap_state == PAPER_APPROVAL_LEGACY_RETIRED:
+                state, reason = (
+                    DISPATCH_BLOCKED_APPROVAL_REQUIRED,
+                    ap_reason or LEGACY_197W_RETIRED,
+                )
+            elif ap_state == PAPER_APPROVAL_VALID_CURRENT:
+                from services.phase_197y_loop_mediated_paper_execution_gate import (
+                    GATE_READY_LOOP_MEDIATED,
+                    evaluate_loop_mediated_paper_execution_gate,
+                    map_gate_state_to_dispatch,
+                )
+
+                paper_execution_gate = evaluate_loop_mediated_paper_execution_gate(
+                    broker_snapshot_ok=broker_snapshot_ok,
+                    open_orders_count=open_orders,
+                    live_blocked=bool(live_payload.get("live_blocked")),
+                    market_open=market_open,
+                )
+                gate_state = str(paper_execution_gate.get("final_state") or "")
+                if gate_state == GATE_READY_LOOP_MEDIATED:
+                    gate_ready = True
+                else:
+                    state, reason = map_gate_state_to_dispatch(gate_state)
+            elif not governance_authorized:
+                state, reason = (
+                    DISPATCH_BLOCKED_GOVERNANCE,
+                    str(
+                        criteria.get("governance_review_reason")
+                        or "governance_authorized=false"
+                    ),
+                )
+            else:
+                state, reason = (
+                    DISPATCH_BLOCKED_APPROVAL_REQUIRED,
+                    f"operator_approval_classify={ap_state}:{ap_reason}",
+                )
 
     readiness_bridge: Optional[Dict[str, Any]] = None
     if state is None:

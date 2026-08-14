@@ -423,6 +423,15 @@ def place_one(o: OrderRow, dry_run: bool) -> Tuple[str, str, Any, Dict[str, Any]
     payload = build_payload(o)
     if dry_run:
         return "DRY_RUN", "", payload, payload
+    from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+    gate_raw_paper_sell(
+        side=str(payload.get("side") or o.side),
+        symbol=str(payload.get("symbol") or o.symbol),
+        qty=payload.get("qty") or o.qty,
+        source="ui.Order_Desk.place_one",
+        client_order_id=payload.get("client_order_id"),
+    )
     code, data = api_post("/v2/orders", payload)
     if 200 <= code < 300 and isinstance(data, dict):
         return "PLACED", str(data.get("id", "")), data, payload

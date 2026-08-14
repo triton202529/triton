@@ -57,6 +57,14 @@ def get_open_positions():
 def submit_exit(ticker, qty, rationale, confidence):
     try:
         print(f"💼 Closing {qty} shares of {ticker} | 🧠 {rationale} (conf: {confidence})")
+        from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+        gate_raw_paper_sell(
+            side="sell",
+            symbol=ticker,
+            qty=qty,
+            source="scripts.auto_exit.submit_exit",
+        )
         order = api.submit_order(
             symbol=ticker, qty=qty, side="sell", type="market", time_in_force="gtc"
         )

@@ -175,14 +175,15 @@ with c1:
 
 with c2:
     if st.button("🧹 Cancel ALL Open Orders", use_container_width=True):
-        out = run_script_sync(
-            [
-                "-c",
-                "import json;from pathlib import Path;from alpaca.trading.client import TradingClient;"
-                "conf=json.loads(Path('config/alpaca.json').read_text(encoding='utf-8-sig'));"
-                "c=TradingClient(conf['key_id'],conf['secret_key'],paper=conf.get('paper',True));"
-                "c.cancel_orders();print('Canceled ALL open orders')",
-            ]
+        # Correction-7: TradingClient.cancel_orders bypasses AlpacaBroker paper-SELL cancel gates.
+        st.error(
+            "DISABLED_FAIL_CLOSED: Cancel ALL via TradingClient is disabled. "
+            "Use services.broker_alpaca.AlpacaBroker.cancel_all_orders() so paper SELL "
+            "cancels require a hardened dispatch permit."
+        )
+        out = (
+            "DISABLED_FAIL_CLOSED: raw TradingClient.cancel_orders path disabled "
+            "(paper SELL cancel gate bypass)."
         )
         st.code(out, language="bash")
 

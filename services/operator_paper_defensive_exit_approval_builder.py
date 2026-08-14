@@ -20,7 +20,10 @@ RESULTS = ROOT / "data" / "results"
 GOVERNANCE = ROOT / "data" / "governance"
 OPERATOR_PACKET_JSON = RESULTS / "defensive_exit_operator_approval_packet.json"
 APPROVAL_TEMPLATE_JSON = RESULTS / "operator_paper_defensive_exit_approval_template.json"
-REAL_APPROVAL_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
+# Phase 198I-FIX — builder real-create target is legacy historical storage only.
+REAL_APPROVAL_PATH = (
+    GOVERNANCE / "operator_paper_defensive_exit_approval_legacy_197w.json"
+)
 OPEN_ORDERS_JSON = RESULTS / "open_orders_snapshot.csv"
 
 DEFAULT_EXPIRES_MINUTES = 60

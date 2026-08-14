@@ -213,6 +213,14 @@ def close_position_safely(
         return False
 
     try:
+        from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+        gate_raw_paper_sell(
+            side="sell",
+            symbol=alpaca_symbol,
+            qty=float(dqty),
+            source="scripts.auto_execute_signals.close_position_safely",
+        )
         if is_fractional_qty(dqty):
             safe_qty = fmt_frac_qty_floor(str(raw_qty), places=6)
             order = MarketOrderRequest(

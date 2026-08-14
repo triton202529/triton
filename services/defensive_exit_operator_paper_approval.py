@@ -22,7 +22,11 @@ GOVERNANCE_AUTH_JSON = RESULTS / "governance_authorization.json"
 OPEN_ORDERS_JSON = RESULTS / "open_orders_snapshot.csv"
 POSITIONS_JSON = RESULTS / "positions_snapshot.csv"
 OPERATOR_PACKET_JSON = RESULTS / "defensive_exit_operator_approval_packet.json"
-APPROVAL_CONTRACT_PATH = GOVERNANCE / "operator_paper_defensive_exit_approval.json"
+# Phase 198I-FIX — hardened canonical authority path (never written by 197W).
+APPROVAL_CONTRACT_PATH = GOVERNANCE / "paper_sell_arm_authority.json"
+LEGACY_197W_APPROVAL_PATH = (
+    GOVERNANCE / "operator_paper_defensive_exit_approval_legacy_197w.json"
+)
 
 PACKET_TTL_HOURS = 24
 
@@ -409,6 +413,7 @@ def validate_operator_approval_contract(
     live_execution_blocked: Optional[bool] = None,
     contract_path: Optional[Path] = None,
     open_sell_symbols_override: Optional[Set[str]] = None,
+    authority_policy: str = "hardened_only",
 ) -> Tuple[str, str, Dict[str, Any]]:
     """
     Validate operator paper defensive exit approval contract.
@@ -416,6 +421,11 @@ def validate_operator_approval_contract(
 
     contract_path: optional override for dry-run fixture validation (197K).
     open_sell_symbols_override: optional in-flight sell set for simulation (197K).
+    authority_policy:
+      - "hardened_only" (default, Phase 198I): only 198H PAPER_SELL_ARM authorizes.
+        Legacy 197W schemas are rejected for runtime dispatch.
+      - "legacy_historical_review": allow reviewing legacy 197W shape as historical
+        evidence tooling only — never used by runtime dispatch/interlock.
     """
     path = contract_path or APPROVAL_CONTRACT_PATH
     try:
@@ -426,6 +436,7 @@ def validate_operator_approval_contract(
         "contract_path": contract_path_display,
         "contract_exists": path.is_file(),
         "checks": {},
+        "authority_policy": authority_policy,
     }
 
     if not path.is_file():
@@ -434,6 +445,64 @@ def validate_operator_approval_contract(
     contract = _read_json(path)
     if bool(contract.get("template_only")):
         return APPROVAL_STATUS_INVALID, "template_only_not_runtime_authority", details
+
+    # Phase 198H/198I — hardened paper sell-arm schema (fail closed; no dispatch here).
+    try:
+        from services.paper_sell_arm_authority import (
+            AUTHORITY_TYPE as _SELL_ARM_TYPE,
+            CHALLENGE_ARTIFACT_TYPE as _CHAL_TYPE,
+            is_hardened_sell_arm_contract,
+            validate_paper_sell_arm_authority,
+        )
+        from services.paper_sell_arm_runtime_enforcement import (
+            LEGACY_197W_RETIRED,
+            looks_like_legacy_197w_approval,
+        )
+
+        if str(contract.get("artifact_type") or "") == _CHAL_TYPE:
+            return (
+                APPROVAL_STATUS_INVALID,
+                "confirmation_challenge_is_not_authority",
+                {**details, "hardened_sell_arm": True},
+            )
+        if str(contract.get("authority_type") or "") == _SELL_ARM_TYPE or is_hardened_sell_arm_contract(
+            contract
+        ):
+            ok, reason, hdetails = validate_paper_sell_arm_authority(contract)
+            details["checks"]["hardened_sell_arm"] = ok
+            details["hardened_sell_arm"] = True
+            details["hardened_details"] = hdetails
+            if ok:
+                return APPROVAL_STATUS_VALID, "hardened_paper_sell_arm_valid", details
+            return APPROVAL_STATUS_INVALID, f"hardened_sell_arm_invalid:{reason}", details
+
+        # Phase 198I: no legacy fallback for runtime authority.
+        if authority_policy == "hardened_only":
+            if looks_like_legacy_197w_approval(contract):
+                return (
+                    APPROVAL_STATUS_INVALID,
+                    LEGACY_197W_RETIRED,
+                    {**details, "legacy_197w": True, "runtime_authoritative": False},
+                )
+            return (
+                APPROVAL_STATUS_INVALID,
+                "hardened_paper_sell_arm_required",
+                {**details, "runtime_authoritative": False},
+            )
+    except Exception as exc:
+        # Fail closed if hardened validator cannot run on a claimed sell-arm doc.
+        if str(contract.get("authority_type") or "") == "PAPER_SELL_ARM":
+            return (
+                APPROVAL_STATUS_INVALID,
+                f"hardened_sell_arm_validator_error:{exc}",
+                details,
+            )
+        if authority_policy == "hardened_only":
+            return (
+                APPROVAL_STATUS_INVALID,
+                f"hardened_sell_arm_policy_error:{exc}",
+                details,
+            )
 
     missing = sorted(REQUIRED_CONTRACT_FIELDS - set(contract.keys()))
     details["checks"]["required_fields_present"] = not missing
@@ -754,9 +823,19 @@ def is_valid_paper_only_defensive_exit_approval(
 
 
 def write_paper_only_defensive_exit_approval(contract: Dict[str, Any]) -> Path:
-    """Atomically write paper-only operator approval contract to governance path."""
-    APPROVAL_CONTRACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = APPROVAL_CONTRACT_PATH.with_suffix(".json.tmp")
+    """
+    Write Phase 197W historical approval evidence only.
+    Never writes the hardened paper_sell_arm_authority.json path.
+    """
+    from services.paper_sell_arm_runtime_enforcement import (
+        legacy_writer_target_path,
+        refuse_legacy_write_to_hardened_path,
+    )
+
+    target = legacy_writer_target_path(GOVERNANCE)
+    refuse_legacy_write_to_hardened_path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text(json.dumps(contract, indent=2, default=str), encoding="utf-8")
-    os.replace(tmp, APPROVAL_CONTRACT_PATH)
-    return APPROVAL_CONTRACT_PATH
+    os.replace(tmp, target)
+    return target

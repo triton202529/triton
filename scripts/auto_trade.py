@@ -55,6 +55,14 @@ def submit_order(ticker, side, rationale, confidence):
     try:
         qty = 1
         print(f"🛒 {side} {qty} shares of {ticker} | 🧠 {rationale} (conf: {confidence:.2f})")
+        from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+        gate_raw_paper_sell(
+            side=side.lower(),
+            symbol=ticker,
+            qty=qty,
+            source="scripts.auto_trade.submit_order",
+        )
         order = api.submit_order(
             symbol=ticker,
             qty=qty,

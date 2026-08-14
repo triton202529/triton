@@ -277,14 +277,75 @@ class AlpacaBroker:
         return self._get(f"/v2/orders/{order_id}")
 
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        """
+        Cancel is a broker-state mutation. Paper SELL cancels require a hardened
+        dispatch permit (same canonical boundary as submit) so cancel-then-replace
+        cannot orphan a sell without authority.
+        """
+        self._gate_paper_sell_cancel_if_needed(order_id)
         return self._delete(f"/v2/orders/{order_id}")
+
+    def _gate_paper_sell_cancel_if_needed(self, order_id: str) -> None:
+        mode = str(getattr(self, "mode", "paper") or "paper").lower()
+        if mode not in {"paper", "paper-only", "paper_trading"}:
+            # Live remains independently blocked by live-execution gates.
+            return
+        side = ""
+        symbol = None
+        qty = None
+        try:
+            od = self.get_order(str(order_id))
+            if isinstance(od, dict):
+                side = str(od.get("side") or "").lower().strip()
+                symbol = od.get("symbol")
+                qty = od.get("qty") or od.get("remaining_qty")
+        except Exception as exc:
+            raise RuntimeError(
+                f"paper_sell_cancel_side_unknown: cannot classify order {order_id} for cancel gate: {exc}"
+            ) from exc
+        if side != "sell":
+            return
+        from services.paper_sell_arm_runtime_enforcement import (
+            enforce_paper_sell_broker_submission,
+        )
+
+        enforce_paper_sell_broker_submission(
+            mode=mode,
+            side="sell",
+            source="broker_alpaca.cancel_order",
+            symbol=symbol,
+            qty=float(qty) if qty is not None and str(qty) != "" else None,
+            client_order_id=None,
+        )
 
     # Optional alias some wrappers expect
     def cancel(self, order_id: str) -> Dict[str, Any]:
         return self.cancel_order(order_id)
 
     def cancel_all_orders(self) -> Any:
-        """Cancel all open orders."""
+        """
+        Cancel all open orders. Paper SELL open orders require a hardened permit
+        per order; without it, sell cancels are skipped/fail-closed rather than
+        silently mutating broker sell state.
+        """
+        mode = str(getattr(self, "mode", "paper") or "paper").lower()
+        if mode in {"paper", "paper-only", "paper_trading"}:
+            try:
+                open_orders = self.list_orders(status="open", nested=True) or []
+            except Exception as exc:
+                raise RuntimeError(
+                    f"paper_sell_cancel_all_blocked: cannot list open orders: {exc}"
+                ) from exc
+            sell_ids = [
+                str(o.get("id"))
+                for o in open_orders
+                if isinstance(o, dict)
+                and str(o.get("side") or "").lower() == "sell"
+                and o.get("id")
+            ]
+            if sell_ids:
+                # Gate using the first sell; absence of permit blocks the batch.
+                self._gate_paper_sell_cancel_if_needed(sell_ids[0])
         return self._delete("/v2/orders")
 
     # ---------- Data (quotes / trades / prices) ----------
@@ -491,7 +552,19 @@ class AlpacaBroker:
         Alpaca expects either qty OR notional (not both). This method is qty-based.
         """
         from services.triton_execution_gate import enforce_broker_submission_gate
+        from services.paper_sell_arm_runtime_enforcement import (
+            enforce_paper_sell_broker_submission,
+        )
 
+        # Phase 198I-FIX — every paper sell must hold a hardened dispatch permit.
+        enforce_paper_sell_broker_submission(
+            mode=getattr(self, "mode", "paper"),
+            side=side,
+            source="broker_alpaca.submit_order",
+            symbol=symbol,
+            qty=float(qty) if qty is not None else None,
+            client_order_id=client_order_id,
+        )
         enforce_broker_submission_gate(
             broker=self,
             symbol=symbol,
@@ -583,7 +656,18 @@ class AlpacaBroker:
         Generic notional market order. Alpaca supports 'notional' instead of 'qty'.
         """
         from services.triton_execution_gate import enforce_broker_submission_gate
+        from services.paper_sell_arm_runtime_enforcement import (
+            enforce_paper_sell_broker_submission,
+        )
 
+        enforce_paper_sell_broker_submission(
+            mode=getattr(self, "mode", "paper"),
+            side=side,
+            source="broker_alpaca.submit_order_notional",
+            symbol=symbol,
+            qty=None,
+            client_order_id=client_order_id,
+        )
         enforce_broker_submission_gate(
             broker=self,
             symbol=symbol,
@@ -624,7 +708,18 @@ class AlpacaBroker:
     ) -> Dict[str, Any]:
         """Notional bracket order — gated like submit_order_notional (THP-H002)."""
         from services.triton_execution_gate import enforce_broker_submission_gate
+        from services.paper_sell_arm_runtime_enforcement import (
+            enforce_paper_sell_broker_submission,
+        )
 
+        enforce_paper_sell_broker_submission(
+            mode=getattr(self, "mode", "paper"),
+            side=side,
+            source="broker_alpaca.submit_bracket_order_notional",
+            symbol=symbol,
+            qty=None,
+            client_order_id=client_order_id,
+        )
         enforce_broker_submission_gate(
             broker=self,
             symbol=symbol,

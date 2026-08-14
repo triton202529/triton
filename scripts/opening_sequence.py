@@ -65,8 +65,11 @@ def main() -> None:
     acct = c.get_account()
     print(f"🕒 Market OPEN. Buying power: {acct.buying_power}")
 
-    # 1) Safety: cancel any straggler orders
-    c.cancel_orders()
+    # 1) Safety: cancel any straggler orders via hardened AlpacaBroker boundary
+    # (TradingClient.cancel_orders bypasses paper-SELL cancel gates).
+    from services.broker_alpaca import AlpacaBroker
+
+    AlpacaBroker(mode="paper" if conf.get("paper", True) else "live").cancel_all_orders()
     time.sleep(1)  # brief settle
     print(f"🧹 Open orders after cancel: {open_orders_count(c)}")
 

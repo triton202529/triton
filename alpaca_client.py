@@ -22,6 +22,11 @@ def _deprecation_guard() -> None:
 
 def submit_order(symbol, qty, side, type="market", time_in_force="gtc"):
     _deprecation_guard()
+    from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+    gate_raw_paper_sell(
+        side=side, symbol=symbol, qty=qty, source="alpaca_client.submit_order"
+    )
     url = f"{BASE_URL}/v2/orders"
     order = {
         "symbol": symbol,

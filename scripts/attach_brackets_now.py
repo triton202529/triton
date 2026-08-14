@@ -54,6 +54,11 @@ for p in positions:
             "take_profit": {"limit_price": str(tp)},
             "stop_loss": {"stop_price": str(sl)},
         }
+        from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+        gate_raw_paper_sell(
+            side="sell", symbol=sym, qty=qty, source="scripts.attach_brackets_now"
+        )
         r = requests.post(f"{B}/v2/orders", headers=H, json=payload)
         if r.status_code in (200, 201):
             created += 1

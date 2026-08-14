@@ -286,6 +286,25 @@ def list_open_orders(nested: bool = True, limit: int = 500) -> List[Dict[str, An
 def cancel_order(order_id: str) -> None:
     base = alpaca_base_url()
     H = alpaca_headers()
+    # Cancellation is a broker mutation. Paper SELL cancels require the hardened
+    # sell boundary before any raw DELETE.
+    try:
+        od = _req_json("GET", f"{base}/v2/orders/{order_id}", H, timeout=20)
+    except Exception as exc:
+        raise RuntimeError(
+            f"paper_sell_cancel_side_unknown: cannot classify order {order_id}: {exc}"
+        ) from exc
+    side = str((od or {}).get("side") or "").lower().strip() if isinstance(od, dict) else ""
+    if side == "sell":
+        from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+
+        gate_raw_paper_sell(
+            side="sell",
+            symbol=(od or {}).get("symbol") if isinstance(od, dict) else None,
+            qty=(od or {}).get("qty") if isinstance(od, dict) else None,
+            source="place_orders_from_csv.cancel_order",
+            mode=mode_from_base(base),
+        )
     _req_json("DELETE", f"{base}/v2/orders/{order_id}", H, timeout=20)
 
 
