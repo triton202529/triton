@@ -145,6 +145,9 @@ def isolate_interlock_artifact_roots(
     monkeypatch.setattr(authority, "LIVE_GOVERNANCE", gov)
     monkeypatch.setattr(authority, "LIVE_APPROVAL_PATH", hardened)
     monkeypatch.setattr(enforcement, "LIVE_GOVERNANCE", gov)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", live / store_mod.DEFAULT_DB_NAME)
 
     monkeypatch.setattr(interlock, "ROOT", tmp_path)
     monkeypatch.setattr(interlock, "RESULTS", results)
@@ -230,6 +233,7 @@ def create_test_only_hardened_authority(
 
     store = tmp_path / "test_only_sell_arm_store"
     store.mkdir(parents=True, exist_ok=True)
+    db = store / "paper_sell_arm.sqlite3"
     readiness = sample_sell_readiness_packet()
     chal = prepare_confirmation_challenge(
         store_root=store,
@@ -237,6 +241,7 @@ def create_test_only_hardened_authority(
         account_raw="acct-1",
         trading_date="2026-08-11",
         now=now,
+        db_path=db,
     )
     auth = confirm_and_create_paper_sell_arm(
         store_root=store,
@@ -245,6 +250,7 @@ def create_test_only_hardened_authority(
         operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
         current_plan_hash=readiness["plan_hash"],
         now=now,
+        db_path=db,
     )
     src = store / HARDENED_AUTHORITY_FILENAME
     hardened_dest.parent.mkdir(parents=True, exist_ok=True)
@@ -268,10 +274,11 @@ def create_sqlite_sell_arm_via_public_apis(
         confirm_and_create_paper_sell_arm,
         prepare_confirmation_challenge,
     )
-    from services.paper_sell_arm_store import db_path_for_store_root, inspect_sqlite_authority
+    from services.paper_sell_arm_store import inspect_sqlite_authority, resolve_runtime_sqlite_path
 
     store_root = Path(store_root)
     store_root.mkdir(parents=True, exist_ok=True)
+    db = resolve_runtime_sqlite_path()
     readiness = sample_sell_readiness_packet()
     chal = prepare_confirmation_challenge(
         store_root=store_root,
@@ -280,6 +287,7 @@ def create_sqlite_sell_arm_via_public_apis(
         trading_date=now.date().isoformat(),
         now=now,
         explicit_runtime_write=explicit_runtime_write,
+        db_path=db,
     )
     auth = confirm_and_create_paper_sell_arm(
         store_root=store_root,
@@ -289,8 +297,9 @@ def create_sqlite_sell_arm_via_public_apis(
         current_plan_hash=readiness["plan_hash"],
         now=now,
         explicit_runtime_write=explicit_runtime_write,
+        db_path=db,
     )
-    inspected = inspect_sqlite_authority(db_path_for_store_root(store_root), now=now)
+    inspected = inspect_sqlite_authority(db, now=now)
     if str(inspected.get("state") or "") != "UNUSED":
         raise AssertionError(f"sqlite authority not UNUSED after confirm: {inspected}")
     return {

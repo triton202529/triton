@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from types import SimpleNamespace
 
-from services.broker_alpaca import AlpacaBroker, BrokerAuthorizationRequired, _broker_order_authorized
+from services.broker_alpaca import (
+    AlpacaBroker,
+    BrokerAuthorizationRequired,
+    _broker_order_authorized,
+)
 from services.paper_sell_arm_authority import (
     OPERATOR_ACKNOWLEDGEMENT_TEXT,
     confirm_and_create_paper_sell_arm,
@@ -151,7 +155,11 @@ class NetworkFakeAlpacaBroker(AlpacaBroker):
     def _data_get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         self.data_gets.append(path)
         return {
-            "quote": {"bp": self.quote_bid, "ap": self.quote_ask, "t": datetime.now(timezone.utc).isoformat()},
+            "quote": {
+                "bp": self.quote_bid,
+                "ap": self.quote_ask,
+                "t": datetime.now(timezone.utc).isoformat(),
+            },
             "trade": {"p": self.quote_ask, "t": datetime.now(timezone.utc).isoformat()},
         }
 
@@ -190,7 +198,9 @@ def block_real_network(monkeypatch) -> None:
     monkeypatch.setattr(socket.socket, "connect", _blocked)
 
 
-def readiness_packet(*, symbol: str = "TSLA", qty: float = 8.0, price: float = 332.5, now: datetime):
+def readiness_packet(
+    *, symbol: str = "TSLA", qty: float = 8.0, price: float = 332.5, now: datetime
+):
     return {
         "status": "UNAPPROVED_APPROVAL_READINESS_ONLY",
         "mode": "PAPER",
@@ -245,6 +255,7 @@ def seed_paper_sell_store(
         account_raw="acct-198i-sell",
         trading_date=now.date().isoformat(),
         now=now,
+        db_path=tmp_path / "paper_sell_arm.sqlite3",
     )
     auth = confirm_and_create_paper_sell_arm(
         store_root=tmp_path,
@@ -253,6 +264,7 @@ def seed_paper_sell_store(
         operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
         current_plan_hash=readiness["plan_hash"],
         now=now,
+        db_path=tmp_path / "paper_sell_arm.sqlite3",
     )
     bindings = {
         "plan_hash": readiness["plan_hash"],
@@ -280,7 +292,14 @@ def seed_paper_sell_store(
         f"symbol,qty,qty_available\n{symbol},{qty},{qty}\n", encoding="utf-8"
     )
     (tmp_path / "open_orders_snapshot.csv").write_text("symbol,side,qty\n", encoding="utf-8")
-    out = {"readiness": readiness, "auth": auth, "now": now, "symbol": symbol, "qty": qty, "price": price}
+    out = {
+        "readiness": readiness,
+        "auth": auth,
+        "now": now,
+        "symbol": symbol,
+        "qty": qty,
+        "price": price,
+    }
     if consume:
         from dataclasses import dataclass
 
@@ -326,6 +345,7 @@ def seed_paper_sell_store(
             now=now + timedelta(minutes=1),
             results_root=tmp_path,
             live_root=tmp_path,
+            db_path=tmp_path / "paper_sell_arm.sqlite3",
         )
         out["guard"] = guard
         assert guard.consumed, f"seed consume failed: {guard.reason} {guard.details}"
@@ -390,14 +410,21 @@ def isolate_sell_store(monkeypatch, tmp_path: Path) -> None:
     import services.place_live_orders as plo
 
     freeze_dispatch_clock(monkeypatch, SESSION_OPEN_NOW)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
     monkeypatch.setattr(auth_mod, "LIVE_GOVERNANCE", tmp_path)
     monkeypatch.setattr(enf, "LIVE_GOVERNANCE", tmp_path)
     monkeypatch.setattr(plo, "IDEMPOTENCY_STATE_PATH", tmp_path / "idempotency_state.json")
     monkeypatch.setattr(plo, "DEFAULT_LOG_CSV", tmp_path / "live_orders_log.csv")
     monkeypatch.setattr(plo, "SIGNAL_STATE_PATH", tmp_path / "signal_state.json")
     monkeypatch.setattr(plo, "EXECUTION_INTELLIGENCE_CSV", tmp_path / "execution_intelligence.csv")
-    monkeypatch.setattr(plo, "PERFORMANCE_RISK_OVERLAY_CSV", tmp_path / "performance_risk_overlay.csv")
-    monkeypatch.setattr(mp, "PERFORMANCE_RISK_OVERLAY_CSV", tmp_path / "performance_risk_overlay.csv")
+    monkeypatch.setattr(
+        plo, "PERFORMANCE_RISK_OVERLAY_CSV", tmp_path / "performance_risk_overlay.csv"
+    )
+    monkeypatch.setattr(
+        mp, "PERFORMANCE_RISK_OVERLAY_CSV", tmp_path / "performance_risk_overlay.csv"
+    )
     monkeypatch.setattr(dog, "SESSION_INTENTS_CSV", tmp_path / "placement_session_intents.csv")
     monkeypatch.setattr(dog, "DEFAULT_LOG_PATH", tmp_path / "live_orders_log.csv")
     monkeypatch.setattr(pea, "AUDIT_CSV", tmp_path / "paper_execution_audit.csv")
@@ -454,12 +481,15 @@ def stub_unrelated_pre_gates(monkeypatch) -> None:
         "services.master_execution_gate.MasterExecutionGate.evaluate",
         _ok_gate,
     )
+
     def _pipeline(**kwargs):
         mode = str(kwargs.get("mode") or "paper").lower()
         if mode != "paper":
             from services.triton_execution_gate import ExecutionGateBlocked
 
-            raise ExecutionGateBlocked({"allowed": False, "decision": "BLOCK", "reason": "live_blocked"})
+            raise ExecutionGateBlocked(
+                {"allowed": False, "decision": "BLOCK", "reason": "live_blocked"}
+            )
         return {"allowed": True, "decision": "ALLOW"}
 
     def _broker_gate(**kwargs):
@@ -467,7 +497,9 @@ def stub_unrelated_pre_gates(monkeypatch) -> None:
         if mode != "paper":
             from services.triton_execution_gate import ExecutionGateBlocked
 
-            raise ExecutionGateBlocked({"allowed": False, "decision": "BLOCK", "reason": "live_blocked"})
+            raise ExecutionGateBlocked(
+                {"allowed": False, "decision": "BLOCK", "reason": "live_blocked"}
+            )
         return {"allowed": True, "decision": "ALLOW"}
 
     monkeypatch.setattr("services.triton_execution_gate.enforce_pipeline_gate", _pipeline)

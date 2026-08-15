@@ -42,9 +42,12 @@ def _evidence_dir() -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _safety(monkeypatch):
+def _safety(monkeypatch, tmp_path):
     stub_dir_fsync_ok(monkeypatch)
     block_real_network(monkeypatch)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
     from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
 
     _ACTIVE_PERMIT.set(None)

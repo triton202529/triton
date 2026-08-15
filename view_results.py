@@ -2554,7 +2554,9 @@ def render_heartbeat_freshness_banner() -> None:
     cl_lock = bool(loops.get("continuous_lock_present"))
     wd_lock = bool(loops.get("watchdog_lock_present"))
 
-    pipeline_banner = summary.get("pipeline_heartbeat_banner") or classify_heartbeat_banner_presentation(
+    pipeline_banner = summary.get(
+        "pipeline_heartbeat_banner"
+    ) or classify_heartbeat_banner_presentation(
         age_minutes=pipeline.get("age_minutes"),
         timestamp_present=pipeline.get("timestamp") is not None,
         process_count=cl_count,
@@ -2563,7 +2565,9 @@ def render_heartbeat_freshness_banner() -> None:
         expected_after_hours_stop=expected_stop,
         timestamp_malformed=bool(pipeline.get("exists") and pipeline.get("timestamp") is None),
     )
-    watchdog_banner = summary.get("watchdog_heartbeat_banner") or classify_heartbeat_banner_presentation(
+    watchdog_banner = summary.get(
+        "watchdog_heartbeat_banner"
+    ) or classify_heartbeat_banner_presentation(
         age_minutes=runtime.get("age_minutes"),
         timestamp_present=runtime.get("timestamp") is not None,
         process_count=wd_count,
@@ -2580,9 +2584,15 @@ def render_heartbeat_freshness_banner() -> None:
             "⚠ Pipeline heartbeat evidence integrity issue "
             "(`heartbeat.json` timestamp malformed or materially future-dated)."
         )
-    elif pipeline_banner.get("show_actionable_warning") and pipeline_banner.get("banner_kind") == "missing":
+    elif (
+        pipeline_banner.get("show_actionable_warning")
+        and pipeline_banner.get("banner_kind") == "missing"
+    ):
         st.warning("⚠ No pipeline heartbeat found (`heartbeat.json`). Pipeline freshness unknown.")
-    elif pipeline_banner.get("show_actionable_warning") and pipeline_banner.get("banner_kind") == "stale":
+    elif (
+        pipeline_banner.get("show_actionable_warning")
+        and pipeline_banner.get("banner_kind") == "stale"
+    ):
         st.error(
             f"⚠ Pipeline data may be stale. Last **pipeline** heartbeat is "
             f"**{float(ph_age):.0f} minutes** old (source: `heartbeat.json`)."
@@ -2605,9 +2615,7 @@ def render_heartbeat_freshness_banner() -> None:
         ph_disp = dt_to_et_str(ph_ts)
         stage = str(pipeline.get("stage") or "—")
         status = str(pipeline.get("status") or "—")
-        st.caption(
-            f"Pipeline heartbeat · **{ph_disp}** · stage **{stage}** · status **{status}**"
-        )
+        st.caption(f"Pipeline heartbeat · **{ph_disp}** · stage **{stage}** · status **{status}**")
 
     rt_ts = runtime.get("timestamp")
     rt_age = runtime.get("age_minutes")
@@ -2616,9 +2624,15 @@ def render_heartbeat_freshness_banner() -> None:
             "⚠ Watchdog heartbeat evidence integrity issue "
             "(`watchdog_status.json` timestamp malformed or materially future-dated)."
         )
-    elif watchdog_banner.get("show_actionable_warning") and watchdog_banner.get("banner_kind") == "missing":
+    elif (
+        watchdog_banner.get("show_actionable_warning")
+        and watchdog_banner.get("banner_kind") == "missing"
+    ):
         st.warning("⚠ Watchdog heartbeat unknown (`watchdog_status.json`).")
-    elif watchdog_banner.get("show_actionable_warning") and watchdog_banner.get("banner_kind") == "stale":
+    elif (
+        watchdog_banner.get("show_actionable_warning")
+        and watchdog_banner.get("banner_kind") == "stale"
+    ):
         st.warning(
             f"Watchdog heartbeat is **{float(rt_age):.0f} minutes** old "
             f"(source: watchdog_status.json). Separate from pipeline heartbeat."
@@ -2646,7 +2660,6 @@ def render_heartbeat_freshness_banner() -> None:
             f"Watchdog heartbeat · **{rt_disp}** · source **{src}** · "
             f"status **{runtime.get('status') or '—'}** · separate from pipeline heartbeat"
         )
-
 
 
 def render_top_status_stack() -> None:
@@ -24627,6 +24640,9 @@ def _render_cc_operations_broker_order_evidence() -> None:
     # Delegate presentation; control callbacks stay inside _render_start_controls.
     assert callable(_render_start_controls)
     render_operations_page()
+    from dashboard.paper_sell_arm_controls import render_paper_sell_arm_controls
+
+    render_paper_sell_arm_controls()
 
 
 def _render_cc_orders_broker_order_evidence() -> None:

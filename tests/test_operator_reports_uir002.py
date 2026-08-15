@@ -7,6 +7,7 @@ Does not invoke Start/Stop/Restart or mutate operational artifacts.
 
 from __future__ import annotations
 
+import ast
 import inspect
 from pathlib import Path
 
@@ -104,7 +105,20 @@ def test_reports_delegates_from_operator_console():
 
 def test_operations_and_callbacks_unchanged_surface():
     ops = inspect.getsource(render_operations_page)
-    assert "_render_start_controls()" in ops
+    tree = ast.parse(ops)
+    start_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "_render_start_controls")
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "_render_start_controls")
+        )
+    ]
+    assert start_calls, "Operations page must render start controls"
+    assert any(
+        any(kw.arg == "status_snapshot" for kw in call.keywords) for call in start_calls
+    ), "start controls must receive the existing status snapshot"
     console = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
     assert "execute_start_triton(" in console
     assert "execute_stop_triton(" in console

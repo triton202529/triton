@@ -40,6 +40,13 @@ ROOT = Path(__file__).resolve().parents[1]
 FROZEN_NOW = datetime(2026, 8, 11, 15, 0, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_canonical_sqlite(tmp_path, monkeypatch):
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
+
+
 def _readiness(**overrides):
     base = {
         "status": "UNAPPROVED_APPROVAL_READINESS_ONLY",
@@ -220,6 +227,7 @@ def test_expired_challenge_and_authority_rejected(tmp_path: Path):
         account_raw="acct-1",
         now=past,
         trading_date="2026-08-11",
+        db_path=tmp_path / "paper_sell_arm.sqlite3",
     )
     with pytest.raises(ValueError, match="challenge_expired"):
         confirm_and_create_paper_sell_arm(
@@ -228,6 +236,7 @@ def test_expired_challenge_and_authority_rejected(tmp_path: Path):
             challenge=chal,
             operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
             now=past + timedelta(minutes=11),
+            db_path=tmp_path / "paper_sell_arm.sqlite3",
         )
 
     chal2 = prepare_confirmation_challenge(
@@ -236,6 +245,7 @@ def test_expired_challenge_and_authority_rejected(tmp_path: Path):
         account_raw="acct-1",
         now=past,
         trading_date="2026-08-11",
+        db_path=tmp_path / "a2" / "paper_sell_arm.sqlite3",
     )
     auth = confirm_and_create_paper_sell_arm(
         store_root=tmp_path / "a2",
@@ -244,6 +254,7 @@ def test_expired_challenge_and_authority_rejected(tmp_path: Path):
         operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
         now=past,
         current_plan_hash=readiness["plan_hash"],
+        db_path=tmp_path / "a2" / "paper_sell_arm.sqlite3",
     )
     ok, reason, _ = validate_paper_sell_arm_authority(auth, now=past + timedelta(minutes=16))
     assert not ok

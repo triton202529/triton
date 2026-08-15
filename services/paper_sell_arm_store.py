@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -28,11 +29,18 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_NAME = "paper_sell_arm.sqlite3"
 DEFAULT_RUNTIME_DB = ROOT / "data" / "live" / DEFAULT_DB_NAME
-SCHEMA_USER_VERSION = 1
-STORE_SCHEMA_VERSION = "198I-W-SQLITE-1"
+SCHEMA_USER_VERSION = 2
+STORE_SCHEMA_VERSION = "198I-YR-SQLITE-2"
+LEGACY_SCHEMA_USER_VERSION = 1
 
 ROLLBACK_ENV = "TRITON_PAPER_SELL_ARM_STORE"
 ROLLBACK_JSON_FAIL_CLOSED = "legacy_json_fail_closed"
+PRODUCTION_PATH_OVERRIDE_ENVS = (
+    "TRITON_PAPER_SELL_ARM_STORE_ROOT",
+    "TRITON_PAPER_SELL_ARM_RESULTS_ROOT",
+    "TRITON_PAPER_SELL_ARM_DB",
+    "RESULTS_ROOT",
+)
 
 CHALLENGE_STATES = frozenset({"OPEN", "CONSUMED", "EXPIRED", "REJECTED"})
 AUTHORITY_STATES = frozenset({"UNUSED", "CONSUMED", "EXPIRED", "RESTRICTED", "REVOKED"})
@@ -72,13 +80,46 @@ def sqlite_permit_grade_enabled() -> bool:
     return True
 
 
+def canonical_runtime_db_path() -> Path:
+    """Sole default permit-grade SQLite path: data/live/paper_sell_arm.sqlite3."""
+    return Path(DEFAULT_RUNTIME_DB)
+
+
+def resolve_runtime_sqlite_path(*, db_path: Optional[Path] = None) -> Path:
+    """Production: canonical live DB. Tests: pass an explicit isolated Path."""
+    if db_path is not None:
+        return Path(db_path)
+    return canonical_runtime_db_path()
+
+
 def db_path_for_store_root(store_root: Path) -> Path:
+    """Isolated/test colocation helper. Production must use resolve_runtime_sqlite_path()."""
     return Path(store_root).resolve() / DEFAULT_DB_NAME
+
+
+def production_path_overrides_present() -> Tuple[bool, str]:
+    for key in PRODUCTION_PATH_OVERRIDE_ENVS:
+        if str(os.environ.get(key) or "").strip():
+            return True, "configuration_blocked"
+    return False, "ok"
 
 
 def refuse_unsupported_db_path(path: Path) -> None:
     raw = str(path)
-    resolved = str(path.resolve()) if path.exists() or path.parent.exists() else raw
+    probe = raw.replace("/", "\\")
+    if probe.startswith("\\\\") or raw.startswith("//") or raw.startswith("\\\\"):
+        raise PaperSellArmStoreError(
+            "sqlite_unc_or_network_path_refused",
+            {"path_kind": "unc"},
+        )
+    try:
+        exists = path.exists() or path.parent.exists()
+    except OSError as exc:
+        raise PaperSellArmStoreError(
+            "sqlite_unc_or_network_path_refused",
+            {"path_kind": "os_error"},
+        ) from exc
+    resolved = str(path.resolve()) if exists else raw
     probe = resolved.replace("/", "\\")
     if probe.startswith("\\\\") or raw.startswith("//") or raw.startswith("\\\\"):
         raise PaperSellArmStoreError(
@@ -252,12 +293,56 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sell_dispatches_authority
   ON sell_dispatches(authority_id);
 CREATE INDEX IF NOT EXISTS idx_sell_challenges_state ON sell_challenges(state);
 CREATE INDEX IF NOT EXISTS idx_sell_authorities_state ON sell_authorities(state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sell_challenges_open_exact_batch
+  ON sell_challenges(plan_hash, batch_hash, operator_action_label)
+  WHERE state = 'OPEN';
 """
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    dups = conn.execute(
+        """
+        SELECT plan_hash, batch_hash, operator_action_label, COUNT(*) AS c
+        FROM sell_challenges
+        WHERE state='OPEN'
+        GROUP BY plan_hash, batch_hash, operator_action_label
+        HAVING c > 1
+        """
+    ).fetchall()
+    if dups:
+        raise PaperSellArmStoreError(
+            "sqlite_duplicate_open_requires_reconciliation",
+            {"duplicate_open_groups": len(dups)},
+        )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sell_challenges_open_exact_batch
+          ON sell_challenges(plan_hash, batch_hash, operator_action_label)
+          WHERE state = 'OPEN'
+        """
+    )
+    conn.execute(f"PRAGMA user_version={SCHEMA_USER_VERSION}")
+    conn.execute(
+        """
+        INSERT INTO sell_audit_events(created_at, event_type, payload_json)
+        VALUES (?,?,?)
+        """,
+        (
+            _utc_now().isoformat(),
+            "schema_migrated_v1_to_v2",
+            canonical_json(
+                {
+                    "user_version": SCHEMA_USER_VERSION,
+                    "store_schema": STORE_SCHEMA_VERSION,
+                }
+            ),
+        ),
+    )
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
     version = int(_pragma_scalar(conn, "user_version") or 0)
-    if version not in {0, SCHEMA_USER_VERSION}:
+    if version not in {0, LEGACY_SCHEMA_USER_VERSION, SCHEMA_USER_VERSION}:
         raise PaperSellArmStoreError(
             "sqlite_incompatible_schema_version",
             {"user_version": version, "expected": SCHEMA_USER_VERSION},
@@ -283,6 +368,17 @@ def _init_schema(conn: sqlite3.Connection) -> None:
                     ),
                 ),
             )
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass
+            raise
+    elif version == LEGACY_SCHEMA_USER_VERSION:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            _migrate_v1_to_v2(conn)
             conn.execute("COMMIT")
         except Exception:
             try:
@@ -316,6 +412,9 @@ def integrity_ok(conn: sqlite3.Connection) -> Tuple[bool, str]:
     return msg.lower() == "ok", msg
 
 
+_SCHEMA_INIT_LOCK = threading.Lock()
+
+
 def open_connection(db_path: Path, *, initialize: bool = True) -> sqlite3.Connection:
     refuse_unsupported_db_path(db_path)
     db_path = Path(db_path)
@@ -330,16 +429,17 @@ def open_connection(db_path: Path, *, initialize: bool = True) -> sqlite3.Connec
     conn = sqlite3.connect(str(db_path), timeout=5.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
     try:
-        apply_and_verify_pragmas(conn)
-        if initialize:
-            _init_schema(conn)
-            ok, msg = integrity_ok(conn)
-            if not ok:
-                raise PaperSellArmStoreError(
-                    "sqlite_integrity_check_failed",
-                    {"integrity_check": msg},
-                )
-            verify_pragmas_or_fail(conn)
+        with _SCHEMA_INIT_LOCK:
+            apply_and_verify_pragmas(conn)
+            if initialize:
+                _init_schema(conn)
+                ok, msg = integrity_ok(conn)
+                if not ok:
+                    raise PaperSellArmStoreError(
+                        "sqlite_integrity_check_failed",
+                        {"integrity_check": msg},
+                    )
+                verify_pragmas_or_fail(conn)
     except Exception:
         conn.close()
         raise
@@ -352,6 +452,10 @@ def write_connection(db_path: Path) -> Generator[sqlite3.Connection, None, None]
     try:
         yield conn
     finally:
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
         conn.close()
 
 
@@ -414,45 +518,117 @@ def persist_open_challenge(
     bhash = batch_hash_from_scope(scope)
     created = str(challenge.get("issued_at") or now.isoformat())
     expires = str(challenge.get("expires_at") or "")
-    with write_connection(db_path) as conn:
-        verify_pragmas_or_fail(conn)
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            conn.execute(
-                """
-                INSERT INTO sell_challenges(
-                    challenge_id, plan_hash, batch_hash, batch_id, canonical_batch_json,
-                    payload_json, created_at, expires_at, state, consumed_at,
-                    consuming_authority_id, operator_action_label, schema_version
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    cid,
-                    str(challenge.get("plan_hash") or ""),
-                    bhash,
-                    str(challenge.get("batch_id") or ""),
-                    canonical_json(scope),
-                    canonical_json(challenge),
-                    created,
-                    expires,
-                    "OPEN",
-                    None,
-                    None,
-                    str(challenge.get("operator_button") or "ARM_REVIEWED_SELLS"),
-                    str(challenge.get("schema_version") or STORE_SCHEMA_VERSION),
-                ),
-            )
-            _audit(conn, "challenge_persisted", challenge_id=cid, payload={"state": "OPEN"})
-            conn.execute("COMMIT")
-        except sqlite3.IntegrityError as exc:
-            conn.execute("ROLLBACK")
-            raise PaperSellArmStoreError(
-                "sqlite_challenge_insert_conflict",
-                {"error": str(exc)},
-            ) from exc
-        except Exception:
-            conn.execute("ROLLBACK")
+    plan_hash = str(challenge.get("plan_hash") or "")
+    label = str(challenge.get("operator_button") or "ARM_REVIEWED_SELLS")
+    now_iso = now.isoformat()
+    try:
+        with write_connection(db_path) as conn:
+            verify_pragmas_or_fail(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    """
+                    UPDATE sell_challenges
+                    SET state='EXPIRED'
+                    WHERE state='OPEN' AND expires_at <= ?
+                    """,
+                    (now_iso,),
+                )
+                existing = conn.execute(
+                    """
+                    SELECT challenge_id FROM sell_challenges
+                    WHERE state='OPEN'
+                      AND plan_hash=?
+                      AND batch_hash=?
+                      AND operator_action_label=?
+                    """,
+                    (plan_hash, bhash, label),
+                ).fetchone()
+                if existing:
+                    raise PaperSellArmStoreError(
+                        "sqlite_duplicate_open_challenge",
+                        {"existing_challenge_id": existing["challenge_id"]},
+                    )
+                conn.execute(
+                    """
+                    INSERT INTO sell_challenges(
+                        challenge_id, plan_hash, batch_hash, batch_id, canonical_batch_json,
+                        payload_json, created_at, expires_at, state, consumed_at,
+                        consuming_authority_id, operator_action_label, schema_version
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        cid,
+                        plan_hash,
+                        bhash,
+                        str(challenge.get("batch_id") or ""),
+                        canonical_json(scope),
+                        canonical_json(challenge),
+                        created,
+                        expires,
+                        "OPEN",
+                        None,
+                        None,
+                        label,
+                        str(challenge.get("schema_version") or STORE_SCHEMA_VERSION),
+                    ),
+                )
+                _audit(conn, "challenge_persisted", challenge_id=cid, payload={"state": "OPEN"})
+                conn.execute("COMMIT")
+            except PaperSellArmStoreError:
+                conn.execute("ROLLBACK")
+                raise
+            except sqlite3.IntegrityError as exc:
+                conn.execute("ROLLBACK")
+                raise PaperSellArmStoreError(
+                    "sqlite_duplicate_open_challenge",
+                    {"error": str(exc)},
+                ) from exc
+            except sqlite3.OperationalError as exc:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise PaperSellArmStoreError(
+                    "sqlite_database_locked",
+                    {"error": str(exc)},
+                ) from exc
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+    except sqlite3.OperationalError as exc:
+        raise PaperSellArmStoreError(
+            "sqlite_database_locked",
+            {"error": str(exc)},
+        ) from exc
+    except PaperSellArmStoreError as exc:
+        if exc.reason == "sqlite_duplicate_open_challenge":
             raise
+        snap = inspect_sqlite_arm_snapshot(db_path, now=now)
+        for rec in snap.get("open_challenges") or []:
+            if (
+                str(rec.get("plan_hash") or "") == plan_hash
+                and str(rec.get("batch_hash") or "") == bhash
+                and not rec.get("expired")
+            ):
+                raise PaperSellArmStoreError(
+                    "sqlite_duplicate_open_challenge",
+                    {"existing_challenge_id": rec.get("challenge_id")},
+                ) from exc
+        raise
+    except Exception as exc:
+        snap = inspect_sqlite_arm_snapshot(db_path, now=now)
+        for rec in snap.get("open_challenges") or []:
+            if (
+                str(rec.get("plan_hash") or "") == plan_hash
+                and str(rec.get("batch_hash") or "") == bhash
+                and not rec.get("expired")
+            ):
+                raise PaperSellArmStoreError(
+                    "sqlite_duplicate_open_challenge",
+                    {"existing_challenge_id": rec.get("challenge_id")},
+                ) from exc
+        raise PaperSellArmStoreError("sqlite_database_locked", {"error": str(exc)}) from exc
     return {"challenge_id": cid, "batch_hash": bhash, "state": "OPEN"}
 
 
@@ -577,11 +753,34 @@ def load_sqlite_authority_payload(db_path: Path, *, now: datetime) -> Optional[D
     return None
 
 
+def _readonly_sqlite_uri(db_path: Path) -> str:
+    resolved = Path(db_path).resolve()
+    posix = resolved.as_posix()
+    if os.name == "nt" and len(posix) >= 2 and posix[1] == ":":
+        posix = "/" + posix
+    return f"file:{posix}?mode=ro&immutable=1"
+
+
+def readonly_connection(db_path: Path) -> sqlite3.Connection:
+    """Open existing DB read-only. Never creates files, schema, WAL, or SHM."""
+    refuse_unsupported_db_path(db_path)
+    path = Path(db_path)
+    if not path.is_file():
+        raise PaperSellArmStoreError("sqlite_absent")
+    conn = sqlite3.connect(_readonly_sqlite_uri(path), uri=True, timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def inspect_sqlite_authority(db_path: Path, *, now: datetime) -> Dict[str, Any]:
     """Inspect permit-grade authority without treating JSON as authoritative."""
     if not Path(db_path).is_file():
         return {"state": "ABSENT"}
-    with write_connection(db_path) as conn:
+    try:
+        conn = readonly_connection(db_path)
+    except PaperSellArmStoreError as exc:
+        return {"state": "ABSENT", "reason": exc.reason, "ok": False}
+    try:
         row = conn.execute(
             """
             SELECT * FROM sell_authorities
@@ -600,6 +799,111 @@ def inspect_sqlite_authority(db_path: Path, *, now: datetime) -> Dict[str, Any]:
                 "reason": "sqlite_authority_expired",
             }
         return {"state": st, "payload": payload, "expires_at": row["expires_at"]}
+    except sqlite3.Error as exc:
+        return {"state": "ABSENT", "ok": False, "reason": "sqlite_readonly_inspect_failed"}
+    finally:
+        conn.close()
+
+
+def inspect_sqlite_arm_snapshot(db_path: Path, *, now: datetime) -> Dict[str, Any]:
+    """Read-only challenge/authority/dispatch counts. Does not create or mutate the DB."""
+    empty: Dict[str, Any] = {
+        "db_present": False,
+        "ok": True,
+        "reason": "sqlite_absent",
+        "challenge_count": 0,
+        "authority_count": 0,
+        "dispatch_count": 0,
+        "open_challenges": [],
+        "latest_challenge": None,
+        "latest_authority": {"state": "ABSENT"},
+    }
+    path = Path(db_path)
+    if not path.is_file():
+        return empty
+    wal = Path(str(path) + "-wal")
+    if wal.is_file() and wal.stat().st_size > 0:
+        empty["db_present"] = True
+        empty["ok"] = False
+        empty["reason"] = "sqlite_readonly_wal_unreadable"
+        return empty
+    try:
+        conn = readonly_connection(path)
+    except PaperSellArmStoreError as exc:
+        empty["db_present"] = True
+        empty["ok"] = False
+        empty["reason"] = exc.reason
+        return empty
+    try:
+        challenges = conn.execute(
+            "SELECT * FROM sell_challenges ORDER BY created_at DESC"
+        ).fetchall()
+        authorities = conn.execute(
+            "SELECT * FROM sell_authorities ORDER BY created_at DESC"
+        ).fetchall()
+        dispatch_count = int(conn.execute("SELECT COUNT(*) FROM sell_dispatches").fetchone()[0])
+        open_challenges: List[Dict[str, Any]] = []
+        latest_challenge = None
+        for row in challenges:
+            payload = json.loads(row["payload_json"] or "{}")
+            rec = {
+                "challenge_id": row["challenge_id"],
+                "state": row["state"],
+                "plan_hash": row["plan_hash"],
+                "batch_hash": row["batch_hash"],
+                "batch_id": row["batch_id"],
+                "expires_at": row["expires_at"],
+                "created_at": row["created_at"],
+                "payload": payload,
+            }
+            if latest_challenge is None:
+                latest_challenge = rec
+            if str(row["state"]) == "OPEN":
+                expired = str(row["expires_at"] or "") <= now.isoformat()
+                rec["expired"] = expired
+                open_challenges.append(rec)
+        latest_authority: Dict[str, Any] = {"state": "ABSENT"}
+        if authorities:
+            arow = authorities[0]
+            payload = json.loads(arow["payload_json"] or "{}")
+            st = str(arow["state"])
+            if st == "UNUSED" and str(arow["expires_at"] or "") <= now.isoformat():
+                latest_authority = {
+                    "state": "EXPIRED",
+                    "authority_id": arow["authority_id"],
+                    "payload": payload,
+                    "expires_at": arow["expires_at"],
+                    "single_use": bool(arow["single_use"]),
+                    "reason": "sqlite_authority_expired",
+                }
+            else:
+                latest_authority = {
+                    "state": st,
+                    "authority_id": arow["authority_id"],
+                    "payload": payload,
+                    "expires_at": arow["expires_at"],
+                    "single_use": bool(arow["single_use"]),
+                    "plan_hash": arow["plan_hash"],
+                    "batch_hash": arow["batch_hash"],
+                }
+        return {
+            "db_present": True,
+            "ok": True,
+            "reason": "ok",
+            "challenge_count": len(challenges),
+            "authority_count": len(authorities),
+            "dispatch_count": dispatch_count,
+            "open_challenges": open_challenges,
+            "latest_challenge": latest_challenge,
+            "latest_authority": latest_authority,
+        }
+    except sqlite3.Error:
+        empty["db_present"] = True
+        empty["ok"] = False
+        empty["reason"] = "sqlite_readonly_inspect_failed"
+        return empty
+    finally:
+        conn.close()
 
 
 def consume_authority_insert_dispatch(

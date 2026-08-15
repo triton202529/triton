@@ -56,9 +56,12 @@ NOW = SESSION_OPEN_NOW
 
 
 @pytest.fixture(autouse=True)
-def _safety(monkeypatch):
+def _safety(monkeypatch, tmp_path):
     block_real_network(monkeypatch)
     monkeypatch.delenv("TRITON_PAPER_SELL_ARM_STORE", raising=False)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
     from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
 
     _ACTIVE_PERMIT.set(None)
@@ -85,6 +88,7 @@ def _challenge_and_scope(tmp_path: Path):
         account_raw="acct-198iw",
         trading_date=NOW.date().isoformat(),
         now=NOW,
+        db_path=tmp_path / "paper_sell_arm.sqlite3",
     )
     return readiness, chal
 

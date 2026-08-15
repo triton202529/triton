@@ -585,6 +585,7 @@ def prepare_confirmation_challenge(
     trading_date: Optional[str] = None,
     now: Optional[datetime] = None,
     explicit_runtime_write: bool = False,
+    db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     BUTTON 1 semantics: issue confirmation challenge only.
@@ -666,15 +667,15 @@ def prepare_confirmation_challenge(
 
     from services.paper_sell_arm_store import (
         PaperSellArmStoreError,
-        db_path_for_store_root,
         persist_open_challenge,
+        resolve_runtime_sqlite_path,
         sqlite_permit_grade_enabled,
     )
 
     if sqlite_permit_grade_enabled():
         try:
             persist_open_challenge(
-                db_path_for_store_root(paths.root),
+                resolve_runtime_sqlite_path(db_path=db_path),
                 challenge=challenge,
                 now=now,
             )
@@ -763,6 +764,7 @@ def confirm_and_create_paper_sell_arm(
     newer_plan_exists: bool = False,
     now: Optional[datetime] = None,
     explicit_runtime_write: bool = False,
+    db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     BUTTON 2 semantics: create batch-specific paper sell authority.
@@ -916,14 +918,14 @@ def confirm_and_create_paper_sell_arm(
         PaperSellArmStoreError,
         batch_hash_from_scope,
         consume_challenge_and_create_authority,
-        db_path_for_store_root,
+        resolve_runtime_sqlite_path,
         sqlite_permit_grade_enabled,
     )
 
     if sqlite_permit_grade_enabled():
         try:
             stored = consume_challenge_and_create_authority(
-                db_path_for_store_root(paths.root),
+                resolve_runtime_sqlite_path(db_path=db_path),
                 challenge_id=str(challenge.get("challenge_id") or ""),
                 readiness_plan_hash=str(readiness_packet.get("plan_hash") or ""),
                 readiness_batch_id=str(readiness_packet.get("batch_id") or ""),

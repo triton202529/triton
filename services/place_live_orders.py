@@ -1571,6 +1571,7 @@ def enforce_and_consume_paper_sells_before_submit(
     live_override: Optional[Dict[str, Any]] = None,
     explicit_runtime_write: Optional[bool] = None,
     now: Optional[Any] = None,
+    db_path: Optional[Path] = None,
 ):
     """
     Phase 198I-FIX — real place_live_orders sell boundary (testable).
@@ -1592,7 +1593,9 @@ def enforce_and_consume_paper_sells_before_submit(
 
     root = store_root or LIVE_GOVERNANCE
     write_flag = (
-        True if explicit_runtime_write is None and root == LIVE_GOVERNANCE else bool(explicit_runtime_write)
+        True
+        if explicit_runtime_write is None and root == LIVE_GOVERNANCE
+        else bool(explicit_runtime_write)
     )
     broker_view = build_broker_view_from_runtime_snapshots(
         store_root=root,
@@ -1612,6 +1615,7 @@ def enforce_and_consume_paper_sells_before_submit(
         results_root=results_root,
         live_root=live_root,
         now=now,
+        db_path=db_path,
     )
     if not guard.permitted and guard.reason != NO_SELLS:
         raise PaperSellDispatchBlocked(guard.reason, guard.details)
@@ -2388,11 +2392,9 @@ def main() -> None:
         )
 
         try:
-            _sell_dispatch_guard, _sell_store_root = (
-                enforce_and_consume_paper_sells_before_submit(
-                    planned=planned,
-                    mode=mode,
-                )
+            _sell_dispatch_guard, _sell_store_root = enforce_and_consume_paper_sells_before_submit(
+                planned=planned,
+                mode=mode,
             )
         except PaperSellDispatchBlocked as blocked:
             die(

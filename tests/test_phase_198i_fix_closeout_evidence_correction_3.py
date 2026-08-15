@@ -55,8 +55,11 @@ from services.paper_sell_arm_runtime_enforcement import (
 
 
 @pytest.fixture(autouse=True)
-def _legacy_json_sell_arm_store(monkeypatch):
+def _legacy_json_sell_arm_store(monkeypatch, tmp_path):
     monkeypatch.setenv("TRITON_PAPER_SELL_ARM_STORE", "legacy_json_fail_closed")
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
 
 
 ET = ZoneInfo("America/New_York")

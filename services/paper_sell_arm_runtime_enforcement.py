@@ -83,6 +83,7 @@ class PaperSellDispatchPermit:
     symbols: Tuple[str, ...] = ()
     actions: Tuple[Tuple[str, str, float], ...] = ()  # (symbol, action, qty)
     permit_token: str = ""
+    sqlite_db_path: Optional[Path] = None
 
 
 _ACTIVE_PERMIT: ContextVar[Optional[PaperSellDispatchPermit]] = ContextVar(
@@ -114,6 +115,7 @@ def validate_runtime_sell_authority(
     now: Optional[datetime] = None,
     consumption_path: Optional[Path] = None,
     store_root: Optional[Path] = None,
+    db_path: Optional[Path] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """Sole runtime authority check: hardened 198H only on canonical path."""
     root = store_root or (contract_path.parent if contract_path else LIVE_GOVERNANCE)
@@ -139,8 +141,8 @@ def validate_runtime_sell_authority(
     details["contract_path"] = str(path)
     from services.paper_sell_arm_store import (
         PaperSellArmStoreError,
-        db_path_for_store_root,
         inspect_sqlite_authority,
+        resolve_runtime_sqlite_path,
         sqlite_permit_grade_enabled,
     )
 
@@ -148,7 +150,7 @@ def validate_runtime_sell_authority(
     if sqlite_applies:
         try:
             inspected = inspect_sqlite_authority(
-                db_path_for_store_root(root), now=now or _utc_now()
+                resolve_runtime_sqlite_path(db_path=db_path), now=now or _utc_now()
             )
         except PaperSellArmStoreError as exc:
             return False, exc.reason, {**details, **exc.details}
@@ -735,15 +737,15 @@ def enforce_paper_sell_broker_submission(
         )
     from services.paper_sell_arm_store import (
         PaperSellArmStoreError,
-        db_path_for_store_root,
         require_permit_sqlite_state,
+        resolve_runtime_sqlite_path,
         sqlite_permit_grade_enabled,
     )
 
     if sqlite_permit_grade_enabled():
         try:
             require_permit_sqlite_state(
-                db_path_for_store_root(permit.store_root),
+                resolve_runtime_sqlite_path(db_path=permit.sqlite_db_path),
                 dispatch_id=str(permit.dispatch_intent_id),
                 permit_token=str(permit.permit_token),
                 symbol=str(symbol or ""),
@@ -920,6 +922,7 @@ def begin_paper_sell_dispatch(
     results_root: Optional[Path] = None,
     live_root: Optional[Path] = None,
     activate_permit: bool = True,
+    db_path: Optional[Path] = None,
 ) -> DispatchGuardResult:
     """
     Final revalidation + durable dispatch intent + irreversible consumption.
@@ -938,6 +941,9 @@ def begin_paper_sell_dispatch(
         return DispatchGuardResult(True, NO_SELLS, {"skipped": True}, consumed=False)
 
     paths = _assert_writable_root(store_root, explicit_runtime_write=explicit_runtime_write)
+    from services.paper_sell_arm_store import resolve_runtime_sqlite_path as _resolve_sqlite
+
+    sqlite_path = _resolve_sqlite(db_path=db_path)
 
     # Preliminary independent evidence (diagnostic); race-sensitive fields reloaded in lock.
     prelim = broker_view or load_independent_runtime_evidence(
@@ -957,6 +963,7 @@ def begin_paper_sell_dispatch(
                 now=now,
                 consumption_path=paths.consumption,
                 store_root=paths.root,
+                db_path=sqlite_path,
             )
             if not ok:
                 append_audit(
@@ -966,16 +973,13 @@ def begin_paper_sell_dispatch(
                 return DispatchGuardResult(False, reason, details)
 
             from services.paper_sell_arm_store import (
-                db_path_for_store_root,
                 load_sqlite_authority_payload,
                 sqlite_permit_grade_enabled as _sqlite_enabled,
             )
 
             authority = _read_json(paths.authority)
             if _sqlite_enabled():
-                sqlite_doc = load_sqlite_authority_payload(
-                    db_path_for_store_root(paths.root), now=now
-                )
+                sqlite_doc = load_sqlite_authority_payload(sqlite_path, now=now)
                 if sqlite_doc:
                     authority = sqlite_doc
             req = requested_actions_from_planned(planned)
@@ -1167,7 +1171,7 @@ def begin_paper_sell_dispatch(
             if sqlite_permit_grade_enabled():
                 try:
                     committed = consume_authority_insert_dispatch(
-                        db_path_for_store_root(paths.root),
+                        sqlite_path,
                         authority_id=str(
                             authority.get("authority_id") or authority.get("audit_id") or ""
                         ),
@@ -1232,6 +1236,7 @@ def begin_paper_sell_dispatch(
                         (str(r["symbol"]), str(r["action"]), float(r["qty"])) for r in req
                     ),
                     permit_token=permit_token,
+                    sqlite_db_path=sqlite_path,
                 )
                 _write_durable_permit(permit, now=now, require_full_durability=False)
                 if activate_permit:
@@ -1287,6 +1292,7 @@ def begin_paper_sell_dispatch(
                         (str(r["symbol"]), str(r["action"]), float(r["qty"])) for r in req
                     ),
                     permit_token=permit_token,
+                    sqlite_db_path=sqlite_path,
                 )
                 _write_durable_permit(permit, now=now, require_full_durability=True)
             except DispatchDurabilityError as dur_exc:
@@ -1350,6 +1356,7 @@ def finalize_paper_sell_dispatch(
     outcome: str,
     explicit_runtime_write: bool = False,
     detail: Optional[Dict[str, Any]] = None,
+    db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Record terminal outcome. Never restores ARMED / UNUSED."""
     paths = _assert_writable_root(store_root, explicit_runtime_write=explicit_runtime_write)
@@ -1357,8 +1364,8 @@ def finalize_paper_sell_dispatch(
     intent = _read_json(intent_path)
     from services.paper_sell_arm_store import (
         PaperSellArmStoreError,
-        db_path_for_store_root,
         record_dispatch_outcome,
+        resolve_runtime_sqlite_path,
         sqlite_permit_grade_enabled,
     )
 
@@ -1376,7 +1383,7 @@ def finalize_paper_sell_dispatch(
         recon = sqlite_state == "OUTCOME_UNKNOWN"
         try:
             record_dispatch_outcome(
-                db_path_for_store_root(paths.root),
+                resolve_runtime_sqlite_path(db_path=db_path),
                 dispatch_id=str(intent.get("dispatch_intent_id") or ""),
                 outcome_state=sqlite_state,
                 broker_ref=str((detail or {}).get("broker_ref") or "") or None,

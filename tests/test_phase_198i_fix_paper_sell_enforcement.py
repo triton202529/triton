@@ -42,8 +42,12 @@ from services.paper_sell_arm_runtime_enforcement import (
 
 
 @pytest.fixture(autouse=True)
-def _dir_fsync_capable(monkeypatch):
+def _dir_fsync_capable(monkeypatch, tmp_path):
     stub_dir_fsync_ok(monkeypatch)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime(2026, 8, 11, 16, 0, 0, tzinfo=timezone.utc)
@@ -186,9 +190,7 @@ def _seed_store(tmp_path: Path, readiness=None, now=NOW):
     (tmp_path / "positions_snapshot.csv").write_text(
         "symbol,qty,qty_available\nTSLA,8,8\n", encoding="utf-8"
     )
-    (tmp_path / "open_orders_snapshot.csv").write_text(
-        "symbol,side,qty\n", encoding="utf-8"
-    )
+    (tmp_path / "open_orders_snapshot.csv").write_text("symbol,side,qty\n", encoding="utf-8")
     return readiness, chal, auth
 
 
@@ -460,9 +462,7 @@ def test_95_97_qty_independent(tmp_path: Path):
     g = begin_paper_sell_dispatch(
         store_root=tmp_path,
         planned=_planned(),
-        broker_view=_broker(
-            auth, positions={"TSLA": {"qty": 8.0, "qty_available": 2.0}}
-        ),
+        broker_view=_broker(auth, positions={"TSLA": {"qty": 8.0, "qty_available": 2.0}}),
         live_override=LIVE_BLOCKED,
         now=NOW + timedelta(minutes=1),
         results_root=tmp_path,
@@ -595,6 +595,7 @@ def test_99_100_concurrent_thread_single_broker_attempt(tmp_path: Path):
         encoding="utf-8",
     )
     assert not errors, errors
+
 
 def test_101_stale_armed_cannot_overwrite_consumed(tmp_path: Path):
     _, _, auth = _seed_store(tmp_path)
@@ -758,7 +759,9 @@ def test_115_117_buy_add_preservation(tmp_path: Path):
 
 def test_118_119_120_live_safety_dashboard_and_isolation():
     assert LIVE_APPROVAL_PATH.name == HARDENED_AUTHORITY_FILENAME
-    console = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8", errors="ignore")
+    console = (ROOT / "dashboard" / "operator_console.py").read_text(
+        encoding="utf-8", errors="ignore"
+    )
     ui = (ROOT / "dashboard" / "operator_ui.py").read_text(encoding="utf-8", errors="ignore")
     for needle in ("Arm Paper Buys", "Arm Reviewed Sells", "Confirm & Arm Paper Sells"):
         assert needle not in console and needle not in ui
@@ -781,9 +784,7 @@ def test_force_exit_requires_hardened_gate(tmp_path: Path):
     _, _, auth = _seed_store(tmp_path, readiness=readiness)
     # Missing authority / permit path: ungated FORCE_EXIT blocked
     with pytest.raises(PaperSellDispatchBlocked):
-        enforce_paper_sell_broker_submission(
-            mode="paper", side="sell", source="force_exit"
-        )
+        enforce_paper_sell_broker_submission(mode="paper", side="sell", source="force_exit")
     g = begin_paper_sell_dispatch(
         store_root=tmp_path,
         planned=_planned(action="FORCE_EXIT", force=True),
@@ -817,11 +818,26 @@ def test_fsync_atomic_write_invoked(tmp_path: Path, monkeypatch):
 
 # Mapping table for requirements 1–70 (covered by 198H/198I/FIX suites).
 REQUIREMENT_MAP = {
-    1: ("test_phase_198i_paper_sell_arm_runtime_enforcement.py", "test_missing_authority_blocks_each_sell_action"),
-    2: ("test_phase_198i_paper_sell_arm_runtime_enforcement.py", "test_legacy_197w_rejected_by_runtime_and_no_fallback"),
-    3: ("test_phase_198i_fix_paper_sell_enforcement.py", "test_113_114_place_live_orders_integration"),
-    4: ("test_phase_198i_paper_sell_arm_runtime_enforcement.py", "test_hardened_gate_permits_then_consumes_before_mock_submit"),
-    5: ("test_phase_198i_paper_sell_arm_runtime_enforcement.py", "test_authority_not_reusable_after_mock_outcomes"),
+    1: (
+        "test_phase_198i_paper_sell_arm_runtime_enforcement.py",
+        "test_missing_authority_blocks_each_sell_action",
+    ),
+    2: (
+        "test_phase_198i_paper_sell_arm_runtime_enforcement.py",
+        "test_legacy_197w_rejected_by_runtime_and_no_fallback",
+    ),
+    3: (
+        "test_phase_198i_fix_paper_sell_enforcement.py",
+        "test_113_114_place_live_orders_integration",
+    ),
+    4: (
+        "test_phase_198i_paper_sell_arm_runtime_enforcement.py",
+        "test_hardened_gate_permits_then_consumes_before_mock_submit",
+    ),
+    5: (
+        "test_phase_198i_paper_sell_arm_runtime_enforcement.py",
+        "test_authority_not_reusable_after_mock_outcomes",
+    ),
     71: (__file__, "test_71_caller_live_blocked_true_cannot_override_enabled"),
     75: (__file__, "test_75_76_77_legacy_writer_cannot_overwrite_shadow_or_reset"),
     79: (__file__, "test_79_86_ungated_helpers_blocked_without_permit"),

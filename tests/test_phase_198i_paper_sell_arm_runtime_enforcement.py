@@ -40,8 +40,11 @@ from services.paper_sell_arm_runtime_enforcement import (
 
 
 @pytest.fixture(autouse=True)
-def _dir_fsync_capable(monkeypatch):
+def _dir_fsync_capable(monkeypatch, tmp_path):
     stub_dir_fsync_ok(monkeypatch)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
 
 
 def begin_paper_sell_dispatch(**kwargs):
@@ -373,9 +376,7 @@ def test_hardened_gate_permits_then_consumes_before_mock_submit(tmp_path: Path):
     assert guard.permitted and guard.consumed
     assert len(mb.calls) == 1
     assert outcome == "SUCCESS"
-    loaded = json.loads(
-        (tmp_path / "paper_sell_arm_authority.json").read_text(encoding="utf-8")
-    )
+    loaded = json.loads((tmp_path / "paper_sell_arm_authority.json").read_text(encoding="utf-8"))
     assert loaded["consumption_status"] == "CONSUMED"
     ok, reason, _ = validate_paper_sell_arm_authority(loaded)
     assert not ok
@@ -503,9 +504,7 @@ def test_supersession_open_order_available_qty(tmp_path: Path):
     g3 = begin_paper_sell_dispatch(
         store_root=tmp_path,
         planned=_planned(),
-        broker_view=_broker(
-            auth, positions={"TSLA": {"qty": 8.0, "qty_available": 3.0}}
-        ),
+        broker_view=_broker(auth, positions={"TSLA": {"qty": 8.0, "qty_available": 3.0}}),
         mode="paper",
         readiness_packet_hash_current=str(auth.get("readiness_packet_hash")),
         now=NOW + timedelta(minutes=1),
@@ -659,9 +658,7 @@ def test_cli_cap_breach_blocked_at_dispatch(tmp_path: Path):
     )
     # Arm with under-cap scope then try over-cap planned notional via price
     _, _, auth = _arm(tmp_path, readiness=readiness)
-    planned = [
-        FakePlanned("BITO", "sell", 100, 60.0, stance="EXIT", client_order_id="bito")
-    ]
+    planned = [FakePlanned("BITO", "sell", 100, 60.0, stance="EXIT", client_order_id="bito")]
     g = begin_paper_sell_dispatch(
         store_root=tmp_path,
         planned=planned,

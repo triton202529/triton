@@ -36,10 +36,13 @@ from services.paper_sell_arm_runtime_enforcement import (
 
 
 @pytest.fixture(autouse=True)
-def _dir_fsync_capable(monkeypatch):
+def _dir_fsync_capable(monkeypatch, tmp_path):
     # Isolation tests below re-monkeypatch os.fsync / _fsync_dir for failure cases.
     monkeypatch.setenv("TRITON_PAPER_SELL_ARM_STORE", "legacy_json_fail_closed")
     stub_dir_fsync_ok(monkeypatch)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
 
 
 NOW = datetime(2026, 8, 11, 16, 0, 0, tzinfo=timezone.utc)

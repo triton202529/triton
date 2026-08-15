@@ -35,8 +35,12 @@ from services.paper_sell_arm_runtime_enforcement import (
 
 
 @pytest.fixture(autouse=True)
-def _dir_fsync_capable(monkeypatch):
+def _dir_fsync_capable(monkeypatch, tmp_path):
     stub_dir_fsync_ok(monkeypatch)
+    import services.paper_sell_arm_store as store_mod
+
+    monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
+
 
 NOW = datetime(2026, 8, 11, 16, 0, 0, tzinfo=timezone.utc)
 LIVE_BLOCKED = {
@@ -87,6 +91,10 @@ def _readiness():
     }
 
 
+def _db(store: Path) -> Path:
+    return Path(store) / "paper_sell_arm.sqlite3"
+
+
 def _seed(store: Path) -> Dict[str, Any]:
     readiness = _readiness()
     (store / "paper_arm_confirm.json").write_text(
@@ -106,6 +114,7 @@ def _seed(store: Path) -> Dict[str, Any]:
         account_raw="acct-cp",
         trading_date="2026-08-11",
         now=NOW,
+        db_path=_db(store),
     )
     auth = confirm_and_create_paper_sell_arm(
         store_root=store,
@@ -114,6 +123,7 @@ def _seed(store: Path) -> Dict[str, Any]:
         operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
         current_plan_hash=readiness["plan_hash"],
         now=NOW,
+        db_path=_db(store),
     )
     (store / "independent_dispatch_bindings.json").write_text(
         json.dumps(
@@ -193,6 +203,7 @@ def _worker(store_s: str, result_s: str, barrier, worker_id: int) -> None:
             results_root=store,
             live_root=store,
             explicit_runtime_write=False,
+            db_path=_db(store),
         )
         out["permitted"] = bool(guard.permitted)
         out["reason"] = guard.reason
@@ -208,7 +219,9 @@ def _worker(store_s: str, result_s: str, barrier, worker_id: int) -> None:
             assert intent_p.is_file(), "intent missing at fake broker"
             assert permit_p.is_file(), "permit missing at fake broker"
             auth_doc = json.loads(auth_p.read_text(encoding="utf-8"))
-            assert auth_doc.get("consumption_status") == "CONSUMED", "authority irreversibly non-reusable"
+            assert (
+                auth_doc.get("consumption_status") == "CONSUMED"
+            ), "authority irreversibly non-reusable"
             intent_doc = json.loads(intent_p.read_text(encoding="utf-8"))
             permit_doc = json.loads(permit_p.read_text(encoding="utf-8"))
             cons_doc = json.loads(cons_p.read_text(encoding="utf-8"))
@@ -217,12 +230,18 @@ def _worker(store_s: str, result_s: str, barrier, worker_id: int) -> None:
                 "INTENT_RECORDED_PRE_SUBMIT",
                 "INTENT_RECORDED",
             } or intent_doc.get("dispatch_intent_id"), "intent exists"
-            assert cons_doc.get("result") in {"STARTED", "SUCCESS", "CONSUMED"} or cons_doc.get(
-                "consumption_status"
-            ) == "CONSUMED" or cons_p.is_file(), "consumption/reservation exists"
+            assert (
+                cons_doc.get("result") in {"STARTED", "SUCCESS", "CONSUMED"}
+                or cons_doc.get("consumption_status") == "CONSUMED"
+                or cons_p.is_file()
+            ), "consumption/reservation exists"
             assert permit_doc.get("dispatch_intent_id") == intent_doc.get("dispatch_intent_id")
-            assert str(auth_doc.get("account_fingerprint")) == str(auth.get("account_fingerprint")), "account fingerprint"
-            assert str(auth_doc.get("trading_date")) == str(auth.get("trading_date")), "trading date"
+            assert str(auth_doc.get("account_fingerprint")) == str(
+                auth.get("account_fingerprint")
+            ), "account fingerprint"
+            assert str(auth_doc.get("trading_date")) == str(
+                auth.get("trading_date")
+            ), "trading date"
             assert str(auth_doc.get("cycle_id")) == str(auth.get("cycle_id")), "cycle id"
             assert str(auth_doc.get("run_id")) == str(auth.get("run_id")), "run id"
             assert str(auth_doc.get("batch_id")) == str(auth.get("batch_id")), "batch id"
@@ -237,7 +256,11 @@ def _worker(store_s: str, result_s: str, barrier, worker_id: int) -> None:
             actions = permit_doc.get("actions") or intent_doc.get("actions") or []
             assert any(
                 (isinstance(a, (list, tuple)) and a and str(a[0]) == "TSLA")
-                or (isinstance(a, dict) and a.get("symbol") == "TSLA" and str(a.get("action", "")).upper() in {"EXIT", "SELL"})
+                or (
+                    isinstance(a, dict)
+                    and a.get("symbol") == "TSLA"
+                    and str(a.get("action", "")).upper() in {"EXIT", "SELL"}
+                )
                 for a in actions
             ) or "TSLA" in (permit_doc.get("symbols") or []), "action/symbol"
             assert "TSLA" in (permit_doc.get("symbols") or []), "symbol"
@@ -248,11 +271,16 @@ def _worker(store_s: str, result_s: str, barrier, worker_id: int) -> None:
                 if isinstance(a, dict) and float(a.get("qty") or 0) == 8.0:
                     qty_ok = True
             assert qty_ok is True, "quantity matches 8.0"
-            assert (store / "fake_broker_attempts.jsonl").exists() is False, "no prior broker attempt"
+            assert (
+                store / "fake_broker_attempts.jsonl"
+            ).exists() is False, "no prior broker attempt"
             bind = json.loads(
                 (store / "independent_dispatch_bindings.json").read_text(encoding="utf-8")
             )
-            assert str(bind.get("market_session")).upper() in {"MARKET_OPEN", "OPEN"}, "market session current"
+            assert str(bind.get("market_session")).upper() in {
+                "MARKET_OPEN",
+                "OPEN",
+            }, "market session current"
             client_order_id = "coid-cp-1"
             out["exact_assertions_executed"] = [
                 'assert cons_p.is_file(), "consumption missing at fake broker"',
@@ -271,7 +299,7 @@ def _worker(store_s: str, result_s: str, barrier, worker_id: int) -> None:
                 'assert str(auth_doc.get("plan_hash")) == str(auth.get("plan_hash")), "plan hash"',
                 'assert str(auth_doc.get("audit_id")) == str(auth.get("audit_id")), "authority id"',
                 'assert str(intent_doc.get("dispatch_intent_id")) == str(permit_doc.get("dispatch_intent_id")), "intent id"',
-                'assert action/symbol TSLA EXIT present in permit/intent actions',
+                "assert action/symbol TSLA EXIT present in permit/intent actions",
                 'assert "TSLA" in (permit_doc.get("symbols") or []), "symbol"',
                 'assert qty_ok is True, "quantity matches 8.0"',
                 'assert client_order_id == "coid-cp-1"',
@@ -303,7 +331,10 @@ def _worker(store_s: str, result_s: str, barrier, worker_id: int) -> None:
             out["client_order_id"] = "coid-cp-1"
             out["fake_broker_assertions"] = "passed"
             finalize_paper_sell_dispatch(
-                store_root=store, outcome="SUCCESS", explicit_runtime_write=False
+                store_root=store,
+                outcome="SUCCESS",
+                explicit_runtime_write=False,
+                db_path=_db(store),
             )
     except PaperSellDispatchBlocked as exc:
         out["blocked"] = exc.reason
@@ -348,9 +379,7 @@ def test_cross_process_single_broker_attempt(tmp_path: Path):
 
     auth_after = json.loads((store / HARDENED_AUTHORITY_FILENAME).read_text(encoding="utf-8"))
     assert auth_after.get("consumption_status") == "CONSUMED"
-    intent = json.loads(
-        (store / "paper_sell_arm_dispatch_intent.json").read_text(encoding="utf-8")
-    )
+    intent = json.loads((store / "paper_sell_arm_dispatch_intent.json").read_text(encoding="utf-8"))
     assert intent.get("dispatch_intent_id")
     # Restart recovery: second begin fails closed
     g = begin_paper_sell_dispatch(
@@ -361,6 +390,7 @@ def test_cross_process_single_broker_attempt(tmp_path: Path):
         now=NOW + timedelta(minutes=2),
         results_root=store,
         live_root=store,
+        db_path=_db(store),
     )
     assert not g.permitted
 
@@ -378,6 +408,7 @@ def test_permit_cannot_replay_extra_symbol_or_qty(tmp_path: Path):
         now=NOW + timedelta(minutes=1),
         results_root=store,
         live_root=store,
+        db_path=_db(store),
     )
     assert g.consumed
     assert (store / DURABLE_PERMIT_NAME).is_file()
@@ -427,6 +458,7 @@ def test_crash_after_intent_before_broker_nonreusable(tmp_path: Path):
         now=NOW + timedelta(minutes=1),
         results_root=store,
         live_root=store,
+        db_path=_db(store),
     )
     assert g.consumed
     # Simulate crash: clear in-memory permit, do not call broker
@@ -441,6 +473,7 @@ def test_crash_after_intent_before_broker_nonreusable(tmp_path: Path):
         now=NOW + timedelta(minutes=2),
         results_root=store,
         live_root=store,
+        db_path=_db(store),
     )
     assert not g2.permitted
     with pytest.raises(PaperSellDispatchBlocked):
@@ -484,6 +517,7 @@ def test_fake_broker_sees_durable_consumption_before_submit(tmp_path: Path):
         live_override=LIVE_BLOCKED,
         explicit_runtime_write=False,
         now=NOW + timedelta(minutes=1),
+        db_path=_db(store),
     )
     assert guard and guard.consumed
     FakeBroker().submit_order(symbol="TSLA", qty=8, side="sell", client_order_id="c1")
