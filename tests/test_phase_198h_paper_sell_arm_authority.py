@@ -245,9 +245,7 @@ def test_expired_challenge_and_authority_rejected(tmp_path: Path):
         now=past,
         current_plan_hash=readiness["plan_hash"],
     )
-    ok, reason, _ = validate_paper_sell_arm_authority(
-        auth, now=past + timedelta(minutes=16)
-    )
+    ok, reason, _ = validate_paper_sell_arm_authority(auth, now=past + timedelta(minutes=16))
     assert not ok
     assert reason == "authority_expired"
 
@@ -389,9 +387,7 @@ def test_supersession_position_open_order_qty_caps(tmp_path: Path):
 
     ok2, reason2, _ = revalidate_before_dispatch(
         auth,
-        broker=_broker_for_auth(
-            auth, positions={"TSLA": {"qty": 7.0, "qty_available": 7.0}}
-        ),
+        broker=_broker_for_auth(auth, positions={"TSLA": {"qty": 7.0, "qty_available": 7.0}}),
         requested_actions=req,
         readiness_packet_hash_current=rhash,
         now=FROZEN_NOW,
@@ -400,16 +396,12 @@ def test_supersession_position_open_order_qty_caps(tmp_path: Path):
 
     ok3, reason3, _ = revalidate_before_dispatch(
         auth,
-        broker=_broker_for_auth(
-            auth, positions={"TSLA": {"qty": 8.0, "qty_available": 5.0}}
-        ),
+        broker=_broker_for_auth(auth, positions={"TSLA": {"qty": 8.0, "qty_available": 5.0}}),
         requested_actions=req,
         readiness_packet_hash_current=rhash,
         now=FROZEN_NOW,
     )
-    assert not ok3 and (
-        "available_qty_insufficient" in reason3 or "shares_reserved" in reason3
-    )
+    assert not ok3 and ("available_qty_insufficient" in reason3 or "shares_reserved" in reason3)
 
     ok4, reason4, _ = revalidate_before_dispatch(
         auth,
@@ -509,9 +501,7 @@ def test_consumed_authority_and_indeterminate_cannot_reuse(tmp_path: Path):
         store_root=tmp_path, authority=auth, result="INDETERMINATE"
     )
     assert cons["consumption_rule"] == "CONSUME_ON_FIRST_DISPATCH_ATTEMPT"
-    loaded = json.loads(
-        (tmp_path / "paper_sell_arm_authority.json").read_text(encoding="utf-8")
-    )
+    loaded = json.loads((tmp_path / "paper_sell_arm_authority.json").read_text(encoding="utf-8"))
     ok, reason, _ = validate_paper_sell_arm_authority(loaded, consumption=cons)
     assert not ok
     ok2, reason2, _ = validate_paper_sell_arm_authority(loaded)
@@ -603,15 +593,9 @@ def test_no_runtime_artifact_touched_by_tests():
 
 
 def test_state_machine_no_direct_jump_to_armed():
-    assert not allowed_transition(
-        SellArmState.REVIEW_REQUIRED, SellArmState.ARMED
-    )
-    assert not allowed_transition(
-        SellArmState.READY_FOR_CONFIRMATION, SellArmState.ARMED
-    )
-    assert allowed_transition(
-        SellArmState.CONFIRMATION_CHALLENGE_ISSUED, SellArmState.ARMED
-    )
+    assert not allowed_transition(SellArmState.REVIEW_REQUIRED, SellArmState.ARMED)
+    assert not allowed_transition(SellArmState.READY_FOR_CONFIRMATION, SellArmState.ARMED)
+    assert allowed_transition(SellArmState.CONFIRMATION_CHALLENGE_ISSUED, SellArmState.ARMED)
 
 
 def test_hardened_authority_can_pass_approval_gate_in_isolation(tmp_path: Path, monkeypatch):
@@ -671,9 +655,7 @@ def test_hardened_authority_can_pass_approval_gate_in_isolation(tmp_path: Path, 
     assert auth["orders_submitted"] is False
 
 
-def test_hardened_authority_interlock_blocks_when_order_guard_missing(
-    tmp_path: Path, monkeypatch
-):
+def test_hardened_authority_interlock_blocks_when_order_guard_missing(tmp_path: Path, monkeypatch):
     from services.defensive_exit_dispatch_interlock import (
         DISPATCH_BLOCKED_ORDER_GUARD,
         evaluate_defensive_exit_dispatch_interlock,
@@ -692,24 +674,26 @@ def test_hardened_authority_interlock_blocks_when_order_guard_missing(
     assert result.get("broker_orders_submitted") is False
 
 
-def test_hardened_authority_at_isolated_path_passes_order_guard_gate(
-    tmp_path: Path, monkeypatch
-):
+def test_hardened_authority_at_isolated_path_passes_order_guard_gate(tmp_path: Path, monkeypatch):
     from services.defensive_exit_dispatch_interlock import (
         DISPATCH_BLOCKED_ORDER_GUARD,
         evaluate_defensive_exit_dispatch_interlock,
     )
     import services.paper_sell_arm_authority as auth_mod
+    import services.paper_sell_arm_runtime_enforcement as enf_mod
     from tests._phase_198i_interlock_test_fixtures import (
-        create_test_only_hardened_authority,
+        create_sqlite_sell_arm_via_public_apis,
         install_hermetic_interlock,
         write_valid_order_guard_fixture,
     )
 
     monkeypatch.setattr(auth_mod, "_utc_now", lambda: FROZEN_NOW)
+    monkeypatch.setattr(enf_mod, "_utc_now", lambda: FROZEN_NOW)
     roots = install_hermetic_interlock(monkeypatch, tmp_path)
     write_valid_order_guard_fixture(roots["results"])
-    create_test_only_hardened_authority(tmp_path, roots["hardened"], now=FROZEN_NOW)
+    create_sqlite_sell_arm_via_public_apis(
+        roots["gov"], now=FROZEN_NOW, explicit_runtime_write=True
+    )
     result = evaluate_defensive_exit_dispatch_interlock(
         mode="paper",
         broker_snapshot_ok=True,

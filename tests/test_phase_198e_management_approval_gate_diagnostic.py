@@ -38,7 +38,7 @@ def test_paper_arm_path_is_distinct_from_defensive_exit_approval_path():
     assert "paper_arm" in arm.lower() or "classify_paper_arm" in arm
     assert "paper_arm_confirm" not in interlock
     assert "paper_sell_arm_authority.json" in interlock
-    assert "REAL_APPROVAL_PATH = GOVERNANCE / \"paper_sell_arm_authority.json\"" in interlock
+    assert 'REAL_APPROVAL_PATH = GOVERNANCE / "paper_sell_arm_authority.json"' in interlock
 
 
 def test_operator_approval_packet_documents_explicit_artifact_requirement():
@@ -92,9 +92,7 @@ def test_live_interlock_evaluation_is_fail_closed_when_artifact_absent(tmp_path,
     assert "real_approval_artifact_absent" in reason or "approval_contract_missing" in reason
 
 
-def test_live_interlock_with_guard_and_hardened_authority_reaches_later_gate(
-    tmp_path, monkeypatch
-):
+def test_live_interlock_with_guard_and_hardened_authority_reaches_later_gate(tmp_path, monkeypatch):
     from datetime import datetime, timezone
 
     from services.defensive_exit_dispatch_interlock import (
@@ -102,13 +100,17 @@ def test_live_interlock_with_guard_and_hardened_authority_reaches_later_gate(
         evaluate_defensive_exit_dispatch_interlock,
     )
     import services.paper_sell_arm_authority as auth_mod
-    from tests._phase_198i_interlock_test_fixtures import create_test_only_hardened_authority
+    import services.paper_sell_arm_runtime_enforcement as enf_mod
+    from tests._phase_198i_interlock_test_fixtures import (
+        create_sqlite_sell_arm_via_public_apis,
+    )
 
     frozen = datetime(2026, 8, 11, 15, 0, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(auth_mod, "_utc_now", lambda: frozen)
+    monkeypatch.setattr(enf_mod, "_utc_now", lambda: frozen)
     roots = install_hermetic_interlock(monkeypatch, tmp_path)
     write_valid_order_guard_fixture(roots["results"])
-    create_test_only_hardened_authority(tmp_path, roots["hardened"], now=frozen)
+    create_sqlite_sell_arm_via_public_apis(roots["gov"], now=frozen, explicit_runtime_write=True)
     assert roots["hardened"].is_file()
     result = evaluate_defensive_exit_dispatch_interlock(
         mode="paper",

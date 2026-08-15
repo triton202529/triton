@@ -38,7 +38,9 @@ from services.paper_sell_arm_runtime_enforcement import (
 @pytest.fixture(autouse=True)
 def _dir_fsync_capable(monkeypatch):
     # Isolation tests below re-monkeypatch os.fsync / _fsync_dir for failure cases.
+    monkeypatch.setenv("TRITON_PAPER_SELL_ARM_STORE", "legacy_json_fail_closed")
     stub_dir_fsync_ok(monkeypatch)
+
 
 NOW = datetime(2026, 8, 11, 16, 0, 0, tzinfo=timezone.utc)
 LIVE_BLOCKED = {
@@ -234,9 +236,10 @@ def test_crash_split_intent_exists_authority_still_armed_fails_closed(tmp_path: 
         live_root=store,
     )
     assert not g2.permitted
-    assert json.loads(intent_path.read_text(encoding="utf-8")).get(
-        "dispatch_intent_id"
-    ) == "sell-dispatch-split-injected"
+    assert (
+        json.loads(intent_path.read_text(encoding="utf-8")).get("dispatch_intent_id")
+        == "sell-dispatch-split-injected"
+    )
     with pytest.raises(PaperSellDispatchBlocked):
         enforce_paper_sell_broker_submission(
             mode="paper", side="sell", source="split_recovery", symbol="TSLA", qty=8.0
@@ -311,7 +314,9 @@ def test_corrupt_or_incomplete_intent_blocks_and_does_not_create_second_intent(
     after = intent_path.read_bytes()
     if label != "corrupt":
         # For structured incomplete/conflict, file may be left as-is (not replaced with new id).
-        assert b"sell-dispatch-" not in after or b"OTHER_KEY" in after or b"INTENT_RECORDED" in after
+        assert (
+            b"sell-dispatch-" not in after or b"OTHER_KEY" in after or b"INTENT_RECORDED" in after
+        )
     # Authority non-reusable after prior-intent evidence.
     post_auth = json.loads((store / HARDENED_AUTHORITY_FILENAME).read_text(encoding="utf-8"))
     assert post_auth.get("consumption_status") == "CONSUMED"
@@ -365,6 +370,9 @@ def test_legacy_auto_exit_auto_trade_sells_require_raw_gate(monkeypatch, tmp_pat
 
     # Behavioral: invoke gate as those scripts must before sell submit.
     from services.paper_sell_raw_path_gate import gate_raw_paper_sell
+    from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
+
+    _ACTIVE_PERMIT.set(None)
 
     with pytest.raises(PaperSellDispatchBlocked):
         gate_raw_paper_sell(

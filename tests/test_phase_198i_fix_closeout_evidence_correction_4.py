@@ -55,6 +55,12 @@ from services.paper_sell_arm_runtime_enforcement import (
     enforce_paper_sell_broker_submission,
 )
 
+
+@pytest.fixture(autouse=True)
+def _legacy_json_sell_arm_store(monkeypatch):
+    monkeypatch.setenv("TRITON_PAPER_SELL_ARM_STORE", "legacy_json_fail_closed")
+
+
 ET = ZoneInfo("America/New_York")
 LIVE_BLOCKED = {
     "live_blocked": True,
@@ -67,7 +73,7 @@ LIVE_BLOCKED = {
 # Exact pre-fix lines reconstructed for isolated RED fixture only.
 # Source: Correction-3 pre-change production behavior in durability_meets_dispatch_standard:
 #   if sys.platform == "win32": return True  # after file_fsync_ok
-PRE_FIX_DURABILITY_MEETS_SOURCE = '''
+PRE_FIX_DURABILITY_MEETS_SOURCE = """
 def durability_meets_dispatch_standard(meta):
     if meta.get("flush_ok") is False:
         return False
@@ -76,7 +82,7 @@ def durability_meets_dispatch_standard(meta):
     if sys.platform == "win32":
         return True
     return bool(meta.get("dir_fsync_ok"))
-'''.strip()
+""".strip()
 
 
 @dataclass
@@ -332,9 +338,7 @@ def _run_dispatch_under_dir_failure(store: Path, auth: Dict[str, Any], now: date
     }
 
 
-def test_directory_durability_uncertainty_blocks_permit_and_broker(
-    tmp_path: Path, monkeypatch
-):
+def test_directory_durability_uncertainty_blocks_permit_and_broker(tmp_path: Path, monkeypatch):
     """
     SAME TEST used for red (TRITON_198I_EVCORR5_RED=1) and green (default).
 
@@ -346,15 +350,14 @@ def test_directory_durability_uncertainty_blocks_permit_and_broker(
     now = datetime(2026, 8, 11, 15, 0, 0, tzinfo=ET).astimezone(timezone.utc)
     auth = _seed(store, now=now)
 
-    red_mode = os.environ.get("TRITON_198I_EVCORR5_RED") == "1" or os.environ.get(
-        "TRITON_198I_EVCORR4_RED"
-    ) == "1"
+    red_mode = (
+        os.environ.get("TRITON_198I_EVCORR5_RED") == "1"
+        or os.environ.get("TRITON_198I_EVCORR4_RED") == "1"
+    )
     if red_mode:
         _install_pre_fix_windows_exception(monkeypatch)
         src = Path(auth_mod.__file__).read_text(encoding="utf-8")
-        assert "if sys.platform == \"win32\":\n        return False" in src.replace(
-            "\r\n", "\n"
-        )
+        assert 'if sys.platform == "win32":\n        return False' in src.replace("\r\n", "\n")
 
     observed: Dict[str, Any] = {}
     _inject_directory_only_failure(monkeypatch, observed)

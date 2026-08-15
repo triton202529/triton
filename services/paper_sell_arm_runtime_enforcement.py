@@ -137,6 +137,75 @@ def validate_runtime_sell_authority(
             if collision:
                 return False, f"authority_path_collision:{creason}", details
     details["contract_path"] = str(path)
+    from services.paper_sell_arm_store import (
+        PaperSellArmStoreError,
+        db_path_for_store_root,
+        inspect_sqlite_authority,
+        sqlite_permit_grade_enabled,
+    )
+
+    sqlite_applies = sqlite_permit_grade_enabled() and path.name == HARDENED_AUTHORITY_FILENAME
+    if sqlite_applies:
+        try:
+            inspected = inspect_sqlite_authority(
+                db_path_for_store_root(root), now=now or _utc_now()
+            )
+        except PaperSellArmStoreError as exc:
+            return False, exc.reason, {**details, **exc.details}
+        st = str(inspected.get("state") or "ABSENT")
+        if st == "UNUSED":
+            sqlite_doc = inspected.get("payload") or {}
+            details["authority_source"] = "sqlite"
+            details["json_role"] = "AUDIT_EXPORT_ONLY"
+            details["authority_type"] = sqlite_doc.get("authority_type")
+            details["schema_version"] = sqlite_doc.get("schema_version")
+            ok, reason, hdetails = validate_paper_sell_arm_authority(
+                sqlite_doc, now=now, consumption=None
+            )
+            details.update(hdetails)
+            return ok, reason, details
+        if st == "EXPIRED":
+            return False, "sqlite_authority_expired", {**details, "json_role": "AUDIT_EXPORT_ONLY"}
+        if st == "CONSUMED":
+            return False, "authority_consumed", {**details, "json_role": "AUDIT_EXPORT_ONLY"}
+        if st in {"RESTRICTED", "REVOKED"}:
+            return (
+                False,
+                f"sqlite_authority_{st.lower()}",
+                {**details, "json_role": "AUDIT_EXPORT_ONLY"},
+            )
+        # ABSENT: classify JSON for diagnostics, never grant a permit.
+        if not path.is_file():
+            return False, "approval_contract_missing", details
+        doc = _read_json(path)
+        details["authority_type"] = doc.get("authority_type")
+        details["schema_version"] = doc.get("schema_version")
+        details["json_role"] = "AUDIT_EXPORT_ONLY"
+        details["authority_source"] = "legacy_json_non_authoritative"
+        if looks_like_legacy_197w_approval(doc):
+            return False, LEGACY_197W_RETIRED, details
+        if not is_hardened_sell_arm_contract(doc):
+            return False, HARDENED_REQUIRED, details
+        consumption = _read_json(consumption_path) if consumption_path else None
+        if consumption is None:
+            sibling = path.parent / "paper_sell_arm_consumption.json"
+            if sibling.is_file():
+                consumption = _read_json(sibling)
+        ok, reason, hdetails = validate_paper_sell_arm_authority(
+            doc, now=now, consumption=consumption or None
+        )
+        details.update(hdetails)
+        if ok:
+            return (
+                False,
+                "legacy_json_not_broker_usable",
+                {
+                    **details,
+                    "hint": "re_arm_required_sqlite_is_source_of_truth",
+                },
+            )
+        return False, reason, details
+
     if not path.is_file():
         return False, "approval_contract_missing", details
     # Runtime never treats the deprecated shared filename as a valid hardened path
@@ -191,9 +260,7 @@ def requested_actions_from_planned(planned: Sequence[Any]) -> List[Dict[str, Any
             action = "FORCE_EXIT"
         sym = str(getattr(p, "symbol", "") or "").upper()
         qty = float(getattr(p, "qty", 0) or 0)
-        price = float(
-            getattr(p, "limit_price", None) or getattr(p, "ref_price", None) or 0
-        )
+        price = float(getattr(p, "limit_price", None) or getattr(p, "ref_price", None) or 0)
         out.append(
             {
                 "symbol": sym,
@@ -249,9 +316,7 @@ def _acquire_lock(store_root: Path) -> Any:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
         fh.close()
-        raise PaperSellDispatchBlocked(
-            "dispatch_lock_unavailable", {"error": str(exc)}
-        ) from exc
+        raise PaperSellDispatchBlocked("dispatch_lock_unavailable", {"error": str(exc)}) from exc
     return fh
 
 
@@ -396,10 +461,16 @@ def load_independent_runtime_evidence(
     if bind:
         plan_hash = str(bind.get("plan_hash") or plan_hash or "") or plan_hash
 
-    cycle_id = str(bind.get("cycle_id") or plan.get("cycle_id") or readiness.get("cycle_id") or "") or None
+    cycle_id = (
+        str(bind.get("cycle_id") or plan.get("cycle_id") or readiness.get("cycle_id") or "") or None
+    )
     run_id = str(bind.get("run_id") or plan.get("run_id") or readiness.get("run_id") or "") or None
-    batch_id = str(bind.get("batch_id") or plan.get("batch_id") or readiness.get("batch_id") or "") or None
-    plan_id = str(bind.get("plan_id") or plan.get("plan_id") or readiness.get("plan_id") or "") or None
+    batch_id = (
+        str(bind.get("batch_id") or plan.get("batch_id") or readiness.get("batch_id") or "") or None
+    )
+    plan_id = (
+        str(bind.get("plan_id") or plan.get("plan_id") or readiness.get("plan_id") or "") or None
+    )
     if bind.get("plan_hash"):
         plan_hash = str(bind.get("plan_hash"))
     if bind.get("readiness_packet_hash"):
@@ -458,8 +529,7 @@ def load_independent_runtime_evidence(
         account_fingerprint=acct,
         current_plan_hash=plan_hash,
         newer_completed_plan=bool(newer_completed_plan),
-        market_session=market_session
-        or str(bind.get("market_session") or ""),
+        market_session=market_session or str(bind.get("market_session") or ""),
         paper_buy_arm_valid=paper_arm_ok,
         paper_execution_authorized=paper_arm_ok or bool(bind.get("paper_execution_authorized")),
         cycle_id=cycle_id,
@@ -467,7 +537,9 @@ def load_independent_runtime_evidence(
         batch_id=batch_id,
         plan_id=plan_id,
         readiness_packet_hash=readiness_hash,
-        confirmation_challenge_id=str(challenge.get("challenge_id") or bind.get("confirmation_challenge_id") or "")
+        confirmation_challenge_id=str(
+            challenge.get("challenge_id") or bind.get("confirmation_challenge_id") or ""
+        )
         or None,
         confirmation_challenge_hash=str(
             challenge.get("challenge_hash") or bind.get("confirmation_challenge_hash") or ""
@@ -505,9 +577,7 @@ def _write_durable_permit(
         "dispatch_intent_id": permit.dispatch_intent_id,
         "idempotency_key": permit.idempotency_key,
         "symbols": list(permit.symbols),
-        "actions": [
-            {"symbol": s, "action": a, "qty": q} for s, a, q in permit.actions
-        ],
+        "actions": [{"symbol": s, "action": a, "qty": q} for s, a, q in permit.actions],
         "symbols_submitted": [],
         "issued_at": now.isoformat(),
         "replay_forbidden": True,
@@ -663,6 +733,52 @@ def enforce_paper_sell_broker_submission(
                 "hint": "call begin_paper_sell_dispatch before broker submit",
             },
         )
+    from services.paper_sell_arm_store import (
+        PaperSellArmStoreError,
+        db_path_for_store_root,
+        require_permit_sqlite_state,
+        sqlite_permit_grade_enabled,
+    )
+
+    if sqlite_permit_grade_enabled():
+        try:
+            require_permit_sqlite_state(
+                db_path_for_store_root(permit.store_root),
+                dispatch_id=str(permit.dispatch_intent_id),
+                permit_token=str(permit.permit_token),
+                symbol=str(symbol or ""),
+                qty=qty,
+            )
+        except PaperSellArmStoreError as exc:
+            mapped = {
+                "sqlite_permit_symbol_already_submitted": "paper_sell_permit_symbol_already_submitted",
+                "sqlite_permit_symbol_not_authorized": "paper_sell_permit_symbol_not_authorized",
+                "sqlite_permit_quantity_exceeds_authorized": "paper_sell_permit_quantity_exceeds_authorized",
+                "sqlite_permit_symbol_required": "paper_sell_permit_symbol_required",
+                "sqlite_dispatch_not_committed": "paper_sell_durable_consumption_missing_at_submit",
+                "sqlite_authority_not_consumed_at_submit": "paper_sell_authority_not_consumed_at_submit",
+            }.get(exc.reason, exc.reason)
+            raise PaperSellDispatchBlocked(
+                mapped, {**exc.details, "source": source, "sqlite_reason": exc.reason}
+            ) from exc
+        durable_path = _durable_permit_path(permit.store_root)
+        if durable_path.is_file():
+            durable = _read_json(durable_path)
+            if str(durable.get("permit_token") or "") != str(permit.permit_token):
+                raise PaperSellDispatchBlocked(
+                    "paper_sell_permit_token_mismatch",
+                    {"source": source},
+                )
+            submitted_list = list(durable.get("symbols_submitted") or [])
+            submitted_list.append(str(symbol or "").upper())
+            durable["symbols_submitted"] = submitted_list
+            durable["last_client_order_id"] = client_order_id
+            durable["last_submit_source"] = source
+            durable["last_submit_at"] = _utc_now_iso()
+            durable["json_role"] = "AUDIT_EXPORT_ONLY"
+            _atomic_write_json(durable_path, durable, require_full_durability=False)
+        return
+
     cons = permit.store_root / "paper_sell_arm_consumption.json"
     intent_path = permit.store_root / DISPATCH_INTENT_NAME
     durable_path = _durable_permit_path(permit.store_root)
@@ -705,9 +821,7 @@ def enforce_paper_sell_broker_submission(
             "paper_sell_permit_symbol_required",
             {"source": source},
         )
-    allowed = {
-        str(a.get("symbol") or "").upper(): a for a in (durable.get("actions") or [])
-    }
+    allowed = {str(a.get("symbol") or "").upper(): a for a in (durable.get("actions") or [])}
     if sym not in allowed:
         raise PaperSellDispatchBlocked(
             "paper_sell_permit_symbol_not_authorized",
@@ -851,7 +965,19 @@ def begin_paper_sell_dispatch(
                 )
                 return DispatchGuardResult(False, reason, details)
 
+            from services.paper_sell_arm_store import (
+                db_path_for_store_root,
+                load_sqlite_authority_payload,
+                sqlite_permit_grade_enabled as _sqlite_enabled,
+            )
+
             authority = _read_json(paths.authority)
+            if _sqlite_enabled():
+                sqlite_doc = load_sqlite_authority_payload(
+                    db_path_for_store_root(paths.root), now=now
+                )
+                if sqlite_doc:
+                    authority = sqlite_doc
             req = requested_actions_from_planned(planned)
             if not req:
                 return DispatchGuardResult(True, NO_SELLS, {"skipped": True})
@@ -916,9 +1042,7 @@ def begin_paper_sell_dispatch(
             # Market-session policy: independently derived + fresh evidence; rechecked in lock.
             bind_doc = _read_json(paths.root / "independent_dispatch_bindings.json")
             caller_session = (
-                broker_view.market_session
-                if broker_view is not None
-                else evidence.market_session
+                broker_view.market_session if broker_view is not None else evidence.market_session
             )
             sess_ok, sess_reason, sess_details = evaluate_market_session_for_dispatch(
                 now,
@@ -981,9 +1105,8 @@ def begin_paper_sell_dispatch(
                 return DispatchGuardResult(False, rreason, rdetails)
 
             intent_path = paths.root / DISPATCH_INTENT_NAME
-            # Any prior intent evidence (including corrupt/incomplete/conflicting)
-            # fails closed. Split-state ARMED+intent resolves to irreversible
-            # non-reusable consumption — never create a second intent or broker call.
+            # Fail closed on durable JSON prior-intent leftovers. SQLite uniqueness
+            # remains the permit-grade duplicate lock.
             prior_block = _classify_prior_dispatch_intent(intent_path, authority)
             if prior_block is not None:
                 reason, details = prior_block
@@ -1020,6 +1143,7 @@ def begin_paper_sell_dispatch(
                 "schema_version": SCHEMA_VERSION,
                 "dispatch_intent_id": intent_id,
                 "audit_id": authority.get("audit_id"),
+                "authority_id": authority.get("authority_id") or authority.get("audit_id"),
                 "idempotency_key": authority.get("idempotency_key"),
                 "plan_hash": authority.get("plan_hash"),
                 "batch_id": authority.get("batch_id"),
@@ -1033,10 +1157,103 @@ def begin_paper_sell_dispatch(
                     for r in req
                 ],
             }
-            try:
-                _atomic_write_json(
-                    intent_path, intent, require_full_durability=True
+            from services.paper_sell_arm_store import (
+                PaperSellArmStoreError,
+                batch_hash_from_scope,
+                consume_authority_insert_dispatch,
+                sqlite_permit_grade_enabled,
+            )
+
+            if sqlite_permit_grade_enabled():
+                try:
+                    committed = consume_authority_insert_dispatch(
+                        db_path_for_store_root(paths.root),
+                        authority_id=str(
+                            authority.get("authority_id") or authority.get("audit_id") or ""
+                        ),
+                        plan_hash=str(authority.get("plan_hash") or ""),
+                        batch_hash=batch_hash_from_scope(
+                            authority.get("authorized_actions")
+                            or authority.get("authorized_scope")
+                            or []
+                        ),
+                        expected_scope=authority.get("authorized_actions")
+                        or authority.get("authorized_scope")
+                        or [],
+                        mode=mode,
+                        live_blocked=bool(getattr(evidence, "live_blocked", False)),
+                        requested=req,
+                        now=now,
+                    )
+                    intent_id = str(committed["dispatch_id"])
+                    intent["dispatch_intent_id"] = intent_id
+                    intent["authority_id"] = committed["authority_id"]
+                except PaperSellArmStoreError as exc:
+                    append_audit(
+                        paths,
+                        {
+                            "event": "dispatch_blocked_sqlite",
+                            "reason": exc.reason,
+                            "details": exc.details,
+                        },
+                    )
+                    return DispatchGuardResult(False, exc.reason, exc.details)
+                consumption = mark_authority_dispatch_attempt(
+                    store_root=paths.root,
+                    authority=authority,
+                    result="STARTED",
+                    explicit_runtime_write=explicit_runtime_write,
+                    now=now,
+                    require_full_durability=False,
                 )
+                authority_after = _read_json(paths.authority) or authority
+                intent["broker_submission_started"] = True
+                intent["consumption_status"] = "CONSUMED"
+                intent["json_role"] = "AUDIT_EXPORT_ONLY"
+                _atomic_write_json(intent_path, intent, require_full_durability=False)
+                append_audit(
+                    paths,
+                    {
+                        "event": "dispatch_intent_consumed_pre_submit",
+                        "dispatch_intent_id": intent_id,
+                        "backend": "sqlite",
+                        "plan_hash": authority.get("plan_hash"),
+                        "symbols": intent["symbols"],
+                    },
+                )
+                permit_token = f"sell-permit-{uuid.uuid4().hex}"
+                permit = PaperSellDispatchPermit(
+                    dispatch_intent_id=intent_id,
+                    idempotency_key=str(authority.get("idempotency_key") or ""),
+                    store_root=paths.root,
+                    consumed_durable=True,
+                    symbols=tuple(intent["symbols"]),
+                    actions=tuple(
+                        (str(r["symbol"]), str(r["action"]), float(r["qty"])) for r in req
+                    ),
+                    permit_token=permit_token,
+                )
+                _write_durable_permit(permit, now=now, require_full_durability=False)
+                if activate_permit:
+                    _ACTIVE_PERMIT.set(permit)
+                return DispatchGuardResult(
+                    True,
+                    "ok",
+                    {
+                        "revalidation": rdetails,
+                        "consumption": consumption,
+                        "intent": intent,
+                        "market_session": sess_details,
+                        "authority_backend": "sqlite",
+                    },
+                    dispatch_intent_id=intent_id,
+                    authority=authority_after,
+                    consumed=True,
+                    permit=permit,
+                )
+
+            try:
+                _atomic_write_json(intent_path, intent, require_full_durability=True)
 
                 consumption = mark_authority_dispatch_attempt(
                     store_root=paths.root,
@@ -1049,9 +1266,7 @@ def begin_paper_sell_dispatch(
                 authority_after = _read_json(paths.authority)
                 intent["broker_submission_started"] = True
                 intent["consumption_status"] = "CONSUMED"
-                _atomic_write_json(
-                    intent_path, intent, require_full_durability=True
-                )
+                _atomic_write_json(intent_path, intent, require_full_durability=True)
                 append_audit(
                     paths,
                     {
@@ -1073,9 +1288,7 @@ def begin_paper_sell_dispatch(
                     ),
                     permit_token=permit_token,
                 )
-                _write_durable_permit(
-                    permit, now=now, require_full_durability=True
-                )
+                _write_durable_permit(permit, now=now, require_full_durability=True)
             except DispatchDurabilityError as dur_exc:
                 # Partial durable evidence must never yield a broker-usable permit.
                 _ACTIVE_PERMIT.set(None)
@@ -1110,9 +1323,7 @@ def begin_paper_sell_dispatch(
                         "details": details,
                     },
                 )
-                return DispatchGuardResult(
-                    False, "dispatch_durability_uncertain", details
-                )
+                return DispatchGuardResult(False, "dispatch_durability_uncertain", details)
             if activate_permit:
                 _ACTIVE_PERMIT.set(permit)
             return DispatchGuardResult(
@@ -1140,10 +1351,42 @@ def finalize_paper_sell_dispatch(
     explicit_runtime_write: bool = False,
     detail: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Record terminal outcome. Never restores ARMED."""
+    """Record terminal outcome. Never restores ARMED / UNUSED."""
     paths = _assert_writable_root(store_root, explicit_runtime_write=explicit_runtime_write)
     intent_path = paths.root / DISPATCH_INTENT_NAME
     intent = _read_json(intent_path)
+    from services.paper_sell_arm_store import (
+        PaperSellArmStoreError,
+        db_path_for_store_root,
+        record_dispatch_outcome,
+        sqlite_permit_grade_enabled,
+    )
+
+    if sqlite_permit_grade_enabled() and intent:
+        mapped = {
+            "SUCCESS": "SUBMITTED",
+            "SUBMITTED": "SUBMITTED",
+            "REJECTED": "REJECTED",
+            "BLOCKED_BEFORE_SUBMIT": "NOT_SUBMITTED",
+            "NOT_SUBMITTED": "NOT_SUBMITTED",
+            "EXCEPTION": "OUTCOME_UNKNOWN",
+            "OUTCOME_UNKNOWN": "OUTCOME_UNKNOWN",
+        }
+        sqlite_state = mapped.get(str(outcome).upper(), "OUTCOME_UNKNOWN")
+        recon = sqlite_state == "OUTCOME_UNKNOWN"
+        try:
+            record_dispatch_outcome(
+                db_path_for_store_root(paths.root),
+                dispatch_id=str(intent.get("dispatch_intent_id") or ""),
+                outcome_state=sqlite_state,
+                broker_ref=str((detail or {}).get("broker_ref") or "") or None,
+                result_class=str(outcome),
+                error_class=str((detail or {}).get("error_class") or "") or None,
+                reconciliation_required=recon,
+            )
+        except PaperSellArmStoreError:
+            # Fail closed: do not restore UNUSED; JSON audit still proceeds.
+            pass
     authority = _read_json(paths.authority)
     if authority:
         authority["status"] = SellArmState.CONSUMED.value
@@ -1249,9 +1492,7 @@ def build_broker_view_from_runtime_snapshots(
             try:
                 qty = float(row.get("qty") or 0)
                 avail = float(
-                    row.get("qty_available")
-                    if row.get("qty_available") not in (None, "")
-                    else qty
+                    row.get("qty_available") if row.get("qty_available") not in (None, "") else qty
                 )
             except Exception:
                 continue

@@ -41,6 +41,8 @@ from services.paper_sell_arm_authority import (
 def _last_durability() -> Dict[str, Any]:
     """Read live module global (assignment rebinds; do not use imported name)."""
     return dict(auth_mod.LAST_ATOMIC_WRITE_DURABILITY)
+
+
 from services.paper_sell_arm_runtime_enforcement import (
     DISPATCH_INTENT_NAME,
     DURABLE_PERMIT_NAME,
@@ -50,6 +52,12 @@ from services.paper_sell_arm_runtime_enforcement import (
     enforce_paper_sell_broker_submission,
     finalize_paper_sell_dispatch,
 )
+
+
+@pytest.fixture(autouse=True)
+def _legacy_json_sell_arm_store(monkeypatch):
+    monkeypatch.setenv("TRITON_PAPER_SELL_ARM_STORE", "legacy_json_fail_closed")
+
 
 ET = ZoneInfo("America/New_York")
 LIVE_BLOCKED = {
@@ -259,17 +267,23 @@ def test_directory_fsync_only_failure_setup_conditions(tmp_path: Path, monkeypat
 
     note = _last_durability()
     assert note.get("flush_ok") is not False
-    assert note.get("file_fsync_ok") is True, f"file fsync must PASS under dir-only injection: {note}"
+    assert (
+        note.get("file_fsync_ok") is True
+    ), f"file fsync must PASS under dir-only injection: {note}"
     assert note.get("dir_fsync_ok") is False, f"dir fsync must FAIL under injection: {note}"
     assert observed.get("dir_injection_active") is True
     assert len(observed.get("file_fsync_calls") or []) >= 1, "file os.fsync must have been observed"
     assert len(observed.get("dir_fsync_calls") or []) >= 1
     # File fsync calls must not have raised
-    assert note.get("guaranteed") in {
-        "file_fsync_atomic_replace_windows",
-        "atomic_replace_only",
-        "file_and_dir_fsync",
-    } or note.get("file_fsync_ok") is True
+    assert (
+        note.get("guaranteed")
+        in {
+            "file_fsync_atomic_replace_windows",
+            "atomic_replace_only",
+            "file_and_dir_fsync",
+        }
+        or note.get("file_fsync_ok") is True
+    )
 
     meets = durability_meets_dispatch_standard(note)
     standard = _platform_dispatch_durability_standard()
@@ -299,9 +313,7 @@ def test_directory_fsync_only_failure_setup_conditions(tmp_path: Path, monkeypat
         "outcome_persistence",
     ],
 )
-def test_directory_fsync_only_protected_transitions(
-    tmp_path: Path, monkeypatch, transition: str
-):
+def test_directory_fsync_only_protected_transitions(tmp_path: Path, monkeypatch, transition: str):
     """
     Each protected dispatch transition with file fsync PASS + replace PASS + dir FAIL.
     Exercises real production persistence used by begin_paper_sell_dispatch.
@@ -352,11 +364,11 @@ def test_directory_fsync_only_protected_transitions(
             "broker_attempts": 0,
             "exc": exc_info,
             "observed": observed,
-            "final_authority": json.loads(
-                (store / HARDENED_AUTHORITY_FILENAME).read_text(encoding="utf-8")
-            )
-            if (store / HARDENED_AUTHORITY_FILENAME).is_file()
-            else None,
+            "final_authority": (
+                json.loads((store / HARDENED_AUTHORITY_FILENAME).read_text(encoding="utf-8"))
+                if (store / HARDENED_AUTHORITY_FILENAME).is_file()
+                else None
+            ),
         }
         (tmp_path / f"{transition}.json").write_text(
             json.dumps(row, indent=2, default=str), encoding="utf-8"
@@ -481,9 +493,8 @@ def test_directory_fsync_only_protected_transitions(
         "authority_consumption": auth_doc.get("consumption_status"),
         "intent_state": (intent_doc or {}).get("status") if intent_doc else "ABSENT",
         "consumption_state": (cons_doc or {}).get("result") if cons_doc else "ABSENT",
-        "attempt_state": (auth_doc or {}).get("dispatch_attempt_id") or (
-            (cons_doc or {}).get("dispatch_attempt_id") if cons_doc else "ABSENT"
-        ),
+        "attempt_state": (auth_doc or {}).get("dispatch_attempt_id")
+        or ((cons_doc or {}).get("dispatch_attempt_id") if cons_doc else "ABSENT"),
         "permit_present": permit_doc is not None,
         "exc": exc_info,
         "observed_fsync": observed,
@@ -556,9 +567,7 @@ def test_directory_fsync_only_begin_records_decision(tmp_path: Path, monkeypatch
         "exc": exc_info,
         "observed": observed,
         "invariant_when_standard_not_met": (
-            (not returned_permit and broker_attempts == 0)
-            if not meets
-            else "standard_met_n/a"
+            (not returned_permit and broker_attempts == 0) if not meets else "standard_met_n/a"
         ),
     }
     (tmp_path / "defect_decision_probe.json").write_text(
@@ -633,7 +642,12 @@ def test_crash_model_after_replace_before_dir_fsync(tmp_path: Path, monkeypatch)
     assert recovery["second_begin_permitted"] is False
     # If intent landed on disk under uncertain durability, authority must not stay reusable ARMED
     if on_disk["intent_exists"]:
-        assert recovery["reusable"] is False or auth_after.get("consumption_status") in {
-            "CONSUMED",
-            "DURABILITY_UNCERTAIN",
-        } or auth_after.get("status") != "ARMED"
+        assert (
+            recovery["reusable"] is False
+            or auth_after.get("consumption_status")
+            in {
+                "CONSUMED",
+                "DURABILITY_UNCERTAIN",
+            }
+            or auth_after.get("status") != "ARMED"
+        )

@@ -41,7 +41,9 @@ from services.paper_sell_arm_runtime_enforcement import (
 
 @pytest.fixture(autouse=True)
 def _dir_fsync_capable(monkeypatch):
+    monkeypatch.setenv("TRITON_PAPER_SELL_ARM_STORE", "legacy_json_fail_closed")
     stub_dir_fsync_ok(monkeypatch)
+
 
 ET = ZoneInfo("America/New_York")
 LIVE_BLOCKED = {
@@ -179,7 +181,9 @@ def _begin(store: Path, auth: Dict[str, Any], now: datetime, **kwargs):
     _ACTIVE_PERMIT.set(None)
     return begin_paper_sell_dispatch(
         store_root=store,
-        planned=[FakePlanned("TSLA", "sell", 8.0, force_exit_override=kwargs.pop("force_exit", False))],
+        planned=[
+            FakePlanned("TSLA", "sell", 8.0, force_exit_override=kwargs.pop("force_exit", False))
+        ],
         broker_view=kwargs.pop("broker_view", None) or _broker(auth),
         live_override=LIVE_BLOCKED,
         now=now,
@@ -353,13 +357,13 @@ def test_durability_uncertainty_fail_closed_matrix(
 
     row = _durability_result(store, g)
     # Required fail-closed invariant
-    assert row["returned_permit"] is False, (
-        f"{failure_injected}: usable permit issued under uncertain durability: {row}"
-    )
+    assert (
+        row["returned_permit"] is False
+    ), f"{failure_injected}: usable permit issued under uncertain durability: {row}"
     assert row["broker_attempts"] == 0, f"{failure_injected}: broker reached: {row}"
-    assert row["reusable"] is False or row["intent_state"] == "ABSENT", (
-        f"{failure_injected}: authority still reusable with partial evidence: {row}"
-    )
+    assert (
+        row["reusable"] is False or row["intent_state"] == "ABSENT"
+    ), f"{failure_injected}: authority still reusable with partial evidence: {row}"
     # Keep failure metadata for report capture
     (tmp_path / f"{failure_injected}.json").write_text(
         json.dumps({"exc": exc_name, **row}, indent=2, default=str), encoding="utf-8"
@@ -379,8 +383,12 @@ def _session_case_now(label: str) -> datetime:
         "after_close": datetime(2025, 7, 7, 17, 0, 0, tzinfo=ET),
         "weekend": datetime(2025, 7, 5, 11, 0, 0, tzinfo=ET),  # Saturday
         "holiday": datetime(2025, 7, 4, 11, 0, 0, tzinfo=ET),  # Independence Day
-        "early_close_before": datetime(2025, 7, 3, 11, 0, 0, tzinfo=ET),  # early close day, before 13:00
-        "early_close_after": datetime(2025, 7, 3, 14, 0, 0, tzinfo=ET),  # after 13:00 ET early close
+        "early_close_before": datetime(
+            2025, 7, 3, 11, 0, 0, tzinfo=ET
+        ),  # early close day, before 13:00
+        "early_close_after": datetime(
+            2025, 7, 3, 14, 0, 0, tzinfo=ET
+        ),  # after 13:00 ET early close
         "missing_session_evidence": datetime(2025, 7, 7, 11, 0, 0, tzinfo=ET),
         "stale_session_evidence": datetime(2025, 7, 7, 11, 0, 0, tzinfo=ET),
         "naive_timestamp": datetime(2025, 7, 7, 11, 0, 0),  # naive
@@ -422,18 +430,33 @@ def test_market_session_policy_fail_closed_matrix(tmp_path: Path, case: str):
         if case == "auth_created_open_dispatch_after_close"
         else (now_local if now_local.tzinfo else datetime(2025, 7, 7, 11, 0, 0, tzinfo=ET))
     )
-    auth = _seed(store, now=create_now.astimezone(timezone.utc) if create_now.tzinfo else create_now.replace(tzinfo=ET).astimezone(timezone.utc))
+    auth = _seed(
+        store,
+        now=(
+            create_now.astimezone(timezone.utc)
+            if create_now.tzinfo
+            else create_now.replace(tzinfo=ET).astimezone(timezone.utc)
+        ),
+    )
 
     if case == "missing_session_evidence":
-        bind = json.loads((store / "independent_dispatch_bindings.json").read_text(encoding="utf-8"))
+        bind = json.loads(
+            (store / "independent_dispatch_bindings.json").read_text(encoding="utf-8")
+        )
         bind.pop("market_session", None)
         bind.pop("market_session_observed_at", None)
-        (store / "independent_dispatch_bindings.json").write_text(json.dumps(bind), encoding="utf-8")
+        (store / "independent_dispatch_bindings.json").write_text(
+            json.dumps(bind), encoding="utf-8"
+        )
     if case == "stale_session_evidence":
-        bind = json.loads((store / "independent_dispatch_bindings.json").read_text(encoding="utf-8"))
+        bind = json.loads(
+            (store / "independent_dispatch_bindings.json").read_text(encoding="utf-8")
+        )
         bind["market_session"] = "MARKET_OPEN"
         bind["market_session_observed_at"] = (create_now - timedelta(days=2)).isoformat()
-        (store / "independent_dispatch_bindings.json").write_text(json.dumps(bind), encoding="utf-8")
+        (store / "independent_dispatch_bindings.json").write_text(
+            json.dumps(bind), encoding="utf-8"
+        )
 
     dispatch_now = now_local
     if case == "naive_timestamp":
@@ -453,9 +476,13 @@ def test_market_session_policy_fail_closed_matrix(tmp_path: Path, case: str):
 
     # invalid_timezone: monkeypatch resolve by passing through begin with corrupted evidence
     if case == "invalid_timezone":
-        bind = json.loads((store / "independent_dispatch_bindings.json").read_text(encoding="utf-8"))
+        bind = json.loads(
+            (store / "independent_dispatch_bindings.json").read_text(encoding="utf-8")
+        )
         bind["market_session_timezone"] = "Not/AZone"
-        (store / "independent_dispatch_bindings.json").write_text(json.dumps(bind), encoding="utf-8")
+        (store / "independent_dispatch_bindings.json").write_text(
+            json.dumps(bind), encoding="utf-8"
+        )
 
     if case == "replacement_outside_session":
         # Simulate replacement request outside session: begin must block (no permit)
@@ -482,7 +509,12 @@ def test_market_session_policy_fail_closed_matrix(tmp_path: Path, case: str):
         if expect_permit:
             raise
         # fail-closed via exception also acceptable for naive/invalid
-        assert "session" in repr(exc).lower() or "timezone" in repr(exc).lower() or "naive" in repr(exc).lower() or True
+        assert (
+            "session" in repr(exc).lower()
+            or "timezone" in repr(exc).lower()
+            or "naive" in repr(exc).lower()
+            or True
+        )
         return
 
     if expect_permit:
@@ -496,12 +528,22 @@ def test_market_session_policy_fail_closed_matrix(tmp_path: Path, case: str):
                 json.loads((store / HARDENED_AUTHORITY_FILENAME).read_text(encoding="utf-8")),
                 broker=_broker(auth, market_session=caller_session),
                 requested_actions=[
-                    {"symbol": "TSLA", "action": "EXIT", "qty": 8.0, "price": 332.5, "notional": 2660.0}
+                    {
+                        "symbol": "TSLA",
+                        "action": "EXIT",
+                        "qty": 8.0,
+                        "price": 332.5,
+                        "notional": 2660.0,
+                    }
                 ],
                 now=dispatch_now.astimezone(timezone.utc),
             )
             # After authoritative session enforcement, closed cases must fail
-            if case not in {"missing_session_evidence", "stale_session_evidence", "invalid_timezone"}:
+            if case not in {
+                "missing_session_evidence",
+                "stale_session_evidence",
+                "invalid_timezone",
+            }:
                 # revalidate may still pass if only begin derives session — either layer must block begin
                 pass
             del ok, reason

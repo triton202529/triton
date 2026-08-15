@@ -45,6 +45,9 @@ class _FakeBrokerForCancel(AlpacaBroker):
 
 
 def test_paper_sell_cancel_blocked_without_permit():
+    from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
+
+    _ACTIVE_PERMIT.set(None)
     b = _FakeBrokerForCancel(side="sell")
     with pytest.raises(PaperSellDispatchBlocked):
         b.cancel_order("oid-sell-1")
@@ -60,6 +63,9 @@ def test_paper_buy_cancel_not_sell_gated():
 
 
 def test_paper_sell_cancel_all_blocked_without_permit():
+    from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
+
+    _ACTIVE_PERMIT.set(None)
     b = _FakeBrokerForCancel(side="sell")
     with pytest.raises(PaperSellDispatchBlocked):
         b.cancel_all_orders()

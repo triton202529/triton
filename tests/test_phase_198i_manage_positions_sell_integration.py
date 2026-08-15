@@ -162,9 +162,7 @@ def _run_chain(
     )
     sell_payloads = [p for p in fake.submit_payloads if str(p.get("side") or "").lower() == "sell"]
     buy_payloads = [
-        p
-        for p in fake.submit_payloads
-        if str(p.get("side") or "").lower() in {"buy", "add"}
+        p for p in fake.submit_payloads if str(p.get("side") or "").lower() in {"buy", "add"}
     ]
     return {
         "rc": rc,
@@ -192,9 +190,7 @@ def test_accepted_manage_positions_to_fake_broker_sell_once(tmp_path, monkeypatc
         e.get("event") == "begin_paper_sell_dispatch_result" and e.get("consumed")
         for e in trace.events
     )
-    assert any(
-        e.get("event") == "validation_result" and e.get("ok") is True for e in trace.events
-    )
+    assert any(e.get("event") == "validation_result" and e.get("ok") is True for e in trace.events)
     assert len(result["sell_payloads"]) == 1
     payload = result["sell_payloads"][0]
     assert payload["symbol"] == "TSLA"
@@ -292,8 +288,23 @@ def test_rejected_expired_authorization_zero_fake_calls(tmp_path, monkeypatch):
     seed_paper_sell_store(tmp_path, now=SESSION_OPEN_NOW, consume=False)
     path = tmp_path / "paper_sell_arm_authority.json"
     doc = json.loads(path.read_text(encoding="utf-8"))
-    doc["expires_at"] = (SESSION_OPEN_NOW - timedelta(minutes=1)).isoformat()
+    expired_at = (SESSION_OPEN_NOW - timedelta(minutes=1)).isoformat()
+    doc["expires_at"] = expired_at
     path.write_text(json.dumps(doc), encoding="utf-8")
+    from services.paper_sell_arm_store import db_path_for_store_root, write_connection
+
+    db = db_path_for_store_root(tmp_path)
+    with write_connection(db) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE sell_authorities SET expires_at=?", (expired_at,))
+        row = conn.execute("SELECT payload_json FROM sell_authorities").fetchone()
+        payload = json.loads(row[0])
+        payload["expires_at"] = expired_at
+        conn.execute(
+            "UPDATE sell_authorities SET payload_json=?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")),),
+        )
+        conn.execute("COMMIT")
     result = _run_chain(monkeypatch, tmp_path, fake=fake, trace=trace, seed=False)
     assert fake.fake_broker_call_count == 0
     assert result["sell_payloads"] == []
@@ -387,9 +398,7 @@ def test_rejected_non_reducing_short_sell_zero_fake_calls(tmp_path, monkeypatch)
 def test_rejected_live_mode_zero_fake_calls(tmp_path, monkeypatch):
     fake = NetworkFakeAlpacaBroker(mode="live")
     trace = OrderedTrace()
-    result = _run_chain(
-        monkeypatch, tmp_path, fake=fake, trace=trace, seed=True, mode="live"
-    )
+    result = _run_chain(monkeypatch, tmp_path, fake=fake, trace=trace, seed=True, mode="live")
     assert fake.fake_broker_call_count == 0
     assert result["sell_payloads"] == []
 
@@ -399,9 +408,7 @@ def test_rejected_buy_does_not_use_sell_path(tmp_path, monkeypatch):
     fake.positions = []
     trace = OrderedTrace()
     buy = _planned(side="buy", action="ADD", qty=1, symbol="AAPL")
-    result = _run_chain(
-        monkeypatch, tmp_path, fake=fake, trace=trace, seed=True, planned=[buy]
-    )
+    result = _run_chain(monkeypatch, tmp_path, fake=fake, trace=trace, seed=True, planned=[buy])
     assert result["sell_payloads"] == []
     # BUY/ADD must not emit a SELL. BUY may be independently gated; either zero submits or buy-only.
     for p in fake.submit_payloads:
@@ -429,8 +436,23 @@ def test_rejected_closed_session_zero_fake_calls(tmp_path, monkeypatch):
     seed_paper_sell_store(tmp_path, now=SESSION_OPEN_NOW, consume=False)
     path = tmp_path / "paper_sell_arm_authority.json"
     doc = json.loads(path.read_text(encoding="utf-8"))
-    doc["expires_at"] = (SESSION_OPEN_NOW + timedelta(hours=12)).isoformat()
+    extended = (SESSION_OPEN_NOW + timedelta(hours=12)).isoformat()
+    doc["expires_at"] = extended
     path.write_text(json.dumps(doc), encoding="utf-8")
+    from services.paper_sell_arm_store import db_path_for_store_root, write_connection
+
+    db = db_path_for_store_root(tmp_path)
+    with write_connection(db) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE sell_authorities SET expires_at=?", (extended,))
+        row = conn.execute("SELECT payload_json FROM sell_authorities").fetchone()
+        payload = json.loads(row[0])
+        payload["expires_at"] = extended
+        conn.execute(
+            "UPDATE sell_authorities SET payload_json=?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")),),
+        )
+        conn.execute("COMMIT")
     fake = NetworkFakeAlpacaBroker()
     trace = OrderedTrace()
     result = _run_chain(
@@ -460,9 +482,7 @@ def test_rejected_malformed_order_zero_fake_sell(tmp_path, monkeypatch):
     fake = NetworkFakeAlpacaBroker()
     trace = OrderedTrace()
     bad = _planned(price=None)
-    result = _run_chain(
-        monkeypatch, tmp_path, fake=fake, trace=trace, seed=True, planned=[bad]
-    )
+    result = _run_chain(monkeypatch, tmp_path, fake=fake, trace=trace, seed=True, planned=[bad])
     assert result["sell_payloads"] == []
     assert fake.fake_broker_call_count == 0
 

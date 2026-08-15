@@ -50,6 +50,7 @@ def sample_sell_readiness_packet(**overrides):
     base.update(overrides)
     return base
 
+
 LIVE_BLOCKED_PAYLOAD = {
     "live_blocked": True,
     "live_block_reason": "TEST_LIVE_BLOCKED",
@@ -178,9 +179,7 @@ def isolate_interlock_artifact_roots(
         results / "defensive_exit_operator_approval_packet.json",
     )
     monkeypatch.setattr(criteria, "READINESS_JSON", results / "execution_readiness.json")
-    monkeypatch.setattr(
-        criteria, "GOVERNANCE_AUTH_JSON", results / "governance_authorization.json"
-    )
+    monkeypatch.setattr(criteria, "GOVERNANCE_AUTH_JSON", results / "governance_authorization.json")
     monkeypatch.setattr(criteria, "OPEN_ORDERS_JSON", results / "open_orders_snapshot.csv")
     monkeypatch.setattr(criteria, "POSITIONS_JSON", results / "positions_snapshot.csv")
     monkeypatch.setattr(criteria, "REAL_APPROVAL_PATH", hardened)
@@ -251,6 +250,55 @@ def create_test_only_hardened_authority(
     hardened_dest.parent.mkdir(parents=True, exist_ok=True)
     hardened_dest.write_bytes(src.read_bytes())
     return auth
+
+
+def create_sqlite_sell_arm_via_public_apis(
+    store_root: Path,
+    *,
+    now: datetime,
+    explicit_runtime_write: bool = False,
+) -> Dict[str, Any]:
+    """Create UNUSED SQLite SELL authority through production challenge/confirm APIs.
+
+    Does not begin dispatch, create a permit, insert SQL rows, or call a broker.
+    JSON beside the database remains AUDIT_EXPORT_ONLY.
+    """
+    from services.paper_sell_arm_authority import (
+        OPERATOR_ACKNOWLEDGEMENT_TEXT,
+        confirm_and_create_paper_sell_arm,
+        prepare_confirmation_challenge,
+    )
+    from services.paper_sell_arm_store import db_path_for_store_root, inspect_sqlite_authority
+
+    store_root = Path(store_root)
+    store_root.mkdir(parents=True, exist_ok=True)
+    readiness = sample_sell_readiness_packet()
+    chal = prepare_confirmation_challenge(
+        store_root=store_root,
+        readiness_packet=readiness,
+        account_raw="acct-1",
+        trading_date=now.date().isoformat(),
+        now=now,
+        explicit_runtime_write=explicit_runtime_write,
+    )
+    auth = confirm_and_create_paper_sell_arm(
+        store_root=store_root,
+        readiness_packet=readiness,
+        challenge=chal,
+        operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
+        current_plan_hash=readiness["plan_hash"],
+        now=now,
+        explicit_runtime_write=explicit_runtime_write,
+    )
+    inspected = inspect_sqlite_authority(db_path_for_store_root(store_root), now=now)
+    if str(inspected.get("state") or "") != "UNUSED":
+        raise AssertionError(f"sqlite authority not UNUSED after confirm: {inspected}")
+    return {
+        "readiness": readiness,
+        "challenge": chal,
+        "authority": auth,
+        "inspect": inspected,
+    }
 
 
 def install_hermetic_interlock(

@@ -437,7 +437,10 @@ def detect_hardened_authority_path_collision(store_root: Optional[Path] = None) 
         return True, "hardened_and_deprecated_approval_paths_both_present"
     if deprecated.is_file():
         doc = _read_json(deprecated)
-        if doc.get("authority_type") == AUTHORITY_TYPE or str(doc.get("schema_version") or "") == SCHEMA_VERSION:
+        if (
+            doc.get("authority_type") == AUTHORITY_TYPE
+            or str(doc.get("schema_version") or "") == SCHEMA_VERSION
+        ):
             return True, "hardened_schema_found_on_deprecated_shared_path"
     return False, "ok"
 
@@ -599,9 +602,7 @@ def prepare_confirmation_challenge(
     if not scope:
         raise ValueError("challenge_blocked:empty_scope")
 
-    total_notional = round(
-        sum(float(s.get("max_notional") or 0.0) for s in scope), 2
-    )
+    total_notional = round(sum(float(s.get("max_notional") or 0.0) for s in scope), 2)
     cap_value, cap_source = applied_authority_cap()
     if total_notional > cap_value + 1e-9:
         write_state(paths, SellArmState.BLOCKED, {"reason": "scope_exceeds_approval_cli_cap"})
@@ -663,6 +664,23 @@ def prepare_confirmation_challenge(
     if missing:
         raise ValueError(f"challenge_schema_incomplete:{sorted(missing)}")
 
+    from services.paper_sell_arm_store import (
+        PaperSellArmStoreError,
+        db_path_for_store_root,
+        persist_open_challenge,
+        sqlite_permit_grade_enabled,
+    )
+
+    if sqlite_permit_grade_enabled():
+        try:
+            persist_open_challenge(
+                db_path_for_store_root(paths.root),
+                challenge=challenge,
+                now=now,
+            )
+        except PaperSellArmStoreError as exc:
+            raise ValueError(f"challenge_blocked:{exc.reason}") from exc
+    # JSON is AUDIT_EXPORT_ONLY after SQLite commit (or fail-closed JSON rollback).
     _atomic_write_json(paths.challenge, challenge)
     # Ensure no authority file is created by step 1.
     write_state(
@@ -778,9 +796,10 @@ def confirm_and_create_paper_sell_arm(
             append_audit(paths, {"event": "arm_rejected", "reason": "challenge_replay"})
             raise ValueError("arm_rejected:challenge_replay")
         # Any existing unused authority for different challenge still blocks silent replace.
-        if str(existing.get("status") or "") == SellArmState.ARMED.value and str(
-            existing.get("consumption_status") or ""
-        ) == "UNUSED":
+        if (
+            str(existing.get("status") or "") == SellArmState.ARMED.value
+            and str(existing.get("consumption_status") or "") == "UNUSED"
+        ):
             exp = _parse_iso(existing.get("expires_at"))
             if exp and exp > now:
                 raise ValueError("arm_rejected:existing_armed_authority_present")
@@ -892,6 +911,34 @@ def confirm_and_create_paper_sell_arm(
     missing = REQUIRED_AUTHORITY_FIELDS - set(authority.keys())
     if missing:
         raise ValueError(f"arm_schema_incomplete:{sorted(missing)}")
+
+    from services.paper_sell_arm_store import (
+        PaperSellArmStoreError,
+        batch_hash_from_scope,
+        consume_challenge_and_create_authority,
+        db_path_for_store_root,
+        sqlite_permit_grade_enabled,
+    )
+
+    if sqlite_permit_grade_enabled():
+        try:
+            stored = consume_challenge_and_create_authority(
+                db_path_for_store_root(paths.root),
+                challenge_id=str(challenge.get("challenge_id") or ""),
+                readiness_plan_hash=str(readiness_packet.get("plan_hash") or ""),
+                readiness_batch_id=str(readiness_packet.get("batch_id") or ""),
+                readiness_batch_hash=batch_hash_from_scope(scope),
+                authority=authority,
+                now=now,
+            )
+            authority["authority_id"] = stored["authority_id"]
+            authority["sqlite_state"] = "UNUSED"
+            authority["json_role"] = "AUDIT_EXPORT_ONLY"
+        except PaperSellArmStoreError as exc:
+            raise ValueError(f"arm_rejected:{exc.reason}") from exc
+    else:
+        authority["json_role"] = "AUDIT_EXPORT_ONLY"
+        authority["sqlite_state"] = "rollback_json_fail_closed"
 
     _atomic_write_json(paths.authority, authority)
     write_state(paths, SellArmState.ARMED, {"audit_id": audit_id, "orders_submitted": False})
@@ -1107,7 +1154,10 @@ def validate_paper_sell_arm_authority(
         "UNAPPROVED_APPROVAL_READINESS_ONLY",
     }:
         return False, "preview_or_readiness_is_not_authority", details
-    if authority.get("creates_no_authority") is True and authority.get("authority_type") != AUTHORITY_TYPE:
+    if (
+        authority.get("creates_no_authority") is True
+        and authority.get("authority_type") != AUTHORITY_TYPE
+    ):
         return False, "non_authoritative_artifact", details
 
     if str(authority.get("authority_type") or "") != AUTHORITY_TYPE:
@@ -1356,7 +1406,10 @@ def is_hardened_sell_arm_contract(doc: Dict[str, Any]) -> bool:
 
 def allowed_transition(src: SellArmState, dst: SellArmState) -> bool:
     allowed = {
-        SellArmState.NO_SELLS_WAITING: {SellArmState.REVIEW_REQUIRED, SellArmState.READY_FOR_CONFIRMATION},
+        SellArmState.NO_SELLS_WAITING: {
+            SellArmState.REVIEW_REQUIRED,
+            SellArmState.READY_FOR_CONFIRMATION,
+        },
         SellArmState.REVIEW_REQUIRED: {SellArmState.READY_FOR_CONFIRMATION, SellArmState.BLOCKED},
         SellArmState.READY_FOR_CONFIRMATION: {
             SellArmState.CONFIRMATION_CHALLENGE_ISSUED,
@@ -1390,6 +1443,9 @@ def allowed_transition(src: SellArmState, dst: SellArmState) -> bool:
         SellArmState.CONSUMED: {SellArmState.REVIEW_REQUIRED},
     }
     # No direct jump from review/ready to ARMED.
-    if src in {SellArmState.REVIEW_REQUIRED, SellArmState.READY_FOR_CONFIRMATION} and dst == SellArmState.ARMED:
+    if (
+        src in {SellArmState.REVIEW_REQUIRED, SellArmState.READY_FOR_CONFIRMATION}
+        and dst == SellArmState.ARMED
+    ):
         return False
     return dst in allowed.get(src, set())
