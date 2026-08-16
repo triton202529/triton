@@ -3504,6 +3504,60 @@ def append_manage_log(summary: ManagePlanSummary) -> None:
         pass
 
 
+def _emit_f_stage_cycle_binding(
+    summary: ManagePlanSummary,
+    *,
+    exec_meta: Optional[Dict[str, Any]] = None,
+    outcome_unknown: bool = False,
+) -> None:
+    """Sidecar identity for F2. Data-authored only; never uses file mtime."""
+    try:
+        from services.manage_positions_cycle_binding import (
+            derive_remaining_blocker,
+            resolve_invocation_id,
+            write_cycle_binding,
+        )
+
+        meta = dict(exec_meta or {})
+        executed_planned = list(meta.get("executed_planned") or [])
+        submitted_symbols = [str(getattr(p, "symbol", p) or "").upper() for p in executed_planned]
+        submitted_symbols = [s for s in submitted_symbols if s]
+        submitted_outcomes = {s: "SUBMITTED" for s in submitted_symbols}
+        orders_executed = int(getattr(summary, "orders_executed", 0) or 0)
+        if orders_executed > 0 and not submitted_symbols:
+            outcome_unknown = True
+        brs = list(getattr(summary, "block_reasons", None) or [])
+        op_req = bool(meta.get("operator_execution_required"))
+        interlock = meta.get("dispatch_interlock") or {}
+        state = str(interlock.get("dispatch_interlock_state") or meta.get("safe_block_state") or "")
+        remaining = derive_remaining_blocker(
+            block_reasons=brs,
+            operator_execution_required=op_req,
+            orders_executed=orders_executed,
+            outcome_unknown=outcome_unknown,
+            dispatch_interlock_state=state,
+        )
+        write_cycle_binding(
+            results_root=RESULTS,
+            invocation_id=resolve_invocation_id(),
+            plan_generated_at=str(summary.timestamp),
+            f_stage_status="COMPLETE",
+            now=datetime.now(timezone.utc),
+            mode=str(summary.mode or "paper"),
+            live_execution_blocked=True,
+            orders_executed=orders_executed,
+            submitted_symbols=submitted_symbols,
+            submitted_outcomes=submitted_outcomes,
+            block_reasons=brs,
+            dispatch_interlock_state=state or None,
+            operator_execution_required=op_req,
+            remaining_blocker=remaining,
+            outcome_unknown=outcome_unknown,
+        )
+    except Exception as exc:
+        print(f"[manage_positions] cycle_binding_write_failed: {exc}", flush=True)
+
+
 def _empty_manage_exec_meta() -> Dict[str, Any]:
     return {
         "blocked_rows": [],
@@ -4174,6 +4228,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             orders_file=str(orders_path),
         )
         write_manage_artifacts([], [], summary, cfg, orders_path)
+        _emit_f_stage_cycle_binding(summary)
         append_manage_log(summary)
         try:
             from services.effective_lifecycle import (
@@ -4376,6 +4431,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"planned={len(planned)} executed=0 skipped={skipped} blocked=0 csv_rows={len(csv_planned)}"
         )
         print(f"[MANAGE_SUMMARY] top_skip_reasons: {_fmt_top_skip_reasons(skip_reasons)}")
+        _emit_f_stage_cycle_binding(summary)
         return 0
 
     rc, executed, brs, mgmt_session, exec_meta = maybe_execute_management(
@@ -4398,6 +4454,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             json.dump(asdict(summary), f, indent=2)
     except Exception:
         pass
+    _emit_f_stage_cycle_binding(summary, exec_meta=exec_meta)
 
     try:
         from services.capital_reallocation import run_reallocation_pipeline

@@ -62,6 +62,10 @@ $logFile  = Join-Path $logDir ("market_open_" + $runStamp + ".log")
 
 Start-Transcript -Path $logFile -Append | Out-Null
 
+$env:TRITON_MARKET_OPEN_INVOCATION_ID = (
+    "mo-" + $runStamp + "-" + [guid]::NewGuid().ToString("N")
+)
+
 # ── Run-Step: invoke a python module and abort on non-zero exit ──────
 function Run-Step {
     param(
@@ -270,6 +274,22 @@ try {
     # ── F. Position management (exits / trims / rotation) ────────────────
     Run-Step -Label "F. POSITION MANAGEMENT" `
              -PyArgs @("-m","services.manage_positions","--mode","paper","--use-performance-risk-overlay","--max-rotation-exits","3","--verbose")
+
+    # ── F2. Paper SELL readiness (cycle-bound; fail-closed; no dispatch/arm) ──
+    # Non-zero F2 codes 10-14 block BUY/ADD via the exit-before-entry interlock
+    # but must not abort heartbeat or crash the continuous loop. Do not use
+    # Run-Step here: a pending-arm cycle is a successful fail-closed market-open.
+    Write-Host ""
+    Write-Host "[F2. PAPER SELL READINESS PACKET]" -ForegroundColor Yellow
+    Write-Host ">>> python -m services.defensive_exit_approval_readiness" -ForegroundColor Cyan
+    & python -m services.defensive_exit_approval_readiness
+    $f2Rc = 0
+    if ($null -ne $LASTEXITCODE) { $f2Rc = [int]$LASTEXITCODE }
+    Write-Host ("[F2] exit_code=" + $f2Rc) -ForegroundColor Cyan
+    if (@(0, 10, 11, 12, 13, 14) -notcontains $f2Rc) {
+        Write-Host ("[FAIL] Step 'F2. PAPER SELL READINESS PACKET' failed (exit $f2Rc).") -ForegroundColor Red
+        throw ("STEP_FAILED:F2. PAPER SELL READINESS PACKET:" + $f2Rc)
+    }
 
     # ── G. Pipeline heartbeat (dashboard freshness; status writer only) ──
     Run-Step -Label "G. TOUCH PIPELINE HEARTBEAT" `

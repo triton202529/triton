@@ -41,9 +41,13 @@ CONFIRM_SUCCESS = "Paper SELL authority armed. No orders were submitted."
 NO_SUBMIT_CAPTION = "Button clicks do not submit orders."
 
 FAIL_CLOSED_MESSAGES = {
-    "no_reviewed_sell_actions": "No reviewed SELL actions are available.",
+    "no_reviewed_sell_actions": "No reviewed SELL actions.",
     "stale_readiness_packet": "Reviewed SELL readiness packet is stale.",
     "malformed_packet": "Reviewed SELL readiness packet is malformed or unavailable.",
+    "missing_generated_at": "Missing generated_at",
+    "naive_generated_at": "Reviewed SELL readiness generated_at is not timezone-aware.",
+    "future_generated_at": "Reviewed SELL readiness generated_at is in the future.",
+    "unparseable_generated_at": "Reviewed SELL readiness generated_at is unparseable.",
     "live_execution_not_blocked": "Live execution is not blocked. Paper SELL arming is refused.",
     "non_paper_mode": "Paper mode is required. Paper SELL arming is refused.",
     "sqlite_unavailable": "SQLite SELL store is unavailable.",
@@ -59,6 +63,9 @@ FAIL_CLOSED_MESSAGES = {
     "authority_already_created": "Paper SELL authority already exists for this challenge.",
     "configuration_blocked": "Paper SELL arming is blocked by a non-production configuration setting.",
     "unknown_exception": "Paper SELL arming failed closed. No orders were submitted.",
+    "source_unbound": "Reviewed SELL readiness is not bound to the current cycle.",
+    "blocked_other_gate": "Reviewed SELL actions are blocked by a non-authority gate.",
+    "sell_outcome_unknown": "Reviewed SELL outcome is unknown and requires reconciliation.",
 }
 
 
@@ -202,9 +209,18 @@ def load_reviewed_sell_packet(results_root: Path) -> Tuple[Optional[Dict[str, An
 def packet_freshness(
     packet: Dict[str, Any], *, now: datetime
 ) -> Tuple[bool, str, Optional[datetime]]:
-    generated = _parse_iso(str(packet.get("generated_at") or packet.get("timestamp") or ""))
-    if generated is None:
-        return False, "malformed_packet", None
+    if "generated_at" not in packet or packet.get("generated_at") in (None, ""):
+        return False, "missing_generated_at", None
+    raw = packet.get("generated_at")
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except Exception:
+        return False, "unparseable_generated_at", None
+    if dt.tzinfo is None:
+        return False, "naive_generated_at", None
+    generated = dt.astimezone(timezone.utc)
+    if generated > now:
+        return False, "future_generated_at", generated
     age = now - generated
     if age > timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES):
         return False, "stale_readiness_packet", generated
@@ -231,14 +247,22 @@ def _sell_only_nonempty(packet: Dict[str, Any]) -> Tuple[bool, str]:
     if not actions:
         return False, "no_reviewed_sell_actions"
     for row in actions:
-        action = str((row or {}).get("action") or "").upper()
+        if not isinstance(row, dict):
+            return False, "malformed_packet"
+        action = str(row.get("action") or "").upper()
         if action in BUY_ACTIONS:
             return False, "malformed_packet"
         if action not in SELL_ACTIONS:
             return False, "malformed_packet"
+        try:
+            qty = float(row.get("qty") or 0)
+        except (TypeError, ValueError):
+            return False, "malformed_packet"
+        if not str(row.get("symbol") or "").strip() or qty <= 0:
+            return False, "malformed_packet"
     scope = _scope_from_readiness(packet)
-    if not scope:
-        return False, "no_reviewed_sell_actions"
+    if not scope or len(scope) != len(actions):
+        return False, "malformed_packet"
     return True, "ok"
 
 
@@ -453,12 +477,50 @@ def build_presentation(
         arm_enabled = deny_arm is None
         arm_duplicate = False
 
-    freshness_label = "unavailable"
-    if generated_at is not None:
+    pkt_status = str((packet or {}).get("packet_status") or "")
+    if pkt_status == "BLOCKED_OTHER_GATE" and deny_arm in (None, "no_reviewed_sell_actions"):
+        deny_arm = "blocked_other_gate"
+        deny_confirm = deny_arm
+        arm_enabled = False
+        confirm_enabled = False
+    elif pkt_status == "OUTCOME_UNKNOWN":
+        deny_arm = "sell_outcome_unknown"
+        deny_confirm = deny_arm
+        arm_enabled = False
+        confirm_enabled = False
+    elif pkt_status == "SOURCE_UNBOUND":
+        deny_arm = "source_unbound"
+        deny_confirm = deny_arm
+        arm_enabled = False
+        confirm_enabled = False
+
+    freshness_label = "UNAVAILABLE"
+    if packet is None:
+        freshness_label = "MALFORMED"
+    elif deny_arm == "missing_generated_at":
+        freshness_label = "MALFORMED"
+    elif deny_arm in (
+        "unparseable_generated_at",
+        "naive_generated_at",
+        "future_generated_at",
+        "malformed_packet",
+    ):
+        freshness_label = "MALFORMED"
+    elif deny_arm == "source_unbound":
+        freshness_label = "SOURCE_UNBOUND"
+    elif deny_arm == "blocked_other_gate":
+        freshness_label = "BLOCKED_OTHER_GATE"
+    elif deny_arm == "sell_outcome_unknown":
+        freshness_label = "OUTCOME_UNKNOWN"
+    elif deny_arm == "stale_readiness_packet":
+        freshness_label = "STALE"
+    elif deny_arm == "no_reviewed_sell_actions":
+        freshness_label = "EMPTY"
+    elif generated_at is not None:
         freshness_label = (
-            "fresh"
+            "FRESH"
             if (now - generated_at) <= timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES)
-            else "stale"
+            else "STALE"
         )
 
     return {

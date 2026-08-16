@@ -82,6 +82,21 @@ def _file_age_minutes(path: Path) -> Optional[float]:
     return (datetime.now(timezone.utc) - mtime).total_seconds() / 60.0
 
 
+def _load_settled_paper_cash() -> Optional[float]:
+    """Current settled paper cash only. Never includes pending SELL proceeds."""
+    for name in ("account_snapshot.json", "equity_snapshot.json", "paper_account_snapshot.json"):
+        doc = _load_json(RESULTS / name)
+        for key in ("settled_cash", "cash", "cash_available", "buying_power"):
+            raw = doc.get(key)
+            try:
+                if raw is None or str(raw).strip() in ("", "nan", "None"):
+                    continue
+                return float(raw)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def _find_execute_trades_running() -> Tuple[bool, List[str]]:
     if sys.platform != "win32":
         return False, []
@@ -682,10 +697,6 @@ def _verify_final_selection_before_execute(
 def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dict[str, Any]]:
     details: Dict[str, Any] = {"checks": {}, "candidates": []}
 
-    candidates, handoff = _load_governed_allocation_candidates()
-    details["candidates"] = candidates
-    _merge_handoff_into_details(details, handoff)
-
     def block(
         reason: str,
         check: str,
@@ -705,6 +716,29 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
         if verbose:
             print(f"[PAPER_ENTRY_GATE] status={label} reason={reason}", flush=True)
         return False, reason, details
+
+    from services.manage_positions_cycle_binding import (
+        DECISION_BLOCK,
+        INVOCATION_ENV,
+        evaluate_exit_before_entry,
+    )
+
+    proc_inv = str(os.environ.get(INVOCATION_ENV) or "").strip()
+    interlock = evaluate_exit_before_entry(
+        results_root=RESULTS,
+        expected_invocation_id=proc_inv,
+    )
+    details["checks"]["exit_before_entry"] = interlock
+    if str(interlock.get("decision") or "") == DECISION_BLOCK:
+        return block(
+            str(interlock.get("reason") or "ENTRY_BLOCKED_SELL_READINESS_UNKNOWN"),
+            "exit_before_entry",
+            safe=True,
+        )
+
+    candidates, handoff = _load_governed_allocation_candidates()
+    details["candidates"] = candidates
+    _merge_handoff_into_details(details, handoff)
 
     from services.triton_env_loader import paper_runtime_env_ready
 
@@ -868,6 +902,42 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     _merge_handoff_into_details(details, handoff_reload)
     eligible = [c for c in candidates if c.get("eligible_for_auto_entry")]
     details["checks"]["entry_rows_total"] = len(candidates)
+    details["checks"]["entry_rows_eligible"] = len(eligible)
+
+    from services.paper_sell_entry_dependency import (
+        ALLOW_EXISTING_GATES,
+        context_from_interlock,
+        filter_entry_candidates,
+    )
+
+    dep_ctx = context_from_interlock(interlock)
+    cash = _load_settled_paper_cash()
+    details["checks"]["settled_paper_cash"] = cash
+    details["checks"]["pending_sell_proceeds_credited"] = 0
+    if dep_ctx.get("pending_sells") or dep_ctx.get("scope") == "GLOBAL_SAFETY_BLOCK":
+        allowed, dep_decisions = filter_entry_candidates(
+            eligible,
+            pending_sells=dep_ctx.get("pending_sells") or [],
+            current_cash=cash,
+            at_position_cap=False,
+            global_scope=str(dep_ctx.get("scope") or ""),
+            global_reason=str(dep_ctx.get("global_reason") or ""),
+        )
+        details["checks"]["pending_sell_candidate_decisions"] = dep_decisions
+        allowed_syms = {str(c.get("ticker") or c.get("symbol") or "").upper() for c in allowed}
+        for cand in candidates:
+            sym = str(cand.get("ticker") or cand.get("symbol") or "").upper()
+            rec = next((d for d in dep_decisions if d.get("symbol") == sym), None)
+            if rec and rec.get("decision") != ALLOW_EXISTING_GATES:
+                cand["eligible_for_auto_entry"] = False
+                extra = str(rec.get("decision") or "")
+                prior = str(cand.get("block_reasons") or "")
+                cand["block_reasons"] = "|".join(x for x in (prior, extra) if x)
+        eligible = [c for c in candidates if c.get("eligible_for_auto_entry")]
+        if handoff_reload.get("eligible_entry_symbols"):
+            handoff_reload["eligible_entry_symbols"] = sorted(allowed_syms)
+        details["checks"]["entry_rows_eligible_after_pending_sell_filter"] = len(eligible)
+
     details["checks"]["entry_rows_eligible"] = len(eligible)
     if not candidates:
         exclusions = _load_dashboard_buy_signal_exclusions()
