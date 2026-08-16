@@ -24641,8 +24641,10 @@ def _render_cc_operations_broker_order_evidence() -> None:
     assert callable(_render_start_controls)
     render_operations_page()
     from dashboard.paper_sell_arm_controls import render_paper_sell_arm_controls
+    from dashboard.paper_buy_add_arm_controls import render_paper_buy_add_arm_controls
 
     render_paper_sell_arm_controls()
+    render_paper_buy_add_arm_controls()
 
 
 def _render_cc_orders_broker_order_evidence() -> None:

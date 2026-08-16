@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE = ROOT / "data" / "live"
@@ -30,22 +32,53 @@ def _utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def write_confirm(ttl_minutes: int, allow_execute: bool = True) -> Path:
+def _atomic_write_confirm(path: Path, doc: dict) -> None:
+    """Same schema bytes as the historical writer, with replace+flush+fsync."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(doc, indent=2)
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(payload)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    try:
+        fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def write_confirm(
+    ttl_minutes: int,
+    allow_execute: bool = True,
+    *,
+    confirm_path: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Path:
     """Write a fixed-expiry paper arm latch (explicit operator use only)."""
-    LIVE.mkdir(parents=True, exist_ok=True)
+    dest = Path(confirm_path) if confirm_path is not None else CONFIRM_PATH
     ttl = max(1, int(ttl_minutes))
     if ttl > MAX_SUPPORTED_TTL_MINUTES:
         ttl = MAX_SUPPORTED_TTL_MINUTES
-    now = datetime.now(timezone.utc)
-    exp = now + timedelta(minutes=ttl)
+    clock = now if now is not None else datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    else:
+        clock = clock.astimezone(timezone.utc)
+    exp = clock + timedelta(minutes=ttl)
+    ts = clock.strftime("%Y-%m-%dT%H:%M:%SZ") if now is not None else _utc_iso()
     doc = {
-        "timestamp": _utc_iso(),
+        "timestamp": ts,
         "mode": "ASSISTED",
         "expires_at": exp.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "allow_execute": bool(allow_execute),
     }
-    CONFIRM_PATH.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-    return CONFIRM_PATH
+    _atomic_write_confirm(dest, doc)
+    return dest
 
 
 def main(argv: list[str] | None = None) -> int:
