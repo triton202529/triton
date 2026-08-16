@@ -62,9 +62,85 @@ $logFile  = Join-Path $logDir ("market_open_" + $runStamp + ".log")
 
 Start-Transcript -Path $logFile -Append | Out-Null
 
-$env:TRITON_MARKET_OPEN_INVOCATION_ID = (
+# Current-cycle invocation ID for F / F2 (inherited by child python in this process).
+# Continuous-loop parent cannot inherit this env after this script exits, so also
+# write an explicit two-phase handoff for paper_entry_loop_stage (Phase 198K-A/B):
+#   PENDING at start (never entry-usable; supersedes prior READY)
+#   READY after F2 (entry-usable only with matching F/F2 binding)
+$script:MarketOpenInvocationId = (
     "mo-" + $runStamp + "-" + [guid]::NewGuid().ToString("N")
 )
+$env:TRITON_MARKET_OPEN_INVOCATION_ID = $script:MarketOpenInvocationId
+$script:HandoffIssuedAt = (Get-Date).ToUniversalTime().ToString("o")
+try {
+    $tzEt = [TimeZoneInfo]::FindSystemTimeZoneById("Eastern Standard Time")
+    $script:HandoffSessionDate = [TimeZoneInfo]::ConvertTimeFromUtc(
+        [DateTime]::UtcNow, $tzEt
+    ).ToString("yyyy-MM-dd")
+} catch {
+    $script:HandoffSessionDate = (Get-Date).ToString("yyyy-MM-dd")
+}
+
+$handoffDir = Join-Path $repoRoot "data\results"
+if (-not (Test-Path $handoffDir)) {
+    New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+}
+$script:HandoffPath = Join-Path $handoffDir "market_open_invocation_handoff.json"
+
+function Get-FileSha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path $Path)) { return $null }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            $hash = $sha.ComputeHash($fs)
+            return ([BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+        } finally {
+            $fs.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Write-InvocationHandoff {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("PENDING", "READY")][string]$Status,
+        [string]$InterlockSha256 = "",
+        [string]$FBindingSha256 = ""
+    )
+    $payload = [ordered]@{
+        schema_version            = 2
+        status                    = $Status
+        market_open_invocation_id = $script:MarketOpenInvocationId
+        session_date              = $script:HandoffSessionDate
+        issued_at                 = $script:HandoffIssuedAt
+        source                    = "scripts/run_market_open.ps1"
+        creates_no_authority      = $true
+        live_execution_permitted  = $false
+        broker_orders_submitted   = $false
+    }
+    if ($Status -eq "READY") {
+        $payload["ready_at"] = (Get-Date).ToUniversalTime().ToString("o")
+        $payload["generated_at"] = $payload["ready_at"]
+        $payload["interlock_sha256"] = $InterlockSha256
+        $payload["f_binding_sha256"] = $FBindingSha256
+    } else {
+        $payload["generated_at"] = $script:HandoffIssuedAt
+        $payload["ready_at"] = $null
+        $payload["interlock_sha256"] = $null
+        $payload["f_binding_sha256"] = $null
+    }
+    $tmp = $script:HandoffPath + ".tmp"
+    ($payload | ConvertTo-Json) | Set-Content -Path $tmp -Encoding utf8
+    Move-Item -Force -Path $tmp -Destination $script:HandoffPath
+    Write-Host ("[INVOCATION] status=" + $Status + " id=" + $script:MarketOpenInvocationId) -ForegroundColor Cyan
+}
+
+# Supersede any prior READY immediately — PENDING is never entry-usable.
+Write-InvocationHandoff -Status "PENDING"
+Write-Host ("[INVOCATION] handoff=" + $script:HandoffPath) -ForegroundColor Cyan
 
 # ── Run-Step: invoke a python module and abort on non-zero exit ──────
 function Run-Step {
@@ -290,6 +366,18 @@ try {
         Write-Host ("[FAIL] Step 'F2. PAPER SELL READINESS PACKET' failed (exit $f2Rc).") -ForegroundColor Red
         throw ("STEP_FAILED:F2. PAPER SELL READINESS PACKET:" + $f2Rc)
     }
+
+    # Finalize invocation handoff only after F/F2 evidence exists for this ID.
+    $interlockPath = Join-Path $repoRoot "data\results\paper_sell_exit_before_entry.json"
+    $fBindingPath = Join-Path $repoRoot "data\results\manage_positions_cycle_binding.json"
+    $interlockSha = Get-FileSha256Hex -Path $interlockPath
+    $fBindingSha = Get-FileSha256Hex -Path $fBindingPath
+    if (-not $interlockSha) {
+        throw "STEP_FAILED:F2. PAPER SELL READINESS PACKET:HANDOFF_INTERLOCK_MISSING"
+    }
+    Write-InvocationHandoff -Status "READY" `
+        -InterlockSha256 $interlockSha `
+        -FBindingSha256 $(if ($fBindingSha) { $fBindingSha } else { "" })
 
     # ── G. Pipeline heartbeat (dashboard freshness; status writer only) ──
     Run-Step -Label "G. TOUCH PIPELINE HEARTBEAT" `

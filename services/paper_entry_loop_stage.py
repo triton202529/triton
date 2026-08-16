@@ -28,6 +28,17 @@ RESULTS = ROOT / "data" / "results"
 LIVE = ROOT / "data" / "live"
 CONFIG = ROOT / "config"
 VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+MARKET_OPEN_INVOCATION_HANDOFF = RESULTS / "market_open_invocation_handoff.json"
+INVOCATION_ENV_NAME = "TRITON_MARKET_OPEN_INVOCATION_ID"
+HANDOFF_SCHEMA_VERSION = 2
+HANDOFF_MAX_AGE_MINUTES = 45
+REASON_INVOCATION_MISSING = "ENTRY_BLOCKED_INVOCATION_MISSING"
+REASON_INVOCATION_SOURCE_MISMATCH = "ENTRY_BLOCKED_INVOCATION_SOURCE_MISMATCH"
+REASON_INVOCATION_MALFORMED = "ENTRY_BLOCKED_INVOCATION_MALFORMED"
+REASON_INVOCATION_HANDOFF_NOT_READY = "ENTRY_BLOCKED_INVOCATION_HANDOFF_NOT_READY"
+REASON_INVOCATION_HANDOFF_STALE = "ENTRY_BLOCKED_INVOCATION_HANDOFF_STALE"
+REASON_INVOCATION_HANDOFF_BINDING = "ENTRY_BLOCKED_INVOCATION_HANDOFF_BINDING"
+REASON_INVOCATION_HANDOFF_SESSION = "ENTRY_BLOCKED_INVOCATION_HANDOFF_SESSION"
 
 EXEC_READINESS = RESULTS / "execution_readiness.json"
 TRADE_OPPORTUNITIES = RESULTS / "trade_opportunities.csv"
@@ -48,6 +59,186 @@ _EXECUTE_INVOKED = False
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def invocation_handoff_path(*, results_root: Optional[Path] = None) -> Path:
+    root = Path(results_root) if results_root is not None else RESULTS
+    return root / "market_open_invocation_handoff.json"
+
+
+def _invocation_id_well_formed(value: str) -> bool:
+    text = str(value or "")
+    if not text or text != text.strip():
+        return False
+    if len(text) > 200:
+        return False
+    if any(ch.isspace() for ch in text):
+        return False
+    if "/" in text or "\\" in text:
+        return False
+    return all(ch.isalnum() or ch in "-_" for ch in text)
+
+
+def _parse_iso_utc(raw: Any) -> Optional[datetime]:
+    if raw is None:
+        return None
+    try:
+        text = str(raw).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            return None
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _sha256_file(path: Path) -> Optional[str]:
+    if not path.is_file():
+        return None
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def _current_session_date_et(*, now: Optional[datetime] = None) -> str:
+    clock = now if now is not None else datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        return clock.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    except Exception:
+        return clock.astimezone(timezone.utc).date().isoformat()
+
+
+def validate_market_open_invocation_handoff(
+    *,
+    results_root: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
+    """Validate READY handoff only. Never adopts F2 interlock ID as authority."""
+    path = invocation_handoff_path(results_root=results_root)
+    if not path.is_file():
+        return None, None, {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, REASON_INVOCATION_MALFORMED, {}
+    if not isinstance(doc, dict):
+        return None, REASON_INVOCATION_MALFORMED, {}
+
+    try:
+        schema = int(doc.get("schema_version"))
+    except Exception:
+        return None, REASON_INVOCATION_MALFORMED, doc
+    if schema != HANDOFF_SCHEMA_VERSION:
+        return None, REASON_INVOCATION_MALFORMED, doc
+
+    status = str(doc.get("status") or "").strip().upper()
+    if status == "PENDING":
+        return None, REASON_INVOCATION_HANDOFF_NOT_READY, doc
+    if status != "READY":
+        return None, REASON_INVOCATION_HANDOFF_NOT_READY, doc
+
+    if doc.get("creates_no_authority") is not True:
+        return None, REASON_INVOCATION_MALFORMED, doc
+    if doc.get("live_execution_permitted") is True:
+        return None, REASON_INVOCATION_MALFORMED, doc
+    if doc.get("broker_orders_submitted") is True:
+        return None, REASON_INVOCATION_MALFORMED, doc
+
+    inv = str(doc.get("market_open_invocation_id") or doc.get("invocation_id") or "").strip()
+    if not _invocation_id_well_formed(inv):
+        return None, REASON_INVOCATION_MALFORMED, doc
+
+    clock = now if now is not None else datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    else:
+        clock = clock.astimezone(timezone.utc)
+
+    ready_at = _parse_iso_utc(doc.get("ready_at") or doc.get("generated_at"))
+    issued_at = _parse_iso_utc(doc.get("issued_at"))
+    if ready_at is None or issued_at is None:
+        return None, REASON_INVOCATION_MALFORMED, doc
+    if ready_at > clock or issued_at > clock:
+        return None, REASON_INVOCATION_HANDOFF_STALE, doc
+    age_min = (clock - ready_at).total_seconds() / 60.0
+    if age_min > HANDOFF_MAX_AGE_MINUTES:
+        return None, REASON_INVOCATION_HANDOFF_STALE, doc
+
+    session_date = str(doc.get("session_date") or "").strip()
+    if not session_date:
+        return None, REASON_INVOCATION_HANDOFF_SESSION, doc
+    if session_date != _current_session_date_et(now=clock):
+        return None, REASON_INVOCATION_HANDOFF_SESSION, doc
+
+    expected_interlock = str(doc.get("interlock_sha256") or "").strip().lower()
+    if not expected_interlock or len(expected_interlock) != 64:
+        return None, REASON_INVOCATION_HANDOFF_BINDING, doc
+    root = Path(results_root) if results_root is not None else RESULTS
+    interlock_path = root / "paper_sell_exit_before_entry.json"
+    actual_interlock = _sha256_file(interlock_path)
+    if actual_interlock is None or actual_interlock != expected_interlock:
+        return None, REASON_INVOCATION_HANDOFF_BINDING, doc
+
+    return inv, None, doc
+
+
+def read_market_open_invocation_handoff(
+    *,
+    results_root: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Compatibility wrapper: READY handoff ID or sanitized fail-closed reason."""
+    inv, err, _doc = validate_market_open_invocation_handoff(results_root=results_root, now=now)
+    return inv, err
+
+
+def resolve_entry_invocation_id(
+    *,
+    explicit: Optional[str] = None,
+    results_root: Optional[Path] = None,
+    environ: Optional[Dict[str, str]] = None,
+    now: Optional[datetime] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve current-cycle invocation ID for entry vs F/F2 interlock.
+
+    Sources (all provided values must match exactly):
+      - explicit CLI/function parameter
+      - process environment TRITON_MARKET_OPEN_INVOCATION_ID
+      - READY market_open_invocation_handoff.json (PENDING/malformed fail closed)
+
+    If a handoff file exists it must validate as READY; prior READY cannot survive
+    a newer PENDING supersession. Never adopts the ID from the F2 interlock.
+    """
+    envmap = environ if environ is not None else os.environ
+    cli = str(explicit or "").strip()
+    env = str(envmap.get(INVOCATION_ENV_NAME) or "").strip()
+    handoff_path = invocation_handoff_path(results_root=results_root)
+    handoff_present = handoff_path.is_file()
+    handoff, handoff_err, _doc = validate_market_open_invocation_handoff(
+        results_root=results_root, now=now
+    )
+    if handoff_present and handoff_err:
+        return None, handoff_err
+    provided: Dict[str, str] = {}
+    if cli:
+        provided["cli"] = cli
+    if env:
+        provided["env"] = env
+    if handoff:
+        provided["handoff"] = handoff
+    if not provided:
+        return None, REASON_INVOCATION_MISSING
+    values = list(provided.values())
+    if len(set(values)) > 1:
+        return None, REASON_INVOCATION_SOURCE_MISMATCH
+    resolved = values[0]
+    if not _invocation_id_well_formed(resolved):
+        return None, REASON_INVOCATION_MALFORMED
+    return resolved, None
 
 
 def _python_exe() -> str:
@@ -694,7 +885,12 @@ def _verify_final_selection_before_execute(
     return False, reason or "FINAL_SELECTION_NOT_APPROVED", sync_details
 
 
-def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dict[str, Any]]:
+def evaluate_paper_entry_gates(
+    *,
+    verbose: bool = False,
+    market_open_invocation_id: Optional[str] = None,
+    results_root: Optional[Path] = None,
+) -> Tuple[bool, str, Dict[str, Any]]:
     details: Dict[str, Any] = {"checks": {}, "candidates": []}
 
     def block(
@@ -719,13 +915,24 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
 
     from services.manage_positions_cycle_binding import (
         DECISION_BLOCK,
-        INVOCATION_ENV,
         evaluate_exit_before_entry,
     )
 
-    proc_inv = str(os.environ.get(INVOCATION_ENV) or "").strip()
+    results = Path(results_root) if results_root is not None else RESULTS
+    proc_inv, inv_err = resolve_entry_invocation_id(
+        explicit=market_open_invocation_id,
+        results_root=results,
+    )
+    details["checks"]["market_open_invocation_id_resolved"] = proc_inv
+    details["checks"]["market_open_invocation_resolve_error"] = inv_err
+    if inv_err or not proc_inv:
+        return block(
+            str(inv_err or REASON_INVOCATION_MISSING),
+            "exit_before_entry",
+            safe=True,
+        )
     interlock = evaluate_exit_before_entry(
-        results_root=RESULTS,
+        results_root=results,
         expected_invocation_id=proc_inv,
     )
     details["checks"]["exit_before_entry"] = interlock
@@ -1151,10 +1358,18 @@ def evaluate_paper_entry_gates(*, verbose: bool = False) -> Tuple[bool, str, Dic
     return True, "OK", details
 
 
-def run_paper_entry_stage(*, verbose: bool = False, dry_run: bool = False) -> int:
+def run_paper_entry_stage(
+    *,
+    verbose: bool = False,
+    dry_run: bool = False,
+    market_open_invocation_id: Optional[str] = None,
+) -> int:
     global _EXECUTE_INVOKED
 
-    gate_ok, reason, details = evaluate_paper_entry_gates(verbose=verbose)
+    gate_ok, reason, details = evaluate_paper_entry_gates(
+        verbose=verbose,
+        market_open_invocation_id=market_open_invocation_id,
+    )
     handoff = details.get("allocation_handoff") or {}
     market_open = bool((details.get("checks") or {}).get("market_open"))
 
@@ -1273,9 +1488,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--dry-run", action="store_true", help="Evaluate gates only; never call execute_trades"
     )
     ap.add_argument("--evaluate-only", action="store_true", help="Alias for --dry-run")
+    ap.add_argument(
+        "--market-open-invocation-id",
+        default=None,
+        help=(
+            "Explicit current-cycle market-open invocation ID. "
+            "Must match env and/or handoff when those are present."
+        ),
+    )
     args = ap.parse_args(argv)
     dry = bool(args.dry_run or args.evaluate_only)
-    return run_paper_entry_stage(verbose=bool(args.verbose), dry_run=dry)
+    return run_paper_entry_stage(
+        verbose=bool(args.verbose),
+        dry_run=dry,
+        market_open_invocation_id=args.market_open_invocation_id,
+    )
 
 
 if __name__ == "__main__":
