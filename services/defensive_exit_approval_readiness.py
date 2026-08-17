@@ -67,6 +67,11 @@ SCHEMA_VERSION = "198I-ZA-SELL-READINESS-1"
 PRODUCER_ID = "services.defensive_exit_approval_readiness"
 CANONICAL_MODE = "PAPER"
 LIVE_EXECUTION_BLOCKED = "BLOCKED"
+# Explicit entry-only vocabulary that may appear on a mixed F plan.
+# These rows are excluded from the SELL packet; they are never converted
+# into SELL actions. Unknown/ambiguous actions still fail closed.
+RECOGNIZED_ENTRY_ONLY_ACTIONS = frozenset(set(BUY_ACTIONS) | {"OPEN_NEW"})
+CONTRADICTORY_BUY_SIDES = frozenset({"BUY", "B", "BID", "LONG_ENTRY", "ENTRY"})
 
 
 def default_results_root() -> Path:
@@ -124,6 +129,35 @@ def plan_fingerprint(rows: Sequence[Dict[str, Any]]) -> str:
         )
     )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _is_recognized_entry_only_action(action: Any) -> bool:
+    return str(action or "").upper().strip() in RECOGNIZED_ENTRY_ONLY_ACTIONS
+
+
+def _contradictory_buy_side(row: Dict[str, Any]) -> bool:
+    side = str(row.get("order_side") or row.get("side") or "").upper().strip()
+    if not side:
+        return False
+    if side in CONTRADICTORY_BUY_SIDES or side in BUY_ACTIONS:
+        return True
+    return False
+
+
+def _partition_invalid_classifications(
+    classified: Sequence[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split CLASS_INVALID into recognized entry-only vs fail-closed rows."""
+    excluded: List[Dict[str, Any]] = []
+    fatal: List[Dict[str, Any]] = []
+    for rec in classified:
+        if rec.get("classification") != CLASS_INVALID:
+            continue
+        if _is_recognized_entry_only_action(rec.get("action")):
+            excluded.append(rec)
+        else:
+            fatal.append(rec)
+    return excluded, fatal
 
 
 def _normalize_action_row(row: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -228,6 +262,8 @@ def _selected_sell_rows(
         action = str(
             row.get("final_action") or row.get("management_action_candidate") or ""
         ).upper()
+        if _is_recognized_entry_only_action(action):
+            continue
         mapped = {
             "symbol": row.get("symbol"),
             "action": action,
@@ -236,8 +272,6 @@ def _selected_sell_rows(
             "est_notional": row.get("planned_notional"),
         }
         item, err = _normalize_action_row(mapped)
-        if err == "buy_or_add_in_sell_packet":
-            return [], err
         if err:
             return [], err
         assert item is not None
@@ -357,12 +391,14 @@ def generate_from_manage_artifacts(
             }
         ready = [c for c in classified if c.get("classification") == CLASS_AUTHORITY_READY]
         other_gate = [c for c in classified if c.get("classification") == CLASS_BLOCKED_OTHER_GATE]
-        invalid = [c for c in classified if c.get("classification") == CLASS_INVALID]
-        if invalid:
+        excluded_entry_only, fatal_invalid = _partition_invalid_classifications(classified)
+        if fatal_invalid:
             raise ValueError("invalid_selected_sell_row")
         actions = []
         for rec in ready:
             row = next((r for r in rows if str(r.get("symbol") or "").upper() == rec["symbol"]), {})
+            if _contradictory_buy_side(row):
+                raise ValueError("contradictory_side_action")
             item, err = _normalize_action_row(
                 {
                     "symbol": rec["symbol"],
@@ -376,6 +412,8 @@ def generate_from_manage_artifacts(
                 raise ValueError(err)
             actions.append(item)
         inv = str(binding.get("invocation_id"))
+        # plan_hash / selected_row_hash remain the whole-plan F-binding identity.
+        # Exclusion of recognized BUY/ADD rows does not recompute that hash.
         packet = build_canonical_packet(
             now=now,
             actions=actions,
@@ -396,6 +434,13 @@ def generate_from_manage_artifacts(
                 "positions_snapshot_sha256": binding.get("positions_snapshot_sha256"),
                 "open_orders_snapshot_sha256": binding.get("open_orders_snapshot_sha256"),
                 "row_classifications": classified,
+                "excluded_entry_only_count": len(excluded_entry_only),
+                "excluded_entry_only_symbols": [
+                    str(c.get("symbol") or "") for c in excluded_entry_only
+                ],
+                "excluded_entry_only_reason": (
+                    "recognized_non_sell_row" if excluded_entry_only else None
+                ),
                 "arm_eligibility": (CLASS_AUTHORITY_READY if actions else "EMPTY"),
                 "remaining_blocker": binding.get("remaining_blocker"),
                 "packet_status": (

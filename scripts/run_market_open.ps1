@@ -104,6 +104,38 @@ function Get-FileSha256Hex {
     }
 }
 
+function Write-Utf8NoBomAtomicFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+    $tmp = $Path + ".tmp"
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $bytes = $encoding.GetBytes($Text)
+    $fs = $null
+    try {
+        $fs = New-Object System.IO.FileStream(
+            $tmp,
+            [System.IO.FileMode]::Create,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $fs.Write($bytes, 0, $bytes.Length)
+        $fs.Flush($true)
+    } finally {
+        if ($null -ne $fs) { $fs.Dispose() }
+    }
+    # Refuse to replace dest with an incomplete tmp payload.
+    if (-not (Test-Path -LiteralPath $tmp)) {
+        throw "HANDOFF_TMP_MISSING"
+    }
+    $tmpLen = (Get-Item -LiteralPath $tmp).Length
+    if ($tmpLen -le 0 -or $tmpLen -ne $bytes.Length) {
+        throw "HANDOFF_TMP_INCOMPLETE"
+    }
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
+}
+
 function Write-InvocationHandoff {
     param(
         [Parameter(Mandatory = $true)][ValidateSet("PENDING", "READY")][string]$Status,
@@ -132,9 +164,13 @@ function Write-InvocationHandoff {
         $payload["interlock_sha256"] = $null
         $payload["f_binding_sha256"] = $null
     }
-    $tmp = $script:HandoffPath + ".tmp"
-    ($payload | ConvertTo-Json) | Set-Content -Path $tmp -Encoding utf8
-    Move-Item -Force -Path $tmp -Destination $script:HandoffPath
+    $json = $payload | ConvertTo-Json
+    try {
+        Write-Utf8NoBomAtomicFile -Path $script:HandoffPath -Text $json
+    } catch {
+        Write-Host ("[INVOCATION] write_failed status=" + $Status + " err=" + $_.Exception.Message) -ForegroundColor Red
+        throw
+    }
     Write-Host ("[INVOCATION] status=" + $Status + " id=" + $script:MarketOpenInvocationId) -ForegroundColor Cyan
 }
 
