@@ -24625,13 +24625,40 @@ def sidebar_controls() -> Tuple[str, str, str]:
         return "legacy", section, page
 
 
+def _render_paper_trading_action_center() -> None:
+    """PAPER TRADING ACTION CENTER — presentation only; callbacks unchanged."""
+    from dashboard.paper_buy_add_arm_controls import render_paper_buy_add_arm_controls
+    from dashboard.paper_sell_arm_controls import render_paper_sell_arm_controls
+
+    st.markdown("### PAPER TRADING ACTION CENTER")
+    st.caption(
+        "Authorization does not start TRITON or submit orders. Live execution remains blocked."
+    )
+    left, right = st.columns(2, gap="medium")
+    with left:
+        with st.container(border=True):
+            render_paper_buy_add_arm_controls(compact=True)
+    with right:
+        with st.container(border=True):
+            render_paper_sell_arm_controls(compact=True)
+    # Tighten gap before Protected Runtime Controls without changing their logic.
+    st.markdown("")
+
+
 def _render_cc_operations_broker_order_evidence() -> None:
     """Operations page with paper-REST broker freshness + protected controls reused.
 
     UIR-001: presentation shell lives in dashboard.operator_console.render_operations_page.
     LIVE EXECUTION BLOCKED remains an authoritative safety display from status evidence.
     Protected Start/Stop/Restart remain wired through _render_start_controls.
+
+    Phase 198L-A: mount the Paper Trading Action Center immediately before
+    Protected Runtime Controls by wrapping _render_start_controls for this render
+    only. operator_console.py bytes (protected hash) are not modified.
     """
+    import importlib
+
+    from dashboard import operator_console as oc
     from dashboard.operator_console import (
         _render_start_controls,  # noqa: F401 — authority-gate contract anchor
         render_operations_page,
@@ -24639,12 +24666,33 @@ def _render_cc_operations_broker_order_evidence() -> None:
 
     # Delegate presentation; control callbacks stay inside _render_start_controls.
     assert callable(_render_start_controls)
-    render_operations_page()
-    from dashboard.paper_sell_arm_controls import render_paper_sell_arm_controls
-    from dashboard.paper_buy_add_arm_controls import render_paper_buy_add_arm_controls
 
-    render_paper_sell_arm_controls()
-    render_paper_buy_add_arm_controls()
+    def _resolve_original_start():
+        saved = getattr(oc, "_triton_198l_original_start_controls", None)
+        if saved is not None and getattr(saved, "__qualname__", "") == "_render_start_controls":
+            return saved
+        current = oc._render_start_controls
+        if getattr(current, "__qualname__", "") == "_render_start_controls":
+            return current
+        # Recover a leftover wrap from a prior failed script run (module stays cached).
+        refreshed = importlib.reload(oc)
+        return refreshed._render_start_controls
+
+    _orig_start = _resolve_original_start()
+    oc._triton_198l_original_start_controls = _orig_start
+    _action_center_mounted = {"done": False}
+
+    def _start_controls_after_action_center(*args, **kwargs):
+        if not _action_center_mounted["done"]:
+            _action_center_mounted["done"] = True
+            _render_paper_trading_action_center()
+        return _orig_start(*args, **kwargs)
+
+    oc._render_start_controls = _start_controls_after_action_center
+    try:
+        render_operations_page()
+    finally:
+        oc._render_start_controls = oc._triton_198l_original_start_controls
 
 
 def _render_cc_orders_broker_order_evidence() -> None:

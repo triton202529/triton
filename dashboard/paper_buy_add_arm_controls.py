@@ -7,7 +7,7 @@ calls the same write_confirm used by the CLI. Does not start TRITON or submit or
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 import streamlit as st
 
@@ -35,13 +35,19 @@ def render_paper_buy_add_arm_controls(
     live_blocked: Optional[bool] = None,
     allow_path_override: bool = False,
     session_state_fn=None,
+    compact: bool = False,
 ) -> None:
-    from dashboard.operator_ui import section_header
+    """Render BUY/ADD authorization. Callbacks and phrases are unchanged."""
+    if compact:
+        st.markdown("##### Paper BUY/ADD authorization")
+    else:
+        from dashboard.operator_ui import section_header
 
-    section_header(
-        "Paper BUY/ADD authorization",
-        "Creates or renews the existing paper_arm_confirm latch · does not start TRITON",
-    )
+        section_header(
+            "Paper BUY/ADD authorization",
+            "Creates or renews the existing paper_arm_confirm latch · does not start TRITON",
+        )
+
     pres = build_presentation(
         paper_mode=paper_mode,
         live_blocked=live_blocked,
@@ -49,11 +55,11 @@ def render_paper_buy_add_arm_controls(
         allow_path_override=allow_path_override,
         session_state_fn=session_state_fn,
     )
+    status = str(pres.get("status") or "UNKNOWN")
+    armed = status == "ARMED" or str(pres.get("consumer_status") or "") == "VALID"
+
     st.caption(pres["no_start_caption"])
-    st.caption(
-        "Use this control to arm paper BUY/ADD entries. The PowerShell command remains an operator fallback."
-    )
-    st.write(f"Status: {pres['status']}")
+    st.write(f"**Status:** {status}")
     st.write(f"Authorized session date: {pres.get('authorized_session_date') or 'unavailable'}")
     st.write(f"Created: {pres.get('created_at') or 'unavailable'}")
     st.write(f"Expiry: {pres.get('expires_at') or 'unavailable'}")
@@ -62,7 +68,7 @@ def render_paper_buy_add_arm_controls(
         st.write("Remaining duration: unavailable")
     else:
         st.write(f"Remaining duration: {remaining:.1f} minutes")
-    st.write(f"Live execution: {pres.get('live_execution')}")
+    st.write(f"**Live execution:** {pres.get('live_execution')}")
 
     flash = st.session_state.get(SESSION_FLASH_KEY)
     if flash:
@@ -81,15 +87,22 @@ def render_paper_buy_add_arm_controls(
     if st.session_state.pop("_paper_buy_add_clear_revoke", False):
         st.session_state[SESSION_REVOKE_KEY] = ""
 
-    st.text_input("Type exactly: ARM PAPER ENTRIES", key=SESSION_PHRASE_KEY)
-    arm_label = (
-        RENEW_BUTTON_LABEL if pres.get("button_label") == RENEW_BUTTON_LABEL else ARM_BUTTON_LABEL
+    st.text_input(
+        "Type exactly: ARM PAPER ENTRIES",
+        key=SESSION_PHRASE_KEY,
     )
+    arm_label = (
+        RENEW_BUTTON_LABEL
+        if str(pres.get("button_label") or "") == RENEW_BUTTON_LABEL
+        else ARM_BUTTON_LABEL
+    )
+
     if st.button(
         arm_label,
         key="paper_buy_add_arm_submit",
         disabled=not pres.get("arm_enabled"),
         type="primary",
+        use_container_width=True,
     ):
         import uuid
 
@@ -109,12 +122,15 @@ def render_paper_buy_add_arm_controls(
         st.session_state["_paper_buy_add_clear_phrase"] = True
         _flash(result)
 
-    if pres.get("revoke_enabled"):
+    # ABSENT / EXPIRED / REVOKED: Revoke must not appear actionable.
+    # VALID/ARMED: Revoke is the secondary destructive action.
+    if armed and pres.get("revoke_enabled"):
         st.text_input("Type exactly: REVOKE PAPER ENTRIES", key=SESSION_REVOKE_KEY)
         if st.button(
             REVOKE_BUTTON_LABEL,
             key="paper_buy_add_arm_revoke",
             type="secondary",
+            use_container_width=True,
         ):
             result = revoke_paper_buy_add_arm(
                 confirmation_phrase=str(st.session_state.get(SESSION_REVOKE_KEY) or ""),
@@ -125,6 +141,18 @@ def render_paper_buy_add_arm_controls(
             )
             st.session_state["_paper_buy_add_clear_revoke"] = True
             _flash(result)
+
+    with st.expander("BUY/ADD authorization details", expanded=False):
+        st.caption(
+            "Use this control to arm paper BUY/ADD entries. The PowerShell command remains an operator fallback."
+        )
+        st.write(f"Consumer status: {pres.get('consumer_status')}")
+        st.write(f"Canonical writer: services.set_paper_arm_confirm.write_confirm")
+        st.write(f"Arm phrase contract: {ARM_PHRASE}")
+        st.write(f"Revoke phrase contract: {REVOKE_PHRASE}")
+        st.write(
+            f"Button contract: {ARM_BUTTON_LABEL} / {RENEW_BUTTON_LABEL} / {REVOKE_BUTTON_LABEL}"
+        )
 
 
 def _flash(result: Dict[str, Any]) -> None:
