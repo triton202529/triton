@@ -22,6 +22,7 @@ from services.paper_sell_arm_console import (
 SESSION_CHALLENGE_KEY = "paper_sell_arm_challenge_id"
 SESSION_PHRASE_KEY = "paper_sell_confirm_phrase"
 SESSION_FLASH_KEY = "paper_sell_arm_flash"
+SESSION_TOKEN_KEY = "paper_sell_arm_presentation_token"
 ARM_BUTTON_LABEL = "Arm Reviewed Sells"
 CONFIRM_BUTTON_LABEL = "Confirm & Arm Paper Sells"
 
@@ -127,7 +128,7 @@ def map_sell_arm_visual_status(pres: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "label": LABEL_READY,
             "color": COLOR_AMBER,
-            "reason": reason or "Fresh reviewed SELL packet is ready to arm.",
+            "reason": reason or "Cap-compliant reviewed SELL slice is ready.",
             "code": "READY_TO_ARM",
         }
 
@@ -177,6 +178,79 @@ def map_sell_arm_visual_status(pres: Dict[str, Any]) -> Dict[str, Any]:
         "reason": reason or LABEL_ATTENTION,
         "code": "ATTENTION_REQUIRED",
     }
+
+
+def _fmt_money(value: Any) -> str:
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "$0.00"
+
+
+def _fmt_qty(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value or "")
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:g}"
+
+
+def _short_fingerprint(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "n/a"
+    return text[:12]
+
+
+def _render_slice_details(pres: Dict[str, Any]) -> None:
+    cap = pres.get("applied_cap")
+    if cap is not None:
+        st.write(f"**Applied authority cap:** {_fmt_money(cap)}")
+    full_count = int(pres.get("action_count") or 0)
+    full_total = pres.get("full_total_notional")
+    if full_count or full_total:
+        st.write(
+            f"**Full reviewed requirement:** {full_count} action(s), {_fmt_money(full_total or 0)}"
+        )
+    slice_actions = list(pres.get("slice_actions") or [])
+    st.write(
+        f"**Full source packet:** `{_short_fingerprint(pres.get('source_packet_fingerprint'))}`"
+    )
+    st.write(f"**Current authorized slice:** `{_short_fingerprint(pres.get('slice_hash'))}`")
+    if slice_actions:
+        st.write(
+            f"**Current authorization slice:** {int(pres.get('slice_action_count') or 0)} action(s), "
+            f"{_fmt_money(pres.get('slice_total_notional') or 0)}"
+        )
+        for row in slice_actions:
+            st.write(
+                f"- {row.get('symbol')} {row.get('action')} qty={_fmt_qty(row.get('qty'))} "
+                f"({_fmt_money(row.get('est_notional') or 0)})"
+            )
+    deferred = list(pres.get("deferred_actions") or [])
+    if deferred:
+        st.write(
+            f"**Deferred remainder:** {int(pres.get('deferred_action_count') or 0)} action(s), "
+            f"estimated {_fmt_money(pres.get('deferred_total_notional') or 0)}"
+        )
+        for row in deferred:
+            qty = row.get("deferred_qty")
+            if qty is None:
+                qty = row.get("qty")
+            st.write(
+                f"- {row.get('symbol')} {row.get('action')} qty={_fmt_qty(qty)} "
+                f"(est. {_fmt_money(row.get('est_notional') or 0)})"
+            )
+    if pres.get("estimated_remaining_slice_count_is_estimate") and pres.get("slice_action_count"):
+        remaining = int(pres.get("estimated_remaining_slice_count") or 0)
+        st.caption(
+            f"Estimated remaining slices after this one: {remaining}. "
+            "Every slice requires separate operator review and confirmation."
+        )
+    elif pres.get("slice_action_count"):
+        st.caption("Every slice requires separate operator review and confirmation.")
 
 
 def _render_status_box(visual: Dict[str, Any]) -> None:
@@ -230,9 +304,11 @@ def render_paper_sell_arm_controls(
     st.caption(pres["no_submit_caption"])
     st.write(f"**Packet freshness:** {pres['freshness']}")
     st.write(f"Packet generated: {pres['generated_at'] or 'unavailable'}")
-    st.write(f"Reviewed SELL actions: {pres['action_count']}")
-    for row in pres.get("actions") or []:
-        st.write(f"- {row.get('symbol')} {row.get('action')} qty={row.get('quantity')}")
+    _render_slice_details(pres)
+    if not pres.get("slice_actions") and pres.get("actions"):
+        st.write(f"Reviewed SELL actions: {pres['action_count']}")
+        for row in pres.get("actions") or []:
+            st.write(f"- {row.get('symbol')} {row.get('action')} qty={row.get('quantity')}")
 
     challenge_state = str(pres.get("challenge_state") or "ABSENT")
     authority_state = str(pres.get("authority_state") or "ABSENT")
@@ -290,8 +366,11 @@ def render_paper_sell_arm_controls(
             paper_mode=paper_mode,
             live_blocked=live_blocked,
             db_path=db_path,
+            expected_presentation_token=st.session_state.get(SESSION_TOKEN_KEY),
         )
         _apply_result(result)
+
+    st.session_state[SESSION_TOKEN_KEY] = pres.get("presentation_token")
 
     st.text_input(
         "Type exactly: CONFIRM PAPER SELLS",
@@ -336,6 +415,8 @@ def render_paper_sell_arm_controls(
         st.write(f"Arm duplicate: {pres.get('arm_duplicate')}")
         st.write(f"Labels: {ARM_BUTTON_LABEL} / {CONFIRM_BUTTON_LABEL}")
         st.write(f"Visual status: {visual.get('label')} ({visual.get('color')})")
+        st.write(f"Slice hash: {pres.get('slice_hash') or 'n/a'}")
+        st.write(f"Source packet fingerprint: {pres.get('source_packet_fingerprint') or 'n/a'}")
 
 
 def _apply_result(result: Dict[str, Any]) -> None:

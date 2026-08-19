@@ -2146,11 +2146,18 @@ def main() -> None:
                             session=placement_session,
                         )
                     )
-                    die(
-                        f"[LIMIT_SANITY_BLOCK] {r.symbol} limit {limit_price} deviates {dev:.1f}% from ref {ref} "
-                        f"(max {args.max_limit_deviation_pct}%)."
-                    )
-                limit_price = clamp_limit(limit_price, ref, r.side, args.open_buffer_pct)
+                    _paper_sell_defer_sanity = str(mode).lower() == "paper" and r.side == "sell"
+                    if _paper_sell_defer_sanity:
+                        # Dual-identity paper SELLs apply LIMIT_SANITY only after
+                        # authorized_planned is selected. Do not die on deferred rows.
+                        pass
+                    else:
+                        die(
+                            f"[LIMIT_SANITY_BLOCK] {r.symbol} limit {limit_price} deviates {dev:.1f}% from ref {ref} "
+                            f"(max {args.max_limit_deviation_pct}%)."
+                        )
+                if not (str(mode).lower() == "paper" and r.side == "sell"):
+                    limit_price = clamp_limit(limit_price, ref, r.side, args.open_buffer_pct)
 
             limit_price = quantize_to_tick(float(limit_price), r.side)
             batch_notional_est += float(r.qty) * float(limit_price)
@@ -2285,6 +2292,98 @@ def main() -> None:
             pass
         die("[BATCH_EMPTY] Nothing to place (all skipped or invalid).")
 
+    _sell_dispatch_guard = None
+    _sell_store_root = None
+    if str(mode).lower() == "paper" and planned and not args.dry_run:
+        from services.paper_sell_arm_runtime_enforcement import (
+            PaperSellDispatchBlocked,
+            planned_rows_include_paper_sells,
+        )
+
+        if planned_rows_include_paper_sells(planned):
+            try:
+                _sell_dispatch_guard, _sell_store_root = (
+                    enforce_and_consume_paper_sells_before_submit(
+                        planned=planned,
+                        mode=mode,
+                    )
+                )
+            except PaperSellDispatchBlocked as blocked:
+                die(
+                    f"[PAPER_SELL_ARM] dispatch blocked before submit: {blocked.reason}",
+                    2,
+                )
+            if _sell_dispatch_guard is not None and _sell_dispatch_guard.consumed:
+
+                def _die_after_sell_reservation(
+                    msg: str, code: int = 2, outcome: str = "REJECTION"
+                ) -> None:
+                    # Local failure after consume: finalize REJECTION/OUTCOME_UNKNOWN.
+                    # Never restore UNUSED authority.
+                    if _sell_store_root is not None:
+                        try:
+                            from services.paper_sell_arm_runtime_enforcement import (
+                                finalize_paper_sell_dispatch,
+                            )
+
+                            finalize_paper_sell_dispatch(
+                                store_root=_sell_store_root,
+                                outcome=outcome,
+                                explicit_runtime_write=True,
+                                detail={"error": msg, "error_class": "LOCAL_POST_RESERVATION"},
+                            )
+                        except Exception as _fin_exc:
+                            print(f"[PAPER_SELL_ARM] finalize warning: {_fin_exc}", flush=True)
+                    die(msg, code)
+
+                auth_planned = tuple(_sell_dispatch_guard.authorized_planned or ())
+                if not auth_planned:
+                    _die_after_sell_reservation(
+                        "[PAPER_SELL_ARM] dispatch blocked before submit: authorized_planned_missing",
+                        2,
+                        "OUTCOME_UNKNOWN",
+                    )
+                for p in auth_planned:
+                    if str(getattr(p, "side", "") or "").lower() != "sell":
+                        _die_after_sell_reservation(
+                            "[PAPER_SELL_ARM] dispatch blocked before submit: buy_or_add_in_authorized_planned",
+                            2,
+                        )
+                non_sells = [
+                    p for p in planned if str(getattr(p, "side", "") or "").lower() != "sell"
+                ]
+                planned = list(non_sells) + list(auth_planned)
+                print(
+                    "[PAPER_SELL_ARM] authority consumed pre-submit "
+                    f"intent={_sell_dispatch_guard.dispatch_intent_id} "
+                    f"authorized_sells={len(auth_planned)}",
+                    flush=True,
+                )
+                for p in list(auth_planned):
+                    if p.order_type != "limit" or p.limit_price is None:
+                        continue
+                    ref = p.ref_price
+                    if ref is None:
+                        continue
+                    dev = deviation_pct(float(p.limit_price), float(ref))
+                    if dev > args.max_limit_deviation_pct:
+                        _die_after_sell_reservation(
+                            f"[LIMIT_SANITY_BLOCK] {p.symbol} limit {p.limit_price} deviates {dev:.1f}% from ref {ref} "
+                            f"(max {args.max_limit_deviation_pct}%).",
+                            2,
+                            "REJECTION",
+                        )
+                    p.limit_price = clamp_limit(
+                        float(p.limit_price), ref, p.side, args.open_buffer_pct
+                    )
+                    p.limit_price = quantize_to_tick(float(p.limit_price), p.side)
+                batch_notional_est = 0.0
+                for p in planned:
+                    px = p.limit_price if p.limit_price is not None else p.ref_price
+                    if px is None:
+                        continue
+                    batch_notional_est += float(p.qty) * float(px)
+
     # Batch notional cap now applies to BOTH market + limit.
     # FORCE_EXIT exits originate from the performance-risk-overlay path in
     # manage_positions and must never be blocked by per-batch heuristics —
@@ -2383,10 +2482,8 @@ def main() -> None:
     failed = 0
     _ei_cfg = ExecutionIntelligenceConfig()
 
-    # Phase 198I-FIX — hardened paper sell-arm: consume before first broker submit.
-    _sell_dispatch_guard = None
-    _sell_store_root = None
-    if str(mode).lower() == "paper" and planned:
+    # Phase 198I-FIX / 198N-F — consume happens before LIMIT_SANITY/notional for paper SELLs.
+    if _sell_dispatch_guard is None and str(mode).lower() == "paper" and planned:
         from services.paper_sell_arm_runtime_enforcement import (
             PaperSellDispatchBlocked,
         )

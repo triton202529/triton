@@ -17,6 +17,7 @@ durable consumption (ContextVar). AlpacaBroker hooks enforce this.
 
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import os
@@ -27,8 +28,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Generator, List, Mapping, Optional, Sequence, Set, Tuple
 
+from services.paper_sell_arm_cap_slice import money_round
 from services.paper_sell_arm_authority import (
     APPROVAL_CLI_CAP,
     AUTHORITY_TYPE,
@@ -52,9 +54,12 @@ from services.paper_sell_arm_authority import (
     append_audit,
     detect_hardened_authority_path_collision,
     is_hardened_sell_arm_contract,
+    is_dual_identity_record,
+    legacy_ambiguous_slice_authority,
     mark_authority_dispatch_attempt,
     readiness_packet_hash,
     revalidate_before_dispatch,
+    source_readiness_packet_hash,
     validate_paper_sell_arm_authority,
     write_state,
 )
@@ -276,6 +281,110 @@ def requested_actions_from_planned(planned: Sequence[Any]) -> List[Dict[str, Any
     return out
 
 
+def _planned_is_sell(p: Any) -> bool:
+    side = str(getattr(p, "side", "") or "").lower()
+    stance = str(
+        getattr(p, "stance", None)
+        or getattr(p, "management_action", None)
+        or getattr(p, "opportunity_type", None)
+        or ""
+    ).upper()
+    return side == "sell" or stance in SELL_ACTIONS
+
+
+def _clone_planned_qty(p: Any, qty: float) -> Any:
+    from dataclasses import is_dataclass, replace
+
+    qty_val: Any = int(qty) if isinstance(getattr(p, "qty", None), int) else qty
+    if is_dataclass(p) and not isinstance(p, type):
+        return replace(p, qty=qty_val)
+    cloned = copy.copy(p)
+    try:
+        cloned.qty = qty_val
+    except Exception:
+        return p
+    return cloned
+
+
+def select_authorized_planned(
+    planned: Sequence[Any], authority: Mapping[str, Any]
+) -> Tuple[bool, str, Tuple[Any, ...]]:
+    """Map full planned SELLs onto exact authorized_scope. Clip qty down; never expand."""
+    scope = list(authority.get("authorized_actions") or authority.get("authorized_scope") or [])
+    if not scope:
+        return False, "empty_authorized_scope", ()
+    sells = [p for p in planned if _planned_is_sell(p)]
+    by_sym: Dict[str, List[Any]] = {}
+    extra_syms = set()
+    for p in sells:
+        sym = str(getattr(p, "symbol", "") or "").upper()
+        by_sym.setdefault(sym, []).append(p)
+        extra_syms.add(sym)
+    selected: List[Any] = []
+    for item in scope:
+        symbol = str(item.get("symbol") or "").upper()
+        action = str(item.get("action") or "").upper()
+        max_qty = float(item.get("max_qty") or 0)
+        max_n = item.get("max_notional")
+        extra_syms.discard(symbol)
+        cands = by_sym.get(symbol) or []
+        if not cands:
+            return False, f"incomplete_authorized_slice:{symbol}", ()
+        p = cands[0]
+        stance = str(
+            getattr(p, "stance", None)
+            or getattr(p, "management_action", None)
+            or getattr(p, "opportunity_type", None)
+            or ""
+        ).upper()
+        planned_action = stance if stance in SELL_ACTIONS else "EXIT"
+        if bool(getattr(p, "force_exit_override", False)):
+            planned_action = "FORCE_EXIT"
+        if (
+            action
+            and planned_action != action
+            and not (action == "EXIT" and planned_action in SELL_ACTIONS)
+        ):
+            return False, f"action_mismatch_vs_authorized_slice:{symbol}", ()
+        pq = float(getattr(p, "qty", 0) or 0)
+        if pq + 1e-9 < max_qty:
+            return False, f"incomplete_authorized_qty:{symbol}", ()
+        use_qty: Any = min(pq, max_qty)
+        if abs(float(use_qty) - round(float(use_qty))) < 1e-9:
+            use_qty = int(round(float(use_qty)))
+        price = float(getattr(p, "limit_price", None) or getattr(p, "ref_price", None) or 0)
+        notional = money_round(float(use_qty) * price) if price else 0.0
+        stored_max = money_round(max_n) if max_n is not None else None
+        if stored_max is not None and notional > stored_max + 1e-9:
+            return False, f"notional_expansion_vs_authorized_slice:{symbol}", ()
+        if notional > APPROVAL_CLI_CAP + 1e-6:
+            return False, f"notional_expansion_vs_authorized_slice:{symbol}", ()
+        if use_qty + 1e-9 < pq:
+            p = _clone_planned_qty(p, use_qty)
+        selected.append(p)
+    total_sel = money_round(
+        sum(
+            float(getattr(p, "qty", 0) or 0)
+            * float(getattr(p, "limit_price", None) or getattr(p, "ref_price", None) or 0)
+            for p in selected
+        )
+    )
+    stored_total = authority.get("total_batch_max_notional")
+    if stored_total is not None and total_sel > money_round(stored_total) + 1e-9:
+        return False, "notional_expansion_vs_authorized_slice_total", ()
+    if total_sel > APPROVAL_CLI_CAP + 1e-6:
+        return False, "batch_notional_exceeds_approval_cli_cap", ()
+    return True, "ok", tuple(selected)
+
+
+def _load_readiness_packet(results_root: Optional[Path], store_root: Path) -> Dict[str, Any]:
+    results_root = results_root or (ROOT / "data" / "results")
+    path = results_root / "defensive_exit_approval_readiness.json"
+    if (store_root / "defensive_exit_approval_readiness.json").is_file():
+        path = store_root / "defensive_exit_approval_readiness.json"
+    return _read_json(path) or {}
+
+
 @dataclass
 class DispatchGuardResult:
     permitted: bool
@@ -285,6 +394,7 @@ class DispatchGuardResult:
     authority: Optional[Dict[str, Any]] = None
     consumed: bool = False
     permit: Optional[PaperSellDispatchPermit] = None
+    authorized_planned: Tuple[Any, ...] = field(default_factory=tuple)
 
 
 class PaperSellDispatchBlocked(Exception):
@@ -983,6 +1093,69 @@ def begin_paper_sell_dispatch(
                 if sqlite_doc:
                     authority = sqlite_doc
             req = requested_actions_from_planned(planned)
+            packet = _load_readiness_packet(results_root, paths.root)
+            selected_planned: Tuple[Any, ...] = tuple(p for p in planned if _planned_is_sell(p))
+            if is_dual_identity_record(authority):
+                if not packet:
+                    return DispatchGuardResult(False, "source_readiness_packet_missing", {})
+                current_src = source_readiness_packet_hash(packet)
+                if str(authority.get("source_readiness_packet_hash") or "") != current_src:
+                    return DispatchGuardResult(False, "source_readiness_packet_hash_changed", {})
+                current_full = readiness_packet_hash(packet)
+                if str(authority.get("readiness_packet_hash") or "") != current_full:
+                    return DispatchGuardResult(False, "readiness_packet_hash_changed", {})
+                inv = packet.get("market_open_invocation_id") or packet.get("invocation_id")
+                if str(authority.get("market_open_invocation_id") or "") != str(inv or ""):
+                    return DispatchGuardResult(False, "invocation_changed", {})
+                if str(authority.get("source_plan_sha256") or "") != str(
+                    packet.get("source_plan_sha256") or ""
+                ):
+                    return DispatchGuardResult(False, "source_plan_hash_changed", {})
+                if str(authority.get("selected_row_hash") or "") != str(
+                    packet.get("selected_row_hash") or ""
+                ):
+                    return DispatchGuardResult(False, "selected_row_hash_changed", {})
+                if str(authority.get("source_generated_at") or "") != str(
+                    packet.get("generated_at") or ""
+                ):
+                    return DispatchGuardResult(False, "generated_at_changed", {})
+                from services.paper_sell_arm_cap_slice import (
+                    authorized_slice_hash as _slice_hash,
+                    validate_slice_against_packet,
+                )
+
+                slice_doc = {
+                    "slice_actions": authority.get("authorized_actions")
+                    or authority.get("authorized_scope")
+                    or [],
+                    "authorized_slice_hash": authority.get("authorized_slice_hash"),
+                    "slice_hash": authority.get("authorized_slice_hash"),
+                }
+                ok_slice, slice_reason, _scope = validate_slice_against_packet(
+                    packet,
+                    slice_doc,
+                    cap=float(authority.get("applied_cap") or APPROVAL_CLI_CAP),
+                    cap_source=str(authority.get("applied_cap_source") or "APPROVAL_CLI_CAP"),
+                )
+                if not ok_slice:
+                    return DispatchGuardResult(False, slice_reason, {})
+                expected_slice = str(authority.get("authorized_slice_hash") or "")
+                got_slice = _slice_hash(
+                    scope=_scope,
+                    slice_total=round(sum(float(s.get("max_notional") or 0.0) for s in _scope), 2),
+                    applied_cap=float(authority.get("applied_cap") or APPROVAL_CLI_CAP),
+                    cap_source=str(authority.get("applied_cap_source") or "APPROVAL_CLI_CAP"),
+                )
+                if expected_slice and expected_slice != got_slice:
+                    return DispatchGuardResult(False, "authorized_slice_hash_changed", {})
+                ok_sel, sel_reason, selected_planned = select_authorized_planned(planned, authority)
+                if not ok_sel:
+                    return DispatchGuardResult(False, sel_reason, {})
+                req = requested_actions_from_planned(selected_planned)
+            else:
+                amb = legacy_ambiguous_slice_authority(authority, readiness_packet=packet or None)
+                if amb:
+                    return DispatchGuardResult(False, amb, {})
             if not req:
                 return DispatchGuardResult(True, NO_SELLS, {"skipped": True})
 
@@ -1035,7 +1208,15 @@ def begin_paper_sell_dispatch(
                     evidence_independent=True,
                 )
 
-            total_n = sum(float(r.get("notional") or 0) for r in req)
+            total_n = money_round(sum(float(r.get("notional") or 0) for r in req))
+            if is_dual_identity_record(authority):
+                stored_total = authority.get("total_batch_max_notional")
+                if stored_total is not None and total_n > money_round(stored_total) + 1e-9:
+                    return DispatchGuardResult(
+                        False,
+                        "notional_expansion_vs_authorized_slice_total",
+                        {"total_notional": total_n, "authorized_total": stored_total},
+                    )
             if total_n > APPROVAL_CLI_CAP + 1e-6:
                 return DispatchGuardResult(
                     False,
@@ -1255,6 +1436,7 @@ def begin_paper_sell_dispatch(
                     authority=authority_after,
                     consumed=True,
                     permit=permit,
+                    authorized_planned=selected_planned,
                 )
 
             try:
@@ -1345,6 +1527,7 @@ def begin_paper_sell_dispatch(
                 authority=authority_after,
                 consumed=True,
                 permit=permit,
+                authorized_planned=selected_planned,
             )
         finally:
             _release_lock(fh)

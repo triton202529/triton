@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_GOVERNANCE = ROOT / "data" / "governance"
@@ -38,6 +38,7 @@ LEGACY_197W_APPROVAL_PATH = LIVE_GOVERNANCE / LEGACY_197W_APPROVAL_FILENAME
 LIVE_BUY_ARM_PATH = ROOT / "data" / "live" / "paper_arm_confirm.json"
 
 SCHEMA_VERSION = "198H-PAPER-SELL-ARM-1"
+SCHEMA_VERSION_DUAL = "198N-E-DUAL-IDENTITY-SELL-1"
 AUTHORITY_TYPE = "PAPER_SELL_ARM"
 CHALLENGE_ARTIFACT_TYPE = "PAPER_SELL_CONFIRMATION_CHALLENGE"
 READINESS_STATUS_OK = "UNAPPROVED_APPROVAL_READINESS_ONLY"
@@ -557,6 +558,41 @@ def readiness_packet_hash(doc: Dict[str, Any]) -> str:
     return canonical_json_hash(material)
 
 
+def source_readiness_packet_hash(doc: Mapping[str, Any]) -> str:
+    from services.paper_sell_arm_cap_slice import source_readiness_packet_hash as _src
+
+    return _src(doc)
+
+
+def is_dual_identity_record(doc: Optional[Mapping[str, Any]]) -> bool:
+    if not doc:
+        return False
+    return str(doc.get("identity_schema") or "") == SCHEMA_VERSION_DUAL
+
+
+def legacy_ambiguous_slice_authority(
+    authority: Mapping[str, Any],
+    *,
+    readiness_packet: Optional[Mapping[str, Any]] = None,
+) -> Optional[str]:
+    """Fail closed on 198H authorities that exceed the $5,000 CLI cap.
+
+    Hash mismatch versus a later F2 packet is handled by existing
+    readiness_packet_hash_changed revalidation so under-cap 198H/198I
+    callers remain unchanged even if an unrelated over-cap packet exists
+    on the default results path.
+    """
+    if is_dual_identity_record(authority):
+        return None
+    try:
+        total = float(authority.get("total_batch_max_notional") or 0.0)
+    except (TypeError, ValueError):
+        return "legacy_over_cap_authority_ambiguous"
+    if total > APPROVAL_CLI_CAP + 1e-9:
+        return "legacy_over_cap_authority_ambiguous"
+    return None
+
+
 def _scope_from_readiness(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for row in doc.get("approval_ready_actions") or []:
@@ -586,10 +622,12 @@ def prepare_confirmation_challenge(
     now: Optional[datetime] = None,
     explicit_runtime_write: bool = False,
     db_path: Optional[Path] = None,
+    authorized_slice: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     BUTTON 1 semantics: issue confirmation challenge only.
     Creates no execution authority. Never writes live governance by default.
+    authorized_slice=None retains 198H/198I full-packet behavior.
     """
     paths = _assert_writable_root(store_root, explicit_runtime_write=explicit_runtime_write)
     ok, reason = classify_readiness_packet(readiness_packet)
@@ -599,12 +637,35 @@ def prepare_confirmation_challenge(
         raise ValueError(f"challenge_blocked:{reason}")
 
     now = now or _utc_now()
-    scope = _scope_from_readiness(readiness_packet)
+    cap_value, cap_source = applied_authority_cap()
+    dual = authorized_slice is not None
+    if dual:
+        from services.paper_sell_arm_cap_slice import (
+            authorized_slice_hash as _slice_hash,
+            validate_slice_against_packet,
+        )
+
+        ok_slice, slice_reason, scope = validate_slice_against_packet(
+            readiness_packet,
+            authorized_slice,
+            cap=cap_value,
+            cap_source=cap_source,
+        )
+        if not ok_slice:
+            mapped = slice_reason
+            if slice_reason in {"scope_exceeds_approval_cli_cap"} or str(slice_reason).startswith(
+                "symbol_exceeds_cap:"
+            ):
+                mapped = slice_reason
+            write_state(paths, SellArmState.BLOCKED, {"reason": mapped})
+            append_audit(paths, {"event": "challenge_blocked", "reason": mapped})
+            raise ValueError(f"challenge_blocked:{mapped}")
+    else:
+        scope = _scope_from_readiness(readiness_packet)
     if not scope:
         raise ValueError("challenge_blocked:empty_scope")
 
     total_notional = round(sum(float(s.get("max_notional") or 0.0) for s in scope), 2)
-    cap_value, cap_source = applied_authority_cap()
     if total_notional > cap_value + 1e-9:
         write_state(paths, SellArmState.BLOCKED, {"reason": "scope_exceeds_approval_cli_cap"})
         append_audit(
@@ -629,6 +690,17 @@ def prepare_confirmation_challenge(
     acct = sanitize_account_fingerprint(account_raw)
     pkt_hash = readiness_packet_hash(readiness_packet)
     expires = now + timedelta(minutes=CHALLENGE_TTL_MINUTES)
+    src_hash = source_readiness_packet_hash(readiness_packet) if dual else None
+    slice_h = None
+    if dual:
+        from services.paper_sell_arm_cap_slice import authorized_slice_hash as _slice_hash
+
+        slice_h = _slice_hash(
+            scope=scope,
+            slice_total=total_notional,
+            applied_cap=cap_value,
+            cap_source=cap_source,
+        )
 
     material = {
         "challenge_id": challenge_id,
@@ -644,6 +716,16 @@ def prepare_confirmation_challenge(
         "applied_cap": cap_value,
         "applied_cap_source": cap_source,
     }
+    if dual:
+        material["identity_schema"] = SCHEMA_VERSION_DUAL
+        material["source_readiness_packet_hash"] = src_hash
+        material["authorized_slice_hash"] = slice_h
+        material["source_plan_sha256"] = readiness_packet.get("source_plan_sha256")
+        material["selected_row_hash"] = readiness_packet.get("selected_row_hash")
+        material["generated_at"] = readiness_packet.get("generated_at")
+        material["market_open_invocation_id"] = readiness_packet.get(
+            "market_open_invocation_id"
+        ) or readiness_packet.get("invocation_id")
     challenge_hash = canonical_json_hash(material)
     challenge = {
         **material,
@@ -734,6 +816,27 @@ def _validate_challenge_doc(
     expected_pkt = readiness_packet_hash(readiness_packet)
     if str(challenge.get("readiness_packet_hash") or "") != expected_pkt:
         return False, "challenge_readiness_hash_mismatch"
+    if is_dual_identity_record(challenge):
+        expected_src = source_readiness_packet_hash(readiness_packet)
+        if str(challenge.get("source_readiness_packet_hash") or "") != expected_src:
+            return False, "challenge_source_readiness_hash_mismatch"
+        if str(challenge.get("generated_at") or "") != str(
+            readiness_packet.get("generated_at") or ""
+        ):
+            return False, "challenge_generated_at_mismatch"
+        inv = readiness_packet.get("market_open_invocation_id") or readiness_packet.get(
+            "invocation_id"
+        )
+        if str(challenge.get("market_open_invocation_id") or "") != str(inv or ""):
+            return False, "challenge_invocation_mismatch"
+        if str(challenge.get("source_plan_sha256") or "") != str(
+            readiness_packet.get("source_plan_sha256") or ""
+        ):
+            return False, "challenge_source_plan_hash_mismatch"
+        if str(challenge.get("selected_row_hash") or "") != str(
+            readiness_packet.get("selected_row_hash") or ""
+        ):
+            return False, "challenge_selected_row_hash_mismatch"
     material = {
         "challenge_id": challenge.get("challenge_id"),
         "nonce": challenge.get("nonce"),
@@ -748,6 +851,14 @@ def _validate_challenge_doc(
         "applied_cap": challenge.get("applied_cap"),
         "applied_cap_source": challenge.get("applied_cap_source"),
     }
+    if is_dual_identity_record(challenge):
+        material["identity_schema"] = challenge.get("identity_schema")
+        material["source_readiness_packet_hash"] = challenge.get("source_readiness_packet_hash")
+        material["authorized_slice_hash"] = challenge.get("authorized_slice_hash")
+        material["source_plan_sha256"] = challenge.get("source_plan_sha256")
+        material["selected_row_hash"] = challenge.get("selected_row_hash")
+        material["generated_at"] = challenge.get("generated_at")
+        material["market_open_invocation_id"] = challenge.get("market_open_invocation_id")
     if canonical_json_hash(material) != str(challenge.get("challenge_hash") or ""):
         return False, "challenge_hash_integrity_failed"
     return True, "ok"
@@ -765,6 +876,7 @@ def confirm_and_create_paper_sell_arm(
     now: Optional[datetime] = None,
     explicit_runtime_write: bool = False,
     db_path: Optional[Path] = None,
+    authorized_slice: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     BUTTON 2 semantics: create batch-specific paper sell authority.
@@ -787,6 +899,41 @@ def confirm_and_create_paper_sell_arm(
         write_state(paths, SellArmState.REJECTED, {"reason": creason})
         append_audit(paths, {"event": "arm_rejected", "reason": creason})
         raise ValueError(f"arm_rejected:{creason}")
+
+    cap_value, cap_source = applied_authority_cap()
+    dual = is_dual_identity_record(challenge) or authorized_slice is not None
+    if dual:
+        from services.paper_sell_arm_cap_slice import (
+            authorized_slice_hash as _slice_hash,
+            validate_slice_against_packet,
+        )
+
+        slice_doc = authorized_slice or {
+            "slice_actions": challenge.get("authorized_scope") or [],
+            "authorized_slice_hash": challenge.get("authorized_slice_hash"),
+            "slice_hash": challenge.get("authorized_slice_hash"),
+        }
+        ok_slice, slice_reason, slice_scope = validate_slice_against_packet(
+            readiness_packet,
+            slice_doc,
+            cap=cap_value,
+            cap_source=cap_source,
+        )
+        if not ok_slice:
+            raise ValueError(f"arm_rejected:{slice_reason}")
+        chal_slice = str(challenge.get("authorized_slice_hash") or "")
+        recomputed_slice = _slice_hash(
+            scope=slice_scope,
+            slice_total=round(sum(float(s.get("max_notional") or 0.0) for s in slice_scope), 2),
+            applied_cap=cap_value,
+            cap_source=cap_source,
+        )
+        if chal_slice and chal_slice != recomputed_slice:
+            raise ValueError("arm_rejected:authorized_slice_hash_changed")
+        if str(challenge.get("source_readiness_packet_hash") or "") != source_readiness_packet_hash(
+            readiness_packet
+        ):
+            raise ValueError("arm_rejected:source_readiness_packet_hash_changed")
 
     # Replay protection: challenge already used to create authority.
     existing = _read_json(paths.authority)
@@ -887,7 +1034,7 @@ def confirm_and_create_paper_sell_arm(
         "source_provenance": {
             "readiness_schema": readiness_packet.get("schema_version"),
             "challenge_id": challenge.get("challenge_id"),
-            "phase": "198H",
+            "phase": "198N-E" if dual else "198H",
         },
         "audit_id": audit_id,
         "idempotency_key": idem,
@@ -910,6 +1057,15 @@ def confirm_and_create_paper_sell_arm(
         "invalidation_policy": "WHOLE_BATCH_DEFAULT",
         "force_exit_policy": "REQUIRES_SAME_REVIEWED_SELL_ARM_FAIL_CLOSED",
     }
+    if dual:
+        authority["identity_schema"] = SCHEMA_VERSION_DUAL
+        authority["source_readiness_packet_hash"] = challenge.get("source_readiness_packet_hash")
+        authority["authorized_slice_hash"] = challenge.get("authorized_slice_hash")
+        authority["source_plan_sha256"] = challenge.get("source_plan_sha256")
+        authority["selected_row_hash"] = challenge.get("selected_row_hash")
+        authority["source_generated_at"] = challenge.get("generated_at")
+        authority["market_open_invocation_id"] = challenge.get("market_open_invocation_id")
+        authority["authorized_scope"] = list(scope)
     missing = REQUIRED_AUTHORITY_FIELDS - set(authority.keys())
     if missing:
         raise ValueError(f"arm_schema_incomplete:{sorted(missing)}")
@@ -1365,11 +1521,23 @@ def revalidate_before_dispatch(
 
         max_n = allowed.get("max_notional")
         if max_n is not None and notional > float(max_n) + 1e-6:
+            reason = (
+                f"notional_expansion_vs_authorized_slice:{sym}"
+                if is_dual_identity_record(authority)
+                else f"symbol_notional_cap:{sym}"
+            )
+            return False, reason, details
+        if notional > APPROVAL_CLI_CAP + 1e-6:
             return False, f"symbol_notional_cap:{sym}", details
 
     max_total = float(authority.get("total_batch_max_notional") or 0)
     if total_req_notional > max_total + 1e-6:
-        return False, "batch_notional_exceeds_authority", details
+        reason = (
+            "notional_expansion_vs_authorized_slice_total"
+            if is_dual_identity_record(authority)
+            else "batch_notional_exceeds_authority"
+        )
+        return False, reason, details
     if total_req_notional > float(authority.get("applied_cap") or 0) + 1e-6:
         return False, "batch_notional_exceeds_approval_cli_cap", details
     if total_req_notional > APPROVAL_CLI_CAP + 1e-6:

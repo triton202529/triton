@@ -6,6 +6,7 @@ Creates no dispatch, permit, or broker call. SQLite remains the authority source
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,10 +22,20 @@ from services.paper_sell_arm_authority import (
     _parse_iso,
     _scope_from_readiness,
     append_audit,
+    applied_authority_cap,
     classify_readiness_packet,
     confirm_and_create_paper_sell_arm,
     prepare_confirmation_challenge,
     PaperSellArmPaths,
+)
+from services.paper_sell_arm_cap_slice import (
+    STATUS_AUTHORITY_CAP_EXCEEDED,
+    STATUS_SLICE_READY,
+    authorized_scope_from_slice,
+    money_round,
+    presentation_token,
+    slice_reviewed_sells,
+    tokens_match,
 )
 from services.paper_sell_arm_store import (
     PaperSellArmStoreError,
@@ -66,6 +77,14 @@ FAIL_CLOSED_MESSAGES = {
     "source_unbound": "Reviewed SELL readiness is not bound to the current cycle.",
     "blocked_other_gate": "Reviewed SELL actions are blocked by a non-authority gate.",
     "sell_outcome_unknown": "Reviewed SELL outcome is unknown and requires reconciliation.",
+    "authority_cap_exceeded": "No reviewed SELL quantity fits the $5,000 authority cap.",
+    "packet_changed_since_render": "Reviewed SELL packet changed. Refresh and review the new slice.",
+    "notional_expansion_vs_authorized_slice": (
+        "Planned SELL notional exceeds the authorized slice maximum."
+    ),
+    "notional_expansion_vs_authorized_slice_total": (
+        "Planned SELL total exceeds the authorized slice maximum."
+    ),
 }
 
 
@@ -102,7 +121,15 @@ def _utc_now() -> datetime:
 
 
 def operator_fail_message(reason: str) -> str:
-    return FAIL_CLOSED_MESSAGES.get(reason, FAIL_CLOSED_MESSAGES["unknown_exception"])
+    key = str(reason or "")
+    if key in FAIL_CLOSED_MESSAGES:
+        return FAIL_CLOSED_MESSAGES[key]
+    if key.startswith("notional_expansion_vs_authorized_slice:"):
+        return FAIL_CLOSED_MESSAGES["notional_expansion_vs_authorized_slice"]
+    base = key.split(":", 1)[0]
+    if base in FAIL_CLOSED_MESSAGES:
+        return FAIL_CLOSED_MESSAGES[base]
+    return FAIL_CLOSED_MESSAGES["unknown_exception"]
 
 
 def _operator_message(reason: str) -> str:
@@ -146,7 +173,11 @@ def _map_arm_exception(exc: BaseException) -> str:
     if isinstance(exc, ValueError):
         if "challenge_blocked:" in msg:
             tail = msg.split("challenge_blocked:", 1)[-1]
-            return _map_store_reason(tail) if tail.startswith("sqlite_") else "malformed_packet"
+            if tail.startswith("sqlite_"):
+                return _map_store_reason(tail)
+            if "scope_exceeds_approval_cli_cap" in tail or "symbol_exceeds_cap" in tail:
+                return "authority_cap_exceeded"
+            return "malformed_packet"
         if "arm_rejected:" in msg:
             tail = msg.split("arm_rejected:", 1)[-1]
             mapping = {
@@ -164,6 +195,7 @@ def _map_arm_exception(exc: BaseException) -> str:
                 "sqlite_challenge_insert_conflict": "duplicate_click",
                 "sqlite_duplicate_open_challenge": "duplicate_click",
                 "sqlite_authority_insert_conflict": "authority_already_created",
+                "total_notional_exceeds_approval_cli_cap": "authority_cap_exceeded",
             }
             for key, mapped in mapping.items():
                 if key in tail:
@@ -172,6 +204,8 @@ def _map_arm_exception(exc: BaseException) -> str:
                 return _map_store_reason(tail)
             if "readiness" in tail:
                 return "malformed_packet"
+            if "exceeds_approval_cli_cap" in tail or "symbol_exceeds_cap" in tail:
+                return "authority_cap_exceeded"
             return "unknown_exception"
     return "unknown_exception"
 
@@ -286,6 +320,77 @@ def _paper_and_live_ok(
     return True, "ok", True, True
 
 
+def _packet_file_sha256(results_root: Path) -> Optional[str]:
+    path = Path(results_root) / READINESS_PACKET_NAME
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _empty_slice_fields() -> Dict[str, Any]:
+    return {
+        "applied_cap": None,
+        "cap_source": None,
+        "slice": None,
+        "slice_actions": [],
+        "slice_action_count": 0,
+        "slice_total_notional": 0.0,
+        "deferred_actions": [],
+        "deferred_action_count": 0,
+        "deferred_total_notional": 0.0,
+        "unsliceable_actions": [],
+        "slice_hash": "",
+        "estimated_remaining_slice_count": 0,
+        "estimated_remaining_slice_count_is_estimate": True,
+        "full_total_notional": 0.0,
+        "presentation_token": None,
+        "packet_sha256": None,
+        "source_packet_fingerprint": None,
+    }
+
+
+def _slice_presentation_fields(
+    packet: Dict[str, Any], *, results_root: Path
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    cap_value, cap_source = applied_authority_cap()
+    sliced = slice_reviewed_sells(packet, cap=cap_value, cap_source=cap_source)
+    file_sha = _packet_file_sha256(results_root)
+    token = presentation_token(packet=packet, slice_result=sliced, packet_sha256=file_sha)
+    fields = {
+        "applied_cap": sliced.get("applied_cap"),
+        "cap_source": sliced.get("cap_source"),
+        "slice": sliced,
+        "slice_actions": sliced.get("slice_actions") or [],
+        "slice_action_count": int(sliced.get("slice_action_count") or 0),
+        "slice_total_notional": sliced.get("slice_total_notional") or 0.0,
+        "deferred_actions": sliced.get("deferred_actions") or [],
+        "deferred_action_count": int(sliced.get("deferred_action_count") or 0),
+        "deferred_total_notional": sliced.get("deferred_total_notional") or 0.0,
+        "unsliceable_actions": sliced.get("unsliceable_actions") or [],
+        "slice_hash": sliced.get("slice_hash") or "",
+        "estimated_remaining_slice_count": int(sliced.get("estimated_remaining_slice_count") or 0),
+        "estimated_remaining_slice_count_is_estimate": True,
+        "full_total_notional": sliced.get("full_total_notional")
+        or packet.get("total_proposed_notional")
+        or 0.0,
+        "presentation_token": token,
+        "packet_sha256": file_sha,
+        "source_packet_fingerprint": sliced.get("source_packet_fingerprint"),
+    }
+    status = sliced.get("status")
+    if status == STATUS_SLICE_READY:
+        if int(fields["slice_action_count"] or 0) < 1:
+            return fields, "authority_cap_exceeded"
+        if money_round(fields["slice_total_notional"]) > money_round(
+            sliced.get("applied_cap") or 5000.0
+        ):
+            return fields, "authority_cap_exceeded"
+        return fields, None
+    if status == STATUS_AUTHORITY_CAP_EXCEEDED:
+        return fields, "authority_cap_exceeded"
+    return fields, "malformed_packet"
+
+
 def sqlite_status(
     store_root: Path, *, now: datetime, db_path: Optional[Path] = None
 ) -> Dict[str, Any]:
@@ -363,6 +468,7 @@ def build_presentation(
             "results_root": results_root,
             "now": now,
             "resolved_db_path": str(resolve_runtime_sqlite_path(db_path=db_path)),
+            **_empty_slice_fields(),
         }
     packet, load_reason = load_reviewed_sell_packet(results_root)
     snap = sqlite_status(store_root, now=now, db_path=db_path)
@@ -373,6 +479,7 @@ def build_presentation(
     plan_hash = ""
     batch_hash = ""
     action_count = 0
+    slice_fields = _empty_slice_fields()
     if packet is None:
         deny_arm = load_reason
         deny_confirm = load_reason
@@ -400,9 +507,16 @@ def build_presentation(
             deny_arm = sell_reason
         elif not mode_ok:
             deny_arm = mode_reason
-        if deny_arm is None:
-            plan_hash = str(packet.get("plan_hash") or "")
-            batch_hash = batch_hash_from_scope(_scope_from_readiness(packet))
+        slice_fields = _empty_slice_fields()
+        if deny_arm is None and packet is not None:
+            slice_fields, slice_deny = _slice_presentation_fields(packet, results_root=results_root)
+            if slice_deny:
+                deny_arm = slice_deny
+            else:
+                plan_hash = str(packet.get("plan_hash") or "")
+                batch_hash = batch_hash_from_scope(
+                    authorized_scope_from_slice(slice_fields["slice"])
+                )
         deny_confirm = deny_arm
         if snap.get("db_present") and not snap.get("ok"):
             deny_arm = snap.get("operator_reason") or "sqlite_unavailable"
@@ -438,6 +552,13 @@ def build_presentation(
             deny_confirm = "challenge_already_consumed"
 
     auth = snap.get("latest_authority") or {"state": "ABSENT"}
+    matching_unused = (
+        str(auth.get("state") or "") == "UNUSED"
+        and bool(plan_hash)
+        and bool(batch_hash)
+        and str(auth.get("plan_hash") or "") == plan_hash
+        and str(auth.get("batch_hash") or "") == batch_hash
+    )
     confirm_enabled = False
     chal_plan = ""
     if challenge is not None:
@@ -473,6 +594,9 @@ def build_presentation(
     ):
         arm_enabled = False
         arm_duplicate = True
+    elif deny_arm is None and matching_unused:
+        arm_enabled = False
+        arm_duplicate = False
     else:
         arm_enabled = deny_arm is None
         arm_duplicate = False
@@ -516,6 +640,8 @@ def build_presentation(
         freshness_label = "STALE"
     elif deny_arm == "no_reviewed_sell_actions":
         freshness_label = "EMPTY"
+    elif deny_arm == "authority_cap_exceeded":
+        freshness_label = "UNAVAILABLE"
     elif generated_at is not None:
         freshness_label = (
             "FRESH"
@@ -556,6 +682,7 @@ def build_presentation(
         "results_root": results_root,
         "now": now,
         "resolved_db_path": str(resolve_runtime_sqlite_path(db_path=db_path)),
+        **slice_fields,
     }
 
 
@@ -568,6 +695,7 @@ def arm_reviewed_sells(
     live_blocked: Optional[bool] = None,
     account_raw: str = "paper-operator-console",
     db_path: Optional[Path] = None,
+    expected_presentation_token: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     now = now or _utc_now()
     counts = {"broker": 0, "network": 0, "permit": 0, "buy_add": 0}
@@ -588,6 +716,11 @@ def arm_reviewed_sells(
         live_blocked=live_blocked,
         db_path=db_path,
     )
+    if expected_presentation_token is not None and not tokens_match(
+        expected_presentation_token, pres.get("presentation_token")
+    ):
+        _record_failure(store_root, "sell_arm_button1_denied", "packet_changed_since_render")
+        return _denied("arm", "packet_changed_since_render", counts, snapshot=pres["snapshot"])
     if pres.get("arm_duplicate"):
         _record_failure(store_root, "sell_arm_button1_denied", "duplicate_click")
         return _denied("arm", "duplicate_click", counts, snapshot=pres["snapshot"])
@@ -595,6 +728,10 @@ def arm_reviewed_sells(
         reason = str(pres.get("arm_deny_reason") or "unknown_exception")
         _record_failure(store_root, "sell_arm_button1_denied", reason)
         return _denied("arm", reason, counts, snapshot=pres["snapshot"])
+
+    authorized_slice = pres.get("slice") or {}
+    sliced_batch = batch_hash_from_scope(authorized_scope_from_slice(authorized_slice))
+    sliced_plan = str(packet.get("plan_hash") or "")
 
     sqlite_path = resolve_runtime_sqlite_path(db_path=db_path)
     parent = sqlite_path.parent
@@ -614,28 +751,28 @@ def arm_reviewed_sells(
             now=now,
             explicit_runtime_write=True,
             db_path=sqlite_path,
+            authorized_slice=authorized_slice,
         )
     except Exception as exc:
         reason = _map_arm_exception(exc)
         snap = sqlite_status(store_root, now=now, db_path=sqlite_path)
         open_match = matching_open_challenge(
             snap,
-            plan_hash=str(packet.get("plan_hash") or ""),
-            batch_hash=batch_hash_from_scope(_scope_from_readiness(packet)),
+            plan_hash=sliced_plan,
+            batch_hash=sliced_batch,
             now=now,
         )
         if not open_match:
             try:
                 from services.paper_sell_arm_store import write_connection
 
-                bhash = batch_hash_from_scope(_scope_from_readiness(packet))
                 with write_connection(sqlite_path) as conn:
                     row = conn.execute(
                         """
                         SELECT challenge_id FROM sell_challenges
                         WHERE state='OPEN' AND plan_hash=? AND batch_hash=?
                         """,
-                        (str(packet.get("plan_hash") or ""), bhash),
+                        (sliced_plan, sliced_batch),
                     ).fetchone()
                 if row:
                     open_match = {"challenge_id": row["challenge_id"], "state": "OPEN"}
@@ -649,8 +786,8 @@ def arm_reviewed_sells(
     snap = sqlite_status(store_root, now=now, db_path=sqlite_path)
     open_match = matching_open_challenge(
         snap,
-        plan_hash=str(packet.get("plan_hash") or ""),
-        batch_hash=batch_hash_from_scope(_scope_from_readiness(packet)),
+        plan_hash=sliced_plan,
+        batch_hash=sliced_batch,
         now=now,
     )
     stored_open = bool(open_match) and str(open_match.get("state")) == "OPEN"
@@ -666,7 +803,8 @@ def arm_reviewed_sells(
         "challenge_id": challenge.get("challenge_id"),
         "challenge_state": "OPEN",
         "challenge_expires_at": challenge.get("expires_at"),
-        "action_count": len(action_summaries(packet)),
+        "action_count": int(pres.get("slice_action_count") or 0),
+        "slice_hash": pres.get("slice_hash"),
         "authority_count": snap.get("authority_count") or 0,
         "dispatch_count": snap.get("dispatch_count") or 0,
         "snapshot": snap,
@@ -731,8 +869,9 @@ def confirm_and_arm_paper_sells(
         return _denied("confirm", "challenge_missing", counts, snapshot=snap)
 
     payload = dict(challenge_rec.get("payload") or {})
+    authorized_slice = pres.get("slice") or {}
     current_plan = str(packet.get("plan_hash") or "")
-    current_batch = batch_hash_from_scope(_scope_from_readiness(packet))
+    current_batch = batch_hash_from_scope(authorized_scope_from_slice(authorized_slice))
     if current_plan != str(challenge_rec.get("plan_hash") or payload.get("plan_hash") or ""):
         _record_failure(store_root, "sell_arm_button2_denied", "plan_mismatch")
         return _denied("confirm", "plan_mismatch", counts, snapshot=snap)
@@ -751,6 +890,7 @@ def confirm_and_arm_paper_sells(
             now=now,
             explicit_runtime_write=True,
             db_path=sqlite_path,
+            authorized_slice=authorized_slice,
         )
     except Exception as exc:
         reason = _map_arm_exception(exc)
@@ -784,7 +924,8 @@ def confirm_and_arm_paper_sells(
         "authority_state": "UNUSED",
         "authority_expires_at": auth.get("expires_at"),
         "single_use": True,
-        "action_count": len(action_summaries(packet)),
+        "action_count": int(pres.get("slice_action_count") or 0),
+        "slice_hash": pres.get("slice_hash"),
         "dispatch_count": 0,
         "snapshot": snap2,
         "counts": counts,
