@@ -3591,6 +3591,35 @@ def _placement_subprocess_is_batch_empty(rc: int, combined_output: str) -> bool:
     return False
 
 
+def _try_pre_plan_authorized_sell_dispatch(
+    *,
+    broker: Any,
+    mode: str,
+    dry_run: bool,
+    verbose: bool = False,
+) -> Dict[str, Any]:
+    """Phase 198Q-B: consume valid UNUSED authority before plan regeneration."""
+    if dry_run or str(mode).lower() != "paper" or broker is None:
+        return {"attempted": False, "dispatched": False, "reason": "skipped_not_paper_or_dry_run"}
+    from services.place_live_orders import dispatch_unused_authorized_sell_slice_pre_plan
+
+    result = dispatch_unused_authorized_sell_slice_pre_plan(
+        broker=broker,
+        mode=mode,
+        verbose=verbose,
+    )
+    if result.get("attempted"):
+        print(
+            "[PRE_PLAN_SELL_DISPATCH] "
+            f"attempted={result.get('attempted')} "
+            f"dispatched={result.get('dispatched')} "
+            f"consumed={result.get('consumed')} "
+            f"reason={result.get('reason')}",
+            flush=True,
+        )
+    return result
+
+
 def maybe_execute_management(
     planned: List[ManagementPlannedOrder],
     mode: str,
@@ -4190,6 +4219,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     pos_map, broker = load_long_positions(args.mode, pos_path)
     open_sells = collect_symbols_with_open_sell(broker, oo_path)
     pos_metrics = load_position_metrics(pos_path, pos_map)
+
+    _try_pre_plan_authorized_sell_dispatch(
+        broker=broker,
+        mode=args.mode,
+        dry_run=dry_run,
+        verbose=bool(args.verbose),
+    )
 
     from services.position_management_state import load_state, save_state
 

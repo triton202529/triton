@@ -955,7 +955,8 @@ def test_expired_authority_fails(tmp_path: Path, monkeypatch):
     packet = _load_prod_copy(generated_at=NOW.isoformat())
     seeded = _arm_confirm(tmp_path, packet)
     auth = seeded["snap"]["latest_authority"]["payload"]
-    later = NOW + timedelta(minutes=20)
+    # Phase 198Q: AUTHORITY_TTL_MINUTES is 60; 20 minutes is still valid, 61 is expired.
+    later = NOW + timedelta(minutes=61)
     freeze_dispatch_clock(monkeypatch, later)
     _write_market_session_evidence(tmp_path, now=later)
     guard = begin_paper_sell_dispatch(

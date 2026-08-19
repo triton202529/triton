@@ -62,6 +62,7 @@ from services.paper_sell_arm_authority import (
     source_readiness_packet_hash,
     validate_paper_sell_arm_authority,
     write_state,
+    BUY_ACTIONS,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1016,6 +1017,312 @@ def _classify_prior_dispatch_intent(
         "authority_idempotency_key": auth_key,
         "intent_idempotency_key": intent_key,
     }
+
+
+def find_unused_pre_plan_authority(
+    *,
+    db_path: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    """Read-only: newest UNUSED authority suitable for pre-plan dispatch."""
+    from services.paper_sell_arm_store import inspect_sqlite_authority, resolve_runtime_sqlite_path
+
+    now = now or _utc_now()
+    path = resolve_runtime_sqlite_path(db_path=db_path)
+    status = inspect_sqlite_authority(path, now=now)
+    if str(status.get("state") or "") == "UNUSED":
+        payload = status.get("payload")
+        return payload if isinstance(payload, dict) else None
+    return None
+
+
+def validate_pre_plan_authority_bound_artifacts(
+    authority: Mapping[str, Any],
+    *,
+    results_root: Path,
+    now: Optional[datetime] = None,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """Fail-closed validation against on-disk authority-bound artifacts (pre-plan)."""
+    now = now or _utc_now()
+    details: Dict[str, Any] = {"phase": "pre_plan_artifact_validation"}
+    if not authority:
+        return False, "authority_missing", details
+    if str(authority.get("consumption_status") or "") != "UNUSED":
+        return False, "authority_not_unused", details
+    if str(authority.get("status") or "") != SellArmState.ARMED.value:
+        return False, "status_not_armed", details
+    if str(authority.get("mode") or "").upper() != "PAPER":
+        return False, "mode_not_paper", details
+    if str(authority.get("live_execution_required_state") or "").upper() != "BLOCKED":
+        return False, "live_execution_not_blocked", details
+    if authority.get("live_authorized") is True:
+        return False, "live_authorized_true", details
+    expires = _parse_iso(authority.get("expires_at"))
+    if expires is None or expires <= now:
+        return False, "authority_expired", details
+    td = str(authority.get("trading_date") or "")
+    if td and td != now.astimezone(timezone.utc).date().isoformat():
+        return False, "trading_date_mismatch", details
+
+    scope = list(authority.get("authorized_actions") or authority.get("authorized_scope") or [])
+    if not scope:
+        return False, "empty_authorized_scope", details
+    for item in scope:
+        action = str(item.get("action") or "").upper()
+        if action in BUY_ACTIONS:
+            return False, "buy_action_in_sell_authority", details
+        if action not in SELL_ACTIONS:
+            return False, f"invalid_sell_action:{action}", details
+
+    try:
+        total_stored = float(authority.get("total_batch_max_notional") or 0.0)
+    except (TypeError, ValueError):
+        return False, "total_notional_unparseable", details
+    if total_stored > APPROVAL_CLI_CAP + 1e-9:
+        return False, "total_notional_exceeds_approval_cli_cap", details
+
+    packet = _load_readiness_packet(results_root, LIVE_GOVERNANCE)
+    if not packet:
+        return False, "source_readiness_packet_missing", details
+    if str(readiness_packet_hash(packet)) != str(authority.get("readiness_packet_hash") or ""):
+        return False, "readiness_packet_hash_mismatch", details
+
+    if is_dual_identity_record(authority):
+        if str(source_readiness_packet_hash(packet)) != str(
+            authority.get("source_readiness_packet_hash") or ""
+        ):
+            return False, "source_readiness_packet_hash_mismatch", details
+        inv = packet.get("market_open_invocation_id") or packet.get("invocation_id")
+        if str(authority.get("market_open_invocation_id") or "") != str(inv or ""):
+            return False, "invocation_mismatch", details
+        if str(authority.get("source_generated_at") or "") != str(packet.get("generated_at") or ""):
+            return False, "generated_at_mismatch", details
+        if str(authority.get("source_plan_sha256") or "") != str(
+            packet.get("source_plan_sha256") or ""
+        ):
+            return False, "source_plan_hash_mismatch", details
+        if str(authority.get("selected_row_hash") or "") != str(
+            packet.get("selected_row_hash") or ""
+        ):
+            return False, "selected_row_hash_mismatch", details
+        from services.paper_sell_arm_cap_slice import (
+            authorized_slice_hash as _slice_hash,
+            validate_slice_against_packet,
+        )
+
+        slice_doc = {
+            "slice_actions": scope,
+            "authorized_slice_hash": authority.get("authorized_slice_hash"),
+            "slice_hash": authority.get("authorized_slice_hash"),
+        }
+        ok_slice, slice_reason, validated_scope = validate_slice_against_packet(
+            packet,
+            slice_doc,
+            cap=float(authority.get("applied_cap") or APPROVAL_CLI_CAP),
+            cap_source=str(authority.get("applied_cap_source") or "APPROVAL_CLI_CAP"),
+        )
+        if not ok_slice:
+            return False, slice_reason, details
+        expected_slice = str(authority.get("authorized_slice_hash") or "")
+        got_slice = _slice_hash(
+            scope=validated_scope,
+            slice_total=round(
+                sum(float(s.get("max_notional") or 0.0) for s in validated_scope),
+                2,
+            ),
+            applied_cap=float(authority.get("applied_cap") or APPROVAL_CLI_CAP),
+            cap_source=str(authority.get("applied_cap_source") or "APPROVAL_CLI_CAP"),
+        )
+        if expected_slice and expected_slice != got_slice:
+            return False, "authorized_slice_hash_mismatch", details
+
+    from services.manage_positions_cycle_binding import selected_row_hash, sha256_file_bytes
+
+    results_root = Path(results_root)
+    csv_path = results_root / "manage_positions_plan.csv"
+    json_path = results_root / "manage_positions_plan.json"
+    on_disk_source = sha256_file_bytes(csv_path) or sha256_file_bytes(json_path)
+    if not on_disk_source:
+        return False, "source_plan_artifact_missing", details
+    if str(authority.get("source_plan_sha256") or "") != str(on_disk_source):
+        return False, "on_disk_source_plan_sha256_mismatch", details
+    if csv_path.is_file():
+        rows = list(csv.DictReader(csv_path.read_text(encoding="utf-8").splitlines()))
+        row_hash = selected_row_hash(rows)
+        if str(authority.get("selected_row_hash") or "") != str(row_hash):
+            return False, "on_disk_selected_row_hash_mismatch", details
+
+    return True, "ok", details
+
+
+def build_authority_bound_broker_view(
+    authority: Mapping[str, Any],
+    *,
+    broker: Any,
+    results_root: Path,
+    now: Optional[datetime] = None,
+) -> BrokerSnapshotView:
+    """Independent evidence frozen to authority bindings (pre-plan; no new plan write)."""
+    now = now or _utc_now()
+    evidence = load_independent_runtime_evidence(
+        store_root=LIVE_GOVERNANCE,
+        results_root=results_root,
+        now=now,
+        caller_live_blocked=True,
+    )
+    return BrokerSnapshotView(
+        positions=evidence.positions,
+        open_order_symbols=evidence.open_order_symbols,
+        mode="paper",
+        live_blocked=True,
+        trading_date=str(authority.get("trading_date") or now.date().isoformat()),
+        account_fingerprint=str(authority.get("account_fingerprint") or "") or None,
+        current_plan_hash=str(authority.get("plan_hash") or "") or None,
+        newer_completed_plan=False,
+        market_session=evidence.market_session or "MARKET_OPEN",
+        paper_buy_arm_valid=evidence.paper_buy_arm_valid,
+        paper_execution_authorized=evidence.paper_execution_authorized,
+        cycle_id=str(authority.get("cycle_id") or "") or None,
+        run_id=str(authority.get("run_id") or "") or None,
+        batch_id=str(authority.get("batch_id") or "") or None,
+        plan_id=str(authority.get("plan_id") or "") or None,
+        readiness_packet_hash=str(authority.get("readiness_packet_hash") or "") or None,
+        confirmation_challenge_id=str(authority.get("confirmation_challenge_id") or "") or None,
+        confirmation_challenge_hash=str(authority.get("confirmation_challenge_hash") or "") or None,
+        newer_batch_supersedes=False,
+        lifecycle_actions=evidence.lifecycle_actions,
+        newer_order_symbols=evidence.newer_order_symbols,
+        newer_fill_symbols=evidence.newer_fill_symbols,
+        live_state_source=evidence.live_state_source,
+        live_state_ambiguous=evidence.live_state_ambiguous,
+        live_state_missing=evidence.live_state_missing,
+        evidence_independent=True,
+    )
+
+
+def build_pre_plan_planned_orders(
+    authority: Mapping[str, Any],
+    broker: Any,
+    *,
+    now: Optional[datetime] = None,
+) -> Tuple[bool, str, Tuple[Any, ...]]:
+    """Build exact authorized-slice planned rows using current broker evidence."""
+    from services.place_live_orders import PlannedOrder, get_ref_price, normalize_symbol
+
+    now = now or _utc_now()
+    scope = list(authority.get("authorized_actions") or authority.get("authorized_scope") or [])
+    per_qty_cap = {
+        str(k).upper(): float(v)
+        for k, v in (authority.get("per_symbol_max_quantity") or {}).items()
+    }
+    per_notional_cap = {
+        str(k).upper(): float(v)
+        for k, v in (authority.get("per_symbol_max_notional") or {}).items()
+    }
+    positions: Dict[str, float] = {}
+    try:
+        for pos in broker.list_positions() or []:
+            sym = normalize_symbol(pos.get("symbol"))
+            if not sym:
+                continue
+            try:
+                avail = float(pos.get("qty_available") or pos.get("qty") or 0)
+            except (TypeError, ValueError):
+                avail = 0.0
+            positions[sym] = avail
+    except Exception:
+        pass
+
+    planned: List[Any] = []
+    total_notional = 0.0
+    for item in scope:
+        sym = normalize_symbol(item.get("symbol"))
+        if not sym:
+            return False, "invalid_symbol_in_scope", ()
+        action = str(item.get("action") or "").upper()
+        if action in BUY_ACTIONS:
+            return False, "buy_action_in_authorized_scope", ()
+        max_qty = float(item.get("max_qty") or 0)
+        if max_qty <= 0:
+            return False, f"invalid_authorized_qty:{sym}", ()
+        held = float(positions.get(sym, 0.0))
+        if held + 1e-9 < max_qty:
+            return False, f"insufficient_current_position:{sym}", ()
+        price = float(get_ref_price(broker, sym, "sell") or 0.0)
+        if price <= 0:
+            return False, f"price_unavailable:{sym}", ()
+        notional = money_round(max_qty * price)
+        stored_n = item.get("max_notional")
+        if stored_n is not None and notional > money_round(float(stored_n)) + 1e-9:
+            return False, f"notional_expansion_vs_authorized_slice:{sym}", ()
+        cap_n = per_notional_cap.get(sym)
+        if cap_n is not None and notional > money_round(cap_n) + 1e-9:
+            return False, f"notional_expansion_vs_symbol_ceiling:{sym}", ()
+        qty_cap = per_qty_cap.get(sym)
+        if qty_cap is not None and max_qty > float(qty_cap) + 1e-9:
+            return False, f"quantity_expansion_vs_symbol_ceiling:{sym}", ()
+        if notional > APPROVAL_CLI_CAP + 1e-6:
+            return False, "batch_notional_exceeds_approval_cli_cap", ()
+        qty_int = int(max_qty) if abs(max_qty - round(max_qty)) < 1e-9 else max_qty
+        client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
+        planned.append(
+            PlannedOrder(
+                symbol=sym,
+                side="sell",
+                qty=int(qty_int),
+                order_type="limit",
+                time_in_force="day",
+                limit_price=price,
+                ref_price=price,
+                client_order_id=client_order_id,
+                discipline_allowed=True,
+            )
+        )
+        setattr(planned[-1], "management_action", action)
+        total_notional = money_round(total_notional + notional)
+
+    stored_total = authority.get("total_batch_max_notional")
+    if stored_total is not None and total_notional > money_round(float(stored_total)) + 1e-9:
+        return False, "notional_expansion_vs_authorized_slice_total", ()
+    if total_notional > APPROVAL_CLI_CAP + 1e-6:
+        return False, "batch_notional_exceeds_approval_cli_cap", ()
+    return True, "ok", tuple(planned)
+
+
+def attempt_pre_plan_authorized_sell_dispatch(
+    *,
+    authority: Mapping[str, Any],
+    broker: Any,
+    results_root: Path,
+    now: Optional[datetime] = None,
+    explicit_runtime_write: bool = True,
+    db_path: Optional[Path] = None,
+) -> DispatchGuardResult:
+    """Validate authority-bound artifacts and consume for pre-plan dispatch."""
+    now = now or _utc_now()
+    ok, reason, _details = validate_pre_plan_authority_bound_artifacts(
+        authority, results_root=results_root, now=now
+    )
+    if not ok:
+        return DispatchGuardResult(False, reason, _details)
+    ok_planned, plan_reason, planned = build_pre_plan_planned_orders(authority, broker, now=now)
+    if not ok_planned or not planned:
+        return DispatchGuardResult(False, plan_reason, {"planned_count": len(planned)})
+    broker_view = build_authority_bound_broker_view(
+        authority, broker=broker, results_root=results_root, now=now
+    )
+    return begin_paper_sell_dispatch(
+        store_root=LIVE_GOVERNANCE,
+        planned=planned,
+        broker_view=broker_view,
+        mode="paper",
+        readiness_packet_hash_current=str(authority.get("readiness_packet_hash") or ""),
+        explicit_runtime_write=explicit_runtime_write,
+        now=now,
+        caller_live_blocked=True,
+        results_root=results_root,
+        db_path=db_path,
+    )
 
 
 def begin_paper_sell_dispatch(

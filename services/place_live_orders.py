@@ -66,7 +66,7 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import pandas as pd
 
@@ -1559,6 +1559,177 @@ def _coerce_order_id(resp: Any) -> str:
         return ""
     oid = str(resp.get("id") or resp.get("order_id") or "").strip()
     return oid
+
+
+def _submit_pre_plan_authorized_sell_orders(
+    *,
+    broker: Any,
+    planned: Sequence[Any],
+    store_root: Path,
+    guard: Any,
+    mode: str = "paper",
+    verbose: bool = False,
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Submit exact pre-plan authorized sells through hardened broker boundary."""
+    from services.broker_alpaca import broker_order_auth_context
+    from services.paper_sell_arm_runtime_enforcement import (
+        PaperSellDispatchBlocked,
+        finalize_paper_sell_dispatch,
+    )
+
+    placed = 0
+    failed = 0
+    ambiguous = False
+    outcome = None
+    to_submit = tuple(guard.authorized_planned or planned)
+    permit = getattr(guard, "permit", None)
+    from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
+
+    token = _ACTIVE_PERMIT.set(permit) if permit is not None else None
+    try:
+        with broker_order_auth_context():
+            for p in to_submit:
+                if str(getattr(p, "side", "") or "").lower() != "sell":
+                    failed += 1
+                    continue
+                try:
+                    resp = broker.submit_order(
+                        symbol=p.symbol,
+                        qty=p.qty,
+                        side=p.side,
+                        order_type=getattr(p, "order_type", "limit"),
+                        time_in_force=getattr(p, "time_in_force", "day"),
+                        limit_price=getattr(p, "limit_price", None),
+                        client_order_id=p.client_order_id,
+                    )
+                    placed += 1
+                    if verbose:
+                        print(
+                            f"[PRE_PLAN_SELL_DISPATCH] submitted {p.symbol} qty={p.qty} id={_coerce_order_id(resp)}",
+                            flush=True,
+                        )
+                except PaperSellDispatchBlocked:
+                    raise
+                except Exception as exc:
+                    failed += 1
+                    msg = str(exc).lower()
+                    if any(x in msg for x in ("timeout", "unknown", "ambiguous", "indeterminate")):
+                        ambiguous = True
+                    if verbose:
+                        print(
+                            f"[PRE_PLAN_SELL_DISPATCH] failed {getattr(p, 'symbol', '?')}: {exc}",
+                            flush=True,
+                        )
+    finally:
+        if token is not None:
+            _ACTIVE_PERMIT.reset(token)
+
+    if guard.consumed:
+        if ambiguous and placed == 0:
+            outcome = "OUTCOME_UNKNOWN"
+        elif placed > 0 and failed > 0:
+            outcome = "PARTIAL"
+        elif placed > 0:
+            outcome = "SUCCESS"
+        elif failed > 0:
+            outcome = "REJECTION"
+        else:
+            outcome = "INDETERMINATE"
+        finalize_paper_sell_dispatch(
+            store_root=store_root,
+            outcome=outcome,
+            explicit_runtime_write=True,
+            detail={"placed": placed, "failed": failed, "pre_plan": True},
+            db_path=db_path,
+        )
+    return {"placed": placed, "failed": failed, "outcome": outcome}
+
+
+def dispatch_unused_authorized_sell_slice_pre_plan(
+    *,
+    broker: Any,
+    mode: str = "paper",
+    results_root: Optional[Path] = None,
+    store_root: Optional[Path] = None,
+    now: Optional[datetime] = None,
+    verbose: bool = False,
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Phase 198Q-B — consume a valid UNUSED authority before manage_positions
+    writes a replacement plan. No-op when absent/expired/invalid.
+    """
+    from services.paper_sell_arm_authority import LIVE_GOVERNANCE
+    from services.paper_sell_arm_runtime_enforcement import (
+        PaperSellDispatchBlocked,
+        attempt_pre_plan_authorized_sell_dispatch,
+        find_unused_pre_plan_authority,
+    )
+
+    results_root = results_root or (ROOT / "data" / "results")
+    store_root = store_root or LIVE_GOVERNANCE
+    now = now or utc_now()
+    if str(mode).lower() != "paper" or broker is None:
+        return {"attempted": False, "dispatched": False, "reason": "skipped_not_paper"}
+
+    authority = find_unused_pre_plan_authority(db_path=db_path, now=now)
+    if not authority:
+        return {"attempted": False, "dispatched": False, "reason": "no_unused_authority"}
+
+    try:
+        guard = attempt_pre_plan_authorized_sell_dispatch(
+            authority=authority,
+            broker=broker,
+            results_root=Path(results_root),
+            now=now,
+            explicit_runtime_write=True,
+            db_path=db_path,
+        )
+    except PaperSellDispatchBlocked as blocked:
+        return {
+            "attempted": True,
+            "dispatched": False,
+            "consumed": False,
+            "reason": blocked.reason,
+            "details": blocked.details,
+        }
+
+    if not guard.permitted or guard.reason == "no_paper_sells_in_batch":
+        return {
+            "attempted": True,
+            "dispatched": False,
+            "consumed": bool(guard.consumed),
+            "reason": guard.reason,
+            "details": guard.details,
+        }
+    if not guard.consumed:
+        return {
+            "attempted": True,
+            "dispatched": False,
+            "consumed": False,
+            "reason": guard.reason or "not_consumed",
+            "details": guard.details,
+        }
+
+    submit_result = _submit_pre_plan_authorized_sell_orders(
+        broker=broker,
+        planned=tuple(guard.authorized_planned or ()),
+        store_root=store_root,
+        guard=guard,
+        mode=mode,
+        verbose=verbose,
+        db_path=db_path,
+    )
+    return {
+        "attempted": True,
+        "dispatched": submit_result.get("placed", 0) > 0,
+        "consumed": True,
+        "reason": "ok",
+        "broker_submissions": submit_result.get("placed", 0),
+        "submit": submit_result,
+        "dispatch_intent_id": guard.dispatch_intent_id,
+    }
 
 
 def enforce_and_consume_paper_sells_before_submit(

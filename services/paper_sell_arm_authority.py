@@ -52,7 +52,9 @@ OPERATOR_ACKNOWLEDGEMENT_TEXT = (
 # Lifetimes (minutes) — separate layers; conservative.
 READINESS_REFERENCE_TTL_MINUTES = 30
 CHALLENGE_TTL_MINUTES = 10
-AUTHORITY_TTL_MINUTES = 15
+# Phase 198Q-B: 45-minute continuous-loop interval + 15-minute execution margin.
+# New authorities only; stored expiry on existing rows is never rewritten.
+AUTHORITY_TTL_MINUTES = 60
 
 # Caps — lower applicable cap governs authority creation.
 APPROVAL_CLI_CAP = 5000.0
