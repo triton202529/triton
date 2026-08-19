@@ -21,6 +21,7 @@ from services.paper_sell_arm_console import (
 
 SESSION_CHALLENGE_KEY = "paper_sell_arm_challenge_id"
 SESSION_PHRASE_KEY = "paper_sell_confirm_phrase"
+SESSION_PHRASE_CLEAR_PENDING_KEY = "paper_sell_confirm_phrase_clear_pending"
 SESSION_FLASH_KEY = "paper_sell_arm_flash"
 SESSION_TOKEN_KEY = "paper_sell_arm_presentation_token"
 ARM_BUTTON_LABEL = "Arm Reviewed Sells"
@@ -287,6 +288,14 @@ def render_paper_sell_arm_controls(
     else:
         st.subheader("Reviewed paper SELLs")
 
+    # Streamlit cannot modify the session_state key after a widget with the same
+    # key has been instantiated in this run. We therefore clear the phrase via
+    # a pending flag and perform the actual clear before the text_input widget
+    # is created on the next render.
+    if st.session_state.get(SESSION_PHRASE_CLEAR_PENDING_KEY):
+        st.session_state[SESSION_PHRASE_KEY] = ""
+        st.session_state[SESSION_PHRASE_CLEAR_PENDING_KEY] = False
+
     phrase = st.session_state.get(SESSION_PHRASE_KEY, "")
     pres = build_presentation(
         store_root=audit_root,
@@ -403,7 +412,8 @@ def render_paper_sell_arm_controls(
             db_path=db_path,
         )
         if result.get("ok"):
-            st.session_state[SESSION_PHRASE_KEY] = ""
+            # Defer clearing until the next run (see pending-clear at top).
+            st.session_state[SESSION_PHRASE_CLEAR_PENDING_KEY] = True
         _apply_result(result)
 
     with st.expander("SELL readiness and authority details", expanded=False):
