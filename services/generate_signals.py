@@ -32,6 +32,7 @@ import glob
 import math
 import re
 import json
+import time
 from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -67,6 +68,78 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 OUT_WITH_RATIONALE = os.path.join(RESULTS_DIR, "signals_with_rationale.csv")
 OUT_SIGNALS = os.path.join(RESULTS_DIR, "signals.csv")  # backward compatibility
 ASOF_DIAG_PATH = os.path.join(RESULTS_DIR, "signals_asof_diagnostics.json")
+_OPERATIONAL_REQUIRED_COLS = {
+    "date",
+    "as_of_date",
+    "session_as_of_date",
+    "ticker",
+    "close",
+    "predicted_close",
+    "delta_pct",
+    "signal",
+    "confidence",
+    "score",
+    "rationale",
+    "generated_at_utc",
+}
+
+
+def _unique_sibling_tmp(target: str) -> str:
+    abs_target = os.path.abspath(target)
+    parent = os.path.dirname(abs_target) or "."
+    name = os.path.basename(abs_target)
+    return os.path.join(parent, f".{name}.{os.getpid()}.{time.time_ns()}.tmp")
+
+
+def atomic_publish_csv(df: pd.DataFrame, target: str) -> None:
+    """Write CSV to a unique sibling tmp, flush, then os.replace onto target."""
+    abs_target = os.path.abspath(target)
+    parent = os.path.dirname(abs_target) or "."
+    os.makedirs(parent, exist_ok=True)
+    tmp = _unique_sibling_tmp(abs_target)
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as fh:
+            df.to_csv(fh, index=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, abs_target)
+    except Exception:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
+
+
+def publish_operational_signal_csvs(signals: pd.DataFrame) -> None:
+    """Publish both operational CSVs only after the complete frame is valid.
+
+    If the rationale file is published and the legacy file then fails, this
+    raises explicitly and does not report full-stage success.
+    """
+    if not signals.empty:
+        missing = _OPERATIONAL_REQUIRED_COLS - set(signals.columns)
+        if missing:
+            raise ValueError(f"operational signals schema missing: {sorted(missing)}")
+        tickers = signals["ticker"].astype(str)
+        if tickers.duplicated().any():
+            raise ValueError("operational signals must have one current row per ticker")
+    if "rationale" in signals.columns:
+        signals_no_rat = signals.drop(columns=["rationale"]).rename(
+            columns={"confidence": "confidence_score"}
+        )
+    else:
+        signals_no_rat = signals.copy()
+    atomic_publish_csv(signals, OUT_WITH_RATIONALE)
+    try:
+        atomic_publish_csv(signals_no_rat, OUT_SIGNALS)
+    except Exception as exc:
+        raise RuntimeError(
+            "signals.csv atomic publish failed after signals_with_rationale.csv "
+            f"was already published: {exc}"
+        ) from exc
+
 
 # Legacy thresholds (still used as a fallback when feature history is too short).
 BUY_DELTA = 0.002  # +0.20%
@@ -947,13 +1020,11 @@ def main() -> None:
 
     signals = signals.sort_values(["ticker", "date"], kind="mergesort")
 
-    # Write outputs
-    signals.to_csv(OUT_WITH_RATIONALE, index=False)
-
+    # Publish only after the complete operational frame is built and valid.
+    publish_operational_signal_csvs(signals)
     signals_no_rat = signals.drop(columns=["rationale"]).rename(
         columns={"confidence": "confidence_score"}
     )
-    signals_no_rat.to_csv(OUT_SIGNALS, index=False)
 
     print(f"✅ signals_with_rationale.csv → {OUT_WITH_RATIONALE}")
     print(f"✅ signals.csv               → {OUT_SIGNALS}")

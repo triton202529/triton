@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+import io
 import argparse
 import numpy as np
 import pandas as pd
@@ -67,16 +69,66 @@ FEATURES_OUT_PATH = os.path.join(RESULTS_DIR, "feature_importance.csv")
 SKIPPED_TICKERS_LOG = os.path.join(RESULTS_DIR, "skipped_tickers.csv")
 MODEL_COMPARISON_PATH = os.path.join(RESULTS_DIR, "model_comparison.csv")
 
-SIGNALS_WITH_RATIONALE_PATH = os.path.join(RESULTS_DIR, "signals_with_rationale.csv")
-LEGACY_SIGNALS_PATH = os.path.join(RESULTS_DIR, "signals.csv")
 
-os.makedirs(RESULTS_DIR, exist_ok=True)
-os.makedirs(PROCESSED_DIR, exist_ok=True)
-os.makedirs(PREDICTIONS_DIR, exist_ok=True)
-os.makedirs(LOGS_DIR, exist_ok=True)
+def _unique_sibling_tmp(target: str) -> str:
+    abs_target = os.path.abspath(target)
+    parent = os.path.dirname(abs_target) or "."
+    name = os.path.basename(abs_target)
+    return os.path.join(parent, f".{name}.{os.getpid()}.{time.time_ns()}.tmp")
 
 
-def parse_args():
+def atomic_publish_csv(df: pd.DataFrame, target: str) -> None:
+    """Write CSV to a unique sibling tmp, flush, then os.replace onto target."""
+    abs_target = os.path.abspath(target)
+    parent = os.path.dirname(abs_target) or "."
+    os.makedirs(parent, exist_ok=True)
+    tmp = _unique_sibling_tmp(abs_target)
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as fh:
+            df.to_csv(fh, index=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, abs_target)
+    except Exception:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
+
+
+def atomic_publish_parquet(df: pd.DataFrame, target: str) -> None:
+    """Write parquet to a unique sibling tmp, fsync, then os.replace onto target."""
+    abs_target = os.path.abspath(target)
+    parent = os.path.dirname(abs_target) or "."
+    os.makedirs(parent, exist_ok=True)
+    tmp = _unique_sibling_tmp(abs_target)
+    try:
+        buf = io.BytesIO()
+        df.to_parquet(buf, index=False)
+        with open(tmp, "wb") as fh:
+            fh.write(buf.getvalue())
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, abs_target)
+    except Exception:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
+
+
+def _ensure_output_dirs() -> None:
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+    os.makedirs(PREDICTIONS_DIR, exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
+
+
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Train models + rationale (no retry, leakage-safe).")
     p.add_argument(
         "--min-rows",
@@ -84,11 +136,29 @@ def parse_args():
         default=30,
         help="Minimum rows required per ticker parquet (pre-lag).",
     )
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-try:
-    args = parse_args()
+def main(argv=None):
+    _ensure_output_dirs()
+    try:
+        return _train(argv)
+    except BaseException as e:
+        try:
+            write_heartbeat(
+                status="fail",
+                stage="train",
+                last_success_stage="train",
+                message="Training failed.",
+                error=str(e),
+            )
+        except Exception:
+            pass
+        raise
+
+
+def _train(argv=None):
+    args = parse_args(argv)
     print(
         "🧠 Starting multi-model training (lagged features), feature importance, model comparison, Trade Rationale 2.0…"
     )
@@ -336,8 +406,6 @@ try:
     skipped_tickers: list[dict] = []
     all_feature_importance = []
     all_model_comparison = []
-    signals_with_rationale_rows = []
-    legacy_signals_rows = []
 
     score_values = (
         scores_df[["ticker", "total_score"]].dropna()["total_score"]
@@ -444,8 +512,9 @@ try:
 
             output_df = df_model[["date", "close", "predicted_close", "signal"]].copy()
             output_df["ticker"] = ticker
-            output_df.to_parquet(
-                os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet"), index=False
+            atomic_publish_parquet(
+                output_df,
+                os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet"),
             )
 
             fi = getattr(rf_model, "feature_importances_", None)
@@ -509,49 +578,6 @@ try:
                 except Exception as me:
                     print(f"⚠️ {ticker} / {name}: model failed — {me}")
 
-            t_score = (
-                df_model["total_score"].iloc[0]
-                if "total_score" in df_model.columns and not df_model.empty
-                else np.nan
-            )
-            score_pct = safe_percentile_rank(score_values, t_score)
-
-            for _, row in df_model.iterrows():
-                rationale = build_rationale_row(row, score_pct, row.get("sentiment", np.nan))
-                signals_with_rationale_rows.append(
-                    {
-                        "date": pd.to_datetime(row["date"]).date(),
-                        "ticker": ticker,
-                        "close": row.get("close", np.nan),
-                        "predicted_close": row.get("predicted_close", np.nan),
-                        "delta_pct": row.get("delta_pct", np.nan),
-                        "signal": row.get("signal", "HOLD"),
-                        "confidence": float(row.get("confidence", 0.0)),
-                        "position_size": float(row.get("position_size", 0.0)),
-                        "rationale": rationale,
-                        "rsi14": row.get("rsi14", np.nan),
-                        "sma20": row.get("sma20", np.nan),
-                        "sma50": row.get("sma50", np.nan),
-                        "atr14": row.get("atr14", np.nan),
-                        "sentiment": row.get("sentiment", np.nan),
-                        "total_score": row.get("total_score", np.nan),
-                        "pe_ratio": row.get("pe_ratio", np.nan),
-                        "eps": row.get("eps", np.nan),
-                        "market_cap": row.get("market_cap", np.nan),
-                        "pb_ratio": row.get("pb_ratio", np.nan),
-                        "dividend_yield": row.get("dividend_yield", np.nan),
-                    }
-                )
-
-                legacy_signals_rows.append(
-                    {
-                        "date": pd.to_datetime(row["date"]).date(),
-                        "ticker": ticker,
-                        "close": row.get("close", np.nan),
-                        "signal": row.get("signal", "HOLD"),
-                    }
-                )
-
             print(f"✅ Trained {ticker} ({', '.join(models.keys())})")
             return True
 
@@ -579,36 +605,22 @@ try:
         trained += int(ok)
 
     if all_feature_importance:
-        pd.concat(all_feature_importance, ignore_index=True).to_csv(FEATURES_OUT_PATH, index=False)
+        atomic_publish_csv(pd.concat(all_feature_importance, ignore_index=True), FEATURES_OUT_PATH)
         print(f"\n📊 Feature importance saved to: {FEATURES_OUT_PATH}")
 
     if all_model_comparison:
         mc_df = pd.concat(all_model_comparison, ignore_index=True)
         mc_df["date"] = pd.to_datetime(mc_df["date"], errors="coerce")
-        mc_df.to_csv(MODEL_COMPARISON_PATH, index=False)
+        atomic_publish_csv(mc_df, MODEL_COMPARISON_PATH)
         print(f"📈 Model comparison saved to: {MODEL_COMPARISON_PATH}")
     else:
         print("⚠️ No model comparison rows were generated.")
-
-    if signals_with_rationale_rows:
-        swr = pd.DataFrame(signals_with_rationale_rows)
-        swr["date"] = pd.to_datetime(swr["date"], errors="coerce").dt.date
-        swr.sort_values(["ticker", "date"], inplace=True)
-        swr.to_csv(SIGNALS_WITH_RATIONALE_PATH, index=False)
-        print(f"🗒️  Signals + Rationale saved to: {SIGNALS_WITH_RATIONALE_PATH}")
-
-    if legacy_signals_rows:
-        leg = pd.DataFrame(legacy_signals_rows).drop_duplicates(subset=["date", "ticker"])
-        leg["date"] = pd.to_datetime(leg["date"], errors="coerce").dt.date
-        leg.sort_values(["ticker", "date"], inplace=True)
-        leg.to_csv(LEGACY_SIGNALS_PATH, index=False)
-        print(f"📄 Legacy signals saved to: {LEGACY_SIGNALS_PATH}")
 
     if skipped_tickers:
         skipped_df = pd.DataFrame(skipped_tickers)
         skipped_df["ticker"] = skipped_df["ticker"].astype(str).str.strip().str.upper()
         skipped_df = skipped_df[~skipped_df["ticker"].isin(["", "NAN", "NONE"])]
-        skipped_df.to_csv(SKIPPED_TICKERS_LOG, index=False)
+        atomic_publish_csv(skipped_df, SKIPPED_TICKERS_LOG)
         print(f"📄 Skipped tickers log saved to: {SKIPPED_TICKERS_LOG}")
 
     print(f"\n🏁 Done. Trained {trained} tickers.")
@@ -619,16 +631,8 @@ try:
         last_success_stage="train",
         message=f"Training complete. Trained {trained} tickers.",
     )
+    return 0
 
-except BaseException as e:
-    try:
-        write_heartbeat(
-            status="fail",
-            stage="train",
-            last_success_stage="train",
-            message="Training failed.",
-            error=str(e),
-        )
-    except Exception:
-        pass
-    raise
+
+if __name__ == "__main__":
+    raise SystemExit(main())
