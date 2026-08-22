@@ -49,7 +49,10 @@ from services.manage_positions_cycle_binding import (
     sha256_file_bytes,
     write_entry_interlock,
 )
-from services.paper_sell_entry_dependency import is_critical_pending_sell, pending_sell_sector
+from services.paper_sell_entry_dependency import (
+    is_critical_pending_sell,
+    pending_sell_sector,
+)
 from services.paper_sell_arm_authority import (
     APPROVAL_CLI_CAP,
     BUY_ACTIONS,
@@ -58,6 +61,7 @@ from services.paper_sell_arm_authority import (
     SELL_ACTIONS,
     _atomic_write_json,
     _parse_iso,
+    readiness_packet_valid_until,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -201,7 +205,20 @@ def build_canonical_packet(
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     generated_at = _iso_utc(now)
-    valid_until = _iso_utc(now + timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES))
+    session_close = None
+    session_date = None
+    try:
+        from services.market_calendar import regular_session_state
+
+        _st = regular_session_state(now=now)
+        session_date = _st.get("session_date")
+        close_raw = _st.get("session_close_et")
+        if close_raw:
+            session_close = datetime.fromisoformat(str(close_raw).replace("Z", "+00:00"))
+    except Exception:
+        session_close = None
+        session_date = None
+    valid_until = _iso_utc(readiness_packet_valid_until(now, session_close=session_close))
     normalized: List[Dict[str, Any]] = []
     for row in actions:
         item, err = _normalize_action_row(row)
@@ -233,6 +250,7 @@ def build_canonical_packet(
         "approval_ready_actions": normalized,
         "total_proposed_notional": total,
         "packet_generation_timestamp": generated_at,
+        "session_date": session_date,
     }
     if extra:
         for key, value in extra.items():
@@ -246,7 +264,12 @@ def write_canonical_packet(
     path: Path, packet: Dict[str, Any], *, overwrite: bool = True
 ) -> Dict[str, Any]:
     if not overwrite and path.is_file():
-        return {"ok": False, "reason": "refused_overwrite", "wrote": False, "path": str(path)}
+        return {
+            "ok": False,
+            "reason": "refused_overwrite",
+            "wrote": False,
+            "path": str(path),
+        }
     _atomic_write_json(path, packet, require_full_durability=False)
     return {"ok": True, "reason": "ok", "wrote": True, "path": str(path)}
 
@@ -294,28 +317,60 @@ def _validate_cycle_binding(
 ) -> Dict[str, Any]:
     binding = load_cycle_binding(results_root)
     if not binding:
-        return {"ok": False, "reason": "f_stage_binding_missing", "exit_code": F2_SOURCE_UNBOUND}
+        return {
+            "ok": False,
+            "reason": "f_stage_binding_missing",
+            "exit_code": F2_SOURCE_UNBOUND,
+        }
     env_id = str(os.environ.get(INVOCATION_ENV) or "").strip()
     expected = str(expected_invocation_id or env_id or "").strip()
     inv = str(binding.get("invocation_id") or "")
     if expected and inv != expected:
-        return {"ok": False, "reason": "cycle_id_mismatch", "exit_code": F2_SOURCE_UNBOUND}
+        return {
+            "ok": False,
+            "reason": "cycle_id_mismatch",
+            "exit_code": F2_SOURCE_UNBOUND,
+        }
     plan_ts = _parse_iso(plan.get("timestamp") or plan.get("plan_generated_at"))
     bind_ts = _parse_iso(binding.get("plan_generated_at"))
     if plan_ts is None or bind_ts is None:
-        return {"ok": False, "reason": "plan_generated_at_unbound", "exit_code": F2_SOURCE_UNBOUND}
+        return {
+            "ok": False,
+            "reason": "plan_generated_at_unbound",
+            "exit_code": F2_SOURCE_UNBOUND,
+        }
     if plan_ts != bind_ts:
-        return {"ok": False, "reason": "plan_generated_at_mismatch", "exit_code": F2_SOURCE_UNBOUND}
+        return {
+            "ok": False,
+            "reason": "plan_generated_at_mismatch",
+            "exit_code": F2_SOURCE_UNBOUND,
+        }
     if bind_ts > now:
-        return {"ok": False, "reason": "future_plan_generated_at", "exit_code": F2_SOURCE_UNBOUND}
+        return {
+            "ok": False,
+            "reason": "future_plan_generated_at",
+            "exit_code": F2_SOURCE_UNBOUND,
+        }
     csv_hash = sha256_file_bytes(results_root / "manage_positions_plan.csv")
     if csv_hash and csv_hash != binding.get("source_plan_sha256"):
-        return {"ok": False, "reason": "source_plan_hash_mismatch", "exit_code": F2_SOURCE_UNBOUND}
+        return {
+            "ok": False,
+            "reason": "source_plan_hash_mismatch",
+            "exit_code": F2_SOURCE_UNBOUND,
+        }
     row_hash = selected_row_hash(rows)
     if row_hash != binding.get("selected_row_hash"):
-        return {"ok": False, "reason": "selected_row_hash_mismatch", "exit_code": F2_SOURCE_UNBOUND}
+        return {
+            "ok": False,
+            "reason": "selected_row_hash_mismatch",
+            "exit_code": F2_SOURCE_UNBOUND,
+        }
     if str(binding.get("mode") or "").upper() != "PAPER":
-        return {"ok": False, "reason": "binding_mode_not_paper", "exit_code": F2_GENERATION_FAILURE}
+        return {
+            "ok": False,
+            "reason": "binding_mode_not_paper",
+            "exit_code": F2_GENERATION_FAILURE,
+        }
     if binding.get("live_execution_blocked") is not True:
         return {
             "ok": False,
@@ -323,7 +378,11 @@ def _validate_cycle_binding(
             "exit_code": F2_GENERATION_FAILURE,
         }
     if str(binding.get("f_stage_status") or "") != "COMPLETE":
-        return {"ok": False, "reason": "f_stage_not_complete", "exit_code": F2_GENERATION_FAILURE}
+        return {
+            "ok": False,
+            "reason": "f_stage_not_complete",
+            "exit_code": F2_GENERATION_FAILURE,
+        }
     completed = _parse_iso(binding.get("f_stage_completed_at"))
     if completed is None or completed > now:
         return {
@@ -396,7 +455,10 @@ def generate_from_manage_artifacts(
             raise ValueError("invalid_selected_sell_row")
         actions = []
         for rec in ready:
-            row = next((r for r in rows if str(r.get("symbol") or "").upper() == rec["symbol"]), {})
+            row = next(
+                (r for r in rows if str(r.get("symbol") or "").upper() == rec["symbol"]),
+                {},
+            )
             if _contradictory_buy_side(row):
                 raise ValueError("contradictory_side_action")
             item, err = _normalize_action_row(

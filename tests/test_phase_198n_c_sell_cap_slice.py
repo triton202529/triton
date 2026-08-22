@@ -31,6 +31,7 @@ from services.paper_sell_arm_authority import (
     BrokerSnapshotView,
     prepare_confirmation_challenge,
     readiness_packet_hash,
+    READINESS_REFERENCE_TTL_MINUTES,
 )
 from services.paper_sell_arm_cap_slice import (
     STATUS_AUTHORITY_CAP_EXCEEDED,
@@ -58,7 +59,10 @@ from services.paper_sell_arm_runtime_enforcement import (
     _ACTIVE_PERMIT,
     begin_paper_sell_dispatch,
 )
-from services.paper_sell_arm_store import db_path_for_store_root, inspect_sqlite_arm_snapshot
+from services.paper_sell_arm_store import (
+    db_path_for_store_root,
+    inspect_sqlite_arm_snapshot,
+)
 from tests._paper_sell_test_durability import stub_dir_fsync_ok
 from tests._phase_198i_sell_fakes import (
     LIVE_BLOCKED,
@@ -745,7 +749,9 @@ def test_render_to_click_refusals(tmp_path: Path):
 
 
 def test_stale_future_malformed_and_unknown_action(tmp_path: Path):
-    stale = _load_prod_copy(generated_at=(NOW - timedelta(minutes=31)).isoformat())
+    stale = _load_prod_copy(
+        generated_at=(NOW - timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES + 1)).isoformat()
+    )
     pres = _pres(tmp_path, stale, now=NOW)
     assert pres["arm_enabled"] is False
     assert pres["arm_deny_reason"] == "stale_readiness_packet"
@@ -916,7 +922,9 @@ def test_sqlite_failure_and_outcome_unknown(tmp_path: Path):
     assert pres["arm_deny_reason"] == "sell_outcome_unknown"
 
 
-def test_expired_consumed_mismatched_authority_and_no_auto_second_challenge(tmp_path: Path):
+def test_expired_consumed_mismatched_authority_and_no_auto_second_challenge(
+    tmp_path: Path,
+):
     packet = _load_prod_copy(generated_at=NOW.isoformat())
     pres = _pres(tmp_path, packet)
     armed = arm_reviewed_sells(

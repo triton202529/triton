@@ -8,6 +8,7 @@ still execute. No credentials, no real network, no live execution.
 from __future__ import annotations
 
 import json
+import os
 import socket
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -86,7 +87,12 @@ class NetworkFakeAlpacaBroker(AlpacaBroker):
         self.gets: List[str] = []
         self.data_gets: List[str] = []
         self.positions = positions or [
-            {"symbol": "TSLA", "qty": "8", "qty_available": "8", "avg_entry_price": "200"}
+            {
+                "symbol": "TSLA",
+                "qty": "8",
+                "qty_available": "8",
+                "avg_entry_price": "200",
+            }
         ]
         self.open_orders = list(open_orders or [])
         self.quote_bid = quote_bid
@@ -104,7 +110,10 @@ class NetworkFakeAlpacaBroker(AlpacaBroker):
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         self.gets.append(path)
         if path == "/v2/clock":
-            return {"is_open": True, "timestamp": datetime.now(timezone.utc).isoformat()}
+            return {
+                "is_open": True,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
         if path == "/v2/account":
             return {
                 "account_number": "PA-FAKE-198I",
@@ -394,11 +403,13 @@ def install_boundary_trace(monkeypatch, trace: OrderedTrace) -> None:
 def freeze_dispatch_clock(monkeypatch, now: datetime = SESSION_OPEN_NOW) -> None:
     import services.paper_sell_arm_authority as auth_mod
     import services.paper_sell_arm_runtime_enforcement as enf
+    import services.paper_sell_dispatch_session_evidence as sess
 
     monkeypatch.setattr(auth_mod, "_utc_now", lambda: now)
     if hasattr(enf, "_utc_now"):
         monkeypatch.setattr(enf, "_utc_now", lambda: now)
     monkeypatch.setattr(enf, "_utc_now_iso", lambda: now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    monkeypatch.setattr(sess, "_utc_now", lambda: now)
 
 
 def isolate_sell_store(monkeypatch, tmp_path: Path) -> None:
@@ -415,6 +426,11 @@ def isolate_sell_store(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(store_mod, "DEFAULT_RUNTIME_DB", tmp_path / store_mod.DEFAULT_DB_NAME)
     monkeypatch.setattr(auth_mod, "LIVE_GOVERNANCE", tmp_path)
     monkeypatch.setattr(enf, "LIVE_GOVERNANCE", tmp_path)
+    import services.paper_sell_dispatch_session_evidence as sess
+
+    monkeypatch.setattr(sess, "LIVE_GOVERNANCE", tmp_path)
+    if not str(os.environ.get("TRITON_MARKET_OPEN_INVOCATION_ID") or "").strip():
+        monkeypatch.setenv("TRITON_MARKET_OPEN_INVOCATION_ID", "mo-isolated-test")
     monkeypatch.setattr(plo, "IDEMPOTENCY_STATE_PATH", tmp_path / "idempotency_state.json")
     monkeypatch.setattr(plo, "DEFAULT_LOG_CSV", tmp_path / "live_orders_log.csv")
     monkeypatch.setattr(plo, "SIGNAL_STATE_PATH", tmp_path / "signal_state.json")

@@ -27,8 +27,15 @@ from services.paper_sell_arm_console import (
     confirm_and_arm_paper_sells,
 )
 from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
-from services.paper_sell_arm_store import db_path_for_store_root, inspect_sqlite_arm_snapshot
-from tests._phase_198i_sell_fakes import SESSION_OPEN_NOW, block_real_network, readiness_packet
+from services.paper_sell_arm_store import (
+    db_path_for_store_root,
+    inspect_sqlite_arm_snapshot,
+)
+from tests._phase_198i_sell_fakes import (
+    SESSION_OPEN_NOW,
+    block_real_network,
+    readiness_packet,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = SESSION_OPEN_NOW
@@ -391,7 +398,7 @@ def test_g_buy_separation(tmp_path: Path):
 
 
 def test_streamlit_ops_page_or_isolated_harness(tmp_path: Path, monkeypatch):
-    wall = datetime.now(timezone.utc)
+    wall = NOW
     packet = readiness_packet(now=wall)
     packet["generated_at"] = wall.isoformat()
     _write_packet(tmp_path, packet)

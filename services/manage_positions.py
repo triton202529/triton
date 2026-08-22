@@ -3598,16 +3598,54 @@ def _try_pre_plan_authorized_sell_dispatch(
     dry_run: bool,
     verbose: bool = False,
 ) -> Dict[str, Any]:
-    """Phase 198Q-B: consume valid UNUSED authority before plan regeneration."""
+    """Phase 198Q-B / 198R-J: consume valid UNUSED authority before plan regeneration."""
     if dry_run or str(mode).lower() != "paper" or broker is None:
-        return {"attempted": False, "dispatched": False, "reason": "skipped_not_paper_or_dry_run"}
-    from services.place_live_orders import dispatch_unused_authorized_sell_slice_pre_plan
+        return {
+            "attempted": False,
+            "dispatched": False,
+            "reason": "skipped_not_paper_or_dry_run",
+        }
+    from services.paper_sell_arm_authority import LIVE_GOVERNANCE
+    from services.paper_sell_arm_runtime_enforcement import (
+        _utc_now as _enf_now,
+        find_unused_pre_plan_authority,
+    )
+    from services.paper_sell_dispatch_session_evidence import (
+        SessionEvidenceError,
+        write_dispatch_session_evidence,
+    )
+    from services.place_live_orders import (
+        dispatch_unused_authorized_sell_slice_pre_plan,
+    )
+
+    unused = find_unused_pre_plan_authority()
+    if unused:
+        try:
+            write_dispatch_session_evidence(store_root=LIVE_GOVERNANCE, now=_enf_now())
+        except SessionEvidenceError as exc:
+            print(
+                "[PRE_PLAN_SELL_DISPATCH] "
+                f"attempted=True dispatched=False consumed=False "
+                f"reason={exc.reason}",
+                flush=True,
+            )
+            return {
+                "attempted": True,
+                "dispatched": False,
+                "consumed": False,
+                "reason": exc.reason,
+                "details": exc.details,
+                "abort_before_plan": True,
+            }
 
     result = dispatch_unused_authorized_sell_slice_pre_plan(
         broker=broker,
         mode=mode,
         verbose=verbose,
     )
+    if result.get("attempted") and not result.get("dispatched"):
+        result = dict(result)
+        result["abort_before_plan"] = True
     if result.get("attempted"):
         print(
             "[PRE_PLAN_SELL_DISPATCH] "
@@ -3668,10 +3706,17 @@ def maybe_execute_management(
 
                 diag = build_handoff_diagnostic(
                     placement_output=f"MASTER_GATE_BLOCK reasons={rs}",
-                    exec_meta={**meta, "manage_block": True, "block_reason": ",".join(rs)},
+                    exec_meta={
+                        **meta,
+                        "manage_block": True,
+                        "block_reason": ",".join(rs),
+                    },
                     mode=mode,
                 )
-                if str(diag.get("readiness_status") or "") in ("PARTIALLY_READY", "NOT_READY"):
+                if str(diag.get("readiness_status") or "") in (
+                    "PARTIALLY_READY",
+                    "NOT_READY",
+                ):
                     diag["handoff_status"] = "HANDOFF_BLOCKED_BY_READINESS"
                     diag["handoff_block_reason"] = (
                         f"execution_readiness={diag.get('readiness_status')}"
@@ -3784,7 +3829,9 @@ def maybe_execute_management(
             print_dispatch_approval_safe_block,
             resolve_dispatch_safe_block_state,
         )
-        from services.paper_execution_handoff_scope import build_handoff_scope_diagnostics
+        from services.paper_execution_handoff_scope import (
+            build_handoff_scope_diagnostics,
+        )
 
         pre_handoff_symbols = sorted(
             {
@@ -3953,9 +4000,13 @@ def maybe_execute_management(
                 "[MANAGE_NOOP] reason=BATCH_EMPTY_AFTER_FILTERS",
                 flush=True,
             )
-            if handoff_status and handoff_status not in ("HANDOFF_FILTERED_TO_EMPTY", "OK"):
+            if handoff_status and handoff_status not in (
+                "HANDOFF_FILTERED_TO_EMPTY",
+                "OK",
+            ):
                 print(
-                    f"[MANAGE_HANDOFF] status={handoff_status} reason={handoff_reason}", flush=True
+                    f"[MANAGE_HANDOFF] status={handoff_status} reason={handoff_reason}",
+                    flush=True,
                 )
             elif diag.get("batch_empty_explained"):
                 print(
@@ -4220,12 +4271,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     open_sells = collect_symbols_with_open_sell(broker, oo_path)
     pos_metrics = load_position_metrics(pos_path, pos_map)
 
-    _try_pre_plan_authorized_sell_dispatch(
+    pre_plan = _try_pre_plan_authorized_sell_dispatch(
         broker=broker,
         mode=args.mode,
         dry_run=dry_run,
         verbose=bool(args.verbose),
     )
+    if pre_plan.get("abort_before_plan"):
+        print(
+            "[manage_positions] BLOCKED: pre-plan authorized SELL dispatch failed; "
+            f"preserving authority-bound plan artifacts reason={pre_plan.get('reason')}",
+            flush=True,
+        )
+        return 2
 
     from services.position_management_state import load_state, save_state
 

@@ -19,6 +19,7 @@ from services.paper_sell_arm_authority import (
     OPERATOR_ACKNOWLEDGEMENT_TEXT,
     READINESS_REFERENCE_TTL_MINUTES,
     SELL_ACTIONS,
+    evaluate_readiness_packet_freshness,
     _parse_iso,
     _scope_from_readiness,
     append_audit,
@@ -40,6 +41,7 @@ from services.paper_sell_arm_cap_slice import (
 from services.paper_sell_arm_store import (
     PaperSellArmStoreError,
     batch_hash_from_scope,
+    count_current_unused_exact_batch_authorities,
     inspect_sqlite_arm_snapshot,
     production_path_overrides_present,
     resolve_runtime_sqlite_path,
@@ -54,6 +56,9 @@ NO_SUBMIT_CAPTION = "Button clicks do not submit orders."
 FAIL_CLOSED_MESSAGES = {
     "no_reviewed_sell_actions": "No reviewed SELL actions.",
     "stale_readiness_packet": "Reviewed SELL readiness packet is stale.",
+    "session_boundary_closed": "Reviewed SELL readiness is past the authorized session boundary.",
+    "prior_session_packet": "Reviewed SELL readiness belongs to a prior session.",
+    "session_derivation_unknown": "Market session could not be derived. Paper SELL arming is refused.",
     "malformed_packet": "Reviewed SELL readiness packet is malformed or unavailable.",
     "missing_generated_at": "Missing generated_at",
     "naive_generated_at": "Reviewed SELL readiness generated_at is not timezone-aware.",
@@ -226,7 +231,9 @@ def _record_failure(store_root: Path, event: str, reason: str) -> None:
         return
 
 
-def load_reviewed_sell_packet(results_root: Path) -> Tuple[Optional[Dict[str, Any]], str]:
+def load_reviewed_sell_packet(
+    results_root: Path,
+) -> Tuple[Optional[Dict[str, Any]], str]:
     path = Path(results_root) / READINESS_PACKET_NAME
     if not path.is_file():
         return None, "malformed_packet"
@@ -243,22 +250,7 @@ def load_reviewed_sell_packet(results_root: Path) -> Tuple[Optional[Dict[str, An
 def packet_freshness(
     packet: Dict[str, Any], *, now: datetime
 ) -> Tuple[bool, str, Optional[datetime]]:
-    if "generated_at" not in packet or packet.get("generated_at") in (None, ""):
-        return False, "missing_generated_at", None
-    raw = packet.get("generated_at")
-    try:
-        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except Exception:
-        return False, "unparseable_generated_at", None
-    if dt.tzinfo is None:
-        return False, "naive_generated_at", None
-    generated = dt.astimezone(timezone.utc)
-    if generated > now:
-        return False, "future_generated_at", generated
-    age = now - generated
-    if age > timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES):
-        return False, "stale_readiness_packet", generated
-    return True, "ok", generated
+    return evaluate_readiness_packet_freshness(packet, now=now)
 
 
 def action_summaries(packet: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -602,7 +594,10 @@ def build_presentation(
         arm_duplicate = False
 
     pkt_status = str((packet or {}).get("packet_status") or "")
-    if pkt_status == "BLOCKED_OTHER_GATE" and deny_arm in (None, "no_reviewed_sell_actions"):
+    if pkt_status == "BLOCKED_OTHER_GATE" and deny_arm in (
+        None,
+        "no_reviewed_sell_actions",
+    ):
         deny_arm = "blocked_other_gate"
         deny_confirm = deny_arm
         arm_enabled = False
@@ -636,7 +631,12 @@ def build_presentation(
         freshness_label = "BLOCKED_OTHER_GATE"
     elif deny_arm == "sell_outcome_unknown":
         freshness_label = "OUTCOME_UNKNOWN"
-    elif deny_arm == "stale_readiness_packet":
+    elif deny_arm in (
+        "stale_readiness_packet",
+        "session_boundary_closed",
+        "prior_session_packet",
+        "session_derivation_unknown",
+    ):
         freshness_label = "STALE"
     elif deny_arm == "no_reviewed_sell_actions":
         freshness_label = "EMPTY"
@@ -900,15 +900,28 @@ def confirm_and_arm_paper_sells(
     snap2 = sqlite_status(store_root, now=now, db_path=sqlite_path)
     latest_ch = snap2.get("latest_challenge") or {}
     auth = snap2.get("latest_authority") or {}
+    created_id = str(authority.get("authority_id") or "")
     unused = str(auth.get("state")) == "UNUSED"
     exp = _parse_iso(str(auth.get("expires_at") or ""))
     unexpired = exp is None or exp > now
     consumed = str(latest_ch.get("state")) == "CONSUMED"
+    current_unused = 0
+    try:
+        current_unused = count_current_unused_exact_batch_authorities(
+            sqlite_path,
+            now=now,
+            plan_hash=current_plan,
+            batch_hash=current_batch,
+        )
+    except Exception:
+        current_unused = 0
     if not (
-        consumed
+        created_id
+        and str(auth.get("authority_id") or "") == created_id
+        and consumed
         and unused
         and unexpired
-        and int(snap2.get("authority_count") or 0) == 1
+        and current_unused == 1
         and int(snap2.get("dispatch_count") or 0) == 0
     ):
         _record_failure(store_root, "sell_arm_button2_denied", "unknown_exception")
@@ -939,7 +952,10 @@ def confirm_and_arm_paper_sells(
 
 
 def _denied(
-    button: str, reason: str, counts: Dict[str, int], snapshot: Optional[Dict[str, Any]] = None
+    button: str,
+    reason: str,
+    counts: Dict[str, int],
+    snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return {
         "ok": False,

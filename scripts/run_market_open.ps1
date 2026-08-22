@@ -187,15 +187,33 @@ function Run-Step {
     Write-Host ""
     Write-Host "[$Label]" -ForegroundColor Yellow
     Write-Host (">>> python " + ($PyArgs -join " ")) -ForegroundColor Cyan
-    & python @PyArgs
-    if ($LASTEXITCODE -ne 0) {
+    # Capture stdout/stderr so a nonzero python exit (especially F) retains
+    # the inner transcript. Windows PowerShell 5.1 turns 2>&1 ErrorRecords
+    # into terminating errors under $ErrorActionPreference=Stop.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & python @PyArgs 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($null -eq $code) { $code = 1 }
+    foreach ($line in @($output)) {
+        $text = if ($null -eq $line) { "" } else { [string]$line }
+        if ($text -match '(?i)APCA-API|SECRET[_-]?KEY|api[_-]?secret|BEGIN (RSA |OPENSSH )?PRIVATE') {
+            $text = "[REDACTED]"
+        }
+        Write-Host $text
+    }
+    if ([int]$code -ne 0) {
         Write-Host ""
-        Write-Host ("[FAIL] Step '" + $Label + "' failed (exit $LASTEXITCODE).") -ForegroundColor Red
+        Write-Host ("[FAIL] Step '" + $Label + "' failed (exit $code).") -ForegroundColor Red
         Write-Host ("[FAIL] Command: python " + ($PyArgs -join " ")) -ForegroundColor Red
         Write-Host "[FAIL] Aborting market-open sequence." -ForegroundColor Red
         # Use throw (not `exit`) so the outer try/finally can stop the
         # transcript cleanly while still preserving the python rc.
-        throw ("STEP_FAILED:" + $Label + ":" + $LASTEXITCODE)
+        throw ("STEP_FAILED:" + $Label + ":" + $code)
     }
 }
 

@@ -573,7 +573,12 @@ def persist_open_challenge(
                         str(challenge.get("schema_version") or STORE_SCHEMA_VERSION),
                     ),
                 )
-                _audit(conn, "challenge_persisted", challenge_id=cid, payload={"state": "OPEN"})
+                _audit(
+                    conn,
+                    "challenge_persisted",
+                    challenge_id=cid,
+                    payload={"state": "OPEN"},
+                )
                 conn.execute("COMMIT")
             except PaperSellArmStoreError:
                 conn.execute("ROLLBACK")
@@ -800,7 +805,11 @@ def inspect_sqlite_authority(db_path: Path, *, now: datetime) -> Dict[str, Any]:
             }
         return {"state": st, "payload": payload, "expires_at": row["expires_at"]}
     except sqlite3.Error as exc:
-        return {"state": "ABSENT", "ok": False, "reason": "sqlite_readonly_inspect_failed"}
+        return {
+            "state": "ABSENT",
+            "ok": False,
+            "reason": "sqlite_readonly_inspect_failed",
+        }
     finally:
         conn.close()
 
@@ -902,6 +911,36 @@ def inspect_sqlite_arm_snapshot(db_path: Path, *, now: datetime) -> Dict[str, An
         empty["ok"] = False
         empty["reason"] = "sqlite_readonly_inspect_failed"
         return empty
+    finally:
+        conn.close()
+
+
+def count_current_unused_exact_batch_authorities(
+    db_path: Path,
+    *,
+    now: datetime,
+    plan_hash: str,
+    batch_hash: str,
+) -> int:
+    """Count UNUSED, unexpired authorities for one exact plan/batch. Ignores history."""
+    if not Path(db_path).is_file():
+        return 0
+    conn = readonly_connection(db_path)
+    try:
+        rows = conn.execute("SELECT * FROM sell_authorities").fetchall()
+        n = 0
+        now_iso = now.isoformat()
+        for row in rows:
+            if str(row["state"]) != "UNUSED":
+                continue
+            if str(row["expires_at"] or "") <= now_iso:
+                continue
+            if str(row["plan_hash"] or "") != str(plan_hash):
+                continue
+            if str(row["batch_hash"] or "") != str(batch_hash):
+                continue
+            n += 1
+        return n
     finally:
         conn.close()
 

@@ -49,8 +49,11 @@ OPERATOR_ACKNOWLEDGEMENT_TEXT = (
     "this exact batch, subject to final safety revalidation."
 )
 
-# Lifetimes (minutes) — separate layers; conservative.
-READINESS_REFERENCE_TTL_MINUTES = 30
+# Lifetimes (minutes) — one freshness contract shared by F2 writer, console,
+# and runtime enforcement. Packet must remain eligible at the next 45-minute
+# loop (44m and 46m) and expire before AUTHORITY_TTL with a safety margin.
+CONTINUOUS_LOOP_INTERVAL_MINUTES = 45
+READINESS_REFERENCE_TTL_MINUTES = 50
 CHALLENGE_TTL_MINUTES = 10
 # Phase 198Q-B: 45-minute continuous-loop interval + 15-minute execution margin.
 # New authorities only; stored expiry on existing rows is never rewritten.
@@ -158,6 +161,86 @@ def _parse_iso(ts: Any) -> Optional[datetime]:
         return dt
     except Exception:
         return None
+
+
+def readiness_packet_valid_until(
+    now: datetime, *, session_close: Optional[datetime] = None
+) -> datetime:
+    """Cap packet lifetime at TTL and never past the authorized session close."""
+    if now.tzinfo is None:
+        raise ValueError("timestamp_must_be_timezone_aware")
+    cap = now.astimezone(timezone.utc) + timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES)
+    if session_close is None:
+        return cap
+    close = session_close if session_close.tzinfo else None
+    if close is None:
+        return cap
+    close_utc = close.astimezone(timezone.utc)
+    return close_utc if close_utc < cap else cap
+
+
+def evaluate_readiness_packet_freshness(
+    packet: Mapping[str, Any],
+    *,
+    now: datetime,
+    session_payload: Optional[Mapping[str, Any]] = None,
+    check_session_boundary: bool = True,
+) -> Tuple[bool, str, Optional[datetime]]:
+    """Shared freshness contract for writer, controller, and runtime enforcement."""
+    if now.tzinfo is None:
+        return False, "naive_now", None
+    now_utc = now.astimezone(timezone.utc)
+    if "generated_at" not in packet or packet.get("generated_at") in (None, ""):
+        return False, "missing_generated_at", None
+    generated = _parse_iso(packet.get("generated_at"))
+    if generated is None:
+        raw = packet.get("generated_at")
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except Exception:
+            return False, "unparseable_generated_at", None
+        if dt.tzinfo is None:
+            return False, "naive_generated_at", None
+        generated = dt
+    generated_utc = generated.astimezone(timezone.utc)
+    if generated_utc > now_utc:
+        return False, "future_generated_at", generated_utc
+    age = now_utc - generated_utc
+    if age > timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES):
+        return False, "stale_readiness_packet", generated_utc
+    valid_until = _parse_iso(packet.get("valid_until"))
+    if valid_until is not None and now_utc >= valid_until.astimezone(timezone.utc):
+        return False, "stale_readiness_packet", generated_utc
+
+    if check_session_boundary:
+        payload: Mapping[str, Any]
+        if session_payload is not None:
+            payload = session_payload
+        else:
+            from services.market_calendar import regular_session_state
+
+            payload = regular_session_state(now=now_utc)
+        state = str(payload.get("session_state") or "").upper()
+        if state == "UNKNOWN":
+            return False, "session_derivation_unknown", generated_utc
+        if state == "CLOSED":
+            return False, "session_boundary_closed", generated_utc
+        if state != "OPEN":
+            return False, "session_boundary_closed", generated_utc
+        current_session_date = str(payload.get("session_date") or "")
+        packet_session = str(packet.get("session_date") or "").strip()
+        if not packet_session:
+            try:
+                from zoneinfo import ZoneInfo
+
+                packet_session = (
+                    generated_utc.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+                )
+            except Exception:
+                packet_session = generated_utc.date().isoformat()
+        if current_session_date and packet_session and packet_session != current_session_date:
+            return False, "prior_session_packet", generated_utc
+    return True, "ok", generated_utc
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -425,7 +508,9 @@ def _atomic_write_json(
     return path
 
 
-def detect_hardened_authority_path_collision(store_root: Optional[Path] = None) -> Tuple[bool, str]:
+def detect_hardened_authority_path_collision(
+    store_root: Optional[Path] = None,
+) -> Tuple[bool, str]:
     """
     Fail closed when default path selection is ambiguous:
     - both hardened and deprecated shared paths present
@@ -695,7 +780,9 @@ def prepare_confirmation_challenge(
     src_hash = source_readiness_packet_hash(readiness_packet) if dual else None
     slice_h = None
     if dual:
-        from services.paper_sell_arm_cap_slice import authorized_slice_hash as _slice_hash
+        from services.paper_sell_arm_cap_slice import (
+            authorized_slice_hash as _slice_hash,
+        )
 
         slice_h = _slice_hash(
             scope=scope,
@@ -1582,7 +1669,10 @@ def allowed_transition(src: SellArmState, dst: SellArmState) -> bool:
             SellArmState.REVIEW_REQUIRED,
             SellArmState.READY_FOR_CONFIRMATION,
         },
-        SellArmState.REVIEW_REQUIRED: {SellArmState.READY_FOR_CONFIRMATION, SellArmState.BLOCKED},
+        SellArmState.REVIEW_REQUIRED: {
+            SellArmState.READY_FOR_CONFIRMATION,
+            SellArmState.BLOCKED,
+        },
         SellArmState.READY_FOR_CONFIRMATION: {
             SellArmState.CONFIRMATION_CHALLENGE_ISSUED,
             SellArmState.STALE,
@@ -1608,8 +1698,14 @@ def allowed_transition(src: SellArmState, dst: SellArmState) -> bool:
             SellArmState.CONSUMED,
             SellArmState.BLOCKED,
         },
-        SellArmState.STALE: {SellArmState.REVIEW_REQUIRED, SellArmState.READY_FOR_CONFIRMATION},
-        SellArmState.EXPIRED: {SellArmState.REVIEW_REQUIRED, SellArmState.READY_FOR_CONFIRMATION},
+        SellArmState.STALE: {
+            SellArmState.REVIEW_REQUIRED,
+            SellArmState.READY_FOR_CONFIRMATION,
+        },
+        SellArmState.EXPIRED: {
+            SellArmState.REVIEW_REQUIRED,
+            SellArmState.READY_FOR_CONFIRMATION,
+        },
         SellArmState.BLOCKED: {SellArmState.REVIEW_REQUIRED},
         SellArmState.REJECTED: {SellArmState.REVIEW_REQUIRED},
         SellArmState.CONSUMED: {SellArmState.REVIEW_REQUIRED},

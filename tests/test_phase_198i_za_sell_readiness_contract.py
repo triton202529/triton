@@ -23,6 +23,7 @@ from services.defensive_exit_approval_readiness import (
     run_market_open_readiness_stage,
     write_canonical_packet,
 )
+from services.paper_sell_arm_authority import READINESS_REFERENCE_TTL_MINUTES
 from services.manage_positions_cycle_binding import (
     BLOCKER_MISSING_SELL_AUTHORITY,
     F2_PENDING_SELL_ARM,
@@ -36,7 +37,10 @@ from services.paper_sell_arm_console import (
     operator_fail_message,
 )
 from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
-from services.paper_sell_arm_store import db_path_for_store_root, inspect_sqlite_arm_snapshot
+from services.paper_sell_arm_store import (
+    db_path_for_store_root,
+    inspect_sqlite_arm_snapshot,
+)
 from tests._phase_198i_sell_fakes import SESSION_OPEN_NOW, block_real_network
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -200,7 +204,7 @@ def test_a_fresh_valid_sell_packet_enables_arm(tmp_path: Path):
 
 
 def test_b_stale_packet_disables_buttons(tmp_path: Path):
-    stale = NOW - timedelta(minutes=31)
+    stale = NOW - timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES + 1)
     pres = _pres(tmp_path, _packet(now=stale), now=NOW)
     assert pres["freshness"] == "STALE"
     assert pres["arm_enabled"] is False
@@ -319,7 +323,12 @@ def test_loop_stage_invokes_canonical_writer(tmp_path: Path, monkeypatch):
     tree = ast.parse(
         (ROOT / "services" / "defensive_exit_approval_readiness.py").read_text(encoding="utf-8")
     )
-    banned = {"begin_paper_sell_dispatch", "submit_order", "AlpacaBroker", "place_order"}
+    banned = {
+        "begin_paper_sell_dispatch",
+        "submit_order",
+        "AlpacaBroker",
+        "place_order",
+    }
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
@@ -357,7 +366,14 @@ def test_streamlit_fresh_then_stale(tmp_path: Path):
         if at.exception:
             raise at.exception
         body = []
-        for bucket in (at.markdown, at.text, at.caption, at.warning, at.info, at.success):
+        for bucket in (
+            at.markdown,
+            at.text,
+            at.caption,
+            at.warning,
+            at.info,
+            at.success,
+        ):
             for item in bucket:
                 body.append(str(getattr(item, "value", item)))
         joined = " ".join(body)
@@ -373,7 +389,7 @@ def test_streamlit_fresh_then_stale(tmp_path: Path):
         assert snap["authority_count"] == 0
         assert snap["dispatch_count"] == 0
         assert _ACTIVE_PERMIT.get() is None
-        stale = _packet(now=NOW - timedelta(minutes=40))
+        stale = _packet(now=NOW - timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES + 1))
         write_canonical_packet(tmp_path / PACKET_NAME, stale)
         at.run()
         arm2 = [b for b in at.button if b.label == "Arm Reviewed Sells"][0]
@@ -394,7 +410,7 @@ def test_streamlit_fresh_then_stale(tmp_path: Path):
         assert snap["open_challenges"][0]["state"] == "OPEN"
         assert snap["authority_count"] == 0
         assert armed["counts"]["broker"] == 0
-        stale = _packet(now=NOW - timedelta(minutes=40))
+        stale = _packet(now=NOW - timedelta(minutes=READINESS_REFERENCE_TTL_MINUTES + 1))
         write_canonical_packet(tmp_path / PACKET_NAME, stale)
         pres = build_presentation(
             store_root=tmp_path,

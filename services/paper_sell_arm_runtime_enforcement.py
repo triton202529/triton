@@ -53,6 +53,7 @@ from services.paper_sell_arm_authority import (
     _utc_now,
     append_audit,
     detect_hardened_authority_path_collision,
+    evaluate_readiness_packet_freshness,
     is_hardened_sell_arm_contract,
     is_dual_identity_record,
     legacy_ambiguous_slice_authority,
@@ -173,9 +174,17 @@ def validate_runtime_sell_authority(
             details.update(hdetails)
             return ok, reason, details
         if st == "EXPIRED":
-            return False, "sqlite_authority_expired", {**details, "json_role": "AUDIT_EXPORT_ONLY"}
+            return (
+                False,
+                "sqlite_authority_expired",
+                {**details, "json_role": "AUDIT_EXPORT_ONLY"},
+            )
         if st == "CONSUMED":
-            return False, "authority_consumed", {**details, "json_role": "AUDIT_EXPORT_ONLY"}
+            return (
+                False,
+                "authority_consumed",
+                {**details, "json_role": "AUDIT_EXPORT_ONLY"},
+            )
         if st in {"RESTRICTED", "REVOKED"}:
             return (
                 False,
@@ -434,22 +443,39 @@ def _acquire_lock(store_root: Path) -> Any:
 
 
 def _release_lock(fh: Any) -> None:
+    if fh is None:
+        return
     try:
         if os.name == "nt":
             import msvcrt
 
-            fh.seek(0)
-            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            try:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
         else:
             import fcntl
 
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
     except Exception:
         pass
     try:
         fh.close()
     except Exception:
         pass
+
+
+@contextmanager
+def _dispatch_lock(store_root: Path) -> Generator[Any, None, None]:
+    fh = _acquire_lock(store_root)
+    try:
+        yield fh
+    finally:
+        _release_lock(fh)
 
 
 def resolve_authoritative_live_blocked(
@@ -484,9 +510,17 @@ def resolve_authoritative_live_blocked(
         )
     }
     if "live_blocked" not in payload:
-        return False, "live_execution_state_missing", {**details, "live_state_missing": True}
+        return (
+            False,
+            "live_execution_state_missing",
+            {**details, "live_state_missing": True},
+        )
     if payload.get("live_state_ambiguous") is True:
-        return False, "live_execution_state_ambiguous", {**details, "live_state_ambiguous": True}
+        return (
+            False,
+            "live_execution_state_ambiguous",
+            {**details, "live_state_ambiguous": True},
+        )
     if payload.get("live_contradictory") is True:
         return False, "live_execution_state_contradictory", details
     # Explicitly authorized live in paper context is fail-closed for paper sells.
@@ -707,48 +741,47 @@ def _write_durable_permit(
 def derive_nyse_regular_session(now: datetime) -> Tuple[str, Dict[str, Any]]:
     """
     Authoritative NYSE regular-session derivation for paper sell dispatch.
+    Delegates to services.market_calendar.regular_session_state (no parallel calendar).
     Returns (OPEN|CLOSED|UNKNOWN, details). No extended-hours permission.
     """
     from zoneinfo import ZoneInfo
 
-    et = ZoneInfo("America/New_York")
+    from services.market_calendar import (
+        SESSION_CLOSED,
+        SESSION_OPEN,
+        SESSION_UNKNOWN,
+        regular_session_state,
+    )
+    from services.paper_sell_dispatch_session_evidence import (
+        calendar_payload_to_session_fields,
+    )
+
     try:
-        now_et = now.astimezone(et)
-    except Exception as exc:  # noqa: BLE001
-        return "UNKNOWN", {"reason": "invalid_timezone", "error": str(exc)}
-    try:
-        import exchange_calendars as xc  # type: ignore
-        import pandas as pd  # type: ignore
-    except Exception as exc:  # noqa: BLE001
-        return "UNKNOWN", {"reason": "calendar_unavailable", "error": str(exc)}
-    try:
-        cal = xc.get_calendar("XNYS")
-        day = pd.Timestamp(now_et.date().isoformat())
-        if not bool(cal.is_session(day)):
-            return "CLOSED", {
-                "reason": "not_a_trading_session",
-                "session_date": now_et.date().isoformat(),
-                "source": "exchange_calendars.XNYS",
-            }
-        open_ts = cal.session_open(day).tz_convert(et).to_pydatetime()
-        close_ts = cal.session_close(day).tz_convert(et).to_pydatetime()
-        if open_ts <= now_et < close_ts:
-            return "OPEN", {
-                "reason": "regular_session_open",
-                "session_open": open_ts.isoformat(),
-                "session_close": close_ts.isoformat(),
-                "early_close": bool(close_ts.hour < 16),
-                "source": "exchange_calendars.XNYS",
-            }
-        return "CLOSED", {
-            "reason": "outside_session_hours",
-            "session_open": open_ts.isoformat(),
-            "session_close": close_ts.isoformat(),
-            "early_close": bool(close_ts.hour < 16),
-            "source": "exchange_calendars.XNYS",
-        }
+        payload = regular_session_state(now=now)
     except Exception as exc:  # noqa: BLE001
         return "UNKNOWN", {"reason": "calendar_error", "error": str(exc)}
+    fields = calendar_payload_to_session_fields(payload)
+    state = str(fields.get("session_state") or SESSION_UNKNOWN)
+    details = {
+        "reason": fields.get("reason"),
+        "session_open": fields.get("session_open"),
+        "session_close": fields.get("session_close"),
+        "session_date": fields.get("session_date"),
+        "source": fields.get("source"),
+        "early_close": False,
+    }
+    close_raw = fields.get("session_close")
+    if close_raw:
+        close_dt = _parse_iso(close_raw)
+        if close_dt is not None:
+            details["early_close"] = bool(
+                close_dt.astimezone(ZoneInfo("America/New_York")).hour < 16
+            )
+    if state == SESSION_OPEN:
+        return "OPEN", details
+    if state == SESSION_CLOSED:
+        return "CLOSED", details
+    return "UNKNOWN", details
 
 
 def evaluate_market_session_for_dispatch(
@@ -775,7 +808,11 @@ def evaluate_market_session_for_dispatch(
 
             ZoneInfo(str(tz_name))
         except Exception as exc:  # noqa: BLE001
-            return False, "market_session_invalid_timezone", {"tz": tz_name, "error": str(exc)}
+            return (
+                False,
+                "market_session_invalid_timezone",
+                {"tz": tz_name, "error": str(exc)},
+            )
 
     derived, ddet = derive_nyse_regular_session(now)
     details.update(ddet)
@@ -802,10 +839,35 @@ def evaluate_market_session_for_dispatch(
         return False, "market_session_evidence_naive_timestamp", details
     age = (now.astimezone(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds()
     details["evidence_age_sec"] = age
-    if age > 15 * 60 or age < -60:
+    if age < -60:
+        return False, "market_session_evidence_future", details
+    if age > 15 * 60:
         return False, "market_session_evidence_stale", details
     if str(evidence_session or "").upper() not in {"MARKET_OPEN", "OPEN"}:
         return False, "market_session_evidence_not_open", details
+    schema = str(evidence.get("schema_version") or "")
+    if schema == "198R-J-DISPATCH-SESSION-EVIDENCE-1":
+        from services.paper_sell_dispatch_session_evidence import (
+            validate_dispatch_session_evidence_document,
+            resolve_current_invocation_id,
+        )
+        from services.market_calendar import regular_session_state
+
+        cal = regular_session_state(now=now)
+        ok_doc, doc_reason, doc_details = validate_dispatch_session_evidence_document(
+            evidence,
+            now=now,
+            expected_invocation_id=resolve_current_invocation_id(),
+            calendar_payload=cal,
+        )
+        details.update(doc_details)
+        if not ok_doc:
+            return False, doc_reason, details
+    else:
+        env_inv = str(os.environ.get("TRITON_MARKET_OPEN_INVOCATION_ID") or "").strip()
+        ev_inv = str(evidence.get("market_open_invocation_id") or "").strip()
+        if env_inv and ev_inv and env_inv != ev_inv:
+            return False, "session_evidence_invocation_mismatch", details
     return True, "market_session_open", details
 
 
@@ -1025,7 +1087,10 @@ def find_unused_pre_plan_authority(
     now: Optional[datetime] = None,
 ) -> Optional[Dict[str, Any]]:
     """Read-only: newest UNUSED authority suitable for pre-plan dispatch."""
-    from services.paper_sell_arm_store import inspect_sqlite_authority, resolve_runtime_sqlite_path
+    from services.paper_sell_arm_store import (
+        inspect_sqlite_authority,
+        resolve_runtime_sqlite_path,
+    )
 
     now = now or _utc_now()
     path = resolve_runtime_sqlite_path(db_path=db_path)
@@ -1084,6 +1149,9 @@ def validate_pre_plan_authority_bound_artifacts(
     packet = _load_readiness_packet(results_root, LIVE_GOVERNANCE)
     if not packet:
         return False, "source_readiness_packet_missing", details
+    fresh_ok, fresh_reason, _gen = evaluate_readiness_packet_freshness(packet, now=now)
+    if not fresh_ok:
+        return False, fresh_reason, details
     if str(readiness_packet_hash(packet)) != str(authority.get("readiness_packet_hash") or ""):
         return False, "readiness_packet_hash_mismatch", details
 
@@ -1136,7 +1204,10 @@ def validate_pre_plan_authority_bound_artifacts(
         if expected_slice and expected_slice != got_slice:
             return False, "authorized_slice_hash_mismatch", details
 
-    from services.manage_positions_cycle_binding import selected_row_hash, sha256_file_bytes
+    from services.manage_positions_cycle_binding import (
+        selected_row_hash,
+        sha256_file_bytes,
+    )
 
     results_root = Path(results_root)
     csv_path = results_root / "manage_positions_plan.csv"
@@ -1358,7 +1429,9 @@ def begin_paper_sell_dispatch(
         return DispatchGuardResult(True, NO_SELLS, {"skipped": True}, consumed=False)
 
     paths = _assert_writable_root(store_root, explicit_runtime_write=explicit_runtime_write)
-    from services.paper_sell_arm_store import resolve_runtime_sqlite_path as _resolve_sqlite
+    from services.paper_sell_arm_store import (
+        resolve_runtime_sqlite_path as _resolve_sqlite,
+    )
 
     sqlite_path = _resolve_sqlite(db_path=db_path)
 
