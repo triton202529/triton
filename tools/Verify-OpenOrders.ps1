@@ -92,8 +92,7 @@ function Verify-OpenOrders {
       $sym = GetProp $o @('symbol') '?'
       $tif = GetProp $o @('time_in_force','tif') ''
       if ($oid -and $PSCmdlet.ShouldProcess("order $oid [$sym]", "Cancel non-GTC (tif=$tif)")) {
-        try { Invoke-RestMethod -Method DELETE -Uri ($Base.TrimEnd('/') + "/v2/orders/$oid") -Headers $H | Out-Null }
-        catch { Write-Warning ("Cancel non-GTC failed $sym id=${oid}: " + $_.Exception.Message) }
+        throw 'DISABLED_FAIL_CLOSED: raw broker DELETE is blocked. Use python -m services.runtime_verify --really-cancel (paper-only guarded cancellation).'
       }
     }
 
@@ -115,8 +114,7 @@ function Verify-OpenOrders {
       $lim = GetProp $o @('limit_price','limit') ''
       $tif = GetProp $o @('time_in_force','tif') ''
       if ($oid -and $PSCmdlet.ShouldProcess("order $oid [$sym]", "Cancel standalone buy limit (lim=$lim tif=$tif)")) {
-        try { Invoke-RestMethod -Method DELETE -Uri ($Base.TrimEnd('/') + "/v2/orders/$oid") -Headers $H | Out-Null }
-        catch { Write-Warning ("Cancel standalone failed $sym id=${oid}: " + $_.Exception.Message) }
+        throw 'DISABLED_FAIL_CLOSED: raw broker DELETE is blocked. Use python -m services.runtime_verify --really-cancel (paper-only guarded cancellation).'
       }
     }
 
@@ -181,12 +179,7 @@ function Verify-OpenOrders {
           $oid = GetProp $o @('id') ''
           $sym = GetProp $o @('symbol') '?'
           if ($oid -and $PSCmdlet.ShouldProcess("order $oid [$sym]", "Cancel duplicate")) {
-            try {
-              Invoke-RestMethod -Method DELETE -Uri ($Base.TrimEnd('/') + "/v2/orders/$oid") -Headers $H | Out-Null
-              ("Canceled duplicate: $sym id=$oid")
-            } catch {
-              Write-Warning ("Cancel dup failed $sym id=${oid}: " + $_.Exception.Message)
-            }
+            throw 'DISABLED_FAIL_CLOSED: raw broker DELETE is blocked. Use python -m services.runtime_verify --really-cancel (paper-only guarded cancellation).'
           }
         }
         try { $open = LoadOpen } catch {}

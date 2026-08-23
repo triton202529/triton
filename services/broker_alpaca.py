@@ -35,6 +35,54 @@ class AlpacaAuthError(AlpacaError):
         self.diagnostics = diagnostics or {}
 
 
+def _validated_order_notional(notional: Any, *, side: str, source: str) -> float:
+    """Fail-closed notional parse. SELL cannot exceed APPROVAL_CLI_CAP. No broker I/O.
+
+    Runs before permit enforcement so over-cap SELL cannot consume authority or POST.
+    BUY is not subjected to reviewed-SELL authority by this helper.
+    """
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+    from services.paper_sell_arm_authority import APPROVAL_CLI_CAP
+    from services.paper_sell_arm_runtime_enforcement import PaperSellDispatchBlocked
+
+    is_sell = str(side or "").lower() == "sell"
+
+    def _fail(reason: str, extra: Optional[Dict[str, Any]] = None) -> None:
+        details = {"source": source, "side": str(side or "")}
+        if extra:
+            details.update(extra)
+        if is_sell:
+            raise PaperSellDispatchBlocked(reason, details)
+        raise ValueError(reason)
+
+    if notional is None or isinstance(notional, bool):
+        _fail("notional_missing_or_malformed")
+    if isinstance(notional, str) and not notional.strip():
+        _fail("notional_missing_or_malformed")
+    try:
+        raw = Decimal(str(notional).strip() if isinstance(notional, str) else str(notional))
+    except (InvalidOperation, ValueError, TypeError, ArithmeticError):
+        _fail("notional_missing_or_malformed")
+    if not raw.is_finite():
+        _fail("notional_non_finite")
+    if raw <= 0:
+        _fail("notional_not_positive")
+    posted = raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if is_sell:
+        cap = Decimal(str(APPROVAL_CLI_CAP))
+        if raw > cap or posted > cap:
+            _fail(
+                "notional_exceeds_approval_cli_cap",
+                {
+                    "notional": str(raw),
+                    "posted_notional": str(posted),
+                    "cap": str(cap),
+                },
+            )
+    return float(posted)
+
+
 class BrokerAuthorizationRequired(AlpacaError):
     """Raised when POST /v2/orders is attempted without execution authorization."""
 
@@ -278,45 +326,51 @@ class AlpacaBroker:
 
     def cancel_order(self, order_id: str) -> Dict[str, Any]:
         """
-        Cancel is a broker-state mutation. Paper SELL cancels require a hardened
-        dispatch permit (same canonical boundary as submit) so cancel-then-replace
-        cannot orphan a sell without authority.
+        Pure cancellation. Paper-only while live execution is blocked.
+        Does not consume reviewed-SELL authority and does not create a dispatch row.
+        Replacement submissions remain independently gated.
         """
-        self._gate_paper_sell_cancel_if_needed(order_id)
-        return self._delete(f"/v2/orders/{order_id}")
+        from services.paper_order_cancellation_guard import (
+            CAP_BROKER_CANCEL,
+            PURE_CANCEL,
+            CancellationRequest,
+            evaluate_paper_order_cancellation,
+            live_execution_is_enabled,
+        )
 
-    def _gate_paper_sell_cancel_if_needed(self, order_id: str) -> None:
-        mode = str(getattr(self, "mode", "paper") or "paper").lower()
-        if mode not in {"paper", "paper-only", "paper_trading"}:
-            # Live remains independently blocked by live-execution gates.
-            return
         side = ""
-        symbol = None
-        qty = None
+        status = ""
         try:
             od = self.get_order(str(order_id))
             if isinstance(od, dict):
                 side = str(od.get("side") or "").lower().strip()
-                symbol = od.get("symbol")
-                qty = od.get("qty") or od.get("remaining_qty")
+                status = str(od.get("status") or "").lower().strip()
         except Exception as exc:
             raise RuntimeError(
-                f"paper_sell_cancel_side_unknown: cannot classify order {order_id} for cancel gate: {exc}"
+                f"paper_cancel_side_unknown: cannot classify order {order_id}: {exc}"
             ) from exc
-        if side != "sell":
-            return
-        from services.paper_sell_arm_runtime_enforcement import (
-            enforce_paper_sell_broker_submission,
+        decision = evaluate_paper_order_cancellation(
+            CancellationRequest(
+                broker_mode=str(getattr(self, "mode", "paper") or "paper"),
+                live_execution_enabled=live_execution_is_enabled(),
+                route_id="broker_alpaca.cancel_order",
+                cancellation_capability=CAP_BROKER_CANCEL,
+                broker_order_id=str(order_id or ""),
+                order_side=side or None,
+                order_status=status or None,
+                intent=PURE_CANCEL,
+                broker_base_url=str(getattr(self, "base", "") or ""),
+            )
         )
-
-        enforce_paper_sell_broker_submission(
-            mode=mode,
-            side="sell",
-            source="broker_alpaca.cancel_order",
-            symbol=symbol,
-            qty=float(qty) if qty is not None and str(qty) != "" else None,
-            client_order_id=None,
-        )
+        if decision.idempotent_terminal:
+            return {
+                "status": decision.terminal_status or "canceled",
+                "id": order_id,
+                "idempotent": True,
+                "reason": decision.reason,
+            }
+        decision.raise_if_blocked()
+        return self._delete(f"/v2/orders/{order_id}")
 
     # Optional alias some wrappers expect
     def cancel(self, order_id: str) -> Dict[str, Any]:
@@ -324,28 +378,30 @@ class AlpacaBroker:
 
     def cancel_all_orders(self) -> Any:
         """
-        Cancel all open orders. Paper SELL open orders require a hardened permit
-        per order; without it, sell cancels are skipped/fail-closed rather than
-        silently mutating broker sell state.
+        Paper-only cancel-all. Uses the cancellation guard, not SELL-dispatch authority.
         """
-        mode = str(getattr(self, "mode", "paper") or "paper").lower()
-        if mode in {"paper", "paper-only", "paper_trading"}:
-            try:
-                open_orders = self.list_orders(status="open", nested=True) or []
-            except Exception as exc:
-                raise RuntimeError(
-                    f"paper_sell_cancel_all_blocked: cannot list open orders: {exc}"
-                ) from exc
-            sell_ids = [
-                str(o.get("id"))
-                for o in open_orders
-                if isinstance(o, dict)
-                and str(o.get("side") or "").lower() == "sell"
-                and o.get("id")
-            ]
-            if sell_ids:
-                # Gate using the first sell; absence of permit blocks the batch.
-                self._gate_paper_sell_cancel_if_needed(sell_ids[0])
+        from services.paper_order_cancellation_guard import (
+            CAP_BROKER_CANCEL_ALL,
+            PURE_CANCEL,
+            CancellationRequest,
+            evaluate_paper_order_cancellation,
+            live_execution_is_enabled,
+        )
+
+        decision = evaluate_paper_order_cancellation(
+            CancellationRequest(
+                broker_mode=str(getattr(self, "mode", "paper") or "paper"),
+                live_execution_enabled=live_execution_is_enabled(),
+                route_id="broker_alpaca.cancel_all_orders",
+                cancellation_capability=CAP_BROKER_CANCEL_ALL,
+                broker_order_id="*",
+                order_side=None,
+                order_status=None,
+                intent=PURE_CANCEL,
+                broker_base_url=str(getattr(self, "base", "") or ""),
+            )
+        )
+        decision.raise_if_blocked()
         return self._delete("/v2/orders")
 
     # ---------- Data (quotes / trades / prices) ----------
@@ -660,6 +716,9 @@ class AlpacaBroker:
             enforce_paper_sell_broker_submission,
         )
 
+        posted_notional = _validated_order_notional(
+            notional, side=side, source="broker_alpaca.submit_order_notional"
+        )
         enforce_paper_sell_broker_submission(
             mode=getattr(self, "mode", "paper"),
             side=side,
@@ -680,7 +739,7 @@ class AlpacaBroker:
         )
         payload: Dict[str, Any] = {
             "symbol": symbol.upper().strip(),
-            "notional": round(float(abs(notional)), 2),
+            "notional": posted_notional,
             "side": side.lower().strip(),
             "type": "market",
             "time_in_force": time_in_force.lower().strip(),
@@ -712,6 +771,9 @@ class AlpacaBroker:
             enforce_paper_sell_broker_submission,
         )
 
+        posted_notional = _validated_order_notional(
+            notional, side=side, source="broker_alpaca.submit_bracket_order_notional"
+        )
         enforce_paper_sell_broker_submission(
             mode=getattr(self, "mode", "paper"),
             side=side,
@@ -732,7 +794,7 @@ class AlpacaBroker:
         )
         payload: Dict[str, Any] = {
             "symbol": symbol.upper().strip(),
-            "notional": round(float(abs(notional)), 2),
+            "notional": posted_notional,
             "side": side.lower().strip(),
             "type": entry_type.lower().strip(),
             "time_in_force": time_in_force.lower().strip(),

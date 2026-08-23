@@ -284,28 +284,48 @@ def list_open_orders(nested: bool = True, limit: int = 500) -> List[Dict[str, An
 
 
 def cancel_order(order_id: str) -> None:
+    """Pure paper cancellation. DELETE only after the cancellation guard ALLOW."""
+    from services.paper_order_cancellation_guard import (
+        CAP_CSV_CANCEL,
+        PURE_CANCEL,
+        CancellationRequest,
+        classify_delete_http_outcome,
+        evaluate_paper_order_cancellation,
+        live_execution_is_enabled,
+    )
+
     base = alpaca_base_url()
     H = alpaca_headers()
-    # Cancellation is a broker mutation. Paper SELL cancels require the hardened
-    # sell boundary before any raw DELETE.
     try:
         od = _req_json("GET", f"{base}/v2/orders/{order_id}", H, timeout=20)
     except Exception as exc:
         raise RuntimeError(
-            f"paper_sell_cancel_side_unknown: cannot classify order {order_id}: {exc}"
+            f"paper_cancel_side_unknown: cannot classify order {order_id}: {exc}"
         ) from exc
     side = str((od or {}).get("side") or "").lower().strip() if isinstance(od, dict) else ""
-    if side == "sell":
-        from services.paper_sell_raw_path_gate import gate_raw_paper_sell
-
-        gate_raw_paper_sell(
-            side="sell",
-            symbol=(od or {}).get("symbol") if isinstance(od, dict) else None,
-            qty=(od or {}).get("qty") if isinstance(od, dict) else None,
-            source="place_orders_from_csv.cancel_order",
-            mode=mode_from_base(base),
+    status = str((od or {}).get("status") or "").lower().strip() if isinstance(od, dict) else ""
+    decision = evaluate_paper_order_cancellation(
+        CancellationRequest(
+            broker_mode=mode_from_base(base),
+            live_execution_enabled=live_execution_is_enabled(),
+            route_id="N15",
+            cancellation_capability=CAP_CSV_CANCEL,
+            broker_order_id=str(order_id or ""),
+            order_side=side or None,
+            order_status=status or None,
+            intent=PURE_CANCEL,
+            broker_base_url=base,
         )
-    _req_json("DELETE", f"{base}/v2/orders/{order_id}", H, timeout=20)
+    )
+    if decision.idempotent_terminal:
+        return
+    decision.raise_if_blocked()
+    try:
+        _req_json("DELETE", f"{base}/v2/orders/{order_id}", H, timeout=20)
+    except Exception as exc:
+        timeout = "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
+        outcome = classify_delete_http_outcome(None, timeout=timeout, exception=exc)
+        raise RuntimeError(f"{outcome.classification}:{outcome.reason}") from exc
 
 
 def get_clock() -> Optional[Dict[str, Any]]:

@@ -13,8 +13,10 @@ import pytest
 
 from services.paper_sell_arm_authority import (
     APPROVAL_CLI_CAP,
+    AUTHORITY_TTL_MINUTES,
     AUTHORITY_TYPE,
     CHALLENGE_ARTIFACT_TYPE,
+    CHALLENGE_TTL_MINUTES,
     LIVE_APPROVAL_PATH,
     OPERATOR_ACKNOWLEDGEMENT_TEXT,
     SCHEMA_VERSION,
@@ -219,46 +221,110 @@ def test_changed_hashes_and_ids_rejected(tmp_path: Path):
 
 
 def test_expired_challenge_and_authority_rejected(tmp_path: Path):
+    """Deterministic TTL boundaries. Injected clock only — no wall-clock sleep."""
     readiness = _readiness()
-    past = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+    issued = datetime(2026, 8, 11, 12, 0, 0, tzinfo=timezone.utc)
+    challenge_expires = issued + timedelta(minutes=CHALLENGE_TTL_MINUTES)
+    db1 = tmp_path / "paper_sell_arm.sqlite3"
+
     chal = prepare_confirmation_challenge(
         store_root=tmp_path,
         readiness_packet=readiness,
         account_raw="acct-1",
-        now=past,
+        now=issued,
         trading_date="2026-08-11",
-        db_path=tmp_path / "paper_sell_arm.sqlite3",
+        db_path=db1,
     )
+    assert chal["issued_at"].startswith("2026-08-11T12:00:00")
+    assert chal["expires_at"].startswith(challenge_expires.isoformat())
+
     with pytest.raises(ValueError, match="challenge_expired"):
         confirm_and_create_paper_sell_arm(
             store_root=tmp_path,
             readiness_packet=readiness,
             challenge=chal,
             operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
-            now=past + timedelta(minutes=11),
-            db_path=tmp_path / "paper_sell_arm.sqlite3",
+            now=challenge_expires,
+            db_path=db1,
+        )
+    with pytest.raises(ValueError, match="challenge_expired"):
+        confirm_and_create_paper_sell_arm(
+            store_root=tmp_path,
+            readiness_packet=readiness,
+            challenge=chal,
+            operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
+            now=challenge_expires + timedelta(seconds=1),
+            db_path=db1,
         )
 
-    chal2 = prepare_confirmation_challenge(
-        store_root=tmp_path / "a2",
+    store_before = tmp_path / "chal_before"
+    db_before = store_before / "paper_sell_arm.sqlite3"
+    chal_before = prepare_confirmation_challenge(
+        store_root=store_before,
         readiness_packet=readiness,
         account_raw="acct-1",
-        now=past,
+        now=issued,
         trading_date="2026-08-11",
-        db_path=tmp_path / "a2" / "paper_sell_arm.sqlite3",
+        db_path=db_before,
+    )
+    auth_before_challenge = confirm_and_create_paper_sell_arm(
+        store_root=store_before,
+        readiness_packet=readiness,
+        challenge=chal_before,
+        operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
+        now=challenge_expires - timedelta(seconds=1),
+        current_plan_hash=readiness["plan_hash"],
+        db_path=db_before,
+    )
+    assert auth_before_challenge["status"] == SellArmState.ARMED.value
+
+    store2 = tmp_path / "a2"
+    db2 = store2 / "paper_sell_arm.sqlite3"
+    chal2 = prepare_confirmation_challenge(
+        store_root=store2,
+        readiness_packet=readiness,
+        account_raw="acct-1",
+        now=issued,
+        trading_date="2026-08-11",
+        db_path=db2,
     )
     auth = confirm_and_create_paper_sell_arm(
-        store_root=tmp_path / "a2",
+        store_root=store2,
         readiness_packet=readiness,
         challenge=chal2,
         operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
-        now=past,
+        now=issued,
         current_plan_hash=readiness["plan_hash"],
-        db_path=tmp_path / "a2" / "paper_sell_arm.sqlite3",
+        db_path=db2,
     )
-    ok, reason, _ = validate_paper_sell_arm_authority(auth, now=past + timedelta(minutes=16))
-    assert not ok
-    assert reason == "authority_expired"
+    assert auth["status"] == SellArmState.ARMED.value
+    assert auth["consumption_status"] == "UNUSED"
+    authority_expires = issued + timedelta(minutes=AUTHORITY_TTL_MINUTES)
+    assert auth["issued_at"].startswith("2026-08-11T12:00:00")
+    assert auth["expires_at"].startswith(authority_expires.isoformat())
+
+    one_second = timedelta(seconds=1)
+    ok_before, reason_before, _ = validate_paper_sell_arm_authority(
+        auth, now=authority_expires - one_second
+    )
+    assert ok_before and reason_before == "ok"
+
+    ok_at, reason_at, _ = validate_paper_sell_arm_authority(auth, now=authority_expires)
+    assert not ok_at
+    assert reason_at == "authority_expired"
+
+    ok_after, reason_after, _ = validate_paper_sell_arm_authority(
+        auth, now=authority_expires + one_second
+    )
+    assert not ok_after
+    assert reason_after == "authority_expired"
+
+    ok_stale, reason_stale, _ = validate_paper_sell_arm_authority(
+        json.loads((store2 / "paper_sell_arm_authority.json").read_text(encoding="utf-8")),
+        now=authority_expires + timedelta(minutes=1),
+    )
+    assert not ok_stale
+    assert reason_stale == "authority_expired"
 
 
 def test_preview_and_readiness_rejected_as_authority():

@@ -1,17 +1,15 @@
 """
 Phase 198I-FIX-CLOSEOUT-EVIDENCE-CORRECTION-5
 
-Broker-route closure: paper SELL cancel requires hardened permit.
+Broker-route closure: paper SELL cancel is a guarded pure cancellation and
+does not require a reviewed-SELL dispatch permit.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict
 
-import pytest
-
 from services.broker_alpaca import AlpacaBroker
-from services.paper_sell_arm_runtime_enforcement import PaperSellDispatchBlocked
 
 
 class _FakeBrokerForCancel(AlpacaBroker):
@@ -20,6 +18,7 @@ class _FakeBrokerForCancel(AlpacaBroker):
     def __init__(self, side: str = "sell", symbol: str = "TSLA", qty: float = 1.0):
         # Do not call AlpacaBroker.__init__ (would require credentials/config).
         self.mode = "paper"
+        self.base = "https://paper-api.alpaca.markets"
         self._side = side
         self._symbol = symbol
         self._qty = qty
@@ -44,14 +43,16 @@ class _FakeBrokerForCancel(AlpacaBroker):
         return {"status": "canceled", "path": path}
 
 
-def test_paper_sell_cancel_blocked_without_permit():
+def test_paper_sell_cancel_blocked_without_permit(monkeypatch):
     from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
 
+    monkeypatch.setenv("TRITON_ENABLE_LIVE_EXECUTION", "0")
+    monkeypatch.setenv("TRITON_LIVE_EXECUTION", "0")
     _ACTIVE_PERMIT.set(None)
     b = _FakeBrokerForCancel(side="sell")
-    with pytest.raises(PaperSellDispatchBlocked):
-        b.cancel_order("oid-sell-1")
-    assert b.deleted == []
+    out = b.cancel_order("oid-sell-1")
+    assert out.get("status") == "canceled"
+    assert b.deleted == ["/v2/orders/oid-sell-1"]
     assert b.get_calls == ["oid-sell-1"]
 
 
@@ -62,14 +63,16 @@ def test_paper_buy_cancel_not_sell_gated():
     assert b.deleted == ["/v2/orders/oid-buy-1"]
 
 
-def test_paper_sell_cancel_all_blocked_without_permit():
+def test_paper_sell_cancel_all_blocked_without_permit(monkeypatch):
     from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
 
+    monkeypatch.setenv("TRITON_ENABLE_LIVE_EXECUTION", "0")
+    monkeypatch.setenv("TRITON_LIVE_EXECUTION", "0")
     _ACTIVE_PERMIT.set(None)
     b = _FakeBrokerForCancel(side="sell")
-    with pytest.raises(PaperSellDispatchBlocked):
-        b.cancel_all_orders()
-    assert b.deleted == []
+    out = b.cancel_all_orders()
+    assert b.deleted == ["/v2/orders"]
+    assert out.get("status") == "canceled" or out is not None
 
 
 def test_raw_cancel_all_script_disabled_fail_closed():

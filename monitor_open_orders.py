@@ -241,21 +241,60 @@ def should_cancel(order: Dict) -> Tuple[bool, str]:
     return (False, "fresh enough")
 
 
-def cancel_order(order_id: str) -> Tuple[bool, str]:
+def cancel_order(
+    order_id: str,
+    *,
+    order_side: Optional[str] = None,
+    order_status: Optional[str] = None,
+    transport: Optional[object] = None,
+) -> Tuple[bool, str]:
     """
-    Cancel an order in Alpaca:
-    DELETE /v2/orders/{order_id}
+    Pure paper cancellation. DELETE only after the cancellation guard ALLOW.
+    Does not submit, replace, or consume reviewed-SELL authority.
     """
-    H = get_alpaca_headers()
-    B = get_alpaca_base()
-    url = f"{B}/v2/orders/{order_id}"
-    r = requests.delete(url, headers=H, timeout=10)
+    from services.paper_order_cancellation_guard import (
+        CAP_MONITOR,
+        PURE_CANCEL,
+        CancellationRequest,
+        classify_delete_http_outcome,
+        evaluate_paper_order_cancellation,
+        live_execution_is_enabled,
+        sanitize_diagnostics,
+    )
 
-    # Alpaca returns 204 No Content on success typically
-    if r.status_code in (200, 204):
-        return (True, "cancelled")
-    else:
-        return (False, f"{r.status_code}: {r.text[:200]}")
+    decision = evaluate_paper_order_cancellation(
+        CancellationRequest(
+            broker_mode="paper",
+            live_execution_enabled=live_execution_is_enabled(),
+            route_id="N1",
+            cancellation_capability=CAP_MONITOR,
+            broker_order_id=str(order_id or ""),
+            order_side=order_side,
+            order_status=order_status,
+            intent=PURE_CANCEL,
+            broker_base_url=get_alpaca_base(),
+        )
+    )
+    if decision.idempotent_terminal:
+        return (True, f"{decision.classification}:{decision.reason}")
+    if not decision.allow_delete:
+        return (False, f"{decision.classification}:{decision.reason}")
+
+    client = transport if transport is not None else requests
+    url = f"{get_alpaca_base()}/v2/orders/{order_id}"
+    try:
+        r = client.delete(url, headers=get_alpaca_headers(), timeout=10)
+    except Exception as exc:
+        timeout = "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
+        outcome = classify_delete_http_outcome(None, timeout=timeout, exception=exc)
+        return (False, f"{outcome.classification}:{outcome.reason}")
+
+    outcome = classify_delete_http_outcome(getattr(r, "status_code", None))
+    note = sanitize_diagnostics(
+        {"classification": outcome.classification, "reason": outcome.reason}
+    )
+    ok = outcome.classification in {"CANCELLED", "IDEMPOTENT_TERMINAL"}
+    return (ok, f"{note['classification']}:{note['reason']}")
 
 
 def write_audit_row(row: Dict):
@@ -337,9 +376,13 @@ def main():
             print(f"[KEEP] {sym} ({side}) -> {reason}")
             continue
 
-        # 3. Cancel
+        # 3. Cancel (guarded pure cancellation; never a SELL dispatch)
         cancel_attempts += 1
-        ok, note = cancel_order(oid)
+        ok, note = cancel_order(
+            oid,
+            order_side=str(side or "") or None,
+            order_status=str(od.get("status") or "") or None,
+        )
         status_str = "CANCELLED" if ok else "CANCEL_ERR"
         if ok:
             cancel_success += 1

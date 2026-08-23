@@ -112,8 +112,55 @@ def fetch_open_orders(nested: bool = True, limit: int = 500) -> List[Dict[str, A
     return _request("GET", "/v2/orders", params=params)  # type: ignore
 
 
-def cancel_order(order_id: str) -> None:
-    _request("DELETE", f"/v2/orders/{order_id}")
+def cancel_order(
+    order_id: str,
+    *,
+    order_side: Optional[str] = None,
+    order_status: Optional[str] = None,
+    cancellation_capability: str = "",
+    request_fn: Optional[Any] = None,
+) -> Any:
+    """
+    Pure paper cancellation. Requires an explicit capability (CLI --really-cancel).
+    Does not consume reviewed-SELL authority and does not submit/replace.
+    """
+    from services.paper_order_cancellation_guard import (
+        PURE_CANCEL,
+        CancellationRequest,
+        classify_delete_http_outcome,
+        evaluate_paper_order_cancellation,
+        live_execution_is_enabled,
+    )
+
+    decision = evaluate_paper_order_cancellation(
+        CancellationRequest(
+            broker_mode="paper",
+            live_execution_enabled=live_execution_is_enabled(),
+            route_id="N2",
+            cancellation_capability=str(cancellation_capability or ""),
+            broker_order_id=str(order_id or ""),
+            order_side=order_side,
+            order_status=order_status,
+            intent=PURE_CANCEL,
+            broker_base_url=_alpaca_base_url(),
+        )
+    )
+    if decision.idempotent_terminal:
+        return {
+            "status": decision.terminal_status or "canceled",
+            "id": order_id,
+            "idempotent": True,
+            "reason": decision.reason,
+            "classification": decision.classification,
+        }
+    decision.raise_if_blocked()
+    fn = request_fn if request_fn is not None else _request
+    try:
+        return fn("DELETE", f"/v2/orders/{order_id}")
+    except Exception as exc:
+        timeout = "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower()
+        outcome = classify_delete_http_outcome(None, timeout=timeout, exception=exc)
+        raise RuntimeError(f"{outcome.classification}:{outcome.reason}") from exc
 
 
 # ----------------------------
@@ -373,20 +420,52 @@ def verify_open_orders(
         for o in stale:
             _plan_cancel(o, "stale_order")
 
-    # Execute cancels
+    # Execute cancels only with explicit --really-cancel (dry_run=False).
     cancelled: List[str] = []
+    cancel_outcomes: List[Dict[str, Any]] = []
     if cancel_plan and not dry_run:
+        from services.paper_order_cancellation_guard import CAP_RUNTIME_VERIFY
+
         seen = set()
         for act in cancel_plan:
             if act.order_id in seen:
                 continue
             seen.add(act.order_id)
             try:
-                cancel_order(act.order_id)
+                result = cancel_order(
+                    act.order_id,
+                    order_side=act.side,
+                    cancellation_capability=CAP_RUNTIME_VERIFY,
+                )
+                if isinstance(result, dict) and result.get("idempotent"):
+                    cancel_outcomes.append(
+                        {
+                            "order_id": act.order_id,
+                            "classification": result.get("classification") or "IDEMPOTENT_TERMINAL",
+                            "reason": result.get("reason"),
+                            "retry": False,
+                        }
+                    )
+                    continue
                 cancelled.append(act.order_id)
-            except Exception:
-                # verifier should still return a report even if cancels fail
-                pass
+                cancel_outcomes.append(
+                    {
+                        "order_id": act.order_id,
+                        "classification": "CANCELLED",
+                        "retry": False,
+                    }
+                )
+            except Exception as exc:
+                text = str(exc)
+                classification = "OUTCOME_UNKNOWN" if "OUTCOME_UNKNOWN" in text else "BLOCKED"
+                cancel_outcomes.append(
+                    {
+                        "order_id": act.order_id,
+                        "classification": classification,
+                        "reason": text[:200],
+                        "retry": False,
+                    }
+                )
 
     # Status
     issue_count = (
@@ -466,6 +545,7 @@ def verify_open_orders(
             for a in cancel_plan
         ],
         "cancelled": cancelled,
+        "cancel_outcomes": cancel_outcomes,
         "dry_run": dry_run,
         "policy": {
             "expect_tif": expect_tif,

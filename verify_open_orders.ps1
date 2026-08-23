@@ -26,12 +26,7 @@ function Verify-OpenOrders {
     if ($nonGtc) {
       '--- CANCELING NON-GTC ORDERS ---'
       foreach ($o in $nonGtc) {
-        try {
-          Invoke-RestMethod -Method DELETE -Uri "$Base/v2/orders/$($o.id)" -Headers $H | Out-Null
-          'Canceled DAY: {0} id={1} lim={2}' -f $o.symbol,$o.id,$o.limit_price
-        } catch {
-          Write-Warning ("Failed cancel {0} id={1}: {2}" -f $o.symbol,$o.id,$_.Exception.Message)
-        }
+        throw 'DISABLED_FAIL_CLOSED: raw broker DELETE is blocked. Use python -m services.runtime_verify --really-cancel (paper-only guarded cancellation).'
       }
       # refresh after cancels
       $open = Invoke-RestMethod -Method GET -Uri "$Base/v2/orders?status=open&nested=true&limit=500" -Headers $H
@@ -63,12 +58,7 @@ function Verify-OpenOrders {
       if ($CancelDupes -and $sorted.Count -gt 1) {
         $toCancel = $sorted[0..($sorted.Count - 2)]
         foreach ($o in $toCancel) {
-          try {
-            Invoke-RestMethod -Method DELETE -Uri "$Base/v2/orders/$($o.id)" -Headers $H | Out-Null
-            'Canceled duplicate: {0} id={1}' -f $o.symbol,$o.id
-          } catch {
-            Write-Warning ("Failed cancel dup {0} id={1}: {2}" -f $o.symbol,$o.id,$_.Exception.Message)
-          }
+          throw 'DISABLED_FAIL_CLOSED: raw broker DELETE is blocked. Use python -m services.runtime_verify --really-cancel (paper-only guarded cancellation).'
         }
       }
     }
@@ -84,7 +74,7 @@ function Verify-OpenOrders {
     if ($ShowLegs) {
       $legs = $open | Where-Object { $_.parent_order_id -eq $p.id }
       foreach ($l in $legs) {
-        "  └─ leg: side=$($l.side) type=$($l.type) class=$($l.order_class) lim=$($l.limit_price) stop=$($l.stop_price) tif=$($l.time_in_force) id=$($l.id)"
+        "  - leg: side=$($l.side) type=$($l.type) class=$($l.order_class) lim=$($l.limit_price) stop=$($l.stop_price) tif=$($l.time_in_force) id=$($l.id)"
       }
     }
   }

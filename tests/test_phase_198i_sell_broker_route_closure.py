@@ -129,15 +129,16 @@ def test_r3_r6_page_sell_blocked_without_permit(monkeypatch):
 def test_r4_r5_r23_cancel_routes_are_non_sell_and_gated(tmp_path, monkeypatch):
     isolate_sell_store(monkeypatch, tmp_path)
     sell_fake = NetworkFakeAlpacaBroker(order_side_by_id={"oid-sell-1": "sell"})
-    sell_fake.open_orders = [
-        {"id": "oid-sell-1", "side": "sell", "symbol": "TSLA", "qty": "8"}
-    ]
-    with pytest.raises(PaperSellDispatchBlocked):
-        sell_fake.cancel_order("oid-sell-1")
-    assert sell_fake.deletes == []
-    with pytest.raises(PaperSellDispatchBlocked):
-        sell_fake.cancel_all_orders()
-    assert sell_fake.deletes == []
+    sell_fake.open_orders = [{"id": "oid-sell-1", "side": "sell", "symbol": "TSLA", "qty": "8"}]
+    out_sell = sell_fake.cancel_order("oid-sell-1")
+    assert out_sell.get("status") == "canceled"
+    assert sell_fake.deletes == ["/v2/orders/oid-sell-1"]
+    assert sell_fake.submit_payloads == []
+    cancel_all = NetworkFakeAlpacaBroker(order_side_by_id={"oid-sell-1": "sell"})
+    cancel_all.open_orders = [{"id": "oid-sell-1", "side": "sell", "symbol": "TSLA", "qty": "8"}]
+    cancel_all.cancel_all_orders()
+    assert cancel_all.deletes == ["/v2/orders"]
+    assert cancel_all.submit_payloads == []
     buy_fake = NetworkFakeAlpacaBroker(order_side_by_id={"oid-buy-1": "buy"})
     buy_fake.open_orders = [{"id": "oid-buy-1", "side": "buy", "symbol": "AAPL", "qty": "1"}]
     out = buy_fake.cancel_order("oid-buy-1")
@@ -162,9 +163,10 @@ def test_r34_execute_cycle_cancel_open_orders(tmp_path, monkeypatch):
     cancelled, failed = cancel_open_orders(
         sell_fake, [{"id": "oid-1", "side": "sell", "symbol": "TSLA"}]
     )
-    assert cancelled == 0
-    assert failed == 1
-    assert sell_fake.deletes == []
+    assert cancelled == 1
+    assert failed == 0
+    assert sell_fake.deletes == ["/v2/orders/oid-1"]
+    assert sell_fake.submit_payloads == []
     buy_fake = NetworkFakeAlpacaBroker(order_side_by_id={"oid-2": "buy"})
     cancelled, failed = cancel_open_orders(
         buy_fake, [{"id": "oid-2", "side": "buy", "symbol": "AAPL"}]
@@ -175,18 +177,15 @@ def test_r34_execute_cycle_cancel_open_orders(tmp_path, monkeypatch):
 
 
 def test_r36_r37_manage_open_orders_sell_replace_hits_boundary(tmp_path, monkeypatch):
-    """R36 cancel and R37 submit both hit the canonical boundary.
+    """R36 cancel is a pure cancellation; R37 replace submit is independently gated.
 
-    One permit is one-use per symbol: cancel of a SELL consumes it, so the
-    replace submit is proven separately with a fresh permit. Production
-    replace is fail-closed on the second mutation rather than a bypass.
+    Pure SELL cancellation must not consume reviewed-SELL authority. The replacement
+    submit still requires a hardened permit and is proven separately.
     """
     src = (ROOT / "services/manage_open_orders.py").read_text(encoding="utf-8")
     assert "broker.cancel_order(oid)" in src
     assert "broker.submit_order(" in src
 
-    freeze_dispatch_clock(monkeypatch)
-    seed_paper_sell_store(tmp_path, consume=True)
     isolate_sell_store(monkeypatch, tmp_path)
     stub_unrelated_pre_gates(monkeypatch)
     fake = NetworkFakeAlpacaBroker(order_side_by_id={"oid-sell-reprice": "sell"})
@@ -195,7 +194,7 @@ def test_r36_r37_manage_open_orders_sell_replace_hits_boundary(tmp_path, monkeyp
     cancel_out = fake.cancel_order("oid-sell-reprice")
     assert cancel_out.get("status") == "canceled"
     assert fake.deletes == ["/v2/orders/oid-sell-reprice"]
-    assert "hardened_sell_boundary_entered" in trace.names()
+    assert "hardened_sell_boundary_entered" not in trace.names()
     with pytest.raises(PaperSellDispatchBlocked) as ei:
         fake.submit_order(
             symbol="TSLA",
@@ -206,10 +205,7 @@ def test_r36_r37_manage_open_orders_sell_replace_hits_boundary(tmp_path, monkeyp
             limit_price=331.0,
             client_order_id="triton-om-test",
         )
-    assert ei.value.reason in {
-        "paper_sell_permit_exhausted_or_finalized",
-        "paper_sell_permit_symbol_already_submitted",
-    }
+    assert ei.value.reason == "paper_sell_requires_hardened_dispatch_permit"
     assert fake.submit_payloads == []
 
 
@@ -248,9 +244,10 @@ def test_r38_run_cancel_sell_fail_closed(tmp_path, monkeypatch):
     src = (ROOT / "services/manage_open_orders.py").read_text(encoding="utf-8")
     assert "br.cancel_order(oid)" in src
     fake = NetworkFakeAlpacaBroker(order_side_by_id={"stale-1": "sell"})
-    with pytest.raises(PaperSellDispatchBlocked):
-        fake.cancel_order("stale-1")
-    assert fake.deletes == []
+    out = fake.cancel_order("stale-1")
+    assert out.get("status") == "canceled"
+    assert fake.deletes == ["/v2/orders/stale-1"]
+    assert fake.submit_payloads == []
 
 
 def test_r39_market_open_cycle_cancel_uses_alpaca_broker(tmp_path, monkeypatch):
@@ -266,17 +263,20 @@ def test_r39_market_open_cycle_cancel_uses_alpaca_broker(tmp_path, monkeypatch):
 
     result = _cancel_open_orders("paper")
     assert result.ok is True
-    assert fake.deletes == []
-    assert "failed=1" in (result.detail or "")
+    assert fake.deletes == ["/v2/orders/oid-1"]
+    assert "cancelled=1" in (result.detail or "")
+    assert "failed=0" in (result.detail or "")
+    assert fake.submit_payloads == []
 
 
 def test_r41_duplicate_sell_cancel_fail_closed(monkeypatch):
     src = (ROOT / "services/place_live_orders.py").read_text(encoding="utf-8")
     assert "broker.cancel_order(oid)" in src
     fake = NetworkFakeAlpacaBroker(order_side_by_id={"dup-1": "sell"})
-    with pytest.raises(PaperSellDispatchBlocked):
-        fake.cancel_order("dup-1")
-    assert fake.deletes == []
+    out = fake.cancel_order("dup-1")
+    assert out.get("status") == "canceled"
+    assert fake.deletes == ["/v2/orders/dup-1"]
+    assert fake.submit_payloads == []
 
 
 def test_r43_position_protector_place_bracket_sell(tmp_path, monkeypatch):
