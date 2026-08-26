@@ -46,7 +46,10 @@ from services.paper_sell_arm_runtime_enforcement import (
     begin_paper_sell_dispatch,
     select_authorized_planned,
 )
-from services.paper_sell_arm_store import PaperSellArmStoreError, inspect_sqlite_arm_snapshot
+from services.paper_sell_arm_store import (
+    PaperSellArmStoreError,
+    inspect_sqlite_arm_snapshot,
+)
 from tests._paper_sell_test_durability import stub_dir_fsync_ok
 from tests._phase_198i_sell_fakes import (
     LIVE_BLOCKED,
@@ -438,7 +441,10 @@ def test_real_route_dispatches_first_slice_only(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -496,7 +502,10 @@ def test_source_hash_substitution_fails(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -543,7 +552,10 @@ def test_source_identity_field_change_fails(tmp_path, monkeypatch, field, value,
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -588,7 +600,10 @@ def test_slice_hash_substitution_fails(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -615,13 +630,20 @@ def test_notional_expansion_fails(tmp_path: Path, monkeypatch):
     for row in planned:
         row.limit_price = 10000.0
         row.ref_price = 10000.0
+    ok, reason, selected = select_authorized_planned(planned, auth)
+    assert ok is False
+    assert reason == "no_executable_authorized_quantity"
+    assert selected == ()
     guard = begin_paper_sell_dispatch(
         store_root=tmp_path,
         planned=planned,
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -634,7 +656,7 @@ def test_notional_expansion_fails(tmp_path: Path, monkeypatch):
         readiness_packet_hash_current=auth["readiness_packet_hash"],
     )
     assert not guard.consumed
-    assert guard.reason == "notional_expansion_vs_authorized_slice:TSLA"
+    assert guard.reason == "no_executable_authorized_quantity"
 
 
 def test_authorized_notional_exact_and_lower_allowed(tmp_path: Path, monkeypatch):
@@ -688,9 +710,16 @@ def test_one_cent_per_symbol_and_total_slice_expansion_refused(tmp_path: Path, m
     tsla.limit_price = (2709.04 + 0.01) / 8.0
     tsla.ref_price = tsla.limit_price
     ok, reason, selected = select_authorized_planned(exact, auth)
-    assert ok is False
-    assert reason == "notional_expansion_vs_authorized_slice:TSLA"
-    assert selected == ()
+    assert ok is True, reason
+    tsla_sel = next(p for p in selected if p.symbol == "TSLA")
+    assert int(tsla_sel.qty) == 7
+    assert int(tsla_sel.qty) < 8
+    assert [(p.symbol, int(p.qty)) for p in selected if p.symbol != "TSLA"] == [
+        ("GLD", 5),
+        ("DBA", 9),
+    ]
+    tsla_notional = money_round(float(tsla_sel.qty) * float(tsla_sel.limit_price))
+    assert tsla_notional <= 2709.04 + 1e-9
 
     crafted = {
         "authorized_actions": [
@@ -716,12 +745,24 @@ def test_price_increase_qty_unchanged_refused(tmp_path: Path, monkeypatch):
     seeded = _arm_confirm(tmp_path, packet)
     auth = seeded["snap"]["latest_authority"]["payload"]
     planned = _planned_from_slice(seeded["pres"]["slice"]["slice_actions"])
+    original = [(p.symbol, int(p.qty)) for p in planned]
     planned[0].limit_price = float(planned[0].limit_price) + 0.02
     planned[0].ref_price = planned[0].limit_price
     ok, reason, selected = select_authorized_planned(planned, auth)
-    assert ok is False
-    assert reason.startswith("notional_expansion_vs_authorized_slice:")
-    assert selected == ()
+    assert ok is True, reason
+    assert selected
+    by_orig = {sym: qty for sym, qty in original}
+    for p in selected:
+        assert int(p.qty) <= by_orig[p.symbol]
+        price = float(p.limit_price or p.ref_price or 0)
+        item = next(
+            a
+            for a in (auth.get("authorized_actions") or auth.get("authorized_scope") or [])
+            if str(a.get("symbol") or "").upper() == p.symbol
+        )
+        assert money_round(float(p.qty) * price) <= money_round(item.get("max_notional")) + 1e-9
+    first_sel = next(p for p in selected if p.symbol == planned[0].symbol)
+    assert int(first_sel.qty) < by_orig[planned[0].symbol]
 
 
 def test_real_route_tsla_notional_expansion_refused(tmp_path: Path, monkeypatch):
@@ -733,6 +774,7 @@ def test_real_route_tsla_notional_expansion_refused(tmp_path: Path, monkeypatch)
     planned = _planned_from_packet(packet)
     tsla = next(p for p in planned if p.symbol == "TSLA")
     tsla.limit_price = (2709.04 + 0.01) / 8.0
+    tsla.ref_price = tsla.limit_price
     fake = PacketQuotedFakeBroker(
         packet,
         positions=[
@@ -752,25 +794,22 @@ def test_real_route_tsla_notional_expansion_refused(tmp_path: Path, monkeypatch)
     )
     guard = captured.get("guard")
     assert guard is not None
-    assert not guard.consumed
-    assert guard.reason == "notional_expansion_vs_authorized_slice:TSLA"
-    assert fake.submit_payloads == []
-    assert all(
-        e.get("fn") != "enforce_paper_sell_broker_submission"
-        for e in trace.events
-        if e.get("event") == "hardened_sell_boundary_entered"
-    )
+    assert guard.consumed, f"{guard.reason} {guard.details}"
+    authorized = list(guard.authorized_planned or captured.get("authorized") or ())
+    tsla_auth = next(p for p in authorized if str(getattr(p, "symbol", "")).upper() == "TSLA")
+    assert int(tsla_auth.qty) == 7
+    assert fake.submit_payloads
     snap = _snap(tmp_path, now=NOW + timedelta(minutes=2))
-    assert snap["latest_authority"]["state"] == "UNUSED"
-    assert snap["dispatch_count"] == 0
-    assert result["rc"] != 0
-    EVIDENCE.mkdir(parents=True, exist_ok=True)
-    (EVIDENCE / "route_tsla_notional_expansion.json").write_text(
+    assert snap["latest_authority"]["state"] == "CONSUMED"
+    assert snap["dispatch_count"] == 1
+    assert result["rc"] == 0
+    (tmp_path / "route_tsla_notional_clip.json").write_text(
         json.dumps(
             {
                 "reason": guard.reason,
-                "consumed": False,
-                "broker_submits": 0,
+                "consumed": True,
+                "broker_submits": len(fake.submit_payloads),
+                "tsla_runtime_qty": int(tsla_auth.qty),
                 "authority_state": snap["latest_authority"]["state"],
             },
             indent=2,
@@ -794,7 +833,10 @@ def test_action_change_fails(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -965,7 +1007,10 @@ def test_expired_authority_fails(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -1004,7 +1049,10 @@ def test_sqlite_failure_fails_closed(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -1032,7 +1080,12 @@ def test_limit_sanity_after_reservation_does_not_restore_unused(tmp_path: Path, 
     class WildQuoteBroker(PacketQuotedFakeBroker):
         def get_latest_quote(self, symbol: str):
             px = 10000.0 if str(symbol).upper() == "TSLA" else self._px(symbol)
-            return {"symbol": str(symbol).upper(), "bid": px, "ask": px, "ts": NOW.isoformat()}
+            return {
+                "symbol": str(symbol).upper(),
+                "bid": px,
+                "ask": px,
+                "ts": NOW.isoformat(),
+            }
 
         def get_latest_trade(self, symbol: str):
             px = 10000.0 if str(symbol).upper() == "TSLA" else self._px(symbol)
@@ -1137,7 +1190,10 @@ def test_buy_injection_not_in_authorized_planned(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -1221,7 +1277,10 @@ def test_confirm_to_dispatch_race_source_change(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -1250,7 +1309,10 @@ def test_next_cycle_previous_authority_cannot_authorize(tmp_path: Path, monkeypa
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in packet["approval_ready_actions"]
             },
         ),
@@ -1288,7 +1350,10 @@ def test_next_cycle_previous_authority_cannot_authorize(tmp_path: Path, monkeypa
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in remaining["approval_ready_actions"]
             },
         ),
@@ -1353,7 +1418,10 @@ def test_stale_future_packet_refused_by_console(tmp_path: Path):
     future = _load_prod_copy(generated_at=(NOW + timedelta(days=2)).isoformat())
     pres = _pres(tmp_path, future)
     assert pres.get("arm_enabled") is False
-    assert pres.get("arm_deny_reason") in {"future_generated_at", "stale_readiness_packet"}
+    assert pres.get("arm_deny_reason") in {
+        "future_generated_at",
+        "stale_readiness_packet",
+    }
 
 
 def test_slice_no_longer_subset_fails(tmp_path: Path, monkeypatch):
@@ -1375,7 +1443,10 @@ def test_slice_no_longer_subset_fails(tmp_path: Path, monkeypatch):
         broker_view=_broker(
             auth,
             {
-                str(a["symbol"]): {"qty": float(a["qty"]), "qty_available": float(a["qty"])}
+                str(a["symbol"]): {
+                    "qty": float(a["qty"]),
+                    "qty_available": float(a["qty"]),
+                }
                 for a in reduced["approval_ready_actions"]
             },
         ),

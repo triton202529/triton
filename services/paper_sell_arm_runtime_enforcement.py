@@ -316,8 +316,116 @@ def _clone_planned_qty(p: Any, qty: float) -> Any:
     return cloned
 
 
+def _price_unavailable(value: Any) -> bool:
+    """Fail-closed current sell reference: missing/zero/negative/NaN/Inf/malformed."""
+    from decimal import Decimal, InvalidOperation
+
+    if value is None:
+        return True
+    try:
+        if isinstance(value, float):
+            import math as _math
+
+            if _math.isnan(value) or _math.isinf(value):
+                return True
+        price = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError, ArithmeticError):
+        return True
+    return (not price.is_finite()) or price <= 0
+
+
+def _downward_runtime_qty(
+    authorized_qty: float, stored_max_notional: Any, price: float
+) -> Tuple[int, str]:
+    """Downward-only whole-share qty so runtime notional cannot exceed stored max.
+
+    runtime_quantity = min(authorized_quantity, floor(max_notional / price)),
+    then walked down until money_round(qty * price) <= stored max.
+    Never increases quantity. Governing comparisons use Decimal, not float.
+    """
+    from decimal import Decimal, ROUND_FLOOR
+
+    auth = int(Decimal(str(authorized_qty)).to_integral_value(rounding=ROUND_FLOOR))
+    if auth <= 0:
+        return 0, "invalid_authorized_qty"
+    if stored_max_notional is None:
+        return auth, "unchanged_no_stored_max"
+    max_n = Decimal(str(money_round(stored_max_notional)))
+    px = Decimal(str(price))
+    runtime = min(Decimal(auth), (max_n / px).to_integral_value(rounding=ROUND_FLOOR))
+    if runtime < 0:
+        runtime = Decimal("0")
+    while runtime > 0 and Decimal(str(money_round(float(runtime * px)))) > max_n:
+        runtime -= 1
+    qty = int(runtime)
+    if qty > auth:
+        return auth, "quantity_expansion_forbidden"
+    if qty <= 0:
+        return 0, "clipped_to_zero_vs_authorized_max_notional"
+    if qty < auth:
+        return qty, "downward_clip_vs_authorized_max_notional"
+    return qty, "authorized_quantity_fits_current_price"
+
+
+def _authorized_clip_audit(
+    authority: Mapping[str, Any], planned: Sequence[Any]
+) -> List[Dict[str, Any]]:
+    """JSON-serializable per-line clip audit. Never emits Decimal objects."""
+    by_sym = {str(getattr(p, "symbol", "") or "").upper(): p for p in planned}
+    rows: List[Dict[str, Any]] = []
+    for item in list(
+        authority.get("authorized_actions") or authority.get("authorized_scope") or []
+    ):
+        symbol = str(item.get("symbol") or "").upper()
+        action = str(item.get("action") or "").upper()
+        auth_qty = float(item.get("max_qty") or 0)
+        max_n = item.get("max_notional")
+        p = by_sym.get(symbol)
+        runtime_qty = float(getattr(p, "qty", 0) or 0) if p is not None else 0.0
+        price_raw = None
+        if p is not None:
+            price_raw = getattr(p, "limit_price", None)
+            if price_raw is None:
+                price_raw = getattr(p, "ref_price", None)
+        try:
+            price_f = float(price_raw) if price_raw is not None else None
+        except (TypeError, ValueError):
+            price_f = None
+        runtime_notional = (
+            money_round(runtime_qty * price_f) if price_f is not None and runtime_qty else 0.0
+        )
+        outcome = "UNCHANGED"
+        reason = str(getattr(p, "clip_reason", "") or "") if p is not None else ""
+        if p is None or runtime_qty <= 0:
+            outcome = "SKIPPED_ZERO"
+            reason = reason or "clipped_to_zero_vs_authorized_max_notional"
+        elif runtime_qty + 1e-9 < auth_qty:
+            outcome = "CLIPPED_DOWN"
+            reason = reason or "downward_clip_vs_authorized_max_notional"
+        else:
+            reason = reason or "authorized_quantity_fits_current_price"
+        rows.append(
+            {
+                "symbol": symbol,
+                "action": action,
+                "authorized_quantity": auth_qty,
+                "runtime_quantity": runtime_qty,
+                "deferred_quantity": max(auth_qty - runtime_qty, 0.0),
+                "current_reference_price": price_f,
+                "authorized_max_notional": float(max_n) if max_n is not None else None,
+                "runtime_estimated_notional": float(runtime_notional),
+                "outcome": outcome,
+                "reason": reason,
+            }
+        )
+    return rows
+
+
 def select_authorized_planned(
-    planned: Sequence[Any], authority: Mapping[str, Any]
+    planned: Sequence[Any],
+    authority: Mapping[str, Any],
+    *,
+    reject_unapproved_planned: bool = False,
 ) -> Tuple[bool, str, Tuple[Any, ...]]:
     """Map full planned SELLs onto exact authorized_scope. Clip qty down; never expand."""
     scope = list(authority.get("authorized_actions") or authority.get("authorized_scope") or [])
@@ -339,7 +447,7 @@ def select_authorized_planned(
         extra_syms.discard(symbol)
         cands = by_sym.get(symbol) or []
         if not cands:
-            return False, f"incomplete_authorized_slice:{symbol}", ()
+            return False, f"incomplete_authorized_qty:{symbol}", ()
         p = cands[0]
         stance = str(
             getattr(p, "stance", None)
@@ -356,22 +464,28 @@ def select_authorized_planned(
             and not (action == "EXIT" and planned_action in SELL_ACTIONS)
         ):
             return False, f"action_mismatch_vs_authorized_slice:{symbol}", ()
-        pq = float(getattr(p, "qty", 0) or 0)
-        if pq + 1e-9 < max_qty:
-            return False, f"incomplete_authorized_qty:{symbol}", ()
-        use_qty: Any = min(pq, max_qty)
-        if abs(float(use_qty) - round(float(use_qty))) < 1e-9:
-            use_qty = int(round(float(use_qty)))
         price = float(getattr(p, "limit_price", None) or getattr(p, "ref_price", None) or 0)
-        notional = money_round(float(use_qty) * price) if price else 0.0
-        stored_max = money_round(max_n) if max_n is not None else None
-        if stored_max is not None and notional > stored_max + 1e-9:
-            return False, f"notional_expansion_vs_authorized_slice:{symbol}", ()
+        if _price_unavailable(price):
+            return False, f"price_unavailable:{symbol}", ()
+        derived_qty, clip_reason = _downward_runtime_qty(max_qty, max_n, price)
+        pq = float(getattr(p, "qty", 0) or 0)
+        if derived_qty <= 0:
+            continue
+        if pq + 1e-9 < float(derived_qty):
+            return False, f"incomplete_authorized_qty:{symbol}", ()
+        use_qty = derived_qty
+        notional = money_round(float(use_qty) * price)
         if notional > APPROVAL_CLI_CAP + 1e-6:
             return False, f"notional_expansion_vs_authorized_slice:{symbol}", ()
-        if use_qty + 1e-9 < pq:
+        if abs(float(use_qty) - float(getattr(p, "qty", 0) or 0)) > 1e-9:
             p = _clone_planned_qty(p, use_qty)
+        setattr(p, "clip_reason", clip_reason)
         selected.append(p)
+    if reject_unapproved_planned and extra_syms:
+        extra = sorted(extra_syms)[0]
+        return False, f"unauthorized_symbol_vs_authorized_slice:{extra}", ()
+    if not selected:
+        return False, "no_executable_authorized_quantity", ()
     total_sel = money_round(
         sum(
             float(getattr(p, "qty", 0) or 0)
@@ -1319,28 +1433,66 @@ def build_pre_plan_planned_orders(
         held = float(positions.get(sym, 0.0))
         if held + 1e-9 < max_qty:
             return False, f"insufficient_current_position:{sym}", ()
-        price = float(get_ref_price(broker, sym, "sell") or 0.0)
-        if price <= 0:
+        price_raw = get_ref_price(broker, sym, "sell")
+        if _price_unavailable(price_raw):
             return False, f"price_unavailable:{sym}", ()
-        notional = money_round(max_qty * price)
-        stored_n = item.get("max_notional")
-        if stored_n is not None and notional > money_round(float(stored_n)) + 1e-9:
-            return False, f"notional_expansion_vs_authorized_slice:{sym}", ()
-        cap_n = per_notional_cap.get(sym)
-        if cap_n is not None and notional > money_round(cap_n) + 1e-9:
-            return False, f"notional_expansion_vs_symbol_ceiling:{sym}", ()
+        price = float(price_raw)
         qty_cap = per_qty_cap.get(sym)
         if qty_cap is not None and max_qty > float(qty_cap) + 1e-9:
             return False, f"quantity_expansion_vs_symbol_ceiling:{sym}", ()
+        stored_n = item.get("max_notional")
+        runtime_qty, clip_reason = _downward_runtime_qty(max_qty, stored_n, price)
+        if runtime_qty <= 0:
+            client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
+            planned.append(
+                PlannedOrder(
+                    symbol=sym,
+                    side="sell",
+                    qty=0,
+                    order_type="limit",
+                    time_in_force="day",
+                    limit_price=price,
+                    ref_price=price,
+                    client_order_id=client_order_id,
+                    discipline_allowed=True,
+                )
+            )
+            setattr(planned[-1], "management_action", action)
+            setattr(planned[-1], "authorized_qty", max_qty)
+            setattr(planned[-1], "clip_reason", clip_reason)
+            continue
+        notional = money_round(float(runtime_qty) * price)
+        cap_n = per_notional_cap.get(sym)
+        if cap_n is not None and notional > money_round(cap_n) + 1e-9:
+            runtime_qty, clip_reason = _downward_runtime_qty(runtime_qty, cap_n, price)
+            if runtime_qty <= 0:
+                client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
+                planned.append(
+                    PlannedOrder(
+                        symbol=sym,
+                        side="sell",
+                        qty=0,
+                        order_type="limit",
+                        time_in_force="day",
+                        limit_price=price,
+                        ref_price=price,
+                        client_order_id=client_order_id,
+                        discipline_allowed=True,
+                    )
+                )
+                setattr(planned[-1], "management_action", action)
+                setattr(planned[-1], "authorized_qty", max_qty)
+                setattr(planned[-1], "clip_reason", clip_reason)
+                continue
+            notional = money_round(float(runtime_qty) * price)
         if notional > APPROVAL_CLI_CAP + 1e-6:
             return False, "batch_notional_exceeds_approval_cli_cap", ()
-        qty_int = int(max_qty) if abs(max_qty - round(max_qty)) < 1e-9 else max_qty
         client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
         planned.append(
             PlannedOrder(
                 symbol=sym,
                 side="sell",
-                qty=int(qty_int),
+                qty=int(runtime_qty),
                 order_type="limit",
                 time_in_force="day",
                 limit_price=price,
@@ -1350,8 +1502,12 @@ def build_pre_plan_planned_orders(
             )
         )
         setattr(planned[-1], "management_action", action)
+        setattr(planned[-1], "authorized_qty", max_qty)
+        setattr(planned[-1], "clip_reason", clip_reason)
         total_notional = money_round(total_notional + notional)
 
+    if not any(float(getattr(p, "qty", 0) or 0) > 0 for p in planned):
+        return False, "no_executable_authorized_quantity", ()
     stored_total = authority.get("total_batch_max_notional")
     if stored_total is not None and total_notional > money_round(float(stored_total)) + 1e-9:
         return False, "notional_expansion_vs_authorized_slice_total", ()
@@ -1377,12 +1533,18 @@ def attempt_pre_plan_authorized_sell_dispatch(
     if not ok:
         return DispatchGuardResult(False, reason, _details)
     ok_planned, plan_reason, planned = build_pre_plan_planned_orders(authority, broker, now=now)
+    clip_audit = _authorized_clip_audit(authority, planned)
     if not ok_planned or not planned:
-        return DispatchGuardResult(False, plan_reason, {"planned_count": len(planned)})
+        return DispatchGuardResult(
+            False,
+            plan_reason,
+            {"planned_count": len(planned), "clip_audit": clip_audit},
+            consumed=False,
+        )
     broker_view = build_authority_bound_broker_view(
         authority, broker=broker, results_root=results_root, now=now
     )
-    return begin_paper_sell_dispatch(
+    guard = begin_paper_sell_dispatch(
         store_root=LIVE_GOVERNANCE,
         planned=planned,
         broker_view=broker_view,
@@ -1393,7 +1555,10 @@ def attempt_pre_plan_authorized_sell_dispatch(
         caller_live_blocked=True,
         results_root=results_root,
         db_path=db_path,
+        clip_audit=clip_audit,
     )
+    guard.details = {**dict(guard.details or {}), "clip_audit": clip_audit}
+    return guard
 
 
 def begin_paper_sell_dispatch(
@@ -1411,6 +1576,7 @@ def begin_paper_sell_dispatch(
     live_root: Optional[Path] = None,
     activate_permit: bool = True,
     db_path: Optional[Path] = None,
+    clip_audit: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> DispatchGuardResult:
     """
     Final revalidation + durable dispatch intent + irreversible consumption.
@@ -1528,7 +1694,11 @@ def begin_paper_sell_dispatch(
                 )
                 if expected_slice and expected_slice != got_slice:
                     return DispatchGuardResult(False, "authorized_slice_hash_changed", {})
-                ok_sel, sel_reason, selected_planned = select_authorized_planned(planned, authority)
+                ok_sel, sel_reason, selected_planned = select_authorized_planned(
+                    planned,
+                    authority,
+                    reject_unapproved_planned=clip_audit is not None,
+                )
                 if not ok_sel:
                     return DispatchGuardResult(False, sel_reason, {})
                 req = requested_actions_from_planned(selected_planned)
@@ -1661,6 +1831,18 @@ def begin_paper_sell_dispatch(
                 consumption=_read_json(paths.consumption) or None,
                 readiness_packet_hash_current=readiness_packet_hash_current
                 or evidence.readiness_packet_hash,
+                clip_audit=clip_audit,
+                runtime_ref_prices=(
+                    {
+                        str(getattr(p, "symbol", "") or "").upper(): float(
+                            getattr(p, "limit_price", None) or getattr(p, "ref_price", None) or 0
+                        )
+                        for p in planned
+                        if _planned_is_sell(p)
+                    }
+                    if clip_audit is not None
+                    else None
+                ),
             )
             if not rok:
                 append_audit(
@@ -1714,6 +1896,7 @@ def begin_paper_sell_dispatch(
                 "batch_id": authority.get("batch_id"),
                 "symbols": [r["symbol"] for r in req],
                 "actions": req,
+                "clip_audit": list(clip_audit) if clip_audit is not None else None,
                 "recorded_at": now.isoformat(),
                 "status": "INTENT_RECORDED_PRE_SUBMIT",
                 "broker_submission_started": False,

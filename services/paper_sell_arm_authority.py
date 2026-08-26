@@ -1479,6 +1479,225 @@ def validate_paper_sell_arm_authority(
     return True, "ok", details
 
 
+def recompute_allowed_runtime_qty(
+    authorized_qty: Any, stored_max_notional: Any, price: Any
+) -> Tuple[int, str]:
+    """Independent Decimal downward qty used by clip-audit revalidation."""
+    from decimal import Decimal, InvalidOperation, ROUND_FLOOR
+
+    from services.paper_sell_arm_cap_slice import money_round
+
+    try:
+        auth = int(Decimal(str(authorized_qty)).to_integral_value(rounding=ROUND_FLOOR))
+    except (InvalidOperation, ValueError, TypeError, ArithmeticError):
+        return 0, "invalid_authorized_qty"
+    if auth <= 0:
+        return 0, "invalid_authorized_qty"
+    if stored_max_notional is None:
+        return auth, "unchanged_no_stored_max"
+    try:
+        max_n = Decimal(str(money_round(stored_max_notional)))
+        px = Decimal(str(price))
+    except (InvalidOperation, ValueError, TypeError, ArithmeticError):
+        return 0, "invalid_price_or_max"
+    if (not px.is_finite()) or px <= 0:
+        return 0, "invalid_price"
+    runtime = min(Decimal(auth), (max_n / px).to_integral_value(rounding=ROUND_FLOOR))
+    if runtime < 0:
+        runtime = Decimal("0")
+    while runtime > 0 and Decimal(str(money_round(float(runtime * px)))) > max_n:
+        runtime -= 1
+    return int(runtime), "ok"
+
+
+def _clip_price_unavailable(value: Any) -> bool:
+    import math as _math
+    from decimal import Decimal, InvalidOperation
+
+    if value is None:
+        return True
+    try:
+        if isinstance(value, float) and (_math.isnan(value) or _math.isinf(value)):
+            return True
+        price = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError, ArithmeticError):
+        return True
+    return (not price.is_finite()) or price <= 0
+
+
+def _integral_qty(value: Any) -> Tuple[bool, int]:
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        qty = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError, ArithmeticError):
+        return False, 0
+    if not qty.is_finite() or qty != qty.to_integral_value():
+        return False, 0
+    return True, int(qty)
+
+
+def validate_runtime_clip_audit(
+    authority: Mapping[str, Any],
+    clip_audit: Sequence[Mapping[str, Any]],
+    requested_actions: Sequence[Mapping[str, Any]],
+    runtime_ref_prices: Mapping[str, Any],
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """Independently recompute a supplied downward-clipping audit. Fail closed."""
+    from services.paper_sell_arm_cap_slice import money_round
+
+    scope = list(authority.get("authorized_actions") or authority.get("authorized_scope") or [])
+    details: Dict[str, Any] = {"clip_audit_validated": False}
+    if not isinstance(clip_audit, (list, tuple)):
+        return False, "clip_audit_malformed", details
+    if len(clip_audit) != len(scope):
+        return False, "clip_audit_row_count_mismatch", details
+    auth_syms = [str(item.get("symbol") or "").upper() for item in scope]
+    if len(set(auth_syms)) != len(auth_syms):
+        return False, "authorized_duplicate_symbol", details
+    seen_audit: Set[str] = set()
+    audit_by_sym: Dict[str, Mapping[str, Any]] = {}
+    for row in clip_audit:
+        if not isinstance(row, Mapping):
+            return False, "clip_audit_malformed_row", details
+        sym = str(row.get("symbol") or "").upper()
+        if not sym:
+            return False, "clip_audit_missing_symbol", details
+        if sym in seen_audit:
+            return False, f"clip_audit_duplicate_symbol:{sym}", details
+        seen_audit.add(sym)
+        audit_by_sym[sym] = row
+    extra = sorted(seen_audit - set(auth_syms))
+    if extra:
+        return False, f"clip_audit_extra_symbol:{extra[0]}", details
+    missing = [s for s in auth_syms if s not in seen_audit]
+    if missing:
+        return False, f"clip_audit_missing_row:{missing[0]}", details
+
+    req_by_sym: Dict[str, Mapping[str, Any]] = {}
+    for req in requested_actions:
+        sym = str(req.get("symbol") or "").upper()
+        if not sym:
+            return False, "requested_missing_symbol", details
+        if sym in req_by_sym:
+            return False, f"duplicate_requested_symbol:{sym}", details
+        qty_ok, req_qty = _integral_qty(req.get("qty"))
+        if not qty_ok:
+            return False, f"requested_qty_not_integer:{sym}", details
+        if req_qty <= 0:
+            return False, f"zero_quantity_broker_request:{sym}", details
+        req_by_sym[sym] = req
+
+    derived_total = 0.0
+    for item in scope:
+        sym = str(item.get("symbol") or "").upper()
+        action = str(item.get("action") or "").upper()
+        auth_qty = float(item.get("max_qty") or 0)
+        max_n = item.get("max_notional")
+        row = audit_by_sym[sym]
+        if str(row.get("action") or "").upper() != action:
+            return False, f"clip_audit_action_mismatch:{sym}", details
+        try:
+            row_auth_qty = float(row.get("authorized_quantity"))
+        except (TypeError, ValueError):
+            return False, f"clip_audit_authorized_quantity_mismatch:{sym}", details
+        if abs(row_auth_qty - auth_qty) > 1e-9:
+            return False, f"clip_audit_authorized_quantity_mismatch:{sym}", details
+        try:
+            row_max_n = (
+                float(row.get("authorized_max_notional"))
+                if row.get("authorized_max_notional") is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            return False, f"clip_audit_max_notional_mismatch:{sym}", details
+        if max_n is None or row_max_n is None or abs(row_max_n - float(max_n)) > 1e-9:
+            return False, f"clip_audit_max_notional_mismatch:{sym}", details
+        price_raw = row.get("current_reference_price")
+        if _clip_price_unavailable(price_raw):
+            return False, f"clip_audit_invalid_price:{sym}", details
+        price = float(price_raw)
+        snap = runtime_ref_prices.get(sym) if runtime_ref_prices is not None else None
+        if snap is None or _clip_price_unavailable(snap):
+            return False, f"clip_audit_missing_runtime_price:{sym}", details
+        if abs(float(snap) - price) > 1e-9:
+            return False, f"clip_audit_forged_current_reference_price:{sym}", details
+        qty_ok, runtime_qty = _integral_qty(row.get("runtime_quantity"))
+        if not qty_ok:
+            return False, f"clip_audit_runtime_quantity_not_integer:{sym}", details
+        if runtime_qty < 0 or runtime_qty - auth_qty > 1e-9:
+            return False, f"clip_audit_runtime_quantity_out_of_range:{sym}", details
+        if runtime_qty > int(auth_qty) + 1e-9:
+            return False, f"quantity_expansion:{sym}", details
+        allowed_qty, _why = recompute_allowed_runtime_qty(auth_qty, max_n, price)
+        if runtime_qty != allowed_qty:
+            return False, f"clip_audit_runtime_quantity_mismatch:{sym}", details
+        try:
+            deferred = float(row.get("deferred_quantity"))
+        except (TypeError, ValueError):
+            return False, f"clip_audit_deferred_mismatch:{sym}", details
+        if abs(deferred - (auth_qty - float(runtime_qty))) > 1e-9:
+            return False, f"clip_audit_deferred_mismatch:{sym}", details
+        expected_notional = money_round(runtime_qty * price) if runtime_qty else 0.0
+        try:
+            got_notional = float(row.get("runtime_estimated_notional") or 0)
+        except (TypeError, ValueError):
+            return False, f"clip_audit_runtime_notional_mismatch:{sym}", details
+        if abs(got_notional - expected_notional) > 1e-9:
+            return False, f"clip_audit_runtime_notional_mismatch:{sym}", details
+        if expected_notional > money_round(max_n) + 1e-9:
+            return False, f"notional_expansion_vs_authorized_slice:{sym}", details
+        if runtime_qty == 0:
+            expected_outcome = "SKIPPED_ZERO"
+        elif runtime_qty + 1e-9 < auth_qty:
+            expected_outcome = "CLIPPED_DOWN"
+        else:
+            expected_outcome = "UNCHANGED"
+        if str(row.get("outcome") or "") != expected_outcome:
+            return False, f"clip_audit_outcome_mismatch:{sym}", details
+        if runtime_qty > 0:
+            req = req_by_sym.pop(sym, None)
+            if req is None:
+                return False, f"incomplete_authorized_qty:{sym}", details
+            if str(req.get("action") or "").upper() != action:
+                return False, f"action_substitution:{sym}", details
+            req_ok, req_qty = _integral_qty(req.get("qty"))
+            if not req_ok or req_qty != runtime_qty:
+                return False, f"requested_qty_mismatch:{sym}", details
+            req_px = float(req.get("price") or 0)
+            req_n = (
+                money_round(req_qty * req_px)
+                if req_qty and req_px
+                else float(req.get("notional") or 0)
+            )
+            if req_n > money_round(max_n) + 1e-9:
+                return False, f"notional_expansion_vs_authorized_slice:{sym}", details
+            derived_total = money_round(derived_total + req_n)
+        else:
+            if sym in req_by_sym:
+                return False, f"zero_derived_symbol_requested:{sym}", details
+    if req_by_sym:
+        extra_req = sorted(req_by_sym)[0]
+        return False, f"unauthorized_symbol_vs_authorized_slice:{extra_req}", details
+    slice_total = money_round(sum(float(i.get("max_notional") or 0) for i in scope))
+    stored_total = authority.get("total_batch_max_notional")
+    cap_total = money_round(stored_total) if stored_total is not None else slice_total
+    if derived_total > cap_total + 1e-9:
+        return False, "notional_expansion_vs_authorized_slice_total", details
+    if cap_total > APPROVAL_CLI_CAP + 1e-9 or slice_total > APPROVAL_CLI_CAP + 1e-9:
+        return False, "batch_notional_exceeds_approval_cli_cap", details
+    if derived_total > APPROVAL_CLI_CAP + 1e-9:
+        return False, "batch_notional_exceeds_approval_cli_cap", details
+    details.update(
+        {
+            "clip_audit_validated": True,
+            "derived_requested_total": derived_total,
+            "authorized_slice_total": slice_total,
+        }
+    )
+    return True, "ok", details
+
+
 def revalidate_before_dispatch(
     authority: Dict[str, Any],
     *,
@@ -1487,6 +1706,8 @@ def revalidate_before_dispatch(
     now: Optional[datetime] = None,
     consumption: Optional[Dict[str, Any]] = None,
     readiness_packet_hash_current: Optional[str] = None,
+    clip_audit: Optional[Sequence[Mapping[str, Any]]] = None,
+    runtime_ref_prices: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Strict pre-dispatch revalidation. Fail closed on ambiguity.
@@ -1551,9 +1772,22 @@ def revalidate_before_dispatch(
     }
     req_syms = {str(r.get("symbol") or "").upper() for r in requested_actions}
     auth_syms = set(auth_map.keys())
-    # Exact batch match required (no safe subset unless future policy adds it).
-    if req_syms != auth_syms:
-        return False, "batch_symbol_set_mismatch_whole_batch_required", details
+    if clip_audit is None:
+        # Exact batch match required unless an explicit clip audit is supplied.
+        if req_syms != auth_syms:
+            return False, "batch_symbol_set_mismatch_whole_batch_required", details
+    else:
+        if runtime_ref_prices is None:
+            return False, "clip_audit_runtime_prices_missing", details
+        ok_clip, clip_reason, clip_details = validate_runtime_clip_audit(
+            authority,
+            clip_audit,
+            requested_actions,
+            runtime_ref_prices,
+        )
+        details.update(clip_details)
+        if not ok_clip:
+            return False, clip_reason, details
 
     total_req_notional = 0.0
     newer_orders = broker.newer_order_symbols or set()

@@ -27,7 +27,10 @@ from services.paper_sell_arm_authority import (
     readiness_packet_hash,
     source_readiness_packet_hash,
 )
-from services.paper_sell_arm_cap_slice import authorized_slice_hash, slice_reviewed_sells
+from services.paper_sell_arm_cap_slice import (
+    authorized_slice_hash,
+    slice_reviewed_sells,
+)
 from services.paper_sell_arm_console import (
     CONFIRM_PAPER_SELLS_PHRASE,
     arm_reviewed_sells,
@@ -40,7 +43,10 @@ from services.paper_sell_arm_runtime_enforcement import (
     find_unused_pre_plan_authority,
     validate_pre_plan_authority_bound_artifacts,
 )
-from services.paper_sell_arm_store import inspect_sqlite_arm_snapshot, resolve_runtime_sqlite_path
+from services.paper_sell_arm_store import (
+    inspect_sqlite_arm_snapshot,
+    resolve_runtime_sqlite_path,
+)
 from services.place_live_orders import dispatch_unused_authorized_sell_slice_pre_plan
 from tests._paper_sell_test_durability import stub_dir_fsync_ok
 from tests._phase_198i_sell_fakes import (
@@ -319,7 +325,11 @@ def test_04_no_authority_no_op(tmp_path, monkeypatch):
     isolate_sell_store(monkeypatch, tmp_path)
     fake = _fake_broker(_slice_packet())
     result = dispatch_unused_authorized_sell_slice_pre_plan(
-        broker=fake, results_root=tmp_path, store_root=tmp_path, db_path=_db(tmp_path), now=NOW
+        broker=fake,
+        results_root=tmp_path,
+        store_root=tmp_path,
+        db_path=_db(tmp_path),
+        now=NOW,
     )
     assert result["attempted"] is False
     assert fake.fake_broker_call_count == 0
@@ -332,7 +342,10 @@ def test_05_expired_authority_no_broker_call(tmp_path, monkeypatch):
     db = _db(tmp_path)
     expired_at = (NOW - timedelta(minutes=1)).isoformat()
     con = sqlite3.connect(str(db))
-    con.execute("UPDATE sell_authorities SET expires_at = ? WHERE state = 'UNUSED'", (expired_at,))
+    con.execute(
+        "UPDATE sell_authorities SET expires_at = ? WHERE state = 'UNUSED'",
+        (expired_at,),
+    )
     con.commit()
     con.close()
     fake = _fake_broker(packet)
@@ -391,7 +404,10 @@ def test_08_new_plan_written_only_after_pre_plan_decision(tmp_path, monkeypatch)
         _pre_plan,
     )
     # invoke helper directly as manage_positions would before plan build
-    from services.manage_positions import ManagePlanSummary, _try_pre_plan_authorized_sell_dispatch
+    from services.manage_positions import (
+        ManagePlanSummary,
+        _try_pre_plan_authorized_sell_dispatch,
+    )
 
     _try_pre_plan_authorized_sell_dispatch(
         broker=_fake_broker(packet), mode="paper", dry_run=False, verbose=False
@@ -500,9 +516,23 @@ def test_14_price_expansion_fails_closed(tmp_path, monkeypatch):
         def _px(self, symbol: str) -> float:
             return 99999.0
 
-    fake = HighQuoteBroker(packet, positions=[{"symbol": "TSLA", "qty": "8", "qty_available": "8"}])
-    ok, reason, _ = build_pre_plan_planned_orders(authority, fake, now=NOW + timedelta(minutes=1))
+    positions = [
+        {
+            "symbol": str(item.get("symbol")),
+            "qty": str(item.get("max_qty")),
+            "qty_available": str(item.get("max_qty")),
+        }
+        for item in (authority.get("authorized_actions") or [])
+    ]
+    fake = HighQuoteBroker(packet, positions=positions)
+    ok, reason, planned = build_pre_plan_planned_orders(
+        authority, fake, now=NOW + timedelta(minutes=1)
+    )
     assert not ok
+    assert reason == "no_executable_authorized_quantity"
+    assert planned == ()
+    snap2 = inspect_sqlite_arm_snapshot(_db(tmp_path), now=NOW + timedelta(minutes=1))
+    assert snap2["latest_authority"]["state"] == "UNUSED"
 
 
 def test_15_quantity_insufficiency_fails_closed(tmp_path, monkeypatch):
