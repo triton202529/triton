@@ -915,6 +915,22 @@ def inspect_sqlite_arm_snapshot(db_path: Path, *, now: datetime) -> Dict[str, An
         conn.close()
 
 
+def count_dispatches_for_authority(db_path: Path, authority_id: str) -> int:
+    """Count sell_dispatches rows bound to one authority_id. History for others is ignored."""
+    aid = str(authority_id or "").strip()
+    if not aid or not Path(db_path).is_file():
+        return 0
+    conn = readonly_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM sell_dispatches WHERE authority_id = ?",
+            (aid,),
+        ).fetchone()
+        return int(row[0] if row is not None else 0)
+    finally:
+        conn.close()
+
+
 def count_current_unused_exact_batch_authorities(
     db_path: Path,
     *,

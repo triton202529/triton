@@ -1372,6 +1372,75 @@ class BrokerSnapshotView:
     evidence_independent: bool = False
 
 
+def _nonempty_identity_values(*values: Any) -> Set[str]:
+    out: Set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            out.add(text)
+    return out
+
+
+def classify_consumption_record_for_authority(
+    authority: Mapping[str, Any],
+    consumption: Optional[Mapping[str, Any]],
+) -> Tuple[str, str]:
+    """Scope a consumption JSON record against one authority.
+
+    Returns (classification, reason):
+      - ("ignore", "") historical / other-authority evidence
+      - ("block", "consumption_record_present") matching current authority
+      - ("fail", explicit_reason) malformed or ambiguous current-authority record
+    """
+    if consumption is None:
+        return "ignore", ""
+    if not isinstance(consumption, Mapping) or not dict(consumption):
+        return "fail", "consumption_record_malformed"
+
+    auth_ids = _nonempty_identity_values(
+        authority.get("authority_id"),
+        authority.get("audit_id"),
+        authority.get("approval_id"),
+    )
+    cons_ids = _nonempty_identity_values(
+        consumption.get("authority_id"),
+        consumption.get("audit_id"),
+        consumption.get("approval_id"),
+    )
+    auth_key = str(authority.get("idempotency_key") or "").strip()
+    cons_key = str(consumption.get("idempotency_key") or "").strip()
+    auth_plan = str(authority.get("plan_hash") or "").strip()
+    cons_plan = str(consumption.get("plan_hash") or "").strip()
+    auth_batch = str(authority.get("batch_id") or "").strip()
+    cons_batch = str(consumption.get("batch_id") or "").strip()
+    auth_chal = str(
+        authority.get("confirmation_challenge_id") or authority.get("challenge_id") or ""
+    ).strip()
+
+    if not cons_ids and not cons_key:
+        return "fail", "consumption_identity_ambiguous"
+
+    id_overlap = bool(cons_ids & auth_ids)
+    id_foreign = bool(cons_ids and auth_ids and cons_ids.isdisjoint(auth_ids))
+    key_match = bool(cons_key and auth_key and cons_key == auth_key)
+    key_conflict = bool(cons_key and auth_key and cons_key != auth_key)
+    mixed_ids = bool(cons_ids and auth_ids and cons_ids - auth_ids and cons_ids & auth_ids)
+
+    appears_current = id_overlap or key_match
+    if mixed_ids or (id_overlap and key_conflict) or (key_match and id_foreign):
+        return "fail", "consumption_identity_ambiguous"
+    if appears_current and cons_plan and auth_plan and cons_plan != auth_plan:
+        return "fail", "consumption_identity_ambiguous"
+    if appears_current and cons_batch and auth_batch and cons_batch != auth_batch:
+        return "fail", "consumption_identity_ambiguous"
+    if appears_current and auth_chal and cons_key and auth_chal not in cons_key and not key_match:
+        if id_overlap:
+            return "fail", "consumption_identity_ambiguous"
+    if appears_current:
+        return "block", "consumption_record_present"
+    return "ignore", ""
+
+
 def validate_paper_sell_arm_authority(
     authority: Dict[str, Any],
     *,
@@ -1428,8 +1497,11 @@ def validate_paper_sell_arm_authority(
         return False, f"status_not_armed:{authority.get('status')}", details
     if str(authority.get("consumption_status") or "") != "UNUSED":
         return False, "authority_consumed_or_revoked", details
-    if consumption:
-        return False, "consumption_record_present", details
+    classification, cons_reason = classify_consumption_record_for_authority(authority, consumption)
+    if classification == "fail":
+        return False, cons_reason, details
+    if classification == "block":
+        return False, cons_reason, details
 
     issued = _parse_iso(authority.get("issued_at"))
     expires = _parse_iso(authority.get("expires_at"))

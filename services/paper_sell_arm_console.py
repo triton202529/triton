@@ -10,7 +10,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from services.live_block_classifier import evaluate_live_block_status
 from services.paper_sell_arm_authority import (
@@ -42,6 +42,7 @@ from services.paper_sell_arm_store import (
     PaperSellArmStoreError,
     batch_hash_from_scope,
     count_current_unused_exact_batch_authorities,
+    count_dispatches_for_authority,
     inspect_sqlite_arm_snapshot,
     production_path_overrides_present,
     resolve_runtime_sqlite_path,
@@ -79,6 +80,34 @@ FAIL_CLOSED_MESSAGES = {
     "authority_already_created": "Paper SELL authority already exists for this challenge.",
     "configuration_blocked": "Paper SELL arming is blocked by a non-production configuration setting.",
     "unknown_exception": "Paper SELL arming failed closed. No orders were submitted.",
+    "post_create_authority_missing": (
+        "Paper SELL confirmation did not persist an authority id. No orders were submitted."
+    ),
+    "post_create_authority_mismatch": (
+        "Paper SELL confirmation did not match the newly created authority. "
+        "No orders were submitted."
+    ),
+    "challenge_not_consumed_after_create": (
+        "Paper SELL confirmation challenge was not consumed. No orders were submitted."
+    ),
+    "authority_not_unused_after_create": (
+        "Paper SELL authority was not unused after create. No orders were submitted."
+    ),
+    "authority_expired_after_create": (
+        "Paper SELL authority expired during confirmation. No orders were submitted."
+    ),
+    "unused_authority_count_mismatch": (
+        "Paper SELL confirmation did not leave exactly one unused authority for this batch. "
+        "No orders were submitted."
+    ),
+    "authority_dispatch_already_present": (
+        "Paper SELL authority already has a dispatch and is not newly unused. "
+        "No orders were submitted."
+    ),
+    "post_create_dispatch_count_unreadable": (
+        "Paper SELL dispatch history for the new authority could not be read. "
+        "No orders were submitted."
+    ),
     "source_unbound": "Reviewed SELL readiness is not bound to the current cycle.",
     "blocked_other_gate": "Reviewed SELL actions are blocked by a non-authority gate.",
     "sell_outcome_unknown": "Reviewed SELL outcome is unknown and requires reconciliation.",
@@ -915,17 +944,23 @@ def confirm_and_arm_paper_sells(
         )
     except Exception:
         current_unused = 0
-    if not (
-        created_id
-        and str(auth.get("authority_id") or "") == created_id
-        and consumed
-        and unused
-        and unexpired
-        and current_unused == 1
-        and int(snap2.get("dispatch_count") or 0) == 0
-    ):
-        _record_failure(store_root, "sell_arm_button2_denied", "unknown_exception")
-        return _denied("confirm", "unknown_exception", counts, snapshot=snap2)
+    created_dispatch_count = -1
+    try:
+        created_dispatch_count = count_dispatches_for_authority(sqlite_path, created_id)
+    except Exception:
+        created_dispatch_count = -1
+    post_reason = classify_post_create_confirm(
+        created_id=created_id,
+        latest_authority=auth,
+        challenge_consumed=consumed,
+        unused=unused,
+        unexpired=unexpired,
+        current_unused=current_unused,
+        created_dispatch_count=created_dispatch_count,
+    )
+    if post_reason:
+        _record_failure(store_root, "sell_arm_button2_denied", post_reason)
+        return _denied("confirm", post_reason, counts, snapshot=snap2)
 
     return {
         "ok": True,
@@ -939,7 +974,7 @@ def confirm_and_arm_paper_sells(
         "single_use": True,
         "action_count": int(pres.get("slice_action_count") or 0),
         "slice_hash": pres.get("slice_hash"),
-        "dispatch_count": 0,
+        "dispatch_count": created_dispatch_count,
         "snapshot": snap2,
         "counts": counts,
         "warning": (
@@ -949,6 +984,36 @@ def confirm_and_arm_paper_sells(
         "authority_id": auth.get("authority_id") or authority.get("authority_id"),
         "resolved_db_path": str(sqlite_path),
     }
+
+
+def classify_post_create_confirm(
+    *,
+    created_id: str,
+    latest_authority: Mapping[str, Any],
+    challenge_consumed: bool,
+    unused: bool,
+    unexpired: bool,
+    current_unused: int,
+    created_dispatch_count: int,
+) -> Optional[str]:
+    """Return an explicit post-create denial reason, or None when newly unused."""
+    if not created_id:
+        return "post_create_authority_missing"
+    if str(latest_authority.get("authority_id") or "") != created_id:
+        return "post_create_authority_mismatch"
+    if not challenge_consumed:
+        return "challenge_not_consumed_after_create"
+    if not unused:
+        return "authority_not_unused_after_create"
+    if not unexpired:
+        return "authority_expired_after_create"
+    if int(current_unused) != 1:
+        return "unused_authority_count_mismatch"
+    if int(created_dispatch_count) < 0:
+        return "post_create_dispatch_count_unreadable"
+    if int(created_dispatch_count) != 0:
+        return "authority_dispatch_already_present"
+    return None
 
 
 def _denied(
