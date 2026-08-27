@@ -150,6 +150,7 @@ try {
             $sessionOpen = $false
             $sessionState = "UNKNOWN"
             $sessionReason = "session_check_failed"
+            $sessionAction = ""
             $sessionRaw = python -m services.paper_runtime_session_gate --check --json
             $sessionCode = $LASTEXITCODE
             Log-Line "[SESSION_CHECK] exit_code=$sessionCode output=$sessionRaw"
@@ -158,11 +159,13 @@ try {
                     $sessionText = ($sessionRaw | Out-String)
                     $sessionObj = $sessionText | ConvertFrom-Json
                     if ($sessionObj.session_state) { $sessionState = [string]$sessionObj.session_state }
+                    if ($sessionObj.action) { $sessionAction = [string]$sessionObj.action }
                     $sessionOpen = ($sessionState -eq "OPEN")
                     if ($sessionObj.reason) { $sessionReason = [string]$sessionObj.reason }
                 } catch {
                     $sessionOpen = $false
                     $sessionState = "UNKNOWN"
+                    $sessionAction = ""
                     $sessionReason = "session_json_unreadable"
                 }
             }
@@ -171,6 +174,10 @@ try {
                 Log-Line "[PAPER_ENTRY_BLOCKED_SESSION_UNKNOWN] reason=$sessionReason session_state=$sessionState session_open=false"
                 python -m services.paper_runtime_session_gate --record-cycle --outcome session_unknown --reason "PAPER_ENTRY_BLOCKED_SESSION_UNKNOWN" --session-open false | Out-Null
                 Log-Line "[CYCLE_BLOCKED_SESSION_UNKNOWN] cycle=$cycle reason=$sessionReason"
+            } elseif ($sessionAction -eq "skip_near_close") {
+                Log-Line "[PAPER_ENTRY_SKIPPED_NEAR_CLOSE] reason=$sessionReason remaining=$($sessionObj.remaining_runway_seconds) required=$($sessionObj.required_runway_seconds) close=$($sessionObj.session_close_et) session_open=true broker_orders_submitted=false live_execution_permitted=false"
+                python -m services.paper_runtime_session_gate --record-cycle --outcome skipped_near_close --reason "CYCLE_SKIPPED_NEAR_CLOSE" --session-open true | Out-Null
+                Log-Line "[CYCLE_SKIPPED_NEAR_CLOSE] cycle=$cycle reason=$sessionReason remaining=$($sessionObj.remaining_runway_seconds) required=181"
             } elseif (-not $sessionOpen) {
                 Log-Line "[PAPER_ENTRY_SKIPPED_MARKET_CLOSED] reason=$sessionReason session_open=false"
                 python -m services.paper_runtime_session_gate --record-cycle --outcome skipped_market_closed --reason $sessionReason --session-open false | Out-Null

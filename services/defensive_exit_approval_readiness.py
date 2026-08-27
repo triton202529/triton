@@ -2,7 +2,9 @@
 
 Writes only data/results/defensive_exit_approval_readiness.json (or an injected
 results_root). Creates no authority, challenge, permit, or broker call.
-Failed generation does not overwrite a previous packet.
+Failed generation does not overwrite a previous packet, except a same-cycle
+protected SELL dispatch which must overwrite any armable packet with a
+non-armable reconciliation-required packet.
 """
 
 from __future__ import annotations
@@ -67,6 +69,10 @@ from services.paper_sell_arm_authority import (
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RESULTS = ROOT / "data" / "results"
 PACKET_NAME = "defensive_exit_approval_readiness.json"
+PRE_PLAN_DISPATCH_EVIDENCE_NAME = "manage_positions_pre_plan_dispatch.json"
+PRE_PLAN_DISPATCH_SCHEMA = "198T-O-PRE-PLAN-DISPATCH-1"
+SAME_CYCLE_DISPATCH_REASON = "SAME_CYCLE_SELL_DISPATCH_REQUIRES_NEXT_CYCLE_RECONCILIATION"
+STATUS_UNAVAILABLE_SAME_CYCLE = "UNAVAILABLE_SAME_CYCLE_DISPATCH_RECONCILIATION"
 SCHEMA_VERSION = "198I-ZA-SELL-READINESS-1"
 PRODUCER_ID = "services.defensive_exit_approval_readiness"
 CANONICAL_MODE = "PAPER"
@@ -86,6 +92,10 @@ def packet_path(results_root: Optional[Path] = None) -> Path:
     return Path(results_root or default_results_root()) / PACKET_NAME
 
 
+def pre_plan_dispatch_evidence_path(results_root: Optional[Path] = None) -> Path:
+    return Path(results_root or default_results_root()) / PRE_PLAN_DISPATCH_EVIDENCE_NAME
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -94,6 +104,235 @@ def _iso_utc(dt: datetime) -> str:
     if dt.tzinfo is None:
         raise ValueError("generated_at_must_be_timezone_aware")
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def derive_pre_plan_dispatch_performed(pre_plan: Dict[str, Any]) -> bool:
+    """True when this invocation crossed a holdings-changing dispatch boundary."""
+    attempted = bool(pre_plan.get("attempted"))
+    dispatched = bool(pre_plan.get("dispatched"))
+    consumed = bool(pre_plan.get("consumed"))
+    try:
+        placed = int(pre_plan.get("broker_submissions") or 0)
+    except (TypeError, ValueError):
+        placed = 0
+    submit = pre_plan.get("submit") if isinstance(pre_plan.get("submit"), dict) else {}
+    try:
+        placed = max(placed, int(submit.get("placed") or 0))
+    except (TypeError, ValueError):
+        pass
+    submitted = bool(pre_plan.get("broker_orders_submitted")) or placed > 0 or dispatched
+    return bool(attempted and (dispatched or consumed or submitted or placed > 0))
+
+
+def build_pre_plan_dispatch_evidence(
+    pre_plan: Optional[Dict[str, Any]] = None,
+    *,
+    invocation_id: str,
+    now: Optional[datetime] = None,
+    session_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Current-invocation dispatch sidecar. Never contacts a broker."""
+    from services.manage_positions_cycle_binding import resolve_invocation_id
+
+    pre_plan = dict(pre_plan or {})
+    now = now or _utc_now()
+    inv = str(invocation_id or resolve_invocation_id() or "").strip()
+    submit = pre_plan.get("submit") if isinstance(pre_plan.get("submit"), dict) else {}
+    try:
+        placed = int(pre_plan.get("broker_submissions") or submit.get("placed") or 0)
+    except (TypeError, ValueError):
+        placed = 0
+    try:
+        failed = int(submit.get("failed") or 0)
+    except (TypeError, ValueError):
+        failed = 0
+    dispatched = bool(pre_plan.get("dispatched"))
+    consumed = bool(pre_plan.get("consumed"))
+    attempted = bool(pre_plan.get("attempted"))
+    performed_raw = pre_plan.get("dispatch_performed")
+    if performed_raw is None:
+        performed = derive_pre_plan_dispatch_performed(pre_plan)
+        evidence_status = "OK"
+    else:
+        if isinstance(performed_raw, bool):
+            performed = performed_raw
+            evidence_status = "OK"
+        else:
+            performed = True
+            evidence_status = "AMBIGUOUS"
+    broker_submitted = bool(dispatched or placed > 0 or pre_plan.get("broker_orders_submitted"))
+    terminal = str(
+        pre_plan.get("dispatch_terminal_status")
+        or ("TERMINAL_SUCCESS" if dispatched and placed > 0 else (pre_plan.get("reason") or "NONE"))
+    )
+    return {
+        "schema_version": PRE_PLAN_DISPATCH_SCHEMA,
+        "generated_at": _iso_utc(now),
+        "invocation_id": inv,
+        "cycle_id": inv,
+        "market_open_invocation_id": inv,
+        "session_date": session_date,
+        "dispatch_id": str(pre_plan.get("dispatch_intent_id") or pre_plan.get("dispatch_id") or ""),
+        "authority_id": str(pre_plan.get("authority_id") or ""),
+        "attempted": attempted,
+        "dispatch_performed": performed,
+        "consumed": consumed,
+        "dispatched": dispatched,
+        "broker_orders_submitted": broker_submitted,
+        "placed_count": placed,
+        "failed_count": failed,
+        "dispatch_terminal_status": terminal,
+        "reason": str(pre_plan.get("reason") or ""),
+        "evidence_status": evidence_status,
+        "creates_no_authority": True,
+        "live_execution_permitted": False,
+    }
+
+
+def write_pre_plan_dispatch_evidence(
+    results_root: Path,
+    pre_plan: Optional[Dict[str, Any]] = None,
+    *,
+    invocation_id: str = "",
+    now: Optional[datetime] = None,
+    session_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    evidence = build_pre_plan_dispatch_evidence(
+        pre_plan,
+        invocation_id=invocation_id,
+        now=now,
+        session_date=session_date,
+    )
+    path = pre_plan_dispatch_evidence_path(results_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(path, evidence, require_full_durability=False)
+    return evidence
+
+
+def load_pre_plan_dispatch_evidence(results_root: Path) -> Dict[str, Any]:
+    return _read_json(pre_plan_dispatch_evidence_path(results_root))
+
+
+def classify_same_cycle_dispatch(
+    *,
+    invocation_id: str,
+    results_root: Path,
+) -> Tuple[str, Dict[str, Any]]:
+    """Return ('none'|'suppress'|'ambiguous', evidence) for the current invocation."""
+    evidence = load_pre_plan_dispatch_evidence(results_root)
+    if not evidence:
+        return "none", {}
+    ev_inv = str(
+        evidence.get("invocation_id")
+        or evidence.get("market_open_invocation_id")
+        or evidence.get("cycle_id")
+        or ""
+    ).strip()
+    current = str(invocation_id or "").strip()
+    if not current or not ev_inv or ev_inv != current:
+        return "none", evidence
+    status = str(evidence.get("evidence_status") or "").upper()
+    performed = evidence.get("dispatch_performed")
+    if status == "AMBIGUOUS" or performed not in (True, False):
+        return "ambiguous", evidence
+    if performed is True:
+        return "suppress", evidence
+    return "none", evidence
+
+
+def write_same_cycle_dispatch_reconciliation_packet(
+    *,
+    results_root: Path,
+    binding: Optional[Dict[str, Any]] = None,
+    evidence: Optional[Dict[str, Any]] = None,
+    now: Optional[datetime] = None,
+    write: bool = True,
+) -> Dict[str, Any]:
+    """Overwrite canonical packet with a non-armable same-cycle reconciliation marker."""
+    now = now or _utc_now()
+    results_root = Path(results_root)
+    dest = packet_path(results_root)
+    binding = dict(binding or {})
+    evidence = dict(evidence or {})
+    inv = str(
+        binding.get("invocation_id")
+        or evidence.get("invocation_id")
+        or os.environ.get(INVOCATION_ENV)
+        or ""
+    )
+    packet = build_canonical_packet(
+        now=now,
+        actions=[],
+        cycle_id=inv or "unbound",
+        run_id=str(
+            binding.get("plan_generated_at") or evidence.get("generated_at") or _iso_utc(now)
+        ),
+        batch_id=f"manage-{(inv or 'unbound')[:16]}",
+        plan_id=f"manage_positions_plan@{binding.get('plan_generated_at') or 'unbound'}",
+        plan_hash=str(binding.get("selected_row_hash") or "same-cycle-dispatch-reconciliation"),
+        generation_status="ok",
+        extra={
+            "invocation_id": inv,
+            "market_open_invocation_id": inv,
+            "plan_generated_at": binding.get("plan_generated_at"),
+            "f_stage_completed_at": binding.get("f_stage_completed_at"),
+            "f_stage_status": binding.get("f_stage_status"),
+            "source_plan_sha256": binding.get("source_plan_sha256"),
+            "selected_row_hash": binding.get("selected_row_hash"),
+            "arm_eligibility": "UNAVAILABLE",
+            "packet_status": SAME_CYCLE_DISPATCH_REASON,
+            "reason": SAME_CYCLE_DISPATCH_REASON,
+            "dispatch_id": evidence.get("dispatch_id"),
+            "authority_id": evidence.get("authority_id"),
+            "dispatch_performed": evidence.get("dispatch_performed"),
+            "dispatch_terminal_status": evidence.get("dispatch_terminal_status"),
+            "placed_count": evidence.get("placed_count"),
+            "session_date": evidence.get("session_date") or binding.get("session_date"),
+            "same_cycle_dispatch_evidence": evidence,
+        },
+    )
+    packet["status"] = STATUS_UNAVAILABLE_SAME_CYCLE
+    packet["approval_ready_symbols"] = []
+    packet["approval_ready_actions"] = []
+    packet["total_proposed_notional"] = 0.0
+    packet["creates_no_authority"] = True
+    packet["orders_submitted"] = bool(evidence.get("broker_orders_submitted"))
+    packet["packet_status"] = SAME_CYCLE_DISPATCH_REASON
+    packet["reason"] = SAME_CYCLE_DISPATCH_REASON
+    packet["arm_eligibility"] = "UNAVAILABLE"
+    if write:
+        write_canonical_packet(dest, packet, overwrite=True)
+        write_entry_interlock(
+            results_root=results_root,
+            invocation_id=inv or "unbound",
+            now=now,
+            pending_sell_symbols=[],
+            pending_sell_actions=[],
+            affected_sectors=[],
+            source_plan_sha256=binding.get("source_plan_sha256"),
+            selected_row_hash_value=binding.get("selected_row_hash"),
+            packet_status=SAME_CYCLE_DISPATCH_REASON,
+            decision=DECISION_BLOCK,
+            reason=SAME_CYCLE_DISPATCH_REASON,
+            interlock_scope=SCOPE_GLOBAL_SAFETY_BLOCK,
+            global_block_reason=SAME_CYCLE_DISPATCH_REASON,
+            risk_criticality="UNKNOWN",
+        )
+    return {
+        "ok": True,
+        "reason": SAME_CYCLE_DISPATCH_REASON,
+        "wrote": bool(write),
+        "packet": packet,
+        "path": str(dest),
+        "previous_preserved": False,
+        "broker": 0,
+        "network": 0,
+        "exit_code": F2_OTHER_GATE,
+        "packet_status": SAME_CYCLE_DISPATCH_REASON,
+        "classifications": [],
+        "invocation_id": inv,
+        "interlock_decision": DECISION_BLOCK,
+    }
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -432,6 +671,20 @@ def generate_from_manage_artifacts(
                 "classifications": [],
             }
         binding = checked["binding"]
+        inv_bind = str(binding.get("invocation_id") or "")
+        dispatch_kind, dispatch_ev = classify_same_cycle_dispatch(
+            invocation_id=inv_bind, results_root=results_root
+        )
+        if dispatch_kind in ("suppress", "ambiguous"):
+            rec = write_same_cycle_dispatch_reconciliation_packet(
+                results_root=results_root,
+                binding=binding,
+                evidence=dispatch_ev,
+                now=now,
+                write=write,
+            )
+            rec["dispatch_classification"] = dispatch_kind
+            return rec
         classified = classify_plan_rows(rows, binding)
         if any(c.get("classification") == CLASS_OUTCOME_UNKNOWN for c in classified):
             return {

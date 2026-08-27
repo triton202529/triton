@@ -171,12 +171,15 @@ def test_01_valid_arm_permits_process_launch_path(tmp_path: Path):
     rec = _start(tmp_path, launched)
     assert rec["result"] == "STARTED"
     assert launched == ["watchdog", "continuous"]
-    el = start_eligibility(root=tmp_path, process_snapshot=lambda: {
-        "continuous_pids": [111],
-        "watchdog_pids": [222],
-        "detection_confidence": "high",
-        "command_lines": {},
-    })
+    el = start_eligibility(
+        root=tmp_path,
+        process_snapshot=lambda: {
+            "continuous_pids": [111],
+            "watchdog_pids": [222],
+            "detection_confidence": "high",
+            "command_lines": {},
+        },
+    )
     assert el["paper_arm_canonical"] == "VALID"
 
 
@@ -305,9 +308,7 @@ def test_12_valid_arm_invalid_immediately_before_launch_fails_closed(tmp_path: P
         calls["n"] += 1
         return "VALID" if calls["n"] == 1 else "EXPIRED"
 
-    monkeypatch.setattr(
-        "services.operator_runtime_controller.classify_paper_arm_for_start", flaky
-    )
+    monkeypatch.setattr("services.operator_runtime_controller.classify_paper_arm_for_start", flaky)
     launched: list = []
     rec = _start(tmp_path, launched)
     assert rec["error_code"] == "PAPER_ARM_EXPIRED"
@@ -330,10 +331,12 @@ def test_14_exact_open_permits_normal_entry_stage_path():
     assert decision["regular_session_open"] is True
 
 
-def test_15_one_second_before_close_permits_normal_entry_stage_path():
+def test_15_one_second_before_close_skips_near_close():
     now = _et(2026, 8, 13, 15, 59, 59)
     decision = decide_paper_entry_cycle_action(now=now)
-    assert decision["action"] == "invoke_entry_sequence"
+    assert decision["action"] == "skip_near_close"
+    assert decision["cycle_event"] == "CYCLE_SKIPPED_NEAR_CLOSE"
+    assert decision["remaining_runway_seconds"] < 181
 
 
 def test_16_exact_regular_close_skips_paper_entry_without_cycle_failure():
@@ -373,9 +376,12 @@ def test_19_full_holiday_produces_informational_skip():
 
 
 def test_20_early_close_boundary_is_respected():
-    open_last = _et(2026, 11, 27, 12, 59, 59)
+    invoke_ok = _et(2026, 11, 27, 12, 56, 59)
+    near = _et(2026, 11, 27, 12, 59, 59)
     closed_at = _et(2026, 11, 27, 13, 0, 0)
-    assert decide_paper_entry_cycle_action(now=open_last)["action"] == "invoke_entry_sequence"
+    assert decide_paper_entry_cycle_action(now=invoke_ok)["action"] == "invoke_entry_sequence"
+    near_dec = decide_paper_entry_cycle_action(now=near)
+    assert near_dec["action"] == "skip_near_close"
     closed = decide_paper_entry_cycle_action(now=closed_at)
     assert closed["action"] == "skip_market_closed"
     assert closed["session"]["reason"] == "early_close"
@@ -477,7 +483,9 @@ def _running_detector():
 
 def test_26_latest_market_hours_cycle_fail_produces_degraded_trading_health(tmp_path: Path):
     _write_runtime_fixture(tmp_path)
-    record_cycle_outcome(outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path)
+    record_cycle_outcome(
+        outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path
+    )
     status = build_operator_status(root=tmp_path, process_detector=_running_detector)
     assert status["trading_pipeline"]["status"] == PIPELINE_DEGRADED
     assert status["overall_status"] == "DEGRADED"
@@ -490,7 +498,9 @@ def test_27_healthy_watchdog_does_not_erase_degraded_trading_health(tmp_path: Pa
         json.dumps({"status": "OK", "health_band": "HEALTHY", "broker_connected": True}),
         encoding="utf-8",
     )
-    record_cycle_outcome(outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path)
+    record_cycle_outcome(
+        outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path
+    )
     status = build_operator_status(root=tmp_path, process_detector=_running_detector)
     assert status["trading_pipeline"]["status"] == PIPELINE_DEGRADED
     assert status["overall_status"] == "DEGRADED"
@@ -499,7 +509,9 @@ def test_27_healthy_watchdog_does_not_erase_degraded_trading_health(tmp_path: Pa
 
 
 def test_28_later_market_hours_cycle_ok_clears_degradation(tmp_path: Path):
-    record_cycle_outcome(outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path)
+    record_cycle_outcome(
+        outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path
+    )
     rec = record_cycle_outcome(
         outcome="ok", reason="market_hours_cycle_ok", session_open=True, root=tmp_path
     )
@@ -508,7 +520,9 @@ def test_28_later_market_hours_cycle_ok_clears_degradation(tmp_path: Path):
 
 
 def test_29_after_hours_skip_does_not_clear_unresolved_market_hours_failure(tmp_path: Path):
-    record_cycle_outcome(outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path)
+    record_cycle_outcome(
+        outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path
+    )
     rec = record_cycle_outcome(
         outcome="skipped_market_closed",
         reason="regular_close",
@@ -529,14 +543,19 @@ def test_30_after_hours_skip_alone_does_not_create_degradation(tmp_path: Path):
     assert rec["trading_pipeline_status"] == PIPELINE_INFORMATIONAL_CLOSED
     _write_runtime_fixture(tmp_path)
     status = build_operator_status(root=tmp_path)
-    assert status["overall_status"] != "DEGRADED" or status["trading_pipeline"]["status"] != PIPELINE_DEGRADED
+    assert (
+        status["overall_status"] != "DEGRADED"
+        or status["trading_pipeline"]["status"] != PIPELINE_DEGRADED
+    )
     assert status["trading_pipeline"]["status"] == PIPELINE_INFORMATIONAL_CLOSED
 
 
 def test_31_current_valid_arm_plus_prior_failed_cycle_displays_both(tmp_path: Path):
     _write_runtime_fixture(tmp_path)
     _write_arm(tmp_path, status="valid")
-    record_cycle_outcome(outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path)
+    record_cycle_outcome(
+        outcome="fail", reason="blocked_arm_expired", session_open=True, root=tmp_path
+    )
     status = build_operator_status(root=tmp_path, process_detector=_running_detector)
     assert status["paper_arm"]["display_status"] == "ARMED"
     assert status["paper_arm"]["currently_valid"] is True
@@ -562,8 +581,7 @@ def test_32_expired_after_hours_arm_displays_informational_status(tmp_path: Path
 def test_33_historical_order_event_displays_its_actual_date(tmp_path: Path):
     csv_path = tmp_path / "paper_execution_audit.csv"
     csv_path.write_text(
-        "timestamp,symbol,submitted_order_id,status\n"
-        "2026-08-11T20:15:00Z,HD,oid-hd,SUBMITTED\n",
+        "timestamp,symbol,submitted_order_id,status\n" "2026-08-11T20:15:00Z,HD,oid-hd,SUBMITTED\n",
         encoding="utf-8",
     )
     events = _events_from_paper_execution_audit(csv_path, set())
@@ -578,14 +596,19 @@ def test_source_continuous_loop_skips_market_open_when_closed():
     assert "paper_runtime_session_gate" in src
     assert "[PAPER_ENTRY_SKIPPED_MARKET_CLOSED]" in src
     assert "[CYCLE_SKIPPED_MARKET_CLOSED]" in src
+    assert "[CYCLE_SKIPPED_NEAR_CLOSE]" in src
+    assert "skipped_near_close" in src
     session_idx = src.index("paper_runtime_session_gate --check")
     market_idx = src.index("run_market_open.ps1")
+    near_idx = src.index("[PAPER_ENTRY_SKIPPED_NEAR_CLOSE]")
     assert session_idx < market_idx
+    assert near_idx < market_idx
     skip_idx = src.index("[PAPER_ENTRY_SKIPPED_MARKET_CLOSED]")
     assert skip_idx < market_idx
     fail_idx = src.index("[CYCLE_FAIL]")
     assert "skipped_market_closed" in src[skip_idx:fail_idx]
-    assert "CYCLE_FAIL" not in src[src.index("if (-not $sessionOpen)"):src.index("} else {")]
+    assert "CYCLE_FAIL" not in src[src.index("if (-not $sessionOpen)") : src.index("} else {")]
+    assert "$IntervalMinutes = 45" in src or "[int]$IntervalMinutes = 45" in src
 
 
 def test_canonical_classifier_is_shared():

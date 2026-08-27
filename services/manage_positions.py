@@ -3619,7 +3619,9 @@ def _try_pre_plan_authorized_sell_dispatch(
     )
 
     unused = find_unused_pre_plan_authority()
+    authority_id = ""
     if unused:
+        authority_id = str(unused.get("authority_id") or unused.get("audit_id") or "")
         try:
             write_dispatch_session_evidence(store_root=LIVE_GOVERNANCE, now=_enf_now())
         except SessionEvidenceError as exc:
@@ -3636,6 +3638,7 @@ def _try_pre_plan_authorized_sell_dispatch(
                 "reason": exc.reason,
                 "details": exc.details,
                 "abort_before_plan": True,
+                "authority_id": authority_id,
             }
 
     result = dispatch_unused_authorized_sell_slice_pre_plan(
@@ -3643,8 +3646,10 @@ def _try_pre_plan_authorized_sell_dispatch(
         mode=mode,
         verbose=verbose,
     )
+    result = dict(result)
+    if authority_id and not result.get("authority_id"):
+        result["authority_id"] = authority_id
     if result.get("attempted") and not result.get("dispatched"):
-        result = dict(result)
         result["abort_before_plan"] = True
     if result.get("attempted"):
         print(
@@ -3656,6 +3661,47 @@ def _try_pre_plan_authorized_sell_dispatch(
             flush=True,
         )
     return result
+
+
+def _emit_pre_plan_dispatch_evidence(pre_plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose current-invocation pre-plan dispatch outcome for F2 (Phase 198T-O).
+
+    write_cycle_binding has a closed signature in manage_positions_cycle_binding.py
+    (outside the isolated-repair allowlist). This sidecar is the minimal current-
+    invocation evidence F2 can bind without timestamps-only matching.
+    """
+    from services.defensive_exit_approval_readiness import write_pre_plan_dispatch_evidence
+    from services.manage_positions_cycle_binding import resolve_invocation_id
+
+    session_date = None
+    try:
+        from services.market_calendar import regular_session_state
+
+        session_date = regular_session_state().get("session_date")
+    except Exception:
+        session_date = None
+    return write_pre_plan_dispatch_evidence(
+        RESULTS,
+        pre_plan,
+        invocation_id=resolve_invocation_id(),
+        now=datetime.now(timezone.utc),
+        session_date=str(session_date) if session_date else None,
+    )
+
+
+def _emit_same_cycle_reconciliation_packet(evidence: Dict[str, Any]) -> None:
+    from services.defensive_exit_approval_readiness import (
+        write_same_cycle_dispatch_reconciliation_packet,
+    )
+    from services.manage_positions_cycle_binding import load_cycle_binding
+
+    write_same_cycle_dispatch_reconciliation_packet(
+        results_root=RESULTS,
+        binding=load_cycle_binding(RESULTS),
+        evidence=evidence,
+        now=datetime.now(timezone.utc),
+        write=True,
+    )
 
 
 def maybe_execute_management(
@@ -4277,12 +4323,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         dry_run=dry_run,
         verbose=bool(args.verbose),
     )
+    dispatch_ev = _emit_pre_plan_dispatch_evidence(pre_plan)
     if pre_plan.get("abort_before_plan"):
         print(
             "[manage_positions] BLOCKED: pre-plan authorized SELL dispatch failed; "
             f"preserving authority-bound plan artifacts reason={pre_plan.get('reason')}",
             flush=True,
         )
+        try:
+            if (
+                dispatch_ev.get("dispatch_performed")
+                or str(dispatch_ev.get("evidence_status") or "").upper() == "AMBIGUOUS"
+            ):
+                _emit_same_cycle_reconciliation_packet(dispatch_ev)
+        except Exception as exc:
+            print(f"[manage_positions] same_cycle_packet_write_failed: {exc}", flush=True)
         return 2
 
     from services.position_management_state import load_state, save_state
