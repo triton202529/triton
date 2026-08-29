@@ -24,7 +24,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Mapping, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_NAME = "paper_sell_arm.sqlite3"
@@ -47,6 +47,20 @@ AUTHORITY_STATES = frozenset({"UNUSED", "CONSUMED", "EXPIRED", "RESTRICTED", "RE
 DISPATCH_STATES = frozenset(
     {"INTENT_COMMITTED", "SUBMITTED", "REJECTED", "OUTCOME_UNKNOWN", "NOT_SUBMITTED"}
 )
+TERMINAL_DISPATCH_STATES = frozenset({"SUBMITTED", "REJECTED", "NOT_SUBMITTED"})
+IN_PROGRESS_DISPATCH_STATES = frozenset({"INTENT_COMMITTED"})
+
+INTENT_CLASS_NO_INTENT = "no_intent"
+INTENT_CLASS_FOREIGN_HISTORICAL_TERMINAL = "foreign_historical_terminal"
+INTENT_CLASS_MATCHING_CURRENT_TERMINAL = "matching_current_terminal"
+INTENT_CLASS_MATCHING_CURRENT_IN_PROGRESS = "matching_current_in_progress"
+INTENT_CLASS_AMBIGUOUS = "ambiguous"
+INTENT_CLASS_FOREIGN_NONTERMINAL = "foreign_nonterminal"
+
+REASON_MATCHING_TERMINAL = "matching_dispatch_intent_already_terminal"
+REASON_MATCHING_IN_PROGRESS = "matching_dispatch_intent_recovery_required"
+REASON_INTENT_AMBIGUOUS = "dispatch_intent_identity_ambiguous"
+REASON_FOREIGN_NONTERMINAL = "foreign_dispatch_intent_not_terminal"
 
 
 class PaperSellArmStoreError(RuntimeError):
@@ -929,6 +943,174 @@ def count_dispatches_for_authority(db_path: Path, authority_id: str) -> int:
         return int(row[0] if row is not None else 0)
     finally:
         conn.close()
+
+
+def inspect_authority_row(db_path: Path, authority_id: str) -> Optional[Dict[str, Any]]:
+    """Read-only row for one authority_id. Never mutates."""
+    aid = str(authority_id or "").strip()
+    if not aid or not Path(db_path).is_file():
+        return None
+    conn = readonly_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM sell_authorities WHERE authority_id=?",
+            (aid,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {k: row[k] for k in row.keys()}
+    finally:
+        conn.close()
+
+
+def inspect_dispatches_for_authority(db_path: Path, authority_id: str) -> List[Dict[str, Any]]:
+    """Read-only dispatch rows for one authority_id."""
+    aid = str(authority_id or "").strip()
+    if not aid or not Path(db_path).is_file():
+        return []
+    conn = readonly_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sell_dispatches WHERE authority_id=? ORDER BY created_at",
+            (aid,),
+        ).fetchall()
+        return [{k: row[k] for k in row.keys()} for row in rows]
+    finally:
+        conn.close()
+
+
+def _nonempty_identity_values(*values: Any) -> set:
+    out = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            out.add(text)
+    return out
+
+
+def _dispatch_terminal_proof(dispatches: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    for row in dispatches:
+        state = str(row.get("state") or "")
+        result = str(row.get("result_class") or row.get("final_result") or "")
+        if state in TERMINAL_DISPATCH_STATES or result.upper() in {"SUCCESS", "SUBMITTED"}:
+            if state == "OUTCOME_UNKNOWN":
+                continue
+            return row
+    return None
+
+
+def classify_dispatch_intent_for_authority(
+    intent: Optional[Mapping[str, Any]],
+    authority: Mapping[str, Any],
+    *,
+    db_path: Optional[Path] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """Classify a durable JSON dispatch-intent relative to one current authority.
+
+    SQLite is the only source that can prove a historical dispatch terminal.
+    JSON intent identity never grants a broker permit.
+    """
+    details: Dict[str, Any] = {"intent_present": bool(intent)}
+    if intent is None:
+        return INTENT_CLASS_NO_INTENT, "", details
+    if not isinstance(intent, Mapping) or not dict(intent):
+        return (
+            INTENT_CLASS_AMBIGUOUS,
+            REASON_INTENT_AMBIGUOUS,
+            {
+                **details,
+                "error": "intent_not_object",
+            },
+        )
+
+    auth_ids = _nonempty_identity_values(
+        authority.get("authority_id"),
+        authority.get("audit_id"),
+        authority.get("approval_id"),
+    )
+    intent_ids = _nonempty_identity_values(
+        intent.get("authority_id"),
+        intent.get("audit_id"),
+        intent.get("approval_id"),
+    )
+    auth_key = str(authority.get("idempotency_key") or "").strip()
+    intent_key = str(intent.get("idempotency_key") or "").strip()
+    auth_plan = str(authority.get("plan_hash") or "").strip()
+    intent_plan = str(intent.get("plan_hash") or "").strip()
+    auth_batch = str(authority.get("batch_id") or "").strip()
+    intent_batch = str(intent.get("batch_id") or "").strip()
+    auth_date = str(authority.get("trading_date") or "").strip()
+    intent_date = str(intent.get("trading_date") or "").strip()
+    auth_packet = str(authority.get("readiness_packet_hash") or "").strip()
+    intent_packet = str(
+        intent.get("readiness_packet_hash") or intent.get("packet_hash") or ""
+    ).strip()
+    dispatch_id = str(intent.get("dispatch_intent_id") or intent.get("dispatch_id") or "").strip()
+    details.update(
+        {
+            "dispatch_intent_id": dispatch_id,
+            "intent_ids": sorted(intent_ids),
+            "authority_ids": sorted(auth_ids),
+        }
+    )
+
+    if not dispatch_id and not intent_ids and not intent_key:
+        return INTENT_CLASS_AMBIGUOUS, REASON_INTENT_AMBIGUOUS, details
+
+    id_overlap = bool(intent_ids and auth_ids and intent_ids & auth_ids)
+    id_foreign = bool(intent_ids and auth_ids and intent_ids.isdisjoint(auth_ids))
+    mixed_ids = bool(intent_ids and auth_ids and intent_ids - auth_ids and intent_ids & auth_ids)
+    key_match = bool(intent_key and auth_key and intent_key == auth_key)
+    key_conflict = bool(intent_key and auth_key and intent_key != auth_key)
+
+    if mixed_ids or (id_overlap and key_conflict) or (key_match and id_foreign):
+        return INTENT_CLASS_AMBIGUOUS, REASON_INTENT_AMBIGUOUS, details
+
+    appears_current = id_overlap or key_match
+    if appears_current and intent_plan and auth_plan and intent_plan != auth_plan:
+        return INTENT_CLASS_AMBIGUOUS, REASON_INTENT_AMBIGUOUS, details
+    if appears_current and intent_batch and auth_batch and intent_batch != auth_batch:
+        return INTENT_CLASS_AMBIGUOUS, REASON_INTENT_AMBIGUOUS, details
+    if appears_current and intent_date and auth_date and intent_date != auth_date:
+        return INTENT_CLASS_AMBIGUOUS, REASON_INTENT_AMBIGUOUS, details
+    if appears_current and intent_packet and auth_packet and intent_packet != auth_packet:
+        return INTENT_CLASS_AMBIGUOUS, REASON_INTENT_AMBIGUOUS, details
+
+    path = Path(db_path) if db_path is not None else None
+    current_aid = str(authority.get("authority_id") or authority.get("audit_id") or "").strip()
+    intent_aid = str(intent.get("authority_id") or intent.get("audit_id") or "").strip()
+
+    if appears_current:
+        dispatches = inspect_dispatches_for_authority(path, current_aid) if path else []
+        terminal = _dispatch_terminal_proof(dispatches)
+        details["sqlite_dispatch_count"] = len(dispatches)
+        if terminal is not None:
+            details["sqlite_dispatch_id"] = terminal.get("dispatch_id")
+            details["sqlite_dispatch_state"] = terminal.get("state")
+            return (
+                INTENT_CLASS_MATCHING_CURRENT_TERMINAL,
+                REASON_MATCHING_TERMINAL,
+                details,
+            )
+        return INTENT_CLASS_MATCHING_CURRENT_IN_PROGRESS, REASON_MATCHING_IN_PROGRESS, details
+
+    if id_foreign or (key_conflict and intent_ids):
+        lookup_id = intent_aid
+        dispatches = inspect_dispatches_for_authority(path, lookup_id) if path else []
+        auth_row = inspect_authority_row(path, lookup_id) if path else None
+        terminal = _dispatch_terminal_proof(dispatches)
+        details["foreign_authority_id"] = lookup_id
+        details["foreign_sqlite_dispatch_count"] = len(dispatches)
+        details["foreign_sqlite_authority_state"] = (
+            None if auth_row is None else auth_row.get("state")
+        )
+        if terminal is not None:
+            details["sqlite_dispatch_id"] = terminal.get("dispatch_id")
+            details["sqlite_dispatch_state"] = terminal.get("state")
+            return INTENT_CLASS_FOREIGN_HISTORICAL_TERMINAL, "", details
+        return INTENT_CLASS_FOREIGN_NONTERMINAL, REASON_FOREIGN_NONTERMINAL, details
+
+    return INTENT_CLASS_AMBIGUOUS, REASON_INTENT_AMBIGUOUS, details
 
 
 def count_current_unused_exact_batch_authorities(

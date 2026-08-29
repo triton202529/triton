@@ -219,14 +219,16 @@ def test_crash_split_intent_exists_authority_still_armed_fails_closed(tmp_path: 
         "duplicate_dispatch_intent",
         "split_intent_authority_disagreement",
         "prior_dispatch_intent_blocks",
+        "matching_dispatch_intent_recovery_required",
+        "matching_dispatch_intent_already_terminal",
     }
     post_intent = json.loads(intent_path.read_text(encoding="utf-8"))
     assert post_intent.get("dispatch_intent_id") == "sell-dispatch-split-injected"
-    # Most restrictive: authority must not remain reusable as ARMED/UNUSED.
+    # Matching current intent fails closed without manufacturing JSON CONSUMED.
     post_auth = json.loads((store / HARDENED_AUTHORITY_FILENAME).read_text(encoding="utf-8"))
-    assert post_auth.get("consumption_status") == "CONSUMED"
-    assert post_auth.get("status") != "ARMED"
-    assert (store / "paper_sell_arm_consumption.json").is_file()
+    assert post_auth.get("consumption_status") != "CONSUMED" or g.reason.endswith("terminal")
+    assert post_intent.get("dispatch_intent_id") == "sell-dispatch-split-injected"
+    assert not (store / "paper_sell_arm_consumption.json").is_file()
 
     # Restart recovery: still blocked; no second intent; no broker.
     g2 = begin_paper_sell_dispatch(
@@ -312,6 +314,9 @@ def test_corrupt_or_incomplete_intent_blocks_and_does_not_create_second_intent(
         "conflicting_dispatch_intent",
         "prior_dispatch_intent_blocks",
         "split_intent_authority_disagreement",
+        "dispatch_intent_identity_ambiguous",
+        "foreign_dispatch_intent_not_terminal",
+        "matching_dispatch_intent_recovery_required",
     }
     # Must not overwrite prior intent evidence with a fresh successful intent.
     after = intent_path.read_bytes()
@@ -320,9 +325,9 @@ def test_corrupt_or_incomplete_intent_blocks_and_does_not_create_second_intent(
         assert (
             b"sell-dispatch-" not in after or b"OTHER_KEY" in after or b"INTENT_RECORDED" in after
         )
-    # Authority non-reusable after prior-intent evidence.
+    # Fail closed without manufacturing JSON CONSUMED for a non-SQLite consumption.
     post_auth = json.loads((store / HARDENED_AUTHORITY_FILENAME).read_text(encoding="utf-8"))
-    assert post_auth.get("consumption_status") == "CONSUMED"
+    assert post_auth.get("consumption_status") != "CONSUMED"
     with pytest.raises(PaperSellDispatchBlocked):
         enforce_paper_sell_broker_submission(
             mode="paper", side="sell", source=f"corrupt_{label}", symbol="TSLA", qty=8.0

@@ -574,15 +574,19 @@ def test_consumed_authority_and_indeterminate_cannot_reuse(tmp_path: Path):
         operator_acknowledgement_text=OPERATOR_ACKNOWLEDGEMENT_TEXT,
         current_plan_hash=readiness["plan_hash"],
     )
-    cons = mark_authority_dispatch_attempt(
-        store_root=tmp_path, authority=auth, result="INDETERMINATE"
-    )
-    assert cons["consumption_rule"] == "CONSUME_ON_FIRST_DISPATCH_ATTEMPT"
+    from services.paper_sell_arm_store import PaperSellArmStoreError
+
+    with pytest.raises(PaperSellArmStoreError) as caught:
+        mark_authority_dispatch_attempt(store_root=tmp_path, authority=auth, result="INDETERMINATE")
+    assert caught.value.reason == "json_consume_rejected_sqlite_not_consumed"
     loaded = json.loads((tmp_path / "paper_sell_arm_authority.json").read_text(encoding="utf-8"))
-    ok, reason, _ = validate_paper_sell_arm_authority(loaded, consumption=cons)
-    assert not ok
-    ok2, reason2, _ = validate_paper_sell_arm_authority(loaded)
-    assert not ok2
+    assert loaded.get("consumption_status") != "CONSUMED"
+    assert loaded.get("status") == "ARMED"
+    cons_path = tmp_path / "paper_sell_arm_consumption.json"
+    assert (
+        not cons_path.is_file()
+        or json.loads(cons_path.read_text(encoding="utf-8")).get("result") != "INDETERMINATE"
+    )
 
 
 def test_malformed_timestamps_and_missing_fields_fail_closed():

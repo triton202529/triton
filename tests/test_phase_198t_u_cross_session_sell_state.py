@@ -433,7 +433,10 @@ def test_case_b_matching_consumption_blocks_no_broker(tmp_path, monkeypatch):
         db_path=_db(tmp_path),
     )
     assert guard.permitted is False
-    assert guard.reason == "consumption_record_present"
+    assert guard.reason in {
+        "consumption_record_present",
+        "sqlite_json_consumption_state_mismatch",
+    }
     assert fake.fake_broker_call_count == 0
     assert not fake.submit_payloads
 

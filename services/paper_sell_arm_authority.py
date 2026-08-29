@@ -1276,6 +1276,116 @@ def revoke_paper_sell_arm(
     return {"revoked": True, "reason": reason}
 
 
+REASON_SQLITE_JSON_AUTHORITY_MISMATCH = "sqlite_json_authority_state_mismatch"
+REASON_SQLITE_JSON_CONSUMPTION_MISMATCH = "sqlite_json_consumption_state_mismatch"
+
+
+def classify_sqlite_json_export_consistency(
+    *,
+    sqlite_state: str,
+    sqlite_payload: Mapping[str, Any],
+    json_authority: Optional[Mapping[str, Any]],
+    consumption: Optional[Mapping[str, Any]],
+) -> Tuple[str, str]:
+    """SQLite is permit-grade. JSON CONSUMED is invalid while SQLite remains UNUSED."""
+    if str(sqlite_state or "") != "UNUSED":
+        return "ok", ""
+    sqlite_ids = _nonempty_identity_values(
+        sqlite_payload.get("authority_id"),
+        sqlite_payload.get("audit_id"),
+        sqlite_payload.get("approval_id"),
+    )
+    json_doc = (
+        json_authority if isinstance(json_authority, Mapping) and dict(json_authority) else None
+    )
+    if json_doc is not None:
+        json_ids = _nonempty_identity_values(
+            json_doc.get("authority_id"),
+            json_doc.get("audit_id"),
+            json_doc.get("approval_id"),
+        )
+        json_status = str(json_doc.get("status") or "")
+        json_cons = str(json_doc.get("consumption_status") or "")
+        overlap = bool(json_ids & sqlite_ids) if json_ids and sqlite_ids else not json_ids
+        if json_cons == "CONSUMED" or json_status == SellArmState.CONSUMED.value:
+            if overlap:
+                return "mismatch", REASON_SQLITE_JSON_AUTHORITY_MISMATCH
+    cons_doc = consumption if isinstance(consumption, Mapping) and dict(consumption) else None
+    if cons_doc is not None:
+        kind, reason = classify_consumption_record_for_authority(sqlite_payload, cons_doc)
+        if kind == "block":
+            return "mismatch", REASON_SQLITE_JSON_CONSUMPTION_MISMATCH
+        if kind == "fail":
+            return "mismatch", reason
+    return "ok", ""
+
+
+def export_json_authority_from_sqlite(
+    *,
+    store_root: Path,
+    db_path: Optional[Path] = None,
+    explicit_runtime_write: bool = False,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Copy SQLite CONSUMED identities into JSON exports. Never calls a broker."""
+    from services.paper_sell_arm_store import (
+        PaperSellArmStoreError,
+        inspect_authority_row,
+        inspect_dispatches_for_authority,
+        inspect_sqlite_authority,
+        resolve_runtime_sqlite_path,
+        sqlite_permit_grade_enabled,
+    )
+
+    if not sqlite_permit_grade_enabled():
+        raise PaperSellArmStoreError("sqlite_required_for_export_reconcile")
+    paths = _assert_writable_root(store_root, explicit_runtime_write=explicit_runtime_write)
+    now = now or _utc_now()
+    sqlite_path = resolve_runtime_sqlite_path(db_path=db_path)
+    inspected = inspect_sqlite_authority(sqlite_path, now=now)
+    if str(inspected.get("state") or "") != "CONSUMED":
+        raise PaperSellArmStoreError(
+            "sqlite_export_reconcile_not_consumed",
+            {"state": inspected.get("state")},
+        )
+    payload = dict(inspected.get("payload") or {})
+    aid = str(payload.get("authority_id") or payload.get("audit_id") or "")
+    row = inspect_authority_row(sqlite_path, aid) if aid else None
+    consuming = None if row is None else row.get("consuming_dispatch_id")
+    dispatches = inspect_dispatches_for_authority(sqlite_path, aid) if aid else []
+    dispatch_id = str(consuming or (dispatches[-1]["dispatch_id"] if dispatches else "") or "")
+    payload["status"] = SellArmState.CONSUMED.value
+    payload["consumption_status"] = "CONSUMED"
+    payload["json_role"] = "AUDIT_EXPORT_ONLY"
+    if consuming:
+        payload["consuming_dispatch_id"] = consuming
+    _atomic_write_json(paths.authority, payload, refuse_authority_downgrade=True)
+    consumption = {
+        "schema_version": SCHEMA_VERSION,
+        "consumed_at": str((row or {}).get("consumption_time") or now.isoformat()),
+        "audit_id": aid,
+        "authority_id": aid,
+        "idempotency_key": payload.get("idempotency_key"),
+        "plan_hash": payload.get("plan_hash"),
+        "batch_id": payload.get("batch_id"),
+        "result": str((row or {}).get("final_result") or "STARTED"),
+        "consuming_dispatch_id": dispatch_id,
+        "consumption_rule": "CONSUME_ON_SQLITE_COMMIT",
+        "orders_submitted_unknown": False,
+    }
+    _atomic_write_json(paths.consumption, consumption)
+    append_audit(
+        paths,
+        {
+            "event": "json_export_reconciled_from_sqlite",
+            "authority_id": aid,
+            "dispatch_id": dispatch_id,
+            "orders_submitted": False,
+        },
+    )
+    return {"ok": True, "authority_id": aid, "dispatch_id": dispatch_id}
+
+
 def mark_authority_dispatch_attempt(
     *,
     store_root: Path,
@@ -1284,22 +1394,46 @@ def mark_authority_dispatch_attempt(
     explicit_runtime_write: bool = False,
     now: Optional[datetime] = None,
     require_full_durability: bool = False,
+    db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Consumption semantics (safe default for existing architecture):
     Consume on first dispatch attempt (including indeterminate/timeout/partial),
     so authority cannot be reused to duplicate sells.
     Does not submit orders.
+    When SQLite is permit-grade, JSON CONSUMED is written only after SQLite CONSUMED.
     """
     paths = _assert_writable_root(store_root, explicit_runtime_write=explicit_runtime_write)
     now = now or _utc_now()
     if str(authority.get("idempotency_key") or "") == "":
         raise ValueError("consume_rejected:missing_idempotency_key")
+    from services.paper_sell_arm_store import (
+        PaperSellArmStoreError,
+        inspect_authority_row,
+        resolve_runtime_sqlite_path,
+        sqlite_permit_grade_enabled,
+    )
+
+    sqlite_row = None
+    sqlite_aid = str(authority.get("authority_id") or authority.get("audit_id") or "").strip()
+    if sqlite_permit_grade_enabled():
+        sqlite_path = resolve_runtime_sqlite_path(db_path=db_path)
+        sqlite_row = inspect_authority_row(sqlite_path, sqlite_aid) if sqlite_aid else None
+        if sqlite_row is None or str(sqlite_row.get("state") or "") != "CONSUMED":
+            raise PaperSellArmStoreError(
+                "json_consume_rejected_sqlite_not_consumed",
+                {
+                    "authority_id": sqlite_aid,
+                    "sqlite_state": None if sqlite_row is None else sqlite_row.get("state"),
+                    "result": result,
+                },
+            )
 
     consumption = {
         "schema_version": SCHEMA_VERSION,
         "consumed_at": now.isoformat(),
         "audit_id": authority.get("audit_id"),
+        "authority_id": authority.get("authority_id") or authority.get("audit_id"),
         "idempotency_key": authority.get("idempotency_key"),
         "plan_hash": authority.get("plan_hash"),
         "batch_id": authority.get("batch_id"),
@@ -1307,6 +1441,8 @@ def mark_authority_dispatch_attempt(
         "consumption_rule": "CONSUME_ON_FIRST_DISPATCH_ATTEMPT",
         "orders_submitted_unknown": result in {"INDETERMINATE", "TIMEOUT", "PARTIAL"},
     }
+    if sqlite_row is not None:
+        consumption["consuming_dispatch_id"] = sqlite_row.get("consuming_dispatch_id")
     authority = dict(authority)
     authority["status"] = (
         SellArmState.DISPATCH_IN_PROGRESS.value

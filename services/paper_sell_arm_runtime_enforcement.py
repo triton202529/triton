@@ -58,6 +58,7 @@ from services.paper_sell_arm_authority import (
     is_dual_identity_record,
     legacy_ambiguous_slice_authority,
     mark_authority_dispatch_attempt,
+    classify_sqlite_json_export_consistency,
     readiness_packet_hash,
     revalidate_before_dispatch,
     source_readiness_packet_hash,
@@ -168,6 +169,23 @@ def validate_runtime_sell_authority(
             details["json_role"] = "AUDIT_EXPORT_ONLY"
             details["authority_type"] = sqlite_doc.get("authority_type")
             details["schema_version"] = sqlite_doc.get("schema_version")
+            json_doc = _read_json(path) if path.is_file() else None
+            consumption = _read_json(consumption_path) if consumption_path else None
+            if not consumption:
+                consumption = None
+                sibling = path.parent / "paper_sell_arm_consumption.json"
+                if sibling.is_file():
+                    consumption = _read_json(sibling)
+            if not consumption:
+                consumption = None
+            kind, mismatch_reason = classify_sqlite_json_export_consistency(
+                sqlite_state="UNUSED",
+                sqlite_payload=sqlite_doc if isinstance(sqlite_doc, dict) else {},
+                json_authority=json_doc if isinstance(json_doc, dict) else None,
+                consumption=consumption if isinstance(consumption, dict) else None,
+            )
+            if kind != "ok":
+                return False, mismatch_reason, {**details, "sqlite_json_consistency": kind}
             ok, reason, hdetails = validate_paper_sell_arm_authority(
                 sqlite_doc, now=now, consumption=None
             )
@@ -1145,54 +1163,71 @@ def enforce_paper_sell_broker_submission(
 
 
 def _classify_prior_dispatch_intent(
-    intent_path: Path, authority: Dict[str, Any]
-) -> Optional[Tuple[str, Dict[str, Any]]]:
-    """
-    Fail closed on any durable prior intent evidence.
+    intent_path: Path,
+    authority: Dict[str, Any],
+    *,
+    db_path: Optional[Path] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """Classify durable prior-intent evidence against the current authority + SQLite.
 
-    Returns (reason, details) when dispatch must not proceed, else None.
-    Corrupt/incomplete/conflicting intents block; matching idempotency is a
-    split/duplicate (intent present while authority may still appear ARMED).
+    Returns (classification, reason, details). Blocking classifications have a reason.
+    foreign_historical_terminal and no_intent are non-blocking.
     """
+    from services.paper_sell_arm_store import (
+        INTENT_CLASS_FOREIGN_HISTORICAL_TERMINAL,
+        INTENT_CLASS_NO_INTENT,
+        classify_dispatch_intent_for_authority,
+    )
+
     if not intent_path.is_file():
-        return None
+        return INTENT_CLASS_NO_INTENT, "", {"path": str(intent_path)}
     try:
         raw = intent_path.read_text(encoding="utf-8")
     except OSError as exc:
-        return "corrupt_dispatch_intent", {"error": str(exc), "path": str(intent_path)}
+        return (
+            "ambiguous",
+            "corrupt_dispatch_intent",
+            {
+                "error": str(exc),
+                "path": str(intent_path),
+            },
+        )
     try:
         existing = json.loads(raw) if raw.strip() else None
     except json.JSONDecodeError as exc:
-        return "corrupt_dispatch_intent", {
-            "error": str(exc),
-            "path": str(intent_path),
-        }
+        return (
+            "ambiguous",
+            "corrupt_dispatch_intent",
+            {
+                "error": str(exc),
+                "path": str(intent_path),
+            },
+        )
     if not isinstance(existing, dict):
-        return "corrupt_dispatch_intent", {
-            "error": "intent_not_object",
-            "path": str(intent_path),
-        }
+        return (
+            "ambiguous",
+            "corrupt_dispatch_intent",
+            {
+                "error": "intent_not_object",
+                "path": str(intent_path),
+            },
+        )
     required = ("dispatch_intent_id", "idempotency_key", "status", "symbols")
     missing = [k for k in required if existing.get(k) in (None, "", [], {})]
     if missing:
-        return "incomplete_dispatch_intent", {
-            "missing": missing,
-            "intent": existing,
-        }
-    auth_key = str(authority.get("idempotency_key") or "")
-    intent_key = str(existing.get("idempotency_key") or "")
-    if intent_key == auth_key:
-        # Split-state or duplicate: intent durable while authority may still be ARMED.
-        return "duplicate_dispatch_intent", {
-            "intent": existing,
-            "split_armed_possible": str(authority.get("status") or "") == "ARMED"
-            and str(authority.get("consumption_status") or "") != "CONSUMED",
-        }
-    return "conflicting_dispatch_intent", {
-        "intent": existing,
-        "authority_idempotency_key": auth_key,
-        "intent_idempotency_key": intent_key,
-    }
+        return (
+            "ambiguous",
+            "incomplete_dispatch_intent",
+            {
+                "missing": missing,
+                "intent": existing,
+            },
+        )
+    classification, reason, details = classify_dispatch_intent_for_authority(
+        existing, authority, db_path=db_path
+    )
+    details = {**details, "intent": existing, "path": str(intent_path)}
+    return classification, reason, details
 
 
 def find_unused_pre_plan_authority(
@@ -1852,38 +1887,29 @@ def begin_paper_sell_dispatch(
                 return DispatchGuardResult(False, rreason, rdetails)
 
             intent_path = paths.root / DISPATCH_INTENT_NAME
-            # Fail closed on durable JSON prior-intent leftovers. SQLite uniqueness
-            # remains the permit-grade duplicate lock.
-            prior_block = _classify_prior_dispatch_intent(intent_path, authority)
-            if prior_block is not None:
-                reason, details = prior_block
-                if str(authority.get("consumption_status") or "") != "CONSUMED" and str(
-                    authority.get("status") or ""
-                ) in {"ARMED", "CHALLENGE_READY", ""}:
-                    try:
-                        mark_authority_dispatch_attempt(
-                            store_root=paths.root,
-                            authority=authority,
-                            result="PRIOR_INTENT_OR_SPLIT",
-                            explicit_runtime_write=explicit_runtime_write,
-                            now=now,
-                        )
-                        details = {
-                            **details,
-                            "authority_restricted": True,
-                            "restriction": "PRIOR_INTENT_OR_SPLIT",
-                        }
-                    except Exception as exc:  # still block even if restrict fails
-                        details = {**details, "authority_restrict_error": str(exc)}
+            from services.paper_sell_arm_store import (
+                INTENT_CLASS_FOREIGN_HISTORICAL_TERMINAL,
+                INTENT_CLASS_NO_INTENT,
+            )
+
+            intent_class, intent_reason, intent_details = _classify_prior_dispatch_intent(
+                intent_path, authority, db_path=sqlite_path
+            )
+            preserve_historical_intent = intent_class == INTENT_CLASS_FOREIGN_HISTORICAL_TERMINAL
+            if intent_class not in {
+                INTENT_CLASS_NO_INTENT,
+                INTENT_CLASS_FOREIGN_HISTORICAL_TERMINAL,
+            }:
                 append_audit(
                     paths,
                     {
                         "event": "dispatch_blocked_prior_intent",
-                        "reason": reason,
-                        "details": details,
+                        "reason": intent_reason,
+                        "classification": intent_class,
+                        "details": intent_details,
                     },
                 )
-                return DispatchGuardResult(False, reason, details)
+                return DispatchGuardResult(False, intent_reason, intent_details)
 
             intent_id = f"sell-dispatch-{uuid.uuid4().hex[:16]}"
             intent = {
@@ -1953,12 +1979,14 @@ def begin_paper_sell_dispatch(
                     explicit_runtime_write=explicit_runtime_write,
                     now=now,
                     require_full_durability=False,
+                    db_path=sqlite_path,
                 )
                 authority_after = _read_json(paths.authority) or authority
                 intent["broker_submission_started"] = True
                 intent["consumption_status"] = "CONSUMED"
                 intent["json_role"] = "AUDIT_EXPORT_ONLY"
-                _atomic_write_json(intent_path, intent, require_full_durability=False)
+                if not preserve_historical_intent:
+                    _atomic_write_json(intent_path, intent, require_full_durability=False)
                 append_audit(
                     paths,
                     {
@@ -2003,7 +2031,8 @@ def begin_paper_sell_dispatch(
                 )
 
             try:
-                _atomic_write_json(intent_path, intent, require_full_durability=True)
+                if not preserve_historical_intent:
+                    _atomic_write_json(intent_path, intent, require_full_durability=True)
 
                 consumption = mark_authority_dispatch_attempt(
                     store_root=paths.root,
@@ -2012,11 +2041,13 @@ def begin_paper_sell_dispatch(
                     explicit_runtime_write=explicit_runtime_write,
                     now=now,
                     require_full_durability=True,
+                    db_path=sqlite_path,
                 )
                 authority_after = _read_json(paths.authority)
                 intent["broker_submission_started"] = True
                 intent["consumption_status"] = "CONSUMED"
-                _atomic_write_json(intent_path, intent, require_full_durability=True)
+                if not preserve_historical_intent:
+                    _atomic_write_json(intent_path, intent, require_full_durability=True)
                 append_audit(
                     paths,
                     {
@@ -2115,7 +2146,7 @@ def finalize_paper_sell_dispatch(
         sqlite_permit_grade_enabled,
     )
 
-    if sqlite_permit_grade_enabled() and intent:
+    if sqlite_permit_grade_enabled():
         mapped = {
             "SUCCESS": "SUBMITTED",
             "SUBMITTED": "SUBMITTED",
@@ -2127,19 +2158,45 @@ def finalize_paper_sell_dispatch(
         }
         sqlite_state = mapped.get(str(outcome).upper(), "OUTCOME_UNKNOWN")
         recon = sqlite_state == "OUTCOME_UNKNOWN"
+        sqlite_dispatch_id = str((intent or {}).get("dispatch_intent_id") or "")
+        try:
+            from services.paper_sell_arm_store import inspect_authority_row
+
+            auth_doc = _read_json(paths.authority) or {}
+            aid = str(auth_doc.get("authority_id") or auth_doc.get("audit_id") or "")
+            arow = inspect_authority_row(resolve_runtime_sqlite_path(db_path=db_path), aid)
+            if arow and arow.get("consuming_dispatch_id"):
+                sqlite_dispatch_id = str(arow.get("consuming_dispatch_id") or sqlite_dispatch_id)
+        except Exception:
+            pass
         try:
             record_dispatch_outcome(
                 resolve_runtime_sqlite_path(db_path=db_path),
-                dispatch_id=str(intent.get("dispatch_intent_id") or ""),
+                dispatch_id=sqlite_dispatch_id,
                 outcome_state=sqlite_state,
                 broker_ref=str((detail or {}).get("broker_ref") or "") or None,
                 result_class=str(outcome),
                 error_class=str((detail or {}).get("error_class") or "") or None,
                 reconciliation_required=recon,
             )
-        except PaperSellArmStoreError:
-            # Fail closed: do not restore UNUSED; JSON audit still proceeds.
-            pass
+        except PaperSellArmStoreError as exc:
+            append_audit(
+                paths,
+                {
+                    "event": "dispatch_finalize_failed",
+                    "reason": exc.reason,
+                    "details": exc.details,
+                    "dispatch_id": sqlite_dispatch_id,
+                },
+            )
+            return {
+                "ok": False,
+                "reason": "sqlite_dispatch_finalize_failed",
+                "recovery_required": True,
+                "broker_reconciliation_required": True,
+                "authority_reusable": False,
+                "details": exc.details,
+            }
     authority = _read_json(paths.authority)
     if authority:
         authority["status"] = SellArmState.CONSUMED.value
@@ -2148,10 +2205,15 @@ def finalize_paper_sell_dispatch(
         authority["dispatch_finalized_at"] = _utc_now_iso()
         _atomic_write_json(paths.authority, authority, refuse_authority_downgrade=True)
     if intent:
-        intent["status"] = f"TERMINAL_{outcome}"
-        intent["finalized_at"] = _utc_now_iso()
-        intent["detail"] = detail or {}
-        _atomic_write_json(intent_path, intent)
+        intent_aid = str(intent.get("authority_id") or intent.get("audit_id") or "")
+        current_aid = str(
+            (authority or {}).get("authority_id") or (authority or {}).get("audit_id") or ""
+        )
+        if not intent_aid or intent_aid == current_aid:
+            intent["status"] = f"TERMINAL_{outcome}"
+            intent["finalized_at"] = _utc_now_iso()
+            intent["detail"] = detail or {}
+            _atomic_write_json(intent_path, intent)
     durable_path = paths.root / DURABLE_PERMIT_NAME
     if durable_path.is_file():
         durable = _read_json(durable_path)
