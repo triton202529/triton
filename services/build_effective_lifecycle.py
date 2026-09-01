@@ -34,6 +34,11 @@ from services.signal_lifecycle import (
     long_qualifies_for_exit_delta,
     long_qualifies_for_trim,
 )
+from services.symbol_identity import (
+    SymbolIdentityCollision,
+    collect_identity_collisions,
+    identity_key,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = PROJECT_ROOT / "data" / "results"
@@ -90,8 +95,8 @@ def load_lifecycle_config() -> dict:
 
 
 def _norm_symbol(s: str) -> str:
-    """Align tickers across lifecycle vs broker snapshot (e.g. BRK.B vs BRK-B)."""
-    return str(s or "").strip().upper().replace(".", "-")
+    """Canonical identity for lifecycle vs broker snapshot joins (BRK.B == BRK-B)."""
+    return identity_key(s)
 
 
 def _delta_pct_float(x: Any) -> float:
@@ -115,7 +120,11 @@ def load_reconciliation(path: Path) -> pd.DataFrame:
     if "ticker" not in df.columns:
         raise ValueError("lifecycle_reconciliation.csv must have ticker")
     df = df.copy()
-    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+    raw = df["ticker"].astype(str).tolist()
+    collisions = collect_identity_collisions(raw)
+    if collisions:
+        raise SymbolIdentityCollision(collisions, source="reconciliation")
+    df["ticker"] = df["ticker"].map(_norm_symbol)
     if "mismatch_reason" not in df.columns:
         df["mismatch_reason"] = ""
     df = df[["ticker", "mismatch_reason"]].drop_duplicates(subset=["ticker"], keep="last")
@@ -176,7 +185,12 @@ def load_lifecycle(path: Path) -> pd.DataFrame:
     if "ticker" not in df.columns:
         raise ValueError("signal_lifecycle.csv must have ticker")
     df = df.copy()
-    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+    raw = df["ticker"].astype(str).tolist()
+    collisions = collect_identity_collisions(raw)
+    if collisions:
+        raise SymbolIdentityCollision(collisions, source="lifecycle")
+    df["ticker"] = df["ticker"].map(_norm_symbol)
+    df = df[df["ticker"].astype(str).str.len() > 0]
     df = df.drop_duplicates(subset=["ticker"], keep="last")
     return df
 

@@ -44,6 +44,11 @@ from services.sector_exposure import (
 )
 from services.lifecycle_truth import evaluate_lifecycle_gate
 from services.position_sizer import join_key
+from services.symbol_identity import (
+    SymbolIdentityCollision,
+    collect_identity_collisions,
+    identity_key,
+)
 from services.execution_intelligence import (
     ExecutionIntelligenceConfig,
     annotate_order as _ei_annotate_order,
@@ -790,7 +795,7 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
 
 
 def _norm_sym(x: Any) -> str:
-    return str(x or "").strip().upper()
+    return identity_key(x)
 
 
 @dataclass
@@ -1248,22 +1253,35 @@ def load_broker_state(
 
         broker = AlpacaBroker(mode=mode)
         raw_pos = broker.get_positions() or []
+        raw_syms = []
+        pending: List[Tuple[str, float, Optional[float]]] = []
         for p in raw_pos:
-            sym = _norm_sym(p.get("symbol"))
-            if not sym:
+            raw = str(p.get("symbol") or "").strip()
+            if not raw:
                 continue
+            raw_syms.append(raw)
             q = _safe_float(p.get("qty") or p.get("quantity"), 0.0)
             mv = (
                 _safe_float(p.get("market_value"), None)
                 if p.get("market_value") is not None
                 else None
             )
+            pending.append((raw, q, mv))
+        collisions = collect_identity_collisions(raw_syms)
+        if collisions:
+            raise SymbolIdentityCollision(collisions, source="broker_positions")
+        for raw, q, mv in pending:
+            sym = _norm_sym(raw)
+            if not sym:
+                continue
             positions[sym] = PositionSnapshot(symbol=sym, qty=q, market_value=mv)
         a = broker.get_account() or {}
         acct.equity = _safe_float(a.get("equity") or a.get("portfolio_value"), 0.0)
         acct.buying_power = _safe_float(a.get("buying_power"), 0.0)
         acct.cash = _safe_float(a.get("cash"), 0.0)
         acct.raw = dict(a)
+    except SymbolIdentityCollision:
+        raise
     except Exception:
         pass
     return positions, acct, broker
@@ -3279,8 +3297,12 @@ def _sum_snapshot_open_qty_for_side(snap_path: Path, sym: str, side: str) -> flo
 def _position_qty_for_symbol(positions: Optional[Dict[str, PositionSnapshot]], sym: str) -> float:
     if not positions:
         return 0.0
-    ps = positions.get(sym)
+    ident = _norm_sym(sym)
+    ps = positions.get(sym) or positions.get(ident)
     if ps is None:
+        for k, v in positions.items():
+            if _norm_sym(k) == ident:
+                return float(v.qty)
         return 0.0
     return float(ps.qty)
 

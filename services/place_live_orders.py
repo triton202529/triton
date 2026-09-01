@@ -103,10 +103,9 @@ OPPORTUNITY_TYPE_TO_STANCE = {"ENTRY": "BUY", "ADD": "ADD", "EXIT": "EXIT", "TRI
 # Cap exploratory rows from trade_opportunities.csv only (strict + lifecycle paths unchanged).
 MAX_EXPLORATION_POSITIONS = 3
 
-SYMBOL_ALIASES = {
-    "BRK-B": "BRK.B",
-    "BF-B": "BF.B",
-}
+from services.symbol_identity import broker_submit_symbol, CLASS_SHARE_BROKER_ALIASES
+
+SYMBOL_ALIASES = CLASS_SHARE_BROKER_ALIASES
 
 LOG_FIELDS = [
     "timestamp",
@@ -268,10 +267,8 @@ def normalize_side(x: Any) -> Optional[str]:
 def normalize_symbol(x: Any) -> Optional[str]:
     if x is None:
         return None
-    sym = str(x).strip().upper()
-    if not sym:
-        return None
-    return SYMBOL_ALIASES.get(sym, sym)
+    sym = broker_submit_symbol(x)
+    return sym or None
 
 
 def sha256_hex(s: str) -> str:

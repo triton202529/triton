@@ -16,6 +16,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
+from services.symbol_identity import (
+    COLLISION_REASON,
+    SymbolIdentityCollision,
+    collect_identity_collisions,
+    fold_qty_map,
+    identity_key,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "data" / "results"
 LIVE = ROOT / "data" / "live"
@@ -197,7 +205,7 @@ def _print_position_cap_sync(pos_count: int, max_pos: int) -> None:
 
 
 def _norm_sym(x: Any) -> str:
-    return str(x or "").strip().upper()
+    return identity_key(x)
 
 
 def _load_position_risk_candidate_map(path: Path) -> Dict[str, str]:
@@ -597,7 +605,12 @@ def load_lifecycle_df(path: Path) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     if "ticker" not in df.columns:
         return pd.DataFrame()
-    df["ticker"] = df["ticker"].apply(_norm_sym)
+    raw_tickers = df["ticker"].astype(str).tolist()
+    collisions = collect_identity_collisions(raw_tickers)
+    if collisions:
+        raise SymbolIdentityCollision(collisions, source="lifecycle")
+    df["ticker"] = df["ticker"].map(_norm_sym)
+    df = df[df["ticker"].astype(str).str.len() > 0]
     df = df.drop_duplicates(subset=["ticker"], keep="last")
     return df
 
@@ -823,30 +836,40 @@ def load_long_positions(
     """symbol -> qty (>0 long only)."""
     m: Dict[str, float] = {}
     broker: Any = None
+    raw_rows: List[Tuple[Any, float]] = []
     try:
         from services.broker_alpaca import AlpacaBroker
 
         broker = AlpacaBroker(mode=mode)
         for p in broker.get_positions() or []:
-            sym = _norm_sym(p.get("symbol"))
             qty = _safe_float(p.get("qty"), 0.0)
             side = str(p.get("side") or "long").lower()
-            if sym and qty > 1e-9 and side in ("long", ""):
-                m[sym] = float(qty)
+            if qty > 1e-9 and side in ("long", ""):
+                raw_rows.append((p.get("symbol"), float(qty)))
+        if raw_rows:
+            m = fold_qty_map(raw_rows, source="broker_positions")
+    except SymbolIdentityCollision:
+        raise
     except Exception:
         broker = None
+        raw_rows = []
+        m = {}
 
     if not m and positions_snapshot_path.is_file():
         try:
             sdf = pd.read_csv(positions_snapshot_path)
             sdf.columns = [str(c).strip() for c in sdf.columns]
             tc = "ticker" if "ticker" in sdf.columns else "symbol"
+            csv_rows: List[Tuple[Any, float]] = []
             for _, r in sdf.iterrows():
-                sym = _norm_sym(r.get(tc))
                 qty = _safe_float(r.get("qty") or r.get("qty_available"), 0.0)
                 sd = str(r.get("side") or "long").lower()
-                if sym and qty > 1e-9 and sd in ("long", ""):
-                    m[sym] = float(qty)
+                if qty > 1e-9 and sd in ("long", ""):
+                    csv_rows.append((r.get(tc), float(qty)))
+            if csv_rows:
+                m = fold_qty_map(csv_rows, source="positions_snapshot")
+        except SymbolIdentityCollision:
+            raise
         except Exception:
             pass
 
@@ -1007,6 +1030,36 @@ def build_management_plan(
     skip_reasons: Dict[str, int] = {}
     planned: List[ManagementPlannedOrder] = []
     lines: List[PlanRow] = []
+    pos_collisions = collect_identity_collisions(list(pos_map.keys()))
+    if pos_collisions:
+        for c in pos_collisions:
+            ident = str(c.get("identity") or "")
+            qty = 0.0
+            for k, v in pos_map.items():
+                if identity_key(k) == ident:
+                    qty = float(v or 0.0)
+                    break
+            lines.append(
+                PlanRow(
+                    ident,
+                    "skip",
+                    "skipped",
+                    COLLISION_REASON,
+                    "",
+                    reason_code=COLLISION_REASON,
+                    reason_detail=(
+                        "conflicting current-position rows for one identity: "
+                        + ",".join(c.get("raw_forms") or [])
+                    ),
+                    current_position_qty=qty,
+                )
+            )
+        skip_reasons[COLLISION_REASON] = len(pos_collisions)
+        print(
+            f"[{COLLISION_REASON}] fail_closed=True orders_planned=0 " f"evidence={pos_collisions}",
+            flush=True,
+        )
+        return [], lines, skip_reasons, state, 0, 0, False
     trim_candidates = 0
     exit_candidates = 0
     exit_pool: List[Dict[str, Any]] = []
@@ -4309,11 +4362,27 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             lifecycle = pd.DataFrame()
         else:
-            lifecycle = load_lifecycle_df(lc_path)
+            try:
+                lifecycle = load_lifecycle_df(lc_path)
+            except SymbolIdentityCollision as e:
+                print(
+                    f"[manage_positions] {COLLISION_REASON} fail_closed=True "
+                    f"source=lifecycle evidence={e.collisions}",
+                    flush=True,
+                )
+                return 3
     except Exception as e:
         print(f"[manage_positions] lifecycle gate error (loading lifecycle anyway): {e}")
         lifecycle = load_lifecycle_df(lc_path)
-    pos_map, broker = load_long_positions(args.mode, pos_path)
+    try:
+        pos_map, broker = load_long_positions(args.mode, pos_path)
+    except SymbolIdentityCollision as e:
+        print(
+            f"[manage_positions] {COLLISION_REASON} fail_closed=True "
+            f"source={e.source or 'positions'} evidence={e.collisions}",
+            flush=True,
+        )
+        return 3
     open_sells = collect_symbols_with_open_sell(broker, oo_path)
     pos_metrics = load_position_metrics(pos_path, pos_map)
 

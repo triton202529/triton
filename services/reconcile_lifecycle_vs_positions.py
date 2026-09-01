@@ -30,6 +30,12 @@ import pandas as pd
 
 from services.schema_guard import safe_merge
 from services.authority_labels import lifecycle_raw_metadata
+from services.symbol_identity import (
+    COLLISION_REASON,
+    SymbolIdentityCollision,
+    collect_identity_collisions,
+    identity_key,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = PROJECT_ROOT / "data" / "results"
@@ -64,8 +70,13 @@ def load_lifecycle(path: Path) -> pd.DataFrame:
     if "ticker" not in df.columns:
         raise ValueError("signal_lifecycle.csv must have ticker")
     df = df.copy()
-    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
-    # latest row per ticker if duplicates
+    raw_tickers = df["ticker"].astype(str).tolist()
+    collisions = collect_identity_collisions(raw_tickers)
+    if collisions:
+        raise SymbolIdentityCollision(collisions, source="lifecycle")
+    df["ticker"] = df["ticker"].map(identity_key)
+    df = df[df["ticker"].astype(str).str.len() > 0]
+    # latest row per identity if duplicates of the same raw form
     df = df.drop_duplicates(subset=["ticker"], keep="last")
     return df
 
@@ -82,7 +93,11 @@ def load_positions(path: Path) -> pd.DataFrame:
         return pd.DataFrame(columns=["ticker", "broker_qty", "broker_market_value"])
     df = _norm_cols(df)
     df = df.copy()
-    df["ticker"] = _ticker_series(df)
+    raw_tickers = _ticker_series(df)
+    collisions = collect_identity_collisions(raw_tickers.tolist())
+    if collisions:
+        raise SymbolIdentityCollision(collisions, source="positions")
+    df["ticker"] = raw_tickers.map(lambda x: identity_key(x))
     q = pd.to_numeric(df.get("qty", np.nan), errors="coerce").fillna(0.0)
     df["qty"] = q
     mv_col = None
@@ -125,7 +140,7 @@ def reconcile_simple(lc: pd.DataFrame, pos: pd.DataFrame) -> pd.DataFrame:
 
     m = safe_merge(lc, pos, on="ticker", how="outer", label="lifecycle_vs_positions")
     m = m.dropna(subset=["ticker"])
-    m["ticker"] = m["ticker"].astype(str).str.strip().str.upper()
+    m["ticker"] = m["ticker"].map(identity_key)
     m["lifecycle_stance"] = m["lifecycle_stance"].fillna("").map(lambda x: str(x).strip())
     m["lifecycle_action"] = m["lifecycle_action"].fillna("").map(lambda x: str(x).strip())
     m["lifecycle_position_state"] = (
@@ -181,11 +196,16 @@ def main() -> int:
 
     try:
         lc = load_lifecycle(args.lifecycle)
+        pos = load_positions(args.positions)
+    except SymbolIdentityCollision as e:
+        print(f"[ERROR] {COLLISION_REASON} fail_closed=True {e}", file=sys.stderr)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        ev_path = args.out.with_name("lifecycle_reconciliation_identity_collision.json")
+        ev_path.write_text(json.dumps(e.to_dict(), indent=2), encoding="utf-8")
+        return 3
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         return 2
-
-    pos = load_positions(args.positions)
     out_df = reconcile_simple(lc, pos)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
