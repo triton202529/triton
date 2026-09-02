@@ -134,11 +134,14 @@ try {
 
         $cycle++
         $cycleRc = 0
+        $intervalSeconds = [int]($IntervalMinutes * 60)
 
         try {
             Log-Line ""
             Log-Line "[CYCLE_START] cycle=$cycle"
             Update-LoopLockMetadata -LockFile $lockFile -Source "continuous_loop" -Cycle $cycle
+            $cadenceStart = python -m services.continuous_loop_cadence --record-start --interval-seconds $intervalSeconds --cycle $cycle --json 2>&1
+            Log-Line "[CADENCE_START] $cadenceStart"
 
             $env:TRITON_ENABLE_PAPER_EXECUTION = "1"
             $env:TRITON_ENABLE_AUTO_PAPER_ENTRIES = "1"
@@ -241,7 +244,23 @@ try {
             break
         }
 
-        $sleepCode = Invoke-InterruptibleSleep -TotalSeconds ($IntervalMinutes * 60)
+        # Start-to-start cadence: remaining_wait = max(0, (start + interval) - now).
+        $cadenceWaitRaw = python -m services.continuous_loop_cadence --remaining-wait --interval-seconds $intervalSeconds --cycle $cycle --json 2>&1
+        Log-Line "[CADENCE_WAIT] $cadenceWaitRaw"
+        $waitSeconds = $intervalSeconds
+        try {
+            $cadenceWaitObj = ($cadenceWaitRaw | Out-String) | ConvertFrom-Json
+            if ($null -ne $cadenceWaitObj.remaining_wait_seconds) {
+                $waitSeconds = [int]$cadenceWaitObj.remaining_wait_seconds
+            }
+            if ($cadenceWaitObj.next_due_at_utc) {
+                Log-Line "[CADENCE_NEXT_DUE_UTC] $($cadenceWaitObj.next_due_at_utc)"
+            }
+        } catch {
+            Log-Line "[CADENCE_WAIT_PARSE] fallback_full_interval reason=$($_.Exception.Message)"
+            $waitSeconds = $intervalSeconds
+        }
+        $sleepCode = Invoke-InterruptibleSleep -TotalSeconds $waitSeconds
         if ($sleepCode -eq 10) {
             Log-Line "[SHUTDOWN_ACCEPTED] during INTERRUPTIBLE_WAIT; exiting without new cycle"
             $shutdownAccepted = $true

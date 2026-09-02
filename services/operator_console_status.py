@@ -30,6 +30,12 @@ from services.command_center_status_coherence import (
     resolve_market_status,
     resolve_shutdown_presentation,
 )
+from services.continuous_loop_cadence import (
+    authoritative_next_due_utc,
+    iso_et as cadence_iso_et,
+    iso_utc as cadence_iso_utc,
+    load_cadence_artifact,
+)
 
 ET = ZoneInfo("America/New_York")
 
@@ -571,7 +577,11 @@ def classify_operator_session_context(
 
     return {
         "session_phase": phase,
-        "status": status if status in ("OPEN", "CLOSED") else ("OPEN" if market_open else "CLOSED" if market_open is False else "UNKNOWN"),
+        "status": (
+            status
+            if status in ("OPEN", "CLOSED")
+            else ("OPEN" if market_open else "CLOSED" if market_open is False else "UNKNOWN")
+        ),
         "market_open": market_open,
         "as_of_et": now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
         "as_of": now_utc.isoformat(),
@@ -779,7 +789,10 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
         items.append(
             AttentionItem(
                 "HIGH",
-                str(trading.get("operator_attention_title") or "Session calendar unavailable — paper entry blocked"),
+                str(
+                    trading.get("operator_attention_title")
+                    or "Session calendar unavailable — paper entry blocked"
+                ),
                 "XNYS could not authoritatively prove OPEN or CLOSED. Paper entry is blocked until the calendar is available. "
                 "This is not an ordinary closed-market skip. Watchdog process health does not clear this.",
                 str(trading.get("evidence_path") or ""),
@@ -1024,7 +1037,11 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
     paper_status = str(paper.get("display_status") or paper.get("raw_status") or "").upper()
     arm_through_close = _paper_arm_valid_through_close(
         expires_at=paper.get("expires_at"),
-        now=_parse_dt(snapshot_parts.get("generated_at")) if snapshot_parts.get("generated_at") else None,
+        now=(
+            _parse_dt(snapshot_parts.get("generated_at"))
+            if snapshot_parts.get("generated_at")
+            else None
+        ),
     )
 
     if paper_status == "INVALID" or paper_status == "UNKNOWN":
@@ -1118,7 +1135,11 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
 
     # --- Heartbeat / freshness when stopped vs running ---
     if freshness.get("class") == "STALE":
-        if expected_stop or clean_premarket_stop or (cont_n == 0 and wd_n == 0 and cont_ok and wd_ok):
+        if (
+            expected_stop
+            or clean_premarket_stop
+            or (cont_n == 0 and wd_n == 0 and cont_ok and wd_ok)
+        ):
             items.append(
                 AttentionItem(
                     "INFO",
@@ -1419,8 +1440,14 @@ def build_operator_status(
     started_lock = _parse_lock_dt(cl_lock.get("started_at"))
     cycle_age = _coherent_age_minutes(refreshed, now)
     cycle_overdue = cycle_is_overdue(refreshed, now=now)
-    deadline = cycle_deadline_utc(refreshed)
-    next_expected = deadline.isoformat() if deadline is not None else None
+    lock_deadline = cycle_deadline_utc(refreshed)
+    cadence_doc = load_cadence_artifact(root)
+    cadence_due = authoritative_next_due_utc(root)
+    # Loop cadence artifact is authoritative; lock start+interval is fallback only.
+    deadline = cadence_due if cadence_due is not None else lock_deadline
+    next_expected = cadence_iso_utc(deadline) if deadline is not None else None
+    next_expected_et = cadence_iso_et(deadline) if deadline is not None else None
+    next_expected_source = "continuous_loop_cadence" if cadence_due is not None else "lock_fallback"
 
     # Alerts
     active_alerts = []
@@ -1544,7 +1571,9 @@ def build_operator_status(
     parts = {
         "overall_status": overall,
         "continuous": {
-            "process_running": bool(proc.get("continuous_loop_running")) if cl_discovery_ok else None,
+            "process_running": (
+                bool(proc.get("continuous_loop_running")) if cl_discovery_ok else None
+            ),
             "process_count": len(cl_pids) if cl_discovery_ok else None,
             "pids": cl_pids if cl_discovery_ok else [],
             "process_discovery_available": cl_discovery_ok,
@@ -1632,6 +1661,11 @@ def build_operator_status(
             "age_minutes": cycle_age,
             "overdue": cycle_overdue,
             "next_expected_at": next_expected,
+            "next_expected_at_utc": next_expected,
+            "next_expected_at_et": next_expected_et,
+            "next_expected_timezone": "UTC",
+            "next_expected_source": next_expected_source,
+            "cadence_phase": (cadence_doc or {}).get("phase"),
             "interval_minutes": CONTINUOUS_INTERVAL_MINUTES,
             "overdue_threshold_minutes": CONTINUOUS_CYCLE_OVERDUE_MINUTES,
             "started_at": started_lock.isoformat() if started_lock else None,

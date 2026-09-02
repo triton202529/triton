@@ -546,6 +546,59 @@ class PaperSellDispatchBlocked(Exception):
         super().__init__(reason)
 
 
+# Phase 198T-AT — unusable SELL permit blocks SELL only. Unknown reasons stay
+# fail-closed (hard cycle failure) so ambiguous execution is never softened.
+SELL_PERMISSION_SOFT_BLOCK_REASONS = frozenset(
+    {
+        "stale_readiness_packet",
+        "no_unused_authority",
+        "authority_expired",
+        "sqlite_authority_expired",
+        "authority_missing",
+        "authority_not_unused",
+        "status_not_armed",
+        "empty_authorized_scope",
+        "trading_date_mismatch",
+        "readiness_packet_hash_mismatch",
+        "source_readiness_packet_missing",
+        "source_readiness_packet_hash_mismatch",
+        "source_readiness_packet_hash_changed",
+        "invocation_mismatch",
+        "generated_at_mismatch",
+        "source_plan_hash_mismatch",
+        "selected_row_hash_mismatch",
+        "skipped_not_paper_or_dry_run",
+        "skipped_not_paper",
+        "no_paper_sells_in_batch",
+        "missing_generated_at",
+        "unparseable_generated_at",
+        "naive_generated_at",
+        "future_generated_at",
+        "session_boundary_closed",
+        "session_derivation_unknown",
+        "no_current_challenge",
+        "no_authorized_quantity",
+        "no_matching_action_after_clipping",
+        "foreign_historical_authority",
+    }
+)
+
+
+def sell_permission_soft_block_reason(reason: Optional[str]) -> bool:
+    """True when SELL must not submit, but F/F2/BUY may continue."""
+    return str(reason or "") in SELL_PERMISSION_SOFT_BLOCK_REASONS
+
+
+def sell_unusable_should_abort_cycle(reason: Optional[str]) -> bool:
+    """Hard cycle abort for ambiguous/corrupt execution; soft otherwise for the allowlist."""
+    text = str(reason or "").strip()
+    if not text:
+        return True
+    if sell_permission_soft_block_reason(text):
+        return False
+    return True
+
+
 def _lock_path(store_root: Path) -> Path:
     return store_root / LOCK_NAME
 

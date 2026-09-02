@@ -184,7 +184,8 @@ def test_19_normal_intraday_unchanged():
 def test_20_fixed_45_minute_cadence_unchanged():
     src = (ROOT / "scripts" / "run_continuous_loop.ps1").read_text(encoding="utf-8")
     assert "[int]$IntervalMinutes = 45" in src
-    assert "Invoke-InterruptibleSleep -TotalSeconds ($IntervalMinutes * 60)" in src
+    assert "Invoke-InterruptibleSleep -TotalSeconds $waitSeconds" in src
+    assert "services.continuous_loop_cadence" in src
     assert "generate_signals.py" not in src
 
 

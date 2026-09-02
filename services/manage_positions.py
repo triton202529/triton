@@ -3702,9 +3702,27 @@ def _try_pre_plan_authorized_sell_dispatch(
     result = dict(result)
     if authority_id and not result.get("authority_id"):
         result["authority_id"] = authority_id
+    reason = str(result.get("reason") or "")
+    from services.paper_sell_arm_runtime_enforcement import (
+        sell_permission_soft_block_reason,
+        sell_unusable_should_abort_cycle,
+    )
+
+    # Soft SELL-permission failures (stale/expired/missing permit) must not
+    # abort F. Hard/ambiguous execution still abort_before_plan.
     if result.get("attempted") and not result.get("dispatched"):
-        result["abort_before_plan"] = True
-    if result.get("attempted"):
+        if sell_unusable_should_abort_cycle(reason):
+            result["abort_before_plan"] = True
+            result["sell_block_class"] = "HARD_CYCLE_FAILURE"
+        else:
+            result["abort_before_plan"] = False
+            result["sell_blocked"] = True
+            result["sell_block_class"] = "SELL_PERMISSION_UNUSABLE"
+    elif (not result.get("dispatched")) and sell_permission_soft_block_reason(reason):
+        result["abort_before_plan"] = False
+        result["sell_blocked"] = True
+        result["sell_block_class"] = "SELL_PERMISSION_UNUSABLE"
+    if result.get("attempted") or result.get("sell_blocked"):
         print(
             "[PRE_PLAN_SELL_DISPATCH] "
             f"attempted={result.get('attempted')} "

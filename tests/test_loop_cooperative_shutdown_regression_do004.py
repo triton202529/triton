@@ -37,7 +37,8 @@ def test_continuous_default_cadence_is_45_minutes():
     src = CONT.read_text(encoding="utf-8")
     assert _param_default(src, "IntervalMinutes") == 45
     assert "($IntervalMinutes * 60)" in src
-    assert "Invoke-InterruptibleSleep -TotalSeconds ($IntervalMinutes * 60)" in src
+    assert "Invoke-InterruptibleSleep -TotalSeconds $waitSeconds" in src
+    assert "services.continuous_loop_cadence" in src
 
 
 def test_watchdog_default_cadence_is_one_minute():

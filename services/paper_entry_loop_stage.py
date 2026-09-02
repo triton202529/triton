@@ -1005,11 +1005,22 @@ def evaluate_paper_entry_gates(
             ap_state, ap_reason, ap_details = classify_paper_operator_approval_artifact()
             details["checks"]["paper_operator_approval_state"] = ap_state
             details["checks"]["paper_operator_approval_reason"] = ap_reason
-            if ap_state == PAPER_APPROVAL_EXPIRED:
+            # Phase 198T-AT: hardened SELL arm is not BUY authorization.
+            # Expired/unusable SELL permits must not emit BUY gate reason
+            # approval_expired. BUY continues under the paper BUY arm.
+            hardened_sell = bool((ap_details or {}).get("hardened_sell_arm"))
+            if hardened_sell:
+                details["checks"]["sell_authority_ignored_for_buy_gate"] = True
+                details["checks"]["sell_authority_buy_gate_reason"] = ap_reason
+                details["checks"]["expired_sell_authority_not_buy_approval_expired"] = (
+                    ap_state == PAPER_APPROVAL_EXPIRED
+                    or str(ap_reason or "").endswith("authority_expired")
+                )
+            elif ap_state == PAPER_APPROVAL_EXPIRED:
                 return block("approval_expired", "paper_operator_approval", safe=True)
-            if ap_state in INVALID_STATES:
+            elif ap_state in INVALID_STATES:
                 return block("approval_invalid", "paper_operator_approval", safe=True)
-            if ap_state == PAPER_APPROVAL_VALID_CURRENT:
+            elif ap_state == PAPER_APPROVAL_VALID_CURRENT:
                 return block(
                     "explicit_broker_execution_phase_required",
                     "paper_operator_approval",

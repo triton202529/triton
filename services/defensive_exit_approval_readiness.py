@@ -165,6 +165,14 @@ def build_pre_plan_dispatch_evidence(
         pre_plan.get("dispatch_terminal_status")
         or ("TERMINAL_SUCCESS" if dispatched and placed > 0 else (pre_plan.get("reason") or "NONE"))
     )
+    sell_block_class = str(pre_plan.get("sell_block_class") or "")
+    sell_blocked = bool(pre_plan.get("sell_blocked"))
+    if sell_block_class == "HARD_CYCLE_FAILURE":
+        pipeline_health_class = "SYSTEM_FAILURE"
+    elif sell_blocked or sell_block_class == "SELL_PERMISSION_UNUSABLE":
+        pipeline_health_class = "SELL_NOT_AUTHORIZED"
+    else:
+        pipeline_health_class = "OK"
     return {
         "schema_version": PRE_PLAN_DISPATCH_SCHEMA,
         "generated_at": _iso_utc(now),
@@ -186,6 +194,9 @@ def build_pre_plan_dispatch_evidence(
         "evidence_status": evidence_status,
         "creates_no_authority": True,
         "live_execution_permitted": False,
+        "sell_blocked": sell_blocked,
+        "sell_block_class": sell_block_class,
+        "pipeline_health_class": pipeline_health_class,
     }
 
 

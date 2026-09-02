@@ -111,7 +111,17 @@ def cycle_deadline_utc(
     refreshed_at: Optional[datetime],
     *,
     interval_minutes: float = CONTINUOUS_INTERVAL_MINUTES,
+    root: Optional[Path] = None,
 ) -> Optional[datetime]:
+    """Authoritative next-due: cadence artifact when present, else start+interval."""
+    try:
+        from services.continuous_loop_cadence import authoritative_next_due_utc
+
+        artifact_due = authoritative_next_due_utc(root)
+        if artifact_due is not None:
+            return artifact_due
+    except Exception:
+        pass
     if refreshed_at is None:
         return None
     return refreshed_at.astimezone(timezone.utc) + timedelta(minutes=float(interval_minutes))

@@ -139,8 +139,9 @@ def _valid_request(pid: int = 101, component: str = "continuous") -> dict:
 def test_01_continuous_preserves_45_minute_cadence():
     src = CONT.read_text(encoding="utf-8")
     assert re.search(r"\[int\]\$IntervalMinutes\s*=\s*45", src)
-    assert "Invoke-InterruptibleSleep -TotalSeconds ($IntervalMinutes * 60)" in src
+    assert "Invoke-InterruptibleSleep -TotalSeconds $waitSeconds" in src
     assert "Start-Sleep -Seconds ($IntervalMinutes * 60)" not in src
+    assert "services.continuous_loop_cadence" in src
 
 
 def test_02_cooperative_wait_bounded_interval():
