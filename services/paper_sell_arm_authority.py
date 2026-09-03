@@ -1838,8 +1838,14 @@ def validate_runtime_clip_audit(
         if runtime_qty > int(auth_qty) + 1e-9:
             return False, f"quantity_expansion:{sym}", details
         allowed_qty, _why = recompute_allowed_runtime_qty(auth_qty, max_n, price)
+        remaining_cap_reasons = {
+            "clipped_to_zero_vs_remaining_batch_cap",
+            "downward_clip_vs_remaining_batch_cap",
+        }
+        row_reason = str(row.get("reason") or "")
         if runtime_qty != allowed_qty:
-            return False, f"clip_audit_runtime_quantity_mismatch:{sym}", details
+            if runtime_qty > allowed_qty or row_reason not in remaining_cap_reasons:
+                return False, f"clip_audit_runtime_quantity_mismatch:{sym}", details
         try:
             deferred = float(row.get("deferred_quantity"))
         except (TypeError, ValueError):

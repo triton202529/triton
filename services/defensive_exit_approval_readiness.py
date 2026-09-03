@@ -73,6 +73,7 @@ PRE_PLAN_DISPATCH_EVIDENCE_NAME = "manage_positions_pre_plan_dispatch.json"
 PRE_PLAN_DISPATCH_SCHEMA = "198T-O-PRE-PLAN-DISPATCH-1"
 SAME_CYCLE_DISPATCH_REASON = "SAME_CYCLE_SELL_DISPATCH_REQUIRES_NEXT_CYCLE_RECONCILIATION"
 STATUS_UNAVAILABLE_SAME_CYCLE = "UNAVAILABLE_SAME_CYCLE_DISPATCH_RECONCILIATION"
+SAME_CYCLE_SUPPRESSION_JSONL = "defensive_exit_same_cycle_suppression.jsonl"
 SCHEMA_VERSION = "198I-ZA-SELL-READINESS-1"
 PRODUCER_ID = "services.defensive_exit_approval_readiness"
 CANONICAL_MODE = "PAPER"
@@ -251,6 +252,44 @@ def classify_same_cycle_dispatch(
     return "none", evidence
 
 
+def append_same_cycle_suppression_record(
+    results_root: Path,
+    *,
+    invocation_id: str,
+    authority_id: Any = None,
+    dispatch_id: Any = None,
+    classification: str = STATUS_UNAVAILABLE_SAME_CYCLE,
+    reason: str = SAME_CYCLE_DISPATCH_REASON,
+    now: Optional[datetime] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """Append-only same-cycle suppression evidence. Does not block later-cycle rebuild."""
+    now = now or _utc_now()
+    path = Path(results_root) / SAME_CYCLE_SUPPRESSION_JSONL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "timestamp": _iso_utc(now),
+        "classification": classification,
+        "reason": reason,
+        "invocation_id": invocation_id,
+        "authority_id": authority_id,
+        "dispatch_id": dispatch_id,
+        "creates_no_authority": True,
+    }
+    if extra:
+        row.update(extra)
+        row["creates_no_authority"] = True
+    line = json.dumps(row, default=str) + "\n"
+    with path.open("a", encoding="utf-8", newline="\n") as fh:
+        fh.write(line)
+        fh.flush()
+        try:
+            os.fsync(fh.fileno())
+        except OSError:
+            pass
+    return path
+
+
 def write_same_cycle_dispatch_reconciliation_packet(
     *,
     results_root: Path,
@@ -312,6 +351,19 @@ def write_same_cycle_dispatch_reconciliation_packet(
     packet["reason"] = SAME_CYCLE_DISPATCH_REASON
     packet["arm_eligibility"] = "UNAVAILABLE"
     if write:
+        append_same_cycle_suppression_record(
+            results_root,
+            invocation_id=inv or "unbound",
+            authority_id=evidence.get("authority_id"),
+            dispatch_id=evidence.get("dispatch_id"),
+            classification=STATUS_UNAVAILABLE_SAME_CYCLE,
+            reason=SAME_CYCLE_DISPATCH_REASON,
+            now=now,
+            extra={
+                "placed_count": evidence.get("placed_count"),
+                "dispatch_performed": evidence.get("dispatch_performed"),
+            },
+        )
         write_canonical_packet(dest, packet, overwrite=True)
         write_entry_interlock(
             results_root=results_root,

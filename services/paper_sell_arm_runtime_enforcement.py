@@ -487,11 +487,22 @@ def select_authorized_planned(
             return False, f"price_unavailable:{symbol}", ()
         derived_qty, clip_reason = _downward_runtime_qty(max_qty, max_n, price)
         pq = float(getattr(p, "qty", 0) or 0)
+        planned_reason = str(getattr(p, "clip_reason", "") or "")
+        remaining_cap_reasons = {
+            "clipped_to_zero_vs_remaining_batch_cap",
+            "downward_clip_vs_remaining_batch_cap",
+        }
+        if pq <= 0:
+            continue
         if derived_qty <= 0:
             continue
         if pq + 1e-9 < float(derived_qty):
-            return False, f"incomplete_authorized_qty:{symbol}", ()
-        use_qty = derived_qty
+            if planned_reason not in remaining_cap_reasons:
+                return False, f"incomplete_authorized_qty:{symbol}", ()
+            use_qty = int(pq)
+            clip_reason = planned_reason
+        else:
+            use_qty = derived_qty
         notional = money_round(float(use_qty) * price)
         if notional > APPROVAL_CLI_CAP + 1e-6:
             return False, f"notional_expansion_vs_authorized_slice:{symbol}", ()
@@ -1508,6 +1519,10 @@ def build_pre_plan_planned_orders(
 
     planned: List[Any] = []
     total_notional = 0.0
+    stored_total = authority.get("total_batch_max_notional")
+    batch_ceiling = APPROVAL_CLI_CAP
+    if stored_total is not None:
+        batch_ceiling = min(float(batch_ceiling), float(money_round(float(stored_total))))
     for item in scope:
         sym = normalize_symbol(item.get("symbol"))
         if not sym:
@@ -1573,6 +1588,35 @@ def build_pre_plan_planned_orders(
                 setattr(planned[-1], "clip_reason", clip_reason)
                 continue
             notional = money_round(float(runtime_qty) * price)
+        remaining = money_round(float(batch_ceiling) - float(total_notional))
+        if remaining < 0:
+            remaining = 0.0
+        if runtime_qty > 0:
+            qty_vs_rem, _rem_why = _downward_runtime_qty(runtime_qty, remaining, price)
+            if qty_vs_rem < runtime_qty:
+                runtime_qty = qty_vs_rem
+                if runtime_qty <= 0:
+                    clip_reason = "clipped_to_zero_vs_remaining_batch_cap"
+                    client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
+                    planned.append(
+                        PlannedOrder(
+                            symbol=sym,
+                            side="sell",
+                            qty=0,
+                            order_type="limit",
+                            time_in_force="day",
+                            limit_price=price,
+                            ref_price=price,
+                            client_order_id=client_order_id,
+                            discipline_allowed=True,
+                        )
+                    )
+                    setattr(planned[-1], "management_action", action)
+                    setattr(planned[-1], "authorized_qty", max_qty)
+                    setattr(planned[-1], "clip_reason", clip_reason)
+                    continue
+                clip_reason = "downward_clip_vs_remaining_batch_cap"
+                notional = money_round(float(runtime_qty) * price)
         if notional > APPROVAL_CLI_CAP + 1e-6:
             return False, "batch_notional_exceeds_approval_cli_cap", ()
         client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
@@ -2011,6 +2055,7 @@ def begin_paper_sell_dispatch(
                         live_blocked=bool(getattr(evidence, "live_blocked", False)),
                         requested=req,
                         now=now,
+                        clip_audit=list(clip_audit) if clip_audit is not None else None,
                     )
                     intent_id = str(committed["dispatch_id"])
                     intent["dispatch_intent_id"] = intent_id
@@ -2048,6 +2093,8 @@ def begin_paper_sell_dispatch(
                         "backend": "sqlite",
                         "plan_hash": authority.get("plan_hash"),
                         "symbols": intent["symbols"],
+                        "clip_audit": list(clip_audit) if clip_audit is not None else None,
+                        "preserve_historical_intent": preserve_historical_intent,
                     },
                 )
                 permit_token = f"sell-permit-{uuid.uuid4().hex}"
@@ -2108,6 +2155,8 @@ def begin_paper_sell_dispatch(
                         "dispatch_intent_id": intent_id,
                         "plan_hash": authority.get("plan_hash"),
                         "symbols": intent["symbols"],
+                        "clip_audit": list(clip_audit) if clip_audit is not None else None,
+                        "preserve_historical_intent": preserve_historical_intent,
                     },
                 )
                 permit_token = f"sell-permit-{uuid.uuid4().hex}"

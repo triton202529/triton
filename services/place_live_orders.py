@@ -1579,6 +1579,8 @@ def _submit_pre_plan_authorized_sell_orders(
     failed = 0
     ambiguous = False
     outcome = None
+    broker_ids: List[str] = []
+    submissions: List[Dict[str, Any]] = []
     to_submit = tuple(guard.authorized_planned or planned)
     permit = getattr(guard, "permit", None)
     from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
@@ -1589,6 +1591,8 @@ def _submit_pre_plan_authorized_sell_orders(
             for p in to_submit:
                 if str(getattr(p, "side", "") or "").lower() != "sell":
                     failed += 1
+                    continue
+                if float(getattr(p, "qty", 0) or 0) <= 0:
                     continue
                 try:
                     resp = broker.submit_order(
@@ -1601,9 +1605,24 @@ def _submit_pre_plan_authorized_sell_orders(
                         client_order_id=p.client_order_id,
                     )
                     placed += 1
+                    oid = _coerce_order_id(resp)
+                    raw_status = ""
+                    if isinstance(resp, dict):
+                        raw_status = str(resp.get("status") or "").strip()
+                    submissions.append(
+                        {
+                            "symbol": str(getattr(p, "symbol", "") or ""),
+                            "qty": getattr(p, "qty", None),
+                            "client_order_id": str(getattr(p, "client_order_id", "") or ""),
+                            "broker_order_id": oid or None,
+                            "broker_status": raw_status or None,
+                        }
+                    )
+                    if oid:
+                        broker_ids.append(oid)
                     if verbose:
                         print(
-                            f"[PRE_PLAN_SELL_DISPATCH] submitted {p.symbol} qty={p.qty} id={_coerce_order_id(resp)}",
+                            f"[PRE_PLAN_SELL_DISPATCH] submitted {p.symbol} qty={p.qty} id={oid}",
                             flush=True,
                         )
                 except PaperSellDispatchBlocked:
@@ -1637,10 +1656,22 @@ def _submit_pre_plan_authorized_sell_orders(
             store_root=store_root,
             outcome=outcome,
             explicit_runtime_write=True,
-            detail={"placed": placed, "failed": failed, "pre_plan": True},
+            detail={
+                "placed": placed,
+                "failed": failed,
+                "pre_plan": True,
+                "broker_ref": ",".join(broker_ids) if broker_ids else None,
+                "broker_submissions": submissions,
+            },
             db_path=db_path,
         )
-    return {"placed": placed, "failed": failed, "outcome": outcome}
+    return {
+        "placed": placed,
+        "failed": failed,
+        "outcome": outcome,
+        "broker_ref": ",".join(broker_ids) if broker_ids else None,
+        "broker_submissions": submissions,
+    }
 
 
 def dispatch_unused_authorized_sell_slice_pre_plan(

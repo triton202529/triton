@@ -24,7 +24,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Generator, List, Mapping, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_NAME = "paper_sell_arm.sqlite3"
@@ -1154,6 +1154,7 @@ def consume_authority_insert_dispatch(
     live_blocked: bool,
     requested: List[Dict[str, Any]],
     now: datetime,
+    clip_audit: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Atomic consume + dispatch intent. Permit only after COMMIT."""
     if str(mode).lower() != "paper":
@@ -1197,6 +1198,7 @@ def consume_authority_insert_dispatch(
                 "dispatch_id": dispatch_id,
                 "authority_id": authority_id,
                 "requested": requested,
+                "clip_audit": list(clip_audit) if clip_audit is not None else None,
                 "recorded_at": now_iso,
                 "status": "INTENT_COMMITTED",
             }
