@@ -1581,6 +1581,8 @@ def _submit_pre_plan_authorized_sell_orders(
     outcome = None
     broker_ids: List[str] = []
     submissions: List[Dict[str, Any]] = []
+    failures: List[Dict[str, Any]] = []
+    ledger_result = None
     to_submit = tuple(guard.authorized_planned or planned)
     permit = getattr(guard, "permit", None)
     from services.paper_sell_arm_runtime_enforcement import _ACTIVE_PERMIT
@@ -1629,6 +1631,12 @@ def _submit_pre_plan_authorized_sell_orders(
                     raise
                 except Exception as exc:
                     failed += 1
+                    failures.append(
+                        {
+                            "symbol": str(getattr(p, "symbol", "") or ""),
+                            "reason": "broker_submit_exception",
+                        }
+                    )
                     msg = str(exc).lower()
                     if any(x in msg for x in ("timeout", "unknown", "ambiguous", "indeterminate")):
                         ambiguous = True
@@ -1665,12 +1673,41 @@ def _submit_pre_plan_authorized_sell_orders(
             },
             db_path=db_path,
         )
+        ledger_result = None
+        try:
+            from services.paper_order_ledger import safe_record_sell_dispatch
+
+            clip_audit = list((getattr(guard, "details", None) or {}).get("clip_audit") or [])
+            authority = getattr(guard, "authority", None) or {}
+            ledger_result = safe_record_sell_dispatch(
+                authority=authority,
+                dispatch_id=str(getattr(guard, "dispatch_intent_id", "") or ""),
+                clip_audit=clip_audit,
+                submissions=submissions,
+                failures=failures,
+                cycle_id=str(
+                    (authority or {}).get("cycle_id")
+                    or (authority or {}).get("market_open_invocation_id")
+                    or ""
+                )
+                or None,
+                event_timestamp=None,
+                root=Path(__file__).resolve().parents[1],
+            )
+        except Exception:
+            ledger_result = {
+                "ok": False,
+                "reason": "ledger_append_failed_after_broker_success",
+                "authority_reusable": False,
+                "replay_forbidden": True,
+            }
     return {
         "placed": placed,
         "failed": failed,
         "outcome": outcome,
         "broker_ref": ",".join(broker_ids) if broker_ids else None,
         "broker_submissions": submissions,
+        "paper_order_ledger": ledger_result,
     }
 
 

@@ -227,6 +227,13 @@ def main() -> Dict[str, Any]:
         )
         df_recent = _to_df(recent_orders, ts)
         _write_csv(RECENT_ORDERS_PATH, df_recent)
+        from services.paper_order_ledger import safe_reconcile_after_snapshot
+
+        ledger_reconcile = safe_reconcile_after_snapshot(
+            root=PROJECT_ROOT,
+            recent_path=RECENT_ORDERS_PATH,
+            snapshot_ts=ts,
+        )
 
         positions = broker.get_positions() or []
         df_pos = _to_df(positions, ts)
@@ -266,6 +273,7 @@ def main() -> Dict[str, Any]:
                 "positions": str(POSITIONS_PATH),
             },
             "guard_snapshot_refresh": guard_refresh,
+            "paper_order_ledger_reconcile": ledger_reconcile,
             "errors": [],
         }
     except AlpacaAuthError as exc:

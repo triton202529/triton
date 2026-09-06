@@ -151,6 +151,19 @@ def render_operator_reports_page() -> None:
     report = build_reconciled_report(request)
 
     st.caption(f"Report as_of: **{report.get('as_of') or 'UNKNOWN'}**")
+    try:
+        from services.paper_order_ledger import proceeds_summary
+
+        sale = proceeds_summary()
+        st.caption(
+            f"Paper SELL filled proceeds (ledger): **${sale.get('filled_proceeds') or 0:,.2f}** "
+            f"from {sale.get('filled_count') or 0} terminal fill(s). "
+            f"Fees {sale.get('fees_commissions')}. "
+            f"Realized P/L {sale.get('realized_pl_availability')} — "
+            f"{sale.get('realized_pl_reason')}"
+        )
+    except Exception:
+        pass
     if report.get("label"):
         st.caption(
             f"Selected: **{report.get('period_type')}** · {report.get('label')} · "

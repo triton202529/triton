@@ -443,6 +443,54 @@ def matching_open_challenge(
     return None
 
 
+def _dispatch_visibility_fields(
+    *,
+    authority_state: str,
+    authority_id: str,
+    results_root: Path,
+) -> Dict[str, Any]:
+    empty = {
+        "last_dispatch_visibility": None,
+        "last_dispatch_message": None,
+        "suppress_no_orders_submitted": False,
+    }
+    try:
+        from services.paper_order_ledger import (
+            consumed_authority_message,
+            dispatch_visibility,
+            reduce_ledger,
+        )
+
+        root = Path(results_root)
+        if root.name == "results":
+            root = root.parent.parent
+        rows = reduce_ledger(root=root)
+        vis = dispatch_visibility(rows, authority_id=authority_id or None)
+        if authority_state == "CONSUMED" and vis.get("has_dispatch"):
+            return {
+                "last_dispatch_visibility": vis,
+                "last_dispatch_message": consumed_authority_message(vis),
+                "suppress_no_orders_submitted": True,
+            }
+        if authority_state == "UNUSED":
+            return {
+                "last_dispatch_visibility": vis,
+                "last_dispatch_message": (
+                    "Paper SELL authority is unused and available for a later eligible cycle."
+                ),
+                "suppress_no_orders_submitted": False,
+            }
+        if authority_state == "EXPIRED" and not vis.get("has_dispatch"):
+            return {
+                "last_dispatch_visibility": vis,
+                "last_dispatch_message": "Paper SELL authority expired and was never used.",
+                "suppress_no_orders_submitted": False,
+            }
+    except Exception:
+        return empty
+    return empty
+
+
 def build_presentation(
     *,
     store_root: Optional[Path] = None,
@@ -712,6 +760,11 @@ def build_presentation(
         "now": now,
         "resolved_db_path": str(resolve_runtime_sqlite_path(db_path=db_path)),
         **slice_fields,
+        **_dispatch_visibility_fields(
+            authority_state=str(auth.get("state") or "ABSENT"),
+            authority_id=str(auth.get("authority_id") or ""),
+            results_root=results_root,
+        ),
     }
 
 

@@ -24698,12 +24698,76 @@ def _render_cc_operations_broker_order_evidence() -> None:
 def _render_cc_orders_broker_order_evidence() -> None:
     """Orders page: current open orders vs submission history (artifact-only)."""
     from services.operator_console_status import build_orders_summary
+    from services.paper_order_ledger import (
+        LEDGER_RELATIVE,
+        filter_unified_rows,
+        unified_order_rows,
+    )
 
     st.title("Orders")
     st.caption(
         "Read-only paper/order visibility. No Submit, Cancel, Approve, Retry, or Execute controls."
     )
     summary = build_orders_summary()
+    ledger_rows = unified_order_rows()
+    st.subheader("Unified paper-order ledger")
+    st.caption(
+        f"Authoritative events: {LEDGER_RELATIVE}. "
+        "Authorization estimates are never labeled as filled proceeds."
+    )
+    f1, f2, f3, f4, f5 = st.columns(5)
+    with f1:
+        date_f = st.text_input("Trading date", key="pol_date")
+    with f2:
+        symbol_f = st.text_input("Symbol", key="pol_symbol")
+    with f3:
+        side_f = st.selectbox("BUY/SELL", ["ALL", "BUY", "SELL"], key="pol_side")
+    with f4:
+        status_f = st.selectbox(
+            "Status",
+            ["ALL", "SUBMITTED", "OPEN", "PARTIAL", "FILLED", "REJECTED", "CANCELLED", "EXPIRED"],
+            key="pol_status",
+        )
+    with f5:
+        auth_f = st.text_input("Authority or dispatch ID", key="pol_auth")
+    shown = filter_unified_rows(
+        ledger_rows,
+        trading_date=date_f or None,
+        symbol=symbol_f or None,
+        side=None if side_f == "ALL" else side_f,
+        status=None if status_f == "ALL" else status_f,
+        authority_id=auth_f if auth_f.startswith("sell-arm") else None,
+        dispatch_id=auth_f if auth_f.startswith("sell-dispatch") else None,
+    )
+    if shown:
+        st.dataframe(
+            [
+                {
+                    "trading_date": r.get("trading_date"),
+                    "timestamp": r.get("event_timestamp") or r.get("last_event_timestamp"),
+                    "symbol": r.get("symbol"),
+                    "side": r.get("side"),
+                    "quantity": r.get("selected_qty"),
+                    "submitted_status": r.get("submission_status"),
+                    "terminal_status": r.get("terminal_status")
+                    or (r.get("action_disposition") if r.get("kind") == "action" else None),
+                    "filled_qty": r.get("filled_qty"),
+                    "avg_fill": r.get("average_fill_price"),
+                    "proceeds": r.get("proceeds"),
+                    "client_order_id": r.get("client_order_id"),
+                    "broker_order_id": r.get("broker_order_id"),
+                    "authority_id": r.get("authority_id"),
+                    "dispatch_id": r.get("dispatch_id"),
+                    "source": r.get("source_pipeline"),
+                    "auth_estimate": r.get("authorized_max_notional"),
+                    "submitted_notional": r.get("submitted_notional"),
+                }
+                for r in shown
+            ],
+            use_container_width=True,
+        )
+    else:
+        st.info("No unified paper-order rows for the selected filters.")
     st.write(summary.get("note"))
 
     current = summary.get("current_open_orders") or {}
@@ -24790,6 +24854,24 @@ def main() -> None:
             return
         if page == "Orders":
             _render_cc_orders_broker_order_evidence()
+            return
+        if page == "Activity":
+            from services.operator_activity_feed import collect_activity_events
+            from services.paper_order_ledger import merge_activity_payload
+            import services.operator_activity_feed as _activity_feed
+
+            def _collect_with_ledger(**kwargs):
+                return merge_activity_payload(collect_activity_events(**kwargs))
+
+            _activity_feed.collect_activity_events = _collect_with_ledger
+            try:
+                fn = OPERATOR_RENDERERS.get("Activity")
+                if fn is None:
+                    st.error("Operator page not wired: Activity")
+                    return
+                fn()
+            finally:
+                _activity_feed.collect_activity_events = collect_activity_events
             return
 
         fn = OPERATOR_RENDERERS.get(page)

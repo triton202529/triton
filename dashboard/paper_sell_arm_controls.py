@@ -111,7 +111,9 @@ def map_sell_arm_visual_status(pres: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "label": LABEL_COMPLETED,
             "color": COLOR_BLUE,
-            "reason": reason or "Authority consumed for this reviewed batch.",
+            "reason": pres.get("last_dispatch_message")
+            or reason
+            or "Authority consumed for this reviewed batch.",
             "code": "COMPLETED",
         }
 
@@ -328,14 +330,29 @@ def render_paper_sell_arm_controls(
     if pres.get("authority_expires_at"):
         st.write(f"Authority expiry: {pres['authority_expires_at']}")
 
+    st.write(f"**Current readiness packet:** {pres['freshness']}")
+    st.write(f"**Last authority:** {authority_state}")
+    if pres.get("last_dispatch_message"):
+        st.write(f"**Last dispatch:** {pres.get('last_dispatch_message')}")
+        vis = pres.get("last_dispatch_visibility") or {}
+        if vis.get("dispatch_ids"):
+            st.caption("Last broker reconciliation is available on Orders and Activity.")
+
     flash = st.session_state.get(SESSION_FLASH_KEY)
     if flash:
-        text = flash.get("text")
+        text = str(flash.get("text") or "")
+        extra_lines = list(flash.get("extra") or [])
+        if pres.get("suppress_no_orders_submitted") or authority_state == "CONSUMED":
+            if "No orders were submitted" in text:
+                text = pres.get("last_dispatch_message") or (
+                    "Paper SELL authority consumed. Open Orders or Activity for execution status."
+                )
+            extra_lines = [ln for ln in extra_lines if "No orders were submitted" not in str(ln)]
         if flash.get("kind") == "success":
             st.success(text)
         else:
             st.error(text)
-        for line in flash.get("extra") or []:
+        for line in extra_lines:
             if line:
                 st.info(line)
 
