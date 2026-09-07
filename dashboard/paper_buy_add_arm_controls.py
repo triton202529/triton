@@ -58,17 +58,21 @@ def render_paper_buy_add_arm_controls(
     status = str(pres.get("status") or "UNKNOWN")
     armed = status == "ARMED" or str(pres.get("consumer_status") or "") == "VALID"
 
+    from dashboard.display_labels import display_status
+
     st.caption(pres["no_start_caption"])
-    st.write(f"**Status:** {status}")
-    st.write(f"Authorized session date: {pres.get('authorized_session_date') or 'unavailable'}")
-    st.write(f"Created: {pres.get('created_at') or 'unavailable'}")
-    st.write(f"Expiry: {pres.get('expires_at') or 'unavailable'}")
+    st.write(f"**Status:** {display_status(status)}")
+    st.write(f"**Expires:** {pres.get('expires_at') or 'unavailable'}")
     remaining = pres.get("remaining_minutes")
     if remaining is None:
-        st.write("Remaining duration: unavailable")
+        st.write("**Next action:** Review expiry and evidence below.")
+    elif remaining <= 0:
+        st.write("**Next action:** Authorization expired. Arm again if paper BUY is required.")
     else:
-        st.write(f"Remaining duration: {remaining:.1f} minutes")
-    st.write(f"**Live execution:** {pres.get('live_execution')}")
+        st.write(
+            f"**Next action:** {remaining:.0f} minutes remaining. Revoke if this session should not buy."
+        )
+    st.write(f"**Live execution:** {display_status(pres.get('live_execution'))}")
 
     flash = st.session_state.get(SESSION_FLASH_KEY)
     if flash:
@@ -142,10 +146,9 @@ def render_paper_buy_add_arm_controls(
             st.session_state["_paper_buy_add_clear_revoke"] = True
             _flash(result)
 
-    with st.expander("BUY/ADD authorization details", expanded=False):
-        st.caption(
-            "Use this control to arm paper BUY/ADD entries. The PowerShell command remains an operator fallback."
-        )
+    with st.expander("Technical details", expanded=False):
+        st.write(f"Authorized session date: {pres.get('authorized_session_date') or 'unavailable'}")
+        st.write(f"Created: {pres.get('created_at') or 'unavailable'}")
         st.write(f"Consumer status: {pres.get('consumer_status')}")
         st.write(f"Canonical writer: services.set_paper_arm_confirm.write_confirm")
         st.write(f"Arm phrase contract: {ARM_PHRASE}")

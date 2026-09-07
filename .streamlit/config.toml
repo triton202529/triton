@@ -21,3 +21,14 @@ fastReruns = true
 # Does not hide the sidebar itself; does not remove pages/ files or routes.
 [client]
 showSidebarNavigation = false
+
+# UI-A2 — official Streamlit theme. primaryColor is informational blue so
+# navigation and period radios are not red. Red remains Streamlit's error color
+# and our own blocked/negative tokens. Do not set a production-facing port here
+# for isolated preview; launchers pass --server.port explicitly.
+[theme]
+base = "dark"
+primaryColor = "#4EA1FF"
+backgroundColor = "#0B0F14"
+secondaryBackgroundColor = "#11171F"
+textColor = "#E7ECF3"

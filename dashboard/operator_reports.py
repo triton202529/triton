@@ -13,6 +13,8 @@ from typing import Any, Dict, Mapping, Optional
 
 import streamlit as st
 
+from dashboard.display_labels import display_label, display_status
+from dashboard.operator_table import render_operator_table
 from services.reconciled_portfolio_reporting import (
     DEFAULT_PERIOD,
     PERIOD_TYPES,
@@ -64,12 +66,12 @@ def _render_metric_card(label: str, metric: Mapping[str, Any]) -> None:
         label,
         [
             {"label": "Value", "value": display},
-            {"label": "Availability", "value": avail or "UNAVAILABLE"},
+            {"label": "Availability", "value": display_status(avail or "UNAVAILABLE")},
             {"label": "Evidence", "value": _metric_caption(metric)},
         ],
     )
     st.markdown(
-        oui.status_badge(avail or "UNAVAILABLE", tone=tone),
+        oui.status_badge(display_status(avail or "UNAVAILABLE"), tone=tone),
         unsafe_allow_html=True,
     )
 
@@ -176,22 +178,24 @@ def render_operator_reports_page() -> None:
         [
             {
                 "label": "Report availability",
-                "value": report.get("availability") or "UNAVAILABLE",
+                "value": display_status(report.get("availability") or "UNAVAILABLE"),
                 "tone": tone_for_report_status(report.get("availability")),
             },
             {
                 "label": "Period completeness",
-                "value": report.get("completeness") or "UNAVAILABLE",
+                "value": display_status(report.get("completeness") or "UNAVAILABLE"),
                 "tone": tone_for_report_status(report.get("completeness")),
             },
             {
                 "label": "Reconciliation",
-                "value": (report.get("reconciliation") or {}).get("status") or "UNAVAILABLE",
+                "value": display_status(
+                    (report.get("reconciliation") or {}).get("status") or "UNAVAILABLE"
+                ),
                 "tone": tone_for_report_status((report.get("reconciliation") or {}).get("status")),
             },
             {
                 "label": "Data freshness",
-                "value": freshness.get("status") or "UNKNOWN",
+                "value": display_status(freshness.get("status") or "UNKNOWN"),
                 "tone": tone_for_report_status(freshness.get("status")),
             },
         ]
@@ -207,19 +211,19 @@ def render_operator_reports_page() -> None:
                 post = bool(s.get("post_as_of") or s.get("excluded_from_as_of_freshness"))
                 rows.append(
                     {
-                        "source": s.get("source"),
-                        "status": status,
-                        "post_as_of": post,
-                        "green_fresh": status == "FRESH" and not post,
-                        "source_timestamp": s.get("source_timestamp"),
-                        "age_minutes": s.get("age_minutes"),
-                        "minutes_after_as_of": s.get("minutes_after_as_of"),
-                        "date_only": bool(s.get("date_only")),
-                        "mtime_advisory_only": s.get("filesystem_mtime_advisory"),
-                        "reason": s.get("reason"),
+                        "Source": display_label(s.get("source")),
+                        "Status": display_status(status),
+                        "Post as-of": post,
+                        "Shown as fresh": status == "FRESH" and not post,
+                        "Source time": s.get("source_timestamp"),
+                        "Age (min)": s.get("age_minutes"),
+                        "Minutes after as-of": s.get("minutes_after_as_of"),
+                        "Date only": bool(s.get("date_only")),
+                        "Filesystem time advisory only": s.get("filesystem_mtime_advisory"),
+                        "Reason": s.get("reason"),
                     }
                 )
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+            render_operator_table(rows, raw_label="Raw freshness rows")
             st.caption(
                 "Post-as-of / future-dated / date-only / UNKNOWN sources are never shown as "
                 "authoritative green FRESH. Filesystem mtime is advisory only."
@@ -248,21 +252,10 @@ def render_operator_reports_page() -> None:
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         _render_metric_card("Opening equity", metrics.get("opening_equity") or {})
-        st.caption(
-            "Authoritative session-open equity is Unavailable — "
-            "portfolio_history is date-only / mixed-producer."
-        )
     with m2:
         _render_metric_card("Closing / as-of equity", metrics.get("closing_equity") or {})
-        st.caption(
-            "Authoritative session-close equity is Unavailable — "
-            "no certified exchange-close boundary."
-        )
     with m3:
         _render_metric_card("Net equity change", metrics.get("net_equity_change") or {})
-        st.caption(
-            "Session net equity change withheld without authoritative open/close boundaries."
-        )
     with m4:
         _render_metric_card("Period P/L", metrics.get("period_pl") or {})
 
@@ -271,29 +264,22 @@ def render_operator_reports_page() -> None:
         _render_metric_card(
             "Previous recorded equity", metrics.get("previous_recorded_equity") or {}
         )
-        st.caption(
-            f"Observation date: {cov.get('previous_recorded_date') or 'n/a'} · "
-            "not a certified session open."
-        )
+        st.caption(f"Observation date: {cov.get('previous_recorded_date') or 'n/a'}")
     with r2:
         _render_metric_card("Latest recorded equity", metrics.get("latest_recorded_equity") or {})
-        st.caption(
-            f"Observation date: {cov.get('latest_recorded_date') or 'n/a'} · "
-            "not a certified exchange close."
-        )
+        st.caption(f"Observation date: {cov.get('latest_recorded_date') or 'n/a'}")
     with r3:
         _render_metric_card(
             "Change between recorded observations",
             metrics.get("recorded_observation_change") or {},
         )
-        st.caption("Not Period P/L, Daily P/L, investment return, or session equity change.")
+        st.caption("Not Period P/L — see why values are withheld.")
     with r4:
         st.caption(cov.get("portfolio_history_disclosure") or "")
 
     m5, m6, m7, m8 = st.columns(4)
     with m5:
         _render_metric_card("Realized P/L", metrics.get("realized_pl") or {})
-        st.caption("Realized P/L withheld unless a governed accounting authority is proven.")
     with m6:
         _render_metric_card("Unrealized P/L", metrics.get("unrealized_pl") or {})
     with m7:
@@ -301,36 +287,59 @@ def render_operator_reports_page() -> None:
     with m8:
         _render_metric_card("Position count", metrics.get("position_count") or {})
 
+    with st.expander("Why some equity figures are Unavailable", expanded=False):
+        st.caption(
+            "Authoritative session-open equity is Unavailable — "
+            "portfolio_history is date-only / mixed-producer."
+        )
+        st.caption(
+            "Authoritative session-close equity is Unavailable — "
+            "no certified exchange-close boundary."
+        )
+        st.caption(
+            "Session net equity change withheld without authoritative open/close boundaries."
+        )
+        st.caption(
+            f"Previous recorded observation date: {cov.get('previous_recorded_date') or 'n/a'} · "
+            "not a certified session open."
+        )
+        st.caption(
+            f"Latest recorded observation date: {cov.get('latest_recorded_date') or 'n/a'} · "
+            "not a certified exchange close."
+        )
+        st.caption("Not Period P/L, Daily P/L, investment return, or session equity change.")
+        st.caption("Realized P/L withheld unless a governed accounting authority is proven.")
+
     tab_summary, tab_holdings, tab_activity, tab_recon = st.tabs(
         ["Summary", "Holdings", "Activity", "Reconciliation & Evidence"]
     )
 
     with tab_summary:
         st.markdown("**What this period covers**")
-        st.write(
-            {
-                "period": report.get("period_type"),
-                "start": report.get("start_date"),
-                "end": report.get("end_date"),
-                "is_market_session": cov.get("is_market_session"),
-                "previous_recorded_date": cov.get("previous_recorded_date"),
-                "latest_recorded_date": cov.get("latest_recorded_date"),
-                "non_session_history_observations": cov.get("non_session_history_observations"),
-                "history_dates_in_range": cov.get("history_dates"),
-                "portfolio_history_disclosure": cov.get("portfolio_history_disclosure"),
-            }
-        )
+        coverage_display = {
+            "Period": report.get("period_type"),
+            "Start": report.get("start_date"),
+            "End": report.get("end_date"),
+            "Market session": cov.get("is_market_session"),
+            "Previous recorded date": cov.get("previous_recorded_date"),
+            "Latest recorded date": cov.get("latest_recorded_date"),
+            "Non-session history observations": cov.get("non_session_history_observations"),
+            "History dates in range": cov.get("history_dates"),
+            "Portfolio history disclosure": cov.get("portfolio_history_disclosure"),
+        }
+        render_operator_table([coverage_display], show_raw=False)
         chart = report.get("chart") or {}
         if chart.get("available"):
             try:
-                import pandas as pd
+                from dashboard.portfolio_chart import build_plotly_figure, normalize_history_rows
 
-                df = pd.DataFrame(chart.get("points") or [])
-                if not df.empty:
-                    df["total_value"] = pd.to_numeric(df["total_value"], errors="coerce")
-                    st.line_chart(df.set_index("date")["total_value"], height=220)
+                points = normalize_history_rows(chart.get("points") or [])
+                if points:
+                    st.plotly_chart(build_plotly_figure(points), use_container_width=True)
+                else:
+                    st.caption(chart.get("reason") or "Chart unavailable")
             except Exception:
-                st.caption("Chart render failed — values remain in evidence JSON.")
+                st.caption("Chart render failed — values remain in evidence.")
         else:
             st.caption(chart.get("reason") or "Chart unavailable")
 
@@ -352,10 +361,10 @@ def render_operator_reports_page() -> None:
         if disclosure:
             st.info(disclosure)
         st.caption(
-            f"snapshot_ts={holdings.get('snapshot_ts') or 'UNKNOWN'} · "
-            f"snapshot_date={holdings.get('snapshot_date') or 'UNKNOWN'} · "
-            f"selected_period_end={holdings.get('selected_period_end') or 'UNKNOWN'} · "
-            f"relationship={holdings.get('period_relationship') or 'UNKNOWN'}"
+            f"Snapshot time: {holdings.get('snapshot_ts') or 'UNKNOWN'} · "
+            f"Snapshot date: {holdings.get('snapshot_date') or 'UNKNOWN'} · "
+            f"Selected period end: {holdings.get('selected_period_end') or 'UNKNOWN'} · "
+            f"Period relationship: {display_status(holdings.get('period_relationship') or 'UNKNOWN')}"
         )
         rows = holdings.get("rows") or []
         if not rows:
@@ -371,12 +380,14 @@ def render_operator_reports_page() -> None:
                     # Preserve signed unrealized strings (negatives remain distinct).
                     item[c] = "Unavailable" if val is None else val
                 display_rows.append(item)
-            # HTML table avoids Glide-grid tab-width collapse and keeps all labels visible.
-            st.table(display_rows)
-            st.caption(
-                "Per-row Notes omitted from the grid — see shared snapshot disclosure above. "
-                "Beginning quantity and net quantity change remain Unavailable without "
-                "authoritative opening and ending holdings."
+            render_operator_table(
+                display_rows,
+                signed_columns=("Unrealized P/L", "Unrealized P/L %", "Gain / loss"),
+                caption=(
+                    "Per-row Notes omitted from the grid — see shared snapshot disclosure above. "
+                    "Beginning quantity and net quantity change remain Unavailable without "
+                    "authoritative opening and ending holdings."
+                ),
             )
 
     with tab_activity:
@@ -387,16 +398,21 @@ def render_operator_reports_page() -> None:
             st.caption(activity["note"])
         st.caption(
             "Coverage: "
-            f"**{activity.get('coverage_kind') or 'UNKNOWN'}** · "
-            "counts_are_complete_period_totals="
-            f"**{activity.get('counts_are_complete_period_totals')}**"
+            f"**{display_status(activity.get('coverage_kind') or 'UNKNOWN')}** · "
+            "Counts are complete period totals: "
+            f"**{'Yes' if activity.get('counts_are_complete_period_totals') else 'No'}**"
         )
-        st.write(activity.get("counts") or {})
+        counts = activity.get("counts") or {}
+        if counts:
+            render_operator_table(
+                [{display_label(k): v for k, v in counts.items()}],
+                show_raw=False,
+            )
 
         st.markdown("**Broker execution activity (recorded under partial coverage)**")
         broker_rows = activity.get("broker_orders") or []
         if broker_rows:
-            st.dataframe(broker_rows, use_container_width=True, hide_index=True)
+            render_operator_table(broker_rows, format_headers=True)
         else:
             st.caption(
                 activity.get("empty_state_broker")
@@ -409,7 +425,7 @@ def render_operator_reports_page() -> None:
         st.markdown("**TRITON decision activity**")
         decisions = activity.get("triton_decisions") or []
         if decisions:
-            st.dataframe(decisions, use_container_width=True, hide_index=True)
+            render_operator_table(decisions, format_headers=True)
         else:
             st.caption(
                 activity.get("empty_state_triton")

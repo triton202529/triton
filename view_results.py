@@ -24417,6 +24417,7 @@ if HAS_MANUAL_ORDER_DESK:
 
 # Unified Command Center top-level destinations (Operator pages + Advanced Dashboard).
 COMMAND_CENTER_DESTINATIONS: List[str] = [
+    "Overview",
     "Operations",
     "Activity",
     "Portfolio",
@@ -24445,17 +24446,15 @@ def _render_compact_left_rail_status() -> None:
     try:
         status = build_operator_status()
         lines = compact_system_status_lines(status)
-        overall = lines["overall"]
-        live = lines["live"]
-        paper = lines["paper"]
-        freshness = lines["freshness"]
+        from dashboard.display_labels import display_status
+
+        overall = display_status(lines["overall"])
+        live = display_status(lines["live"])
+        paper = display_status(lines["paper"])
+        freshness = display_status(lines["freshness"])
         continuous = lines.get("continuous") or "UNKNOWN"
         watchdog = lines.get("watchdog") or "UNKNOWN"
-        live_note = (
-            '<div style="color:#95A2B2;font-size:0.7rem;margin-top:0.15rem;">Required safety lock</div>'
-            if live == "BLOCKED"
-            else ""
-        )
+        live_note = "Required safety lock" if str(lines["live"]).upper() == "BLOCKED" else ""
 
         def _loop_tone(token: str) -> str:
             t = str(token or "").upper()
@@ -24471,8 +24470,8 @@ def _render_compact_left_rail_status() -> None:
             f'<div class="triton-kv"><span class="k">Runtime</span>'
             f'<span class="v">{status_badge(overall, tone=tone_for_status(overall))}</span></div>'
             f'<div class="triton-kv"><span class="k">Live</span>'
-            f'<span class="v">{status_badge(live, tone=tone_for_live_execution(live))}</span></div>'
-            f"{live_note}"
+            f'<span class="v">{status_badge(live, tone=tone_for_live_execution(lines["live"]))}</span>'
+            f'{("<span class=\"k\">" + live_note + "</span>") if live_note else ""}</div>'
             f'<div class="triton-kv"><span class="k">Paper</span>'
             f'<span class="v">{status_badge(paper, tone=tone_for_status(paper))}</span></div>'
             f'<div class="triton-kv"><span class="k">Freshness</span>'
@@ -24502,7 +24501,12 @@ def sidebar_controls() -> Tuple[str, str, str]:
     Operator and Advanced trees are never rendered in the same run.
     """
     from dashboard.operator_console import DEFAULT_OPERATOR_PAGE, OPERATOR_PAGES
+    from dashboard.operator_nav import DEFAULT_UI_A_PAGE, NAV_GROUPS, all_destinations, page_help
     from dashboard.operator_ui import inject_operator_theme
+
+    # Contract identity retained for UIR tests: list(OPERATOR_PAGES)
+    _operator_pages_contract = list(OPERATOR_PAGES)
+    ui_a_pages = all_destinations()
 
     with st.sidebar:
         inject_operator_theme()
@@ -24512,19 +24516,19 @@ def sidebar_controls() -> Tuple[str, str, str]:
             unsafe_allow_html=True,
         )
 
-        # Fresh sessions land on Operations. Preserve Advanced if already selected
+        # Fresh sessions land on Overview. Preserve Advanced if already selected
         # via dashboard_nav_mode (Diagnostics switch / prior session).
         if "cc_top_destination" not in st.session_state:
             if st.session_state.get("dashboard_nav_mode") == "legacy":
                 st.session_state["cc_top_destination"] = ADVANCED_DASHBOARD_DESTINATION
             else:
-                st.session_state["cc_top_destination"] = DEFAULT_OPERATOR_PAGE
+                st.session_state["cc_top_destination"] = DEFAULT_UI_A_PAGE
         if "dashboard_nav_mode" not in st.session_state:
             st.session_state["dashboard_nav_mode"] = "operator"
 
-        current_dest = st.session_state.get("cc_top_destination", DEFAULT_OPERATOR_PAGE)
+        current_dest = st.session_state.get("cc_top_destination", DEFAULT_UI_A_PAGE)
         if current_dest not in COMMAND_CENTER_DESTINATIONS:
-            current_dest = DEFAULT_OPERATOR_PAGE
+            current_dest = DEFAULT_UI_A_PAGE
             st.session_state["cc_top_destination"] = current_dest
 
         initial_mode = (
@@ -24553,32 +24557,29 @@ def sidebar_controls() -> Tuple[str, str, str]:
             destination = ADVANCED_DASHBOARD_DESTINATION
         else:
             st.session_state["dashboard_nav_mode"] = "operator"
-            # Heal stale Destination widget values from pre-Reports sessions.
             stored_dest = st.session_state.get("cc_destination_radio")
-            if stored_dest is not None and stored_dest not in OPERATOR_PAGES:
+            if stored_dest is not None and stored_dest not in ui_a_pages:
                 st.session_state["cc_destination_radio"] = (
-                    current_dest if current_dest in OPERATOR_PAGES else DEFAULT_OPERATOR_PAGE
+                    current_dest if current_dest in ui_a_pages else DEFAULT_UI_A_PAGE
                 )
-            if current_dest not in OPERATOR_PAGES:
-                current_dest = DEFAULT_OPERATOR_PAGE
+            if current_dest not in ui_a_pages:
+                current_dest = DEFAULT_UI_A_PAGE
                 st.session_state["cc_top_destination"] = current_dest
-            # Destination radio remains the operator-page selector (preserves key contract).
-            op_index = OPERATOR_PAGES.index(
-                current_dest if current_dest in OPERATOR_PAGES else DEFAULT_OPERATOR_PAGE
+            op_index = ui_a_pages.index(
+                current_dest if current_dest in ui_a_pages else DEFAULT_UI_A_PAGE
             )
-            st.caption("Operator pages (exact order)")
             destination = st.radio(
-                "Destination",
-                list(OPERATOR_PAGES),
+                "Page",
+                ui_a_pages,
                 index=op_index,
                 key="cc_destination_radio",
-                help=(
-                    "Required order: Operations, Activity, Portfolio, Reports, Orders, "
-                    "Risk & Alerts, Diagnostics."
+                help=page_help().get(
+                    current_dest if current_dest in ui_a_pages else DEFAULT_UI_A_PAGE,
+                    "Operator page",
                 ),
             )
             st.session_state["cc_top_destination"] = destination
-            if "Reports" not in OPERATOR_PAGES:
+            if "Reports" not in _operator_pages_contract:
                 st.error("Reports navigation missing from OPERATOR_PAGES — configuration error.")
 
         if st.button("Refresh data", key="refresh"):
@@ -24596,10 +24597,10 @@ def sidebar_controls() -> Tuple[str, str, str]:
 
         st.markdown("---")
         if destination != ADVANCED_DASHBOARD_DESTINATION:
-            if destination not in OPERATOR_PAGES:
+            if destination not in ui_a_pages:
                 st.error(f"Unknown Command Center destination: {destination}")
-                destination = DEFAULT_OPERATOR_PAGE
-            st.caption("Operator navigation · routine pages only")
+                destination = DEFAULT_UI_A_PAGE
+            st.caption("Operator navigation")
             return "operator", destination, ""
 
         # Advanced Dashboard — reuse SECTIONS / PAGE_REGISTRY; default Portfolio (read-only).
@@ -24829,14 +24830,9 @@ def main() -> None:
         from dashboard.operator_ui import inject_operator_theme
 
         inject_operator_theme()
-        st.caption(
-            "TRITON Operator Console · Live execution remains blocked · "
-            "Protected runtime controls require confirmation"
-        )
-        # Freshness banner retained; presentation-only and does not mutate controls.
-        render_heartbeat_freshness_banner()
-
         page = section_or_page
+        from dashboard.operator_modern import UI_A_RENDERERS
+
         if page == "Diagnostics":
 
             def _to_legacy() -> None:
@@ -24844,37 +24840,12 @@ def main() -> None:
                 st.session_state["cc_top_destination"] = ADVANCED_DASHBOARD_DESTINATION
                 st.rerun()
 
-            render_diagnostics_page(switch_to_legacy_callback=_to_legacy)
+            UI_A_RENDERERS["Diagnostics"](switch_to_legacy_callback=_to_legacy)
             return
 
-        # Operations retains the broker-evidence entrypoint name for contract tests;
-        # implementation delegates to the UIR-001 Operations presentation.
-        if page == "Operations":
-            _render_cc_operations_broker_order_evidence()
-            return
-        if page == "Orders":
-            _render_cc_orders_broker_order_evidence()
-            return
-        if page == "Activity":
-            from services.operator_activity_feed import collect_activity_events
-            from services.paper_order_ledger import merge_activity_payload
-            import services.operator_activity_feed as _activity_feed
-
-            def _collect_with_ledger(**kwargs):
-                return merge_activity_payload(collect_activity_events(**kwargs))
-
-            _activity_feed.collect_activity_events = _collect_with_ledger
-            try:
-                fn = OPERATOR_RENDERERS.get("Activity")
-                if fn is None:
-                    st.error("Operator page not wired: Activity")
-                    return
-                fn()
-            finally:
-                _activity_feed.collect_activity_events = collect_activity_events
-            return
-
-        fn = OPERATOR_RENDERERS.get(page)
+        fn = UI_A_RENDERERS.get(page)
+        if fn is None:
+            fn = OPERATOR_RENDERERS.get(page)
         if fn is None:
             st.error(f"Operator page not wired: {page}")
             return

@@ -25,6 +25,7 @@ TOKENS = {
     "green": "#39C98A",
     "amber": "#F2B84B",
     "red": "#EF6461",
+    "gray": "#6B7785",
 }
 
 
@@ -136,9 +137,103 @@ def inject_operator_theme() -> None:
   }}
   .triton-safety-strip {{
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(9.4rem, 1fr));
     gap: 0.4rem;
     margin: 0 0 0.55rem 0;
+  }}
+  .triton-page-kicker {{
+    color: {t["muted"]};
+    font-size: 0.78rem;
+    margin: 0 0 0.15rem 0;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }}
+  .triton-page-title {{
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin: 0;
+    color: {t["text"]};
+  }}
+  .triton-page-desc {{
+    color: {t["muted"]};
+    font-size: 0.88rem;
+    margin: 0.2rem 0 0.75rem 0;
+  }}
+  .triton-signed.pos {{ color: {t["green"]}; font-weight: 650; }}
+  .triton-signed.neg {{ color: {t["red"]}; font-weight: 650; }}
+  .triton-signed.flat {{ color: {t["muted"]}; font-weight: 650; }}
+  .triton-timeline {{
+    border-left: 2px solid {t["border"]};
+    margin: 0.25rem 0 0.75rem 0.35rem;
+    padding: 0 0 0 0.85rem;
+  }}
+  .triton-timeline-item {{
+    position: relative;
+    margin: 0 0 0.7rem 0;
+  }}
+  .triton-timeline-item::before {{
+    content: "";
+    position: absolute;
+    left: -1.05rem;
+    top: 0.35rem;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: {t["muted"]};
+  }}
+  .triton-timeline-item.ok::before {{ background: {t["green"]}; }}
+  .triton-timeline-item.warn::before {{ background: {t["amber"]}; }}
+  .triton-timeline-item.crit::before {{ background: {t["red"]}; }}
+  .triton-timeline-item.info::before {{ background: {t["blue"]}; }}
+  .triton-op-table-wrap {{
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 0 0 0.75rem 0;
+    border: 1px solid {t["border"]};
+    border-radius: 4px;
+    background: {t["panel"]};
+  }}
+  .triton-op-table {{
+    width: 100%;
+    min-width: 36rem;
+    border-collapse: collapse;
+    table-layout: auto;
+    color: {t["text"]};
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }}
+  .triton-op-table th {{
+    background: {t["panel_2"]};
+    color: {t["text"]};
+    font-weight: 650;
+    text-align: left;
+    padding: 0.48rem 0.65rem;
+    border-bottom: 1px solid {t["border"]};
+    white-space: nowrap;
+  }}
+  .triton-op-table td {{
+    padding: 0.42rem 0.65rem;
+    border-bottom: 1px solid {t["border"]};
+    vertical-align: top;
+    word-break: break-word;
+    color: {t["text"]};
+    background: {t["panel"]};
+  }}
+  .triton-op-table tbody tr:nth-child(even) td {{
+    background: {t["panel_2"]};
+  }}
+  .triton-op-table td.pos {{ color: {t["green"]}; font-weight: 650; }}
+  .triton-op-table td.neg {{ color: {t["red"]}; font-weight: 650; }}
+  .triton-op-table td.flat {{ color: {t["muted"]}; font-weight: 650; }}
+  .triton-iso-banner {{
+    background: rgba(78, 161, 255, 0.10);
+    border: 1px solid {t["blue"]};
+    border-radius: 4px;
+    padding: 0.4rem 0.65rem;
+    color: {t["text"]};
+    font-size: 0.78rem;
+    margin: 0 0 0.65rem 0;
   }}
   .triton-safety-cell {{
     background: {t["panel"]};
@@ -399,6 +494,12 @@ def tone_for_status(value: Any) -> str:
         "CONNECTED",
         "SUCCESS",
         "STARTED",
+        "FILLED",
+        "PASSED",
+        "COMPLETE",
+        "COMPLETED",
+        "VALID",
+        "READY",
     ):
         return "ok"
     if s in (
@@ -410,10 +511,29 @@ def tone_for_status(value: Any) -> str:
         "AGING",
         "PIPELINE_DEGRADED",
         "PARTIAL",
+        "PARTIALLY_READY",
+        "PARTIALLY READY",
+        "PARTIALLY_FILLED",
+        "PENDING",
+        "SUBMITTED",
+        "ACCEPTED",
+        "STARTING",
+        "EXPIRING",
     ):
         return "warn"
-    if s in ("CRITICAL", "NOT BLOCKED", "INVALID", "FAILED", "ERROR"):
+    if s in (
+        "CRITICAL",
+        "NOT BLOCKED",
+        "INVALID",
+        "FAILED",
+        "ERROR",
+        "REJECTED",
+        "CANCELLED",
+        "CANCELED",
+    ):
         return "crit"
+    if s in ("PAPER", "PAPER_ONLY", "PAPER ONLY", "INFO"):
+        return "info"
     # Distinct stopped states stay distinct and non-healthy.
     if s in ("STOPPED", "FULLY_STOPPED", "NOT RUNNING", "DISCONNECTED"):
         return "info"
@@ -612,7 +732,9 @@ def present_current_runtime_action_message(
     stop_res = str(stop.get("result") or "")
     restart_res = str(restart.get("result") or "")
     start_msg = str(start.get("safe_message") or "")
-    start_claims_running = any(m in start_msg.lower() for m in _START_RUNNING_CLAIM_MARKERS) or start_res in (
+    start_claims_running = any(
+        m in start_msg.lower() for m in _START_RUNNING_CLAIM_MARKERS
+    ) or start_res in (
         "STARTED",
         "ALREADY_RUNNING",
     )
@@ -689,16 +811,17 @@ def present_current_runtime_action_message(
                 "level": (
                     "success"
                     if stop_res in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED")
-                    else "error"
-                    if stop_res
-                    else "info"
+                    else "error" if stop_res else "info"
                 ),
                 "source": "stop" if stop_res else "evidence",
                 "result": stop_res or overall or "UNKNOWN",
                 "message": (
                     CURRENT_STOPPED_RUNTIME_MESSAGE
                     if (cont_n == 0 and wd_n == 0)
-                    else (stop.get("safe_message") or "Runtime evidence no longer matches the Start success message.")
+                    else (
+                        stop.get("safe_message")
+                        or "Runtime evidence no longer matches the Start success message."
+                    )
                 ),
             }
             return {
@@ -723,10 +846,14 @@ def present_current_runtime_action_message(
 
     # Default: surface the most recent non-success-start latch without inventing runtime truth.
     if stop:
-        level = "success" if stop_res in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED") else (
-            "warning"
-            if stop_res in ("STOP_PARTIAL_COMPLETION", "STOP_TIMED_OUT", "STOP_IN_PROGRESS")
-            else "error"
+        level = (
+            "success"
+            if stop_res in ("STOP_COMPLETED", "STOP_ALREADY_STOPPED")
+            else (
+                "warning"
+                if stop_res in ("STOP_PARTIAL_COMPLETION", "STOP_TIMED_OUT", "STOP_IN_PROGRESS")
+                else "error"
+            )
         )
         if start:
             _hist("start", start)
@@ -744,9 +871,7 @@ def present_current_runtime_action_message(
         level = (
             "success"
             if start_res in ("STARTED", "ALREADY_RUNNING")
-            else "warning"
-            if start_res in ("PARTIAL_START", "START_IN_PROGRESS")
-            else "error"
+            else "warning" if start_res in ("PARTIAL_START", "START_IN_PROGRESS") else "error"
         )
         return {
             "current": {
@@ -775,11 +900,13 @@ def present_current_runtime_action_message(
                 "level": "info",
                 "source": "evidence",
                 "result": "STOPPED",
-                "message": CURRENT_STOPPED_RUNTIME_MESSAGE
-                if live_execution_blocked
-                else (
-                    "TRITON is stopped. The continuous loop and watchdog are not running, "
-                    "and their locks are released."
+                "message": (
+                    CURRENT_STOPPED_RUNTIME_MESSAGE
+                    if live_execution_blocked
+                    else (
+                        "TRITON is stopped. The continuous loop and watchdog are not running, "
+                        "and their locks are released."
+                    )
                 ),
             },
             "historical": historical,
@@ -806,12 +933,7 @@ def present_pipeline_heartbeat_label(
 ) -> Dict[str, Any]:
     """Presentation-only: pipeline heartbeat.json class (never a watchdog aggregate)."""
     source = str(evidence_path or "heartbeat.json")
-    if (
-        expected_after_hours_stop
-        and discovery_available
-        and process_count == 0
-        and not lock_held
-    ):
+    if expected_after_hours_stop and discovery_available and process_count == 0 and not lock_held:
         age_note = None
         try:
             if age_minutes is not None:
@@ -1278,3 +1400,28 @@ def summarize_attention_items(items: Sequence[Mapping[str, Any]]) -> Dict[str, A
         "before_next_market_open_count": groups.get("before_next_market_open_count", 0),
         "informational_count": groups.get("informational_count", 0),
     }
+
+
+def render_page_intro(title: str, description: str = "", *, kicker: str = "") -> None:
+    """Short page title plus at most one sentence of context."""
+    kick = f'<div class="triton-page-kicker">{escape(kicker)}</div>' if kicker else ""
+    desc = f'<div class="triton-page-desc">{escape(description)}</div>' if description else ""
+    st.markdown(
+        f'{kick}<div class="triton-page-title">{escape(title)}</div>{desc}',
+        unsafe_allow_html=True,
+    )
+
+
+def signed_html(value: Any, *, currency: bool = True) -> str:
+    from dashboard.display_labels import signed_text
+
+    text = signed_text(value, currency=currency)
+    if text == "Unavailable":
+        cls = "flat"
+    elif text.startswith("+"):
+        cls = "pos"
+    elif text.startswith("-"):
+        cls = "neg"
+    else:
+        cls = "flat"
+    return f'<span class="triton-signed {cls}">{escape(text)}</span>'

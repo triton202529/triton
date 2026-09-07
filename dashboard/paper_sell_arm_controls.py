@@ -42,10 +42,10 @@ COLOR_BLUE = "BLUE"
 COLOR_RED = "RED"
 
 _STATUS_STYLES = {
-    COLOR_GREEN: {"bg": "#d1e7dd", "fg": "#0f5132", "border": "#badbcc"},
-    COLOR_AMBER: {"bg": "#fff3cd", "fg": "#664d03", "border": "#ffecb5"},
-    COLOR_BLUE: {"bg": "#cfe2ff", "fg": "#084298", "border": "#b6d4fe"},
-    COLOR_RED: {"bg": "#f8d7da", "fg": "#842029", "border": "#f5c2c7"},
+    COLOR_GREEN: {"bg": "rgba(57, 201, 138, 0.12)", "fg": "#E7ECF3", "border": "#39C98A"},
+    COLOR_AMBER: {"bg": "rgba(242, 184, 75, 0.12)", "fg": "#E7ECF3", "border": "#F2B84B"},
+    COLOR_BLUE: {"bg": "rgba(78, 161, 255, 0.12)", "fg": "#E7ECF3", "border": "#4EA1FF"},
+    COLOR_RED: {"bg": "rgba(239, 100, 97, 0.12)", "fg": "#E7ECF3", "border": "#EF6461"},
 }
 
 
@@ -312,31 +312,28 @@ def render_paper_sell_arm_controls(
     visual = map_sell_arm_visual_status(pres)
     _render_status_box(visual)
 
-    st.caption(pres["no_submit_caption"])
-    st.write(f"**Packet freshness:** {pres['freshness']}")
-    st.write(f"Packet generated: {pres['generated_at'] or 'unavailable'}")
-    _render_slice_details(pres)
-    if not pres.get("slice_actions") and pres.get("actions"):
-        st.write(f"Reviewed SELL actions: {pres['action_count']}")
-        for row in pres.get("actions") or []:
-            st.write(f"- {row.get('symbol')} {row.get('action')} qty={row.get('quantity')}")
+    from dashboard.display_labels import display_status
 
+    st.caption(pres["no_submit_caption"])
     challenge_state = str(pres.get("challenge_state") or "ABSENT")
     authority_state = str(pres.get("authority_state") or "ABSENT")
-    st.write(f"**Challenge status:** {challenge_state}")
-    if pres.get("challenge_expires_at"):
-        st.write(f"Challenge expiry: {pres['challenge_expires_at']}")
-    st.write(f"**Authority status:** {authority_state}")
+    next_action = "Review packet details below."
+    if challenge_state == "OPEN":
+        next_action = "Type the confirmation phrase, then confirm."
+    elif visual.get("label"):
+        next_action = str(visual.get("reason") or "No additional action required.")
+    st.write(f"**Status:** {display_status(authority_state)}")
     if pres.get("authority_expires_at"):
-        st.write(f"Authority expiry: {pres['authority_expires_at']}")
-
-    st.write(f"**Current readiness packet:** {pres['freshness']}")
-    st.write(f"**Last authority:** {authority_state}")
+        st.write(f"**Expires:** {pres['authority_expires_at']}")
+    elif pres.get("challenge_expires_at"):
+        st.write(f"**Challenge expires:** {pres['challenge_expires_at']}")
+    st.write(f"**Next action:** {next_action}")
+    st.write(f"**Live execution:** blocked")
     if pres.get("last_dispatch_message"):
         st.write(f"**Last dispatch:** {pres.get('last_dispatch_message')}")
         vis = pres.get("last_dispatch_visibility") or {}
         if vis.get("dispatch_ids"):
-            st.caption("Last broker reconciliation is available on Orders and Activity.")
+            st.caption("Open Orders or Activity for execution status.")
 
     flash = st.session_state.get(SESSION_FLASH_KEY)
     if flash:
@@ -433,7 +430,16 @@ def render_paper_sell_arm_controls(
             st.session_state[SESSION_PHRASE_CLEAR_PENDING_KEY] = True
         _apply_result(result)
 
-    with st.expander("SELL readiness and authority details", expanded=False):
+    with st.expander("Packet contents", expanded=False):
+        st.write(f"Packet freshness: {display_status(pres.get('freshness'))}")
+        st.write(f"Packet generated: {pres['generated_at'] or 'unavailable'}")
+        st.write(f"Challenge status: {display_status(challenge_state)}")
+        _render_slice_details(pres)
+        if not pres.get("slice_actions") and pres.get("actions"):
+            st.write(f"Reviewed SELL actions: {pres['action_count']}")
+            for row in pres.get("actions") or []:
+                st.write(f"- {row.get('symbol')} {row.get('action')} qty={row.get('quantity')}")
+    with st.expander("Technical details", expanded=False):
         st.write(f"Plan hash: {pres.get('plan_hash') or 'n/a'}")
         st.write(f"Batch hash: {pres.get('batch_hash') or 'n/a'}")
         st.write(f"Resolved SQLite: {pres.get('resolved_db_path') or 'n/a'}")
