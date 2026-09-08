@@ -232,24 +232,28 @@ def _convert_schedule_to_ny(sched, pd, open_col: str, close_col: str):
 
 
 def _weak_clock_diagnostic(now_utc: datetime) -> Optional[bool]:
-    """Descriptive weekday/clock hint only. Must never grant execution eligibility."""
-    try:
-        from services.guard_auto import is_market_open_et
+    """Descriptive weekday/clock hint only. Must never grant execution eligibility.
 
-        return bool(is_market_open_et(now_utc))
+    Uses the private weekday clock so a calendar UNKNOWN path cannot recurse
+    into regular_session_state.
+    """
+    try:
+        from services.guard_auto import _weekday_clock_open_et
+
+        return bool(_weekday_clock_open_et(now_utc))
     except Exception:
         return None
 
 
-def _unknown_session_payload(payload: dict, reason: str, exc: Optional[BaseException], now_utc: datetime) -> dict:
+def _unknown_session_payload(
+    payload: dict, reason: str, exc: Optional[BaseException], now_utc: datetime
+) -> dict:
     payload["session_state"] = SESSION_UNKNOWN
     payload["regular_session_open"] = False
     payload["reason"] = reason
     payload["calendar_fallback"] = False
     payload["source"] = "services.market_calendar.regular_session_state"
-    payload["calendar_error"] = (
-        f"{type(exc).__name__}: {exc}" if exc is not None else None
-    )
+    payload["calendar_error"] = f"{type(exc).__name__}: {exc}" if exc is not None else None
     payload["weak_clock_diagnostic"] = _weak_clock_diagnostic(now_utc)
     return payload
 

@@ -1,4 +1,4 @@
-﻿# services/guard_auto.py
+# services/guard_auto.py
 # ----------------------
 # Auto-manages guard_snapshot.json
 # Rules:
@@ -51,20 +51,43 @@ def is_weekend_utc(now_utc: datetime) -> bool:
     return now_utc.weekday() >= 5  # 5=Sat, 6=Sun
 
 
-def is_market_open_et(now_utc: datetime) -> bool:
-    """
-    NYSE regular session approximation: 09:30–16:00 ET, Mon–Fri.
-    (No holiday calendar here; safe enough for auto-clear gating.)
-    """
+def _weekday_clock_open_et(now_utc: datetime) -> bool:
+    """Descriptive Mon–Fri 09:30–16:00 ET hint only. Must never grant OPEN."""
     if _ET is None:
         return False
-    now_et = now_utc.astimezone(_ET)
+    try:
+        if now_utc is None or getattr(now_utc, "tzinfo", None) is None:
+            return False
+        now_et = now_utc.astimezone(_ET)
+    except Exception:
+        return False
     if now_et.weekday() >= 5:
         return False
     h, m = now_et.hour, now_et.minute
     after_open = (h > 9) or (h == 9 and m >= 30)
     before_close = h < 16
     return after_open and before_close
+
+
+def is_market_open_et(now_utc: datetime) -> bool:
+    """True only when XNYS regular_session_state is explicitly OPEN.
+
+    CLOSED, UNKNOWN, missing calendar, malformed payload, naive/invalid
+    timestamps, and any exception fail closed (False). No weekday/clock fallback.
+    """
+    try:
+        if now_utc is None or not isinstance(now_utc, datetime):
+            return False
+        if now_utc.tzinfo is None:
+            return False
+        from services.market_calendar import SESSION_OPEN, regular_session_state
+
+        payload = regular_session_state(now=now_utc)
+        if not isinstance(payload, dict):
+            return False
+        return str(payload.get("session_state") or "").upper() == SESSION_OPEN
+    except Exception:
+        return False
 
 
 def read_guard_snapshot(path: Path) -> dict:

@@ -535,6 +535,8 @@ def classify_operator_session_context(
     now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     now_et = now_utc.astimezone(ET)
     market = dict(market_status or {})
+    session_reason = str(market.get("reason") or "") or None
+    session_state = str(market.get("session_state") or "").upper() or None
     if market_open is None:
         if "market_open" in market:
             market_open = market.get("market_open")
@@ -545,9 +547,26 @@ def classify_operator_session_context(
                 market_open = bool(is_market_open_et(now_utc))
             except Exception:
                 market_open = None
+        if not session_reason or not session_state:
+            try:
+                from services.market_calendar import regular_session_state
+
+                payload = regular_session_state(now=now_utc)
+                session_reason = session_reason or str(payload.get("reason") or "") or None
+                session_state = (
+                    session_state or str(payload.get("session_state") or "").upper() or None
+                )
+            except Exception:
+                pass
 
     status = str(market.get("status") or "").upper()
-    if market_open is None and status not in ("OPEN", "CLOSED"):
+    if session_state == "UNKNOWN" and market_open is not True and status != "OPEN":
+        phase = SESSION_UNKNOWN
+        market_open = False if market_open is True else market_open
+        if market_open is None:
+            market_open = False
+        status = "UNKNOWN"
+    elif market_open is None and status not in ("OPEN", "CLOSED"):
         phase = SESSION_UNKNOWN
     elif market_open is True or status == "OPEN":
         phase = SESSION_MARKET_OPEN
@@ -560,7 +579,13 @@ def classify_operator_session_context(
         t = now_et.time()
         open_t = time(9, 30)
         close_t = time(16, 0)
-        if session_day is False or now_et.weekday() >= 5:
+        if session_reason in {"holiday", "weekend"}:
+            phase = SESSION_NON_TRADING_DAY
+        elif session_reason == "pre_open":
+            phase = SESSION_PRE_MARKET
+        elif session_reason in {"regular_close", "early_close"}:
+            phase = SESSION_AFTER_HOURS
+        elif session_day is False or now_et.weekday() >= 5:
             phase = SESSION_NON_TRADING_DAY
         elif session_day is None and now_et.weekday() >= 5:
             phase = SESSION_NON_TRADING_DAY
@@ -579,10 +604,12 @@ def classify_operator_session_context(
         "session_phase": phase,
         "status": (
             status
-            if status in ("OPEN", "CLOSED")
+            if status in ("OPEN", "CLOSED", "UNKNOWN")
             else ("OPEN" if market_open else "CLOSED" if market_open is False else "UNKNOWN")
         ),
         "market_open": market_open,
+        "session_reason": session_reason,
+        "session_state": session_state,
         "as_of_et": now_et.strftime("%Y-%m-%d %H:%M:%S ET"),
         "as_of": now_utc.isoformat(),
         "source": "guard_auto.is_market_open_et+et_clock+nyse_calendar",
@@ -1650,10 +1677,13 @@ def build_operator_status(
             ),
         },
         "market": (
-            lambda _m: {
-                **_m,
-                **classify_operator_session_context(now=now, market_status=_m),
-            }
+            lambda _m: (
+                lambda _ctx: {
+                    **_m,
+                    **_ctx,
+                    "source": _m.get("source") or _ctx.get("source"),
+                }
+            )(classify_operator_session_context(now=now, market_status=_m))
         )(resolve_market_status(now=now)),
         "cycle": {
             "last_cycle_number": cycle_num,

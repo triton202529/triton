@@ -890,6 +890,7 @@ def evaluate_paper_entry_gates(
     verbose: bool = False,
     market_open_invocation_id: Optional[str] = None,
     results_root: Optional[Path] = None,
+    now: Optional[datetime] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     details: Dict[str, Any] = {"checks": {}, "candidates": []}
 
@@ -971,9 +972,10 @@ def evaluate_paper_entry_gates(
 
     from services.guard_auto import is_market_open_et
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = now if now is not None else datetime.now(timezone.utc)
     market_open = is_market_open_et(now_utc)
     details["checks"]["market_open"] = market_open
+    details["checks"]["market_open_source"] = "services.guard_auto.is_market_open_et"
     if not market_open:
         if verbose:
             print("[PAPER_AUTO_APPROVAL] status=REFUSED reason=MARKET_CLOSED", flush=True)

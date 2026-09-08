@@ -174,14 +174,35 @@ def resolve_market_status(
             "market_open": None,
             "source": "guard_auto.is_market_open_et",
             "as_of": now_utc.isoformat(),
+            "reason": None,
             "note": "Market session classification failed",
         }
+
+    reason = None
+    try:
+        from services.market_calendar import regular_session_state
+
+        payload = regular_session_state(now=now_utc)
+        reason = payload.get("reason")
+        state = str(payload.get("session_state") or "").upper()
+        if state == "UNKNOWN" and not is_open:
+            return {
+                "status": "UNKNOWN",
+                "market_open": False,
+                "source": "guard_auto.is_market_open_et",
+                "as_of": now_utc.isoformat(),
+                "reason": reason,
+                "note": "US equities session (ET); informational only",
+            }
+    except Exception:
+        reason = None
 
     return {
         "status": "OPEN" if is_open else "CLOSED",
         "market_open": is_open,
         "source": "guard_auto.is_market_open_et",
         "as_of": now_utc.isoformat(),
+        "reason": reason,
         "note": "US equities session (ET); informational only",
     }
 

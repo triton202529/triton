@@ -329,6 +329,8 @@ def _duplicate_checks(symbols: Sequence[str]) -> Tuple[bool, str, Dict[str, str]
 
 def _validate_auto_approval_gates(
     symbols: Sequence[str],
+    *,
+    now: Optional[datetime] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     checks: Dict[str, Any] = {"symbols": _norm_symbols(symbols)}
 
@@ -346,9 +348,11 @@ def _validate_auto_approval_gates(
 
     from services.guard_auto import is_market_open_et
 
-    market_open = is_market_open_et(datetime.now(timezone.utc))
+    clock = now if now is not None else datetime.now(timezone.utc)
+    market_open = is_market_open_et(clock)
     checks["market_open"] = market_open
     checks["market_status"] = "OPEN" if market_open else "CLOSED"
+    checks["market_open_source"] = "services.guard_auto.is_market_open_et"
     if not market_open:
         return False, "MARKET_CLOSED", checks
 
