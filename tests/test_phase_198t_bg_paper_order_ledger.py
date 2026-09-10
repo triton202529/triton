@@ -17,6 +17,7 @@ from services.paper_order_ledger import (
     EVENT_ACTION_SUBMITTED,
     EVENT_ORDER_TERMINAL_RECONCILED,
     LEDGER_RELATIVE,
+    LOCK_RELATIVE,
     PaperOrderLedgerError,
     SCHEMA_VERSION,
     append_events,
@@ -38,6 +39,8 @@ from services.paper_order_ledger import (
 
 ROOT = Path(__file__).resolve().parents[1]
 BF = Path(r"C:\Users\akimw\AppData\Local\Temp\phase_198T_BF_20260904_195631")
+
+pytestmark = pytest.mark.bn2a_isolation
 
 
 @pytest.fixture
@@ -69,13 +72,42 @@ def _clip(symbol: str, qty: float, outcome: str = "UNCHANGED", **extra) -> dict:
     return row
 
 
-def test_import_has_no_production_side_effects():
+def _path_meta(path: Path):
+    if not path.exists():
+        return None
+    st = path.stat()
+    return (st.st_mtime_ns, st.st_size)
+
+
+def test_import_has_no_production_side_effects(tmp_root: Path):
+    """Import must not create a ledger. Assert against an empty TEMP root.
+
+    Production already contains paper_order_events.jsonl from live paper
+    operation. That environmental fact is not an import side effect, so the
+    'ledger is absent' assertion uses the injectable TEMP fixture instead of
+    the production path. Production mtime/size must stay unchanged.
+    """
     import services.paper_order_ledger as mod
 
+    isolated = tmp_root
+    assert not (isolated / LEDGER_RELATIVE).is_file()
+    assert not (isolated / LOCK_RELATIVE).is_file()
+
     production = Path(r"C:\Users\akimw\triton")
-    assert not (production / LEDGER_RELATIVE).is_file()
-    before = (ROOT / LEDGER_RELATIVE).is_file()
-    assert (ROOT / LEDGER_RELATIVE).is_file() is before
+    prod_ledger = production / LEDGER_RELATIVE
+    prod_lock = production / LOCK_RELATIVE
+    before_ledger = _path_meta(prod_ledger)
+    before_lock = _path_meta(prod_lock)
+
+    assert mod.ledger_path(isolated) == isolated / LEDGER_RELATIVE
+    assert mod.lock_path(isolated) == isolated / LOCK_RELATIVE
+    assert not (isolated / LEDGER_RELATIVE).is_file()
+    assert not (isolated / LOCK_RELATIVE).is_file()
+
+    before = (isolated / LEDGER_RELATIVE).is_file()
+    assert (isolated / LEDGER_RELATIVE).is_file() is before
+    assert _path_meta(prod_ledger) == before_ledger
+    assert _path_meta(prod_lock) == before_lock
     assert "alpaca" not in Path(mod.__file__).read_text(encoding="utf-8").lower()
 
 
