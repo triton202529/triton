@@ -27,6 +27,7 @@ from services.performance_accounting import (
     reduce_events,
     reduce_ledger,
 )
+from tests.isolation_guard import ISO as GUARDED_ISO
 from tests.isolation_guard import ProductionIsolationError
 from tests.test_phase_198t_bn2a_performance_accounting import ISO, PROD, _close, _cutover, _fill
 
@@ -311,7 +312,7 @@ def test_account_identifiers_remain_redacted():
 def test_guards_block_production_artifacts_and_broker():
     ledger = PROD / "data" / "results" / "paper_order_events.jsonl"
     sqlite = PROD / "data" / "live" / "paper_sell_arm.sqlite3"
-    iso_ledger = ISO / EVENTS_RELATIVE
+    iso_ledger = GUARDED_ISO / EVENTS_RELATIVE
     with pytest.raises(ProductionIsolationError):
         ledger.open("r", encoding="utf-8")
     with pytest.raises(ProductionIsolationError):

@@ -1,10 +1,11 @@
-"""Phase 198T-BN2B/BN2C — isolated performance evidence collector + publication.
+"""Phase 198T-BN2B/BN2C/BN2F — isolated performance evidence collector + publication.
 
 Standalone observer around services.performance_accounting. Import creates no
 files and contacts no broker. BUY/SELL decision and submission paths are never
 imported or invoked. All readers and output roots are injected. Default mode
-is dry-run (zero writes). Publication is production-capable but exercised only
-against injectable TEMP fixtures with explicit confirm phrases.
+is dry-run (zero writes). Production writes are allowed only through
+--publish-cutover / --publish-session-close after the complete gate mints an
+in-memory publication authority.
 """
 
 from __future__ import annotations
@@ -20,6 +21,17 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence
 
+from services.performance_publication_authority import (
+    COMMAND_CUTOVER,
+    COMMAND_SESSION_CLOSE,
+    EMPTY_LEDGER_SHA256,
+    REQUIRED_BRANCH,
+    inspect_git_identity,
+    inspect_runtime_state,
+    is_real_production_path,
+    mint_publication_authority,
+    sha256_bytes,
+)
 from services.performance_accounting import (
     ACCOUNT_MODEL,
     EVENT_BENCHMARK_CLOSE,
@@ -46,8 +58,10 @@ from services.performance_accounting import (
     append_events,
     build_event,
     build_external_flow,
+    encode_ledger_suffix,
     identity_residual,
     load_events,
+    plan_ledger_writes,
     publish_ledger_atomic,
     q_cash,
     redact_account_ids,
@@ -59,6 +73,7 @@ from services.performance_accounting import (
 
 COLLECTOR_SCHEMA = "198T-BN2B-PERFORMANCE-EVIDENCE-COLLECTOR-1"
 PUBLICATION_SCHEMA = "198T-BN2C-PROTECTED-ACCOUNTING-PUBLICATION-1"
+PRODUCTION_PUBLICATION_SCHEMA = "198T-BN2F-PRODUCTION-PUBLICATION-GATE-1"
 CANONICAL_EVENTS_RELATIVE = EVENTS_RELATIVE
 CANONICAL_LOCK_RELATIVE = LOCK_RELATIVE
 CERTIFIED_CLOSE_REASONS = frozenset({"regular_close", "early_close"})
@@ -142,6 +157,16 @@ class PublicationContext:
     broker_adapter: Any = field(default_factory=GetOnlyBrokerAdapter)
     fail_hook: Optional[Callable[[str, Path, bytes], None]] = None
     confirm: str = ""
+    production_root: Optional[Path] = None
+    expected_git_head: Optional[str] = None
+    git_identity: Optional[Mapping[str, Any]] = None
+    runtime_state: Optional[Mapping[str, Any]] = None
+    authority_ttl_seconds: float = 120.0
+    now: Optional[datetime] = None
+    git_inspector: Optional[Callable[..., Mapping[str, Any]]] = None
+    runtime_inspector: Optional[Callable[..., Mapping[str, Any]]] = None
+    session_inspector: Optional[Callable[..., Mapping[str, Any]]] = None
+    evidence_inspector: Optional[Callable[..., Mapping[str, Any]]] = None
 
 
 def redact_payload(value: Any) -> Any:
@@ -382,9 +407,36 @@ class PerformanceEvidenceCollector:
         source: EvidenceSource,
         session_gate: SessionGate,
         persist: bool = False,
+        allow_production_destination: bool = False,
+        production_root: Optional[Path] = None,
     ) -> None:
-        self.events_path = assert_isolated_path(Path(events_path), role="events_path")
-        self.lock_path = assert_isolated_path(Path(lock_path), role="lock_path")
+        if allow_production_destination:
+            if persist:
+                raise CollectorError("production_persist_forbidden")
+            if production_root is None:
+                raise CollectorError("production_root_required")
+            root = _resolve(Path(production_root))
+            ev = _resolve(Path(events_path))
+            lk = _resolve(Path(lock_path))
+            if (
+                ev.name.lower() == PORTFOLIO_HISTORY_NAME
+                or lk.name.lower() == PORTFOLIO_HISTORY_NAME
+            ):
+                raise CollectorError("portfolio_history_rewrite_forbidden")
+            if not (_under(ev, root) and _under(lk, root)):
+                raise CollectorError(
+                    "destination_not_under_production_root",
+                    {"events_path": str(ev), "lock_path": str(lk), "production_root": str(root)},
+                )
+            self.events_path = ev
+            self.lock_path = lk
+            self.production_root = root
+            self.allow_production_destination = True
+        else:
+            self.events_path = assert_isolated_path(Path(events_path), role="events_path")
+            self.lock_path = assert_isolated_path(Path(lock_path), role="lock_path")
+            self.production_root = None
+            self.allow_production_destination = False
         self.source = source
         self.session_gate = session_gate
         self.persist = bool(persist)
@@ -854,6 +906,138 @@ class PerformanceEvidenceCollector:
         if context.freshness_lock_present:
             raise CollectorError("freshness_lock_present")
 
+    def _destination_is_production(self, context: PublicationContext) -> bool:
+        if self.allow_production_destination:
+            return True
+        if context.production_root is not None and _under(
+            self.events_path, Path(context.production_root)
+        ):
+            return True
+        return is_real_production_path(self.events_path) or is_real_production_path(self.lock_path)
+
+    def _assert_xnys_closed(self, session: Mapping[str, Any]) -> None:
+        calendar = str(session.get("calendar") or "").upper()
+        if calendar != "XNYS":
+            raise CollectorError("session_not_xnys", {"calendar": session.get("calendar")})
+
+    def _assert_production_publication_gates(
+        self,
+        context: PublicationContext,
+        session: Mapping[str, Any],
+    ) -> Path:
+        root = context.production_root or self.production_root
+        if root is None:
+            raise CollectorError("production_root_required")
+        root = _resolve(Path(root))
+        if not (_under(self.events_path, root) and _under(self.lock_path, root)):
+            raise CollectorError(
+                "destination_not_under_production_root",
+                {"production_root": str(root)},
+            )
+        expected_head = str(context.expected_git_head or "")
+        if not expected_head:
+            raise CollectorError("expected_git_head_required")
+        identity = (
+            dict(context.git_identity)
+            if context.git_identity is not None
+            else inspect_git_identity(root)
+        )
+        if str(identity.get("head") or "") != expected_head:
+            raise CollectorError(
+                "git_head_mismatch",
+                {"expected": expected_head, "actual": identity.get("head")},
+            )
+        if str(identity.get("branch") or "") != REQUIRED_BRANCH:
+            raise CollectorError(
+                "git_branch_not_main",
+                {"branch": identity.get("branch")},
+            )
+        if identity.get("index_empty") is not True:
+            raise CollectorError("git_index_not_empty")
+        state = (
+            dict(context.runtime_state)
+            if context.runtime_state is not None
+            else inspect_runtime_state(root)
+        )
+        if not state.get("runtime_stopped"):
+            raise CollectorError("runtime_not_stopped")
+        if not state.get("watchdog_stopped"):
+            raise CollectorError("watchdog_not_stopped")
+        if not state.get("streamlit_stopped"):
+            raise CollectorError("streamlit_not_stopped")
+        if not state.get("ports_closed"):
+            raise CollectorError("production_ports_open")
+        writers_idle = state.get("freshness_writer_idle", context.writers_idle)
+        if not writers_idle or not context.writers_idle:
+            raise CollectorError("writers_active")
+        lock_present = state.get("freshness_lock_present", context.freshness_lock_present)
+        if lock_present or context.freshness_lock_present:
+            raise CollectorError("freshness_lock_present")
+        self._assert_xnys_closed(session)
+        return root
+
+    def _mint_authority_if_required(
+        self,
+        context: PublicationContext,
+        session: Mapping[str, Any],
+        *,
+        events: Sequence[Mapping[str, Any]],
+        mode: str,
+        command: str,
+        confirm: str,
+        evidence_hashes: Mapping[str, str],
+    ) -> tuple[Any, Optional[Path], Optional[str]]:
+        if not self._destination_is_production(context):
+            return None, None, None
+        root = self._assert_production_publication_gates(context, session)
+        if mode == "create":
+            prior = b""
+            existing: List[Dict[str, Any]] = []
+        elif self.events_path.is_file():
+            prior = self.events_path.read_bytes()
+            existing = self._existing()
+        else:
+            prior = b""
+            existing = []
+        planned, _skipped = plan_ledger_writes(events, existing)
+        payload = prior + encode_ledger_suffix(planned)
+        identity = (
+            dict(context.git_identity)
+            if context.git_identity is not None
+            else inspect_git_identity(root)
+        )
+        runtime = (
+            dict(context.runtime_state)
+            if context.runtime_state is not None
+            else inspect_runtime_state(root)
+        )
+        authority = mint_publication_authority(
+            resolved_root=root,
+            expected_git_head=str(context.expected_git_head),
+            events_path=self.events_path,
+            lock_path=self.lock_path,
+            command=command,
+            publication_mode=mode,
+            confirm_phrase=confirm,
+            payload_sha256=sha256_bytes(payload),
+            existing_ledger_sha256=sha256_bytes(prior) if prior else EMPTY_LEDGER_SHA256,
+            existing_ledger_nbytes=len(prior),
+            required_prefix=prior if mode == "append" else b"",
+            account_mode=str(context.mode or "PAPER_ONLY"),
+            live_execution_permitted=bool(context.live_execution_permitted),
+            git_identity=identity,
+            runtime_state=runtime,
+            session=dict(session),
+            evidence_hashes=dict(evidence_hashes),
+            git_inspector=context.git_inspector,
+            runtime_inspector=context.runtime_inspector,
+            session_inspector=context.session_inspector,
+            evidence_inspector=context.evidence_inspector,
+            ttl_seconds=context.authority_ttl_seconds,
+            now=context.now,
+        )
+        return authority, root, str(context.expected_git_head)
+
     def _stable_publication_hashes(self) -> Mapping[str, str]:
         first = dict(self.source.source_hashes())
         second = dict(self.source.source_hashes())
@@ -962,12 +1146,27 @@ class PerformanceEvidenceCollector:
         hashes = self._assert_complete_publication_evidence(session_date)
         leverage = classify_leverage(snap)
         event = self._published_cutover_event(snap, leverage_class=leverage, source_hashes=hashes)
+        authority, prod_root, expected_head = self._mint_authority_if_required(
+            ctx,
+            session,
+            events=[event],
+            mode="create",
+            command=COMMAND_CUTOVER,
+            confirm=confirm,
+            evidence_hashes=hashes,
+        )
         result = publish_ledger_atomic(
             [event],
             events_path=self.events_path,
             lock_path=self.lock_path,
             mode="create",
             fail_hook=ctx.fail_hook,
+            publication_authority=authority,
+            production_root=prod_root,
+            expected_git_head=expected_head,
+            now=ctx.now,
+            publication_command=COMMAND_CUTOVER,
+            confirm=confirm,
         )
         report = self._report(
             mode="publish-cutover",
@@ -979,7 +1178,9 @@ class PerformanceEvidenceCollector:
             publishing=True,
             source_hashes=hashes,
             extra={
-                "publication_schema": PUBLICATION_SCHEMA,
+                "publication_schema": (
+                    PRODUCTION_PUBLICATION_SCHEMA if authority is not None else PUBLICATION_SCHEMA
+                ),
                 "leverage_class": leverage,
                 "opening_checkpoint": True,
                 "opening_basis_only": True,
@@ -990,6 +1191,7 @@ class PerformanceEvidenceCollector:
                 "measurement_boundary": "earliest_future",
                 "payload_hash": result.get("payload_hash"),
                 "buying_power": snap.get("buying_power") or UNAVAILABLE,
+                "publication_authority_issued": authority is not None,
             },
         )
         report["writes_performed"] = bool(result.get("writes_performed"))
@@ -1132,12 +1334,27 @@ class PerformanceEvidenceCollector:
             )
             report["writes_performed"] = False
             return report
+        authority, prod_root, expected_head = self._mint_authority_if_required(
+            ctx,
+            session,
+            events=events,
+            mode="append",
+            command=COMMAND_SESSION_CLOSE,
+            confirm=confirm,
+            evidence_hashes=hashes,
+        )
         result = publish_ledger_atomic(
             events,
             events_path=self.events_path,
             lock_path=self.lock_path,
             mode="append",
             fail_hook=ctx.fail_hook,
+            publication_authority=authority,
+            production_root=prod_root,
+            expected_git_head=expected_head,
+            now=ctx.now,
+            publication_command=COMMAND_SESSION_CLOSE,
+            confirm=confirm,
         )
         report = self._report(
             mode="publish-session-close",
@@ -1149,11 +1366,14 @@ class PerformanceEvidenceCollector:
             publishing=True,
             source_hashes=hashes,
             extra={
-                "publication_schema": PUBLICATION_SCHEMA,
+                "publication_schema": (
+                    PRODUCTION_PUBLICATION_SCHEMA if authority is not None else PUBLICATION_SCHEMA
+                ),
                 "leverage_class": leverage,
                 "close_kind": close_kind,
                 "session_date": session_date,
                 "payload_hash": result.get("payload_hash"),
+                "publication_authority_issued": authority is not None,
             },
         )
         report["writes_performed"] = bool(result.get("writes_performed"))
@@ -1233,6 +1453,8 @@ def _cli_publication_context(args: argparse.Namespace) -> PublicationContext:
         can_mutate_orders=False,
         writers_idle=True,
         freshness_lock_present=False,
+        production_root=Path(args.production_root) if args.production_root else None,
+        expected_git_head=str(args.expected_git_head or "") or None,
     )
 
 
@@ -1281,13 +1503,19 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     parser.add_argument("--confirm", default="")
     parser.add_argument("--account-mode", default="PAPER_ONLY")
     parser.add_argument("--live-execution-permitted", action="store_true")
+    parser.add_argument("--production-root")
+    parser.add_argument("--expected-git-head", default="")
     args = parser.parse_args(argv)
 
     events_path = Path(args.events_path)
     lock_path = Path(args.lock_path)
+    production_publish = bool(
+        (args.publish_cutover or args.publish_session_close) and args.production_root
+    )
     try:
-        assert_isolated_path(events_path, role="events_path")
-        assert_isolated_path(lock_path, role="lock_path")
+        if not production_publish:
+            assert_isolated_path(events_path, role="events_path")
+            assert_isolated_path(lock_path, role="lock_path")
         if args.validate_ledger:
             collector = PerformanceEvidenceCollector(
                 events_path=events_path,
@@ -1365,6 +1593,8 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
                 source=source,
                 session_gate=gate,
                 persist=False,
+                allow_production_destination=production_publish,
+                production_root=Path(args.production_root) if production_publish else None,
             )
             context = _cli_publication_context(args)
             if args.publish_cutover:

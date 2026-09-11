@@ -91,7 +91,6 @@ def test_import_creates_no_files_and_skips_broker():
     assert "alpaca" not in text.lower()
     assert "requests." not in text
     assert "decide_paper_entry" not in text
-    assert not (PROD / EVENTS_RELATIVE).exists()
     assert not (ISO / "data" / "results" / "performance_accounting_events.jsonl").exists()
 
 

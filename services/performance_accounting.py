@@ -24,6 +24,16 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
+from services.performance_publication_authority import (
+    COMMAND_CUTOVER,
+    COMMAND_SESSION_CLOSE,
+    PublicationAuthorityError,
+    destination_requires_authority,
+    preflight_publication_authority,
+    require_publication_authority,
+    sha256_bytes,
+)
+
 SCHEMA_VERSION = "198T-BN2A-PERFORMANCE-ACCOUNTING-1"
 COST_BASIS_METHOD = "MOVING_WEIGHTED_AVERAGE"
 TIMEZONE_NAME = "America/New_York"
@@ -667,6 +677,37 @@ def append_events(
     }
 
 
+def encode_ledger_suffix(events: Sequence[Mapping[str, Any]]) -> bytes:
+    return "".join(_dump(dict(item)) + "\n" for item in events).encode("utf-8")
+
+
+def plan_ledger_writes(
+    events: Sequence[Mapping[str, Any]],
+    existing: Sequence[Mapping[str, Any]],
+) -> Tuple[List[Dict[str, Any]], int]:
+    by_id = {str(item["event_id"]): item for item in existing}
+    by_key = {str(item["logical_key"]): item for item in existing}
+    to_write: List[Dict[str, Any]] = []
+    skipped = 0
+    for raw in events:
+        rec = dict(raw)
+        validate_event(rec)
+        eid = str(rec["event_id"])
+        key = str(rec["logical_key"])
+        if eid in by_id or key in by_key:
+            if key in by_key and eid not in by_id and _dump(by_key[key]) != _dump(rec):
+                raise PerformanceAccountingError(
+                    "duplicate_logical_key_conflict",
+                    {"logical_key": key, "event_id": eid},
+                )
+            skipped += 1
+            continue
+        by_id[eid] = rec
+        by_key[key] = rec
+        to_write.append(rec)
+    return to_write, skipped
+
+
 def _is_known_accounting_ledger(events: Sequence[Mapping[str, Any]]) -> bool:
     if not events:
         return False
@@ -682,6 +723,12 @@ def publish_ledger_atomic(
     lock_path: Path,
     mode: str,
     fail_hook: Optional[Callable[[str, Path, bytes], None]] = None,
+    publication_authority: Any = None,
+    production_root: Optional[Path] = None,
+    expected_git_head: Optional[str] = None,
+    now: Optional[datetime] = None,
+    publication_command: Optional[str] = None,
+    confirm: str = "",
 ) -> Dict[str, Any]:
     """Create-only or append-only durable publication.
 
@@ -690,11 +737,66 @@ def publish_ledger_atomic(
     an existing ledger unchanged and never creates a destination on first
     publication. Unknown existing ledgers are refused — never overwritten,
     truncated, repaired, or merged.
+
+    Destinations under production require a collector-minted in-memory
+    publication authority. TEMP destinations keep working without one.
+    Authority bindings are verified before lock, directory, temp-file, or
+    writable opens.
     """
     if mode not in {"create", "append"}:
         raise PerformanceAccountingError("publication_mode_invalid", {"mode": mode})
     dest = Path(events_path)
     lock = Path(lock_path)
+    command = publication_command or (
+        COMMAND_CUTOVER if mode == "create" else COMMAND_SESSION_CLOSE
+    )
+    protected = destination_requires_authority(dest, lock, production_root)
+    if protected or publication_authority is not None:
+        if publication_authority is None or production_root is None:
+            raise PerformanceAccountingError(
+                "missing_publication_authority",
+                {"reason": "production_root_or_authority_missing"},
+            )
+        try:
+            preflight_publication_authority(
+                publication_authority,
+                events_path=dest,
+                lock_path=lock,
+                production_root=production_root,
+                expected_git_head=str(expected_git_head or ""),
+                publication_mode=mode,
+                command=command,
+                confirm_phrase=str(confirm or ""),
+                now=now,
+            )
+        except PublicationAuthorityError as exc:
+            raise PerformanceAccountingError(exc.reason, exc.details) from exc
+        prior = dest.read_bytes() if dest.is_file() else b""
+        if prior:
+            try:
+                existing_preview = load_events(dest)
+            except PerformanceAccountingError:
+                existing_preview = []
+        else:
+            existing_preview = []
+        planned_records, _skipped = plan_ledger_writes(events, existing_preview)
+        planned_payload = prior + encode_ledger_suffix(planned_records)
+        try:
+            require_publication_authority(
+                publication_authority,
+                events_path=dest,
+                lock_path=lock,
+                production_root=production_root,
+                expected_git_head=str(expected_git_head or ""),
+                publication_mode=mode,
+                command=command,
+                confirm_phrase=str(confirm or ""),
+                planned_payload=planned_payload,
+                prior=prior,
+                now=now,
+            )
+        except PublicationAuthorityError as exc:
+            raise PerformanceAccountingError(exc.reason, exc.details) from exc
     tmp = dest.with_name(dest.name + ".tmp")
     with _exclusive_lock(lock):
         existed = dest.is_file()
@@ -716,26 +818,7 @@ def publish_ledger_atomic(
             if not _is_known_accounting_ledger(existing):
                 raise PerformanceAccountingError("unknown_existing_ledger", {"path": str(dest)})
             prior = dest.read_bytes()
-        by_id = {str(item["event_id"]): item for item in existing}
-        by_key = {str(item["logical_key"]): item for item in existing}
-        to_write: List[Dict[str, Any]] = []
-        skipped = 0
-        for raw in events:
-            rec = dict(raw)
-            validate_event(rec)
-            eid = str(rec["event_id"])
-            key = str(rec["logical_key"])
-            if eid in by_id or key in by_key:
-                if key in by_key and eid not in by_id and _dump(by_key[key]) != _dump(rec):
-                    raise PerformanceAccountingError(
-                        "duplicate_logical_key_conflict",
-                        {"logical_key": key, "event_id": eid},
-                    )
-                skipped += 1
-                continue
-            by_id[eid] = rec
-            by_key[key] = rec
-            to_write.append(rec)
+        to_write, skipped = plan_ledger_writes(events, existing)
         if mode == "create":
             if len(to_write) != 1 or to_write[0].get("event_type") != EVENT_CUTOVER:
                 raise PerformanceAccountingError(
@@ -750,9 +833,8 @@ def publish_ledger_atomic(
                 "writes_performed": False,
                 "path": str(dest),
             }
-        suffix = "".join(_dump(item) + "\n" for item in to_write).encode("utf-8")
-        payload = prior + suffix
-        expected_hash = hashlib.sha256(payload).hexdigest()
+        payload = prior + encode_ledger_suffix(to_write)
+        expected_hash = sha256_bytes(payload)
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             with tmp.open("wb") as handle:

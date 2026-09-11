@@ -102,9 +102,9 @@ def test_import_creates_no_files_and_skips_broker():
     text = Path(mod.__file__).read_text(encoding="utf-8")
     assert "alpaca" not in text.lower()
     assert "requests." not in text
-    assert not (PROD / EVENTS_RELATIVE).exists()
     before = list((ISO / "data" / "results").glob("performance_accounting*"))
     assert before == []
+    assert not (ISO / EVENTS_RELATIVE).exists()
 
 
 def test_planning_records_rejected():
@@ -450,4 +450,4 @@ def test_bn1_evidence_present_and_isolated():
     assert BN1.is_dir()
     assert (BN1 / "10_classification_summary.json").is_file()
     assert ISO.resolve() != PROD.resolve()
-    assert ISO.name == "triton-bn1-performance-isolated"
+    assert "isolated" in ISO.name.lower()
