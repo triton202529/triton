@@ -1,4 +1,4 @@
-"""Phase 198T-BN2B/BN2C/BN2F — isolated performance evidence collector + publication.
+"""Phase 198T-BN2B/BN2C/BN2F/BN2H1 — isolated performance evidence collector + publication.
 
 Standalone observer around services.performance_accounting. Import creates no
 files and contacts no broker. BUY/SELL decision and submission paths are never
@@ -953,7 +953,43 @@ class PerformanceEvidenceCollector:
                 {"branch": identity.get("branch")},
             )
         if identity.get("index_empty") is not True:
-            raise CollectorError("git_index_not_empty")
+            raise CollectorError(
+                "git_index_not_empty",
+                {
+                    "tolerated_paths": identity.get("tolerated_paths") or [],
+                    "rejected_paths": identity.get("rejected_paths") or [],
+                },
+            )
+        if "git_identity_valid" in identity:
+            details = {
+                "tolerated_paths": identity.get("tolerated_paths") or [],
+                "rejected_paths": identity.get("rejected_paths") or [],
+            }
+            reason = str(identity.get("failure_reason") or "")
+            if reason == "git_status_conflict":
+                raise CollectorError("git_status_conflict", details)
+            if reason == "git_status_unparseable":
+                raise CollectorError("git_status_unparseable", details)
+            if identity.get("tracked_worktree_safe") is not True:
+                raise CollectorError("git_tracked_code_dirty", details)
+            if identity.get("untracked_worktree_safe") is not True:
+                raise CollectorError(
+                    (
+                        reason
+                        if reason
+                        in {
+                            "git_untracked_code_present",
+                            "git_untracked_test_present",
+                            "git_worktree_artifact_unexplained",
+                        }
+                        else "git_worktree_artifact_unexplained"
+                    ),
+                    details,
+                )
+            if identity.get("publication_code_matches_head") is not True:
+                raise CollectorError("git_tracked_code_dirty", details)
+            if identity.get("git_identity_valid") is not True:
+                raise CollectorError(reason or "git_worktree_artifact_unexplained", details)
         state = (
             dict(context.runtime_state)
             if context.runtime_state is not None

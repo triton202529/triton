@@ -1,4 +1,4 @@
-"""In-process production publication authority for Phase 198T-BN2F2.
+"""In-process production publication authority for Phase 198T-BN2F2/BN2H1.
 
 Minted only after the collector's complete gate passes. Never written to disk.
 This is an in-process capability that protects accidental or unauthorized
@@ -18,7 +18,7 @@ import subprocess
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 PRODUCTION_ROOT = Path(r"C:\Users\akimw\triton").resolve()
 EXPECTED_PRODUCTION_HEAD = "18c790469c2f6f46d549fd0c42eb5df33df47ab9"
@@ -382,6 +382,8 @@ def require_publication_authority(
             raise PublicationAuthorityError("git_branch_changed")
         if fresh_git.get("index_empty") is not True:
             raise PublicationAuthorityError("git_index_changed")
+        if "git_identity_valid" in fresh_git and fresh_git.get("git_identity_valid") is not True:
+            raise PublicationAuthorityError("git_identity_changed")
         _reconfirm_mapping(
             authority.runtime_state,
             authority.runtime_inspector,
@@ -420,27 +422,422 @@ def require_publication_authority(
     return authority
 
 
-def inspect_git_identity(root: Path) -> Dict[str, Any]:
-    def git(*args: str) -> str:
-        return subprocess.check_output(
-            ["git", "-C", str(root), *args],
-            text=True,
-            stderr=subprocess.STDOUT,
-        ).strip()
+CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA = "KNOWN_MUTABLE_OPERATIONAL_DATA"
+CLASS_KNOWN_ACCOUNTING_LEDGER_OR_LOCK = "KNOWN_ACCOUNTING_LEDGER_OR_LOCK"
+CLASS_KNOWN_PAPER_ORDER_LEDGER_OR_LOCK = "KNOWN_PAPER_ORDER_LEDGER_OR_LOCK"
+CLASS_KNOWN_TEMP_EVIDENCE = "KNOWN_TEMP_EVIDENCE"
+CLASS_TRACKED_CODE_OR_CONFIG_CHANGE = "TRACKED_CODE_OR_CONFIG_CHANGE"
+CLASS_UNTRACKED_CODE_OR_CONFIG = "UNTRACKED_CODE_OR_CONFIG"
+CLASS_UNTRACKED_TEST = "UNTRACKED_TEST"
+CLASS_UNEXPLAINED = "UNEXPLAINED"
+CLASS_OTHER_NONEXECUTABLE_ARTIFACT = "OTHER_NONEXECUTABLE_ARTIFACT"
 
+REASON_INDEX_NOT_EMPTY = "git_index_not_empty"
+REASON_TRACKED_CODE_DIRTY = "git_tracked_code_dirty"
+REASON_UNTRACKED_CODE = "git_untracked_code_present"
+REASON_UNTRACKED_TEST = "git_untracked_test_present"
+REASON_STATUS_CONFLICT = "git_status_conflict"
+REASON_STATUS_UNPARSEABLE = "git_status_unparseable"
+REASON_ARTIFACT_UNEXPLAINED = "git_worktree_artifact_unexplained"
+
+_PROTECTED_CODE_PREFIXES = (
+    "services/",
+    "scripts/",
+    "dashboard/",
+    "pages/",
+    "plugins/",
+    "hooks/",
+)
+_PROTECTED_ROOT_FILES = frozenset(
+    {
+        "view_results.py",
+        "conftest.py",
+        "pytest.ini",
+        ".pre-commit-config.yaml",
+        ".gitattributes",
+        "pyproject.toml",
+        "setup.cfg",
+    }
+)
+_PUBLICATION_CODE_RELATIVE = (
+    "services/performance_publication_authority.py",
+    "services/performance_evidence_collector.py",
+    "services/performance_accounting.py",
+)
+_PUBLICATION_BASENAMES = frozenset(Path(p).name for p in _PUBLICATION_CODE_RELATIVE)
+_ACCOUNTING_RELATIVE = frozenset(
+    {
+        "data/results/performance_accounting_events.jsonl",
+        "data/results/performance_accounting_events.lock",
+    }
+)
+_PAPER_LEDGER_RELATIVE = frozenset(
+    {
+        "data/results/paper_order_events.jsonl",
+        "data/results/paper_order_events.lock",
+    }
+)
+_EXPLICIT_OPERATIONAL_FILES = frozenset(
+    {
+        "data/governance/execution_gate_authority_matrix.json",
+        "data/governance/execution_gate_decisions.json",
+        "data/governance/execution_gate_evidence.json",
+        "data/governance/symbol_hydration_quarantine.json",
+        "data/governance/paper_sell_arm_authority.json",
+        "data/governance/independent_dispatch_bindings.json",
+        "data/governance/paper_sell_arm_audit.jsonl",
+        "data/governance/paper_sell_arm_consumption.json",
+        "data/governance/paper_sell_arm_dispatch.lock",
+        "data/governance/paper_sell_arm_dispatch_intent.json",
+        "data/governance/paper_sell_arm_dispatch_permit.json",
+        "data/governance/paper_sell_arm_state.json",
+        "data/governance/paper_sell_confirmation_challenge.json",
+        "data/results/exit_logic_refinement_validation.json",
+        "data/results/execution_readiness.json",
+        "data/results/defensive_exit_approval_readiness.json",
+        "data/results/positions_snapshot.csv",
+        "data/results/open_orders_snapshot.csv",
+        "data/results/open_orders_snapshot.json",
+        "data/results/broker_snapshot_paper.json",
+        "data/results/portfolio_history.csv",
+        "data/results/guard_snapshot.json",
+        "data/raw/SPY.csv",
+        "data/raw/QQQ.csv",
+        "data/live/paper_arm_confirm.json",
+        "data/live/live_armed.json",
+        "data/live/paper_sell_arm.sqlite3",
+        "data/live/paper_sell_arm.sqlite3-wal",
+        "data/live/paper_sell_arm.sqlite3-shm",
+        "data/live/operator_restart_action.guard.json",
+        "data/live/operator_restart_idempotency.json",
+        "data/live/operator_restart_preflight_tokens.json",
+        "data/live/operator_restart_transaction.json",
+        "data/live/operator_shutdown_ack_continuous.json",
+        "data/live/operator_shutdown_ack_watchdog.json",
+        "data/live/operator_shutdown_request.json",
+        "data/live/operator_stop_idempotency.json",
+        "data/live/operator_stop_preflight_tokens.json",
+        "data/live/paper_entry_dispatch_contract.json",
+    }
+)
+_CODE_SHADOW_PREFIXES = (
+    "services/",
+    "scripts/",
+    "dashboard/",
+    "pages/",
+    "tests/",
+)
+_EXECUTABLE_SUFFIXES = frozenset(
+    {".py", ".pyw", ".pyi", ".ps1", ".psm1", ".psd1", ".cmd", ".bat", ".exe", ".pyd", ".dll"}
+)
+_TEMP_EVIDENCE_SUFFIXES = frozenset({".json", ".jsonl", ".csv", ".txt", ".md", ".log", ".lock", ""})
+_CONFLICT_INDEX_CODES = frozenset("AUDTCRU")
+_UNMERGED = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def _posix_rel(path: str) -> str:
+    return str(path or "").replace("\\", "/").strip()
+
+
+def _is_reparse_point(path: Path) -> bool:
+    if path.is_symlink():
+        return True
     try:
-        head = git("rev-parse", "HEAD")
-        branch = git("rev-parse", "--abbrev-ref", "HEAD")
-        porcelain = git("status", "--porcelain")
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise PublicationAuthorityError(
-            "git_identity_unavailable", {"error": type(exc).__name__}
-        ) from exc
+        import ctypes
+
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+        if attrs == -1:
+            return False
+        return bool(attrs & _FILE_ATTRIBUTE_REPARSE_POINT)
+    except (AttributeError, OSError):
+        return False
+
+
+def _path_escapes_root(root: Path, rel: str) -> bool:
+    norm = _posix_rel(rel)
+    if not norm or norm.startswith("/") or (len(norm) >= 2 and norm[1] == ":"):
+        return True
+    parts = Path(norm).parts
+    if any(part in {"..", "."} and part == ".." for part in parts) or ".." in parts:
+        return True
+    current = Path(root)
+    for part in parts:
+        current = current / part
+        if _is_reparse_point(current):
+            try:
+                resolved = Path(os.path.realpath(current))
+            except OSError:
+                return True
+            root_real = Path(os.path.realpath(root))
+            try:
+                resolved.relative_to(root_real)
+            except ValueError:
+                return True
+    try:
+        real = Path(os.path.realpath(Path(root) / norm))
+        Path(os.path.realpath(root))
+        real.relative_to(Path(os.path.realpath(root)))
+    except (OSError, ValueError):
+        return True
+    return False
+
+
+def _under_prefix(rel: str, prefixes: Sequence[str]) -> bool:
+    text = _posix_rel(rel)
+    return any(text == prefix.rstrip("/") or text.startswith(prefix) for prefix in prefixes)
+
+
+def classify_publication_worktree_path(
+    rel: str,
+    *,
+    tracked: bool,
+    x_status: str,
+    y_status: str,
+) -> str:
+    norm = _posix_rel(rel).rstrip("/")
+    suffix = Path(norm).suffix.lower()
+    name = Path(norm).name
+    if norm in _ACCOUNTING_RELATIVE:
+        return CLASS_KNOWN_ACCOUNTING_LEDGER_OR_LOCK
+    if norm in _PAPER_LEDGER_RELATIVE:
+        return CLASS_KNOWN_PAPER_ORDER_LEDGER_OR_LOCK
+    if not tracked and _under_prefix(norm, ("tests/",)) and suffix == ".py":
+        return CLASS_UNTRACKED_TEST
+    if tracked and (_under_prefix(norm, _PROTECTED_CODE_PREFIXES) or name in _PROTECTED_ROOT_FILES):
+        return CLASS_TRACKED_CODE_OR_CONFIG_CHANGE
+    if not tracked and (
+        _under_prefix(norm, _PROTECTED_CODE_PREFIXES)
+        or _under_prefix(norm, (".githooks/", ".github/", "hooks/"))
+        or (norm in _PROTECTED_ROOT_FILES)
+        or (suffix in _EXECUTABLE_SUFFIXES and not _under_prefix(norm, ("tmp/", "data/")))
+    ):
+        return CLASS_UNTRACKED_CODE_OR_CONFIG
+    if suffix in _EXECUTABLE_SUFFIXES and _under_prefix(norm, ("data/", "tmp/")):
+        return CLASS_UNTRACKED_CODE_OR_CONFIG
+    if name in _PUBLICATION_BASENAMES:
+        return (
+            CLASS_UNTRACKED_CODE_OR_CONFIG if not tracked else CLASS_TRACKED_CODE_OR_CONFIG_CHANGE
+        )
+    if norm in _EXPLICIT_OPERATIONAL_FILES:
+        return CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA
+    if _under_prefix(norm, ("tmp/",)):
+        nested = norm[4:] if norm.startswith("tmp/") else norm
+        if any(
+            nested == prefix.rstrip("/") or nested.startswith(prefix)
+            for prefix in _CODE_SHADOW_PREFIXES
+        ):
+            return CLASS_UNTRACKED_CODE_OR_CONFIG
+        if Path(nested).name in _PUBLICATION_BASENAMES:
+            return CLASS_UNTRACKED_CODE_OR_CONFIG
+        if suffix in _EXECUTABLE_SUFFIXES:
+            return CLASS_UNTRACKED_CODE_OR_CONFIG
+        if suffix in _TEMP_EVIDENCE_SUFFIXES:
+            return CLASS_KNOWN_TEMP_EVIDENCE
+        return CLASS_UNEXPLAINED
+    if suffix in {".zip", ".diff", ".md", ".txt"} or _under_prefix(norm, ("docs/",)):
+        return CLASS_OTHER_NONEXECUTABLE_ARTIFACT
+    return CLASS_UNEXPLAINED
+
+
+def parse_porcelain_line(line: str) -> Optional[Dict[str, str]]:
+    raw = line.rstrip("\n")
+    if not raw:
+        return None
+    if len(raw) < 4 or raw[2] != " ":
+        return {"error": REASON_STATUS_UNPARSEABLE, "line": raw}
+    x_status, y_status = raw[0], raw[1]
+    remainder = raw[3:]
+    if " -> " in remainder:
+        path = remainder.split(" -> ", 1)[1]
+        original = remainder.split(" -> ", 1)[0]
+    else:
+        path = remainder
+        original = ""
+    return {
+        "x": x_status,
+        "y": y_status,
+        "path": _posix_rel(path),
+        "original": _posix_rel(original),
+        "xy": x_status + y_status,
+    }
+
+
+def _conflict_or_structural(entry: Mapping[str, str]) -> Optional[str]:
+    xy = str(entry.get("xy") or "")
+    x_status = str(entry.get("x") or "")
+    y_status = str(entry.get("y") or "")
+    if xy in _UNMERGED or x_status == "U" or y_status == "U":
+        return REASON_STATUS_CONFLICT
+    if x_status in {"R", "C", "T", "S"} or y_status in {"R", "C", "T", "S"}:
+        return REASON_STATUS_CONFLICT
+    if x_status == "D" or y_status == "D":
+        return REASON_STATUS_CONFLICT
+    return None
+
+
+def evaluate_git_publication_identity(
+    *,
+    root: Path,
+    head: str,
+    branch: str,
+    index_empty: bool,
+    porcelain_lines: Sequence[str],
+    staged_paths: Sequence[str],
+    verify_filesystem: bool = True,
+) -> Dict[str, Any]:
+    tolerated: List[Dict[str, str]] = []
+    rejected: List[Dict[str, str]] = []
+    failure_reason: Optional[str] = None
+    tracked_safe = True
+    untracked_safe = True
+    publication_matches = True
+    parsed: List[Dict[str, str]] = []
+
+    if any(str(path) for path in staged_paths):
+        index_empty = False
+        failure_reason = REASON_INDEX_NOT_EMPTY
+
+    for line in porcelain_lines:
+        entry = parse_porcelain_line(str(line))
+        if entry is None:
+            continue
+        if entry.get("error"):
+            failure_reason = REASON_STATUS_UNPARSEABLE
+            rejected.append(
+                {"path": str(line), "classification": CLASS_UNEXPLAINED, "reason": failure_reason}
+            )
+            tracked_safe = False
+            untracked_safe = False
+            continue
+        parsed.append(entry)
+
+    for entry in parsed:
+        rel = entry["path"]
+        tracked = entry["xy"] != "??"
+        structural = _conflict_or_structural(entry)
+        classification = classify_publication_worktree_path(
+            rel, tracked=tracked, x_status=entry["x"], y_status=entry["y"]
+        )
+        row = {
+            "path": rel,
+            "classification": classification,
+            "x": entry["x"],
+            "y": entry["y"],
+        }
+        if verify_filesystem and _path_escapes_root(Path(root), rel):
+            untracked_safe = False
+            tracked_safe = False
+            rejected.append(
+                {**row, "reason": REASON_ARTIFACT_UNEXPLAINED, "detail": "path_escape_or_reparse"}
+            )
+            if failure_reason is None:
+                failure_reason = REASON_ARTIFACT_UNEXPLAINED
+            continue
+        if structural:
+            tracked_safe = False
+            rejected.append({**row, "reason": structural})
+            if failure_reason is None:
+                failure_reason = structural
+            continue
+        if rel in _PUBLICATION_CODE_RELATIVE:
+            publication_matches = False
+        if classification in {
+            CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA,
+            CLASS_KNOWN_ACCOUNTING_LEDGER_OR_LOCK,
+            CLASS_KNOWN_PAPER_ORDER_LEDGER_OR_LOCK,
+            CLASS_KNOWN_TEMP_EVIDENCE,
+        }:
+            tolerated.append(row)
+            continue
+        if classification == CLASS_TRACKED_CODE_OR_CONFIG_CHANGE:
+            tracked_safe = False
+            rejected.append({**row, "reason": REASON_TRACKED_CODE_DIRTY})
+            if failure_reason in {None, REASON_INDEX_NOT_EMPTY}:
+                if failure_reason != REASON_INDEX_NOT_EMPTY:
+                    failure_reason = REASON_TRACKED_CODE_DIRTY
+            if failure_reason is None:
+                failure_reason = REASON_TRACKED_CODE_DIRTY
+            continue
+        if classification == CLASS_UNTRACKED_CODE_OR_CONFIG:
+            untracked_safe = False
+            rejected.append({**row, "reason": REASON_UNTRACKED_CODE})
+            if failure_reason is None:
+                failure_reason = REASON_UNTRACKED_CODE
+            continue
+        if classification == CLASS_UNTRACKED_TEST:
+            untracked_safe = False
+            rejected.append({**row, "reason": REASON_UNTRACKED_TEST})
+            if failure_reason is None:
+                failure_reason = REASON_UNTRACKED_TEST
+            continue
+        untracked_safe = False
+        rejected.append({**row, "reason": REASON_ARTIFACT_UNEXPLAINED})
+        if failure_reason is None:
+            failure_reason = REASON_ARTIFACT_UNEXPLAINED
+
+    if not index_empty:
+        failure_reason = REASON_INDEX_NOT_EMPTY
+        tracked_safe = tracked_safe and True
+
+    valid = (
+        index_empty
+        and tracked_safe
+        and untracked_safe
+        and publication_matches
+        and failure_reason is None
+    )
     return {
         "head": head,
         "branch": branch,
-        "index_empty": porcelain == "",
+        "index_empty": bool(index_empty),
+        "tracked_worktree_safe": bool(tracked_safe),
+        "untracked_worktree_safe": bool(untracked_safe),
+        "publication_code_matches_head": bool(publication_matches),
+        "git_identity_valid": bool(valid),
+        "failure_reason": failure_reason,
+        "tolerated_paths": tolerated,
+        "rejected_paths": rejected,
     }
+
+
+def inspect_git_identity(root: Path) -> Dict[str, Any]:
+    def run_git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(root), *args],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+
+    try:
+        head_proc = run_git("rev-parse", "HEAD")
+        branch_proc = run_git("rev-parse", "--abbrev-ref", "HEAD")
+        porcelain_proc = run_git("status", "--porcelain")
+        cached_quiet = run_git("diff", "--cached", "--quiet", "--exit-code")
+        cached_names = run_git("diff", "--cached", "--name-only")
+    except OSError as exc:
+        raise PublicationAuthorityError(
+            "git_identity_unavailable", {"error": type(exc).__name__}
+        ) from exc
+    if head_proc.returncode != 0 or branch_proc.returncode != 0 or porcelain_proc.returncode != 0:
+        raise PublicationAuthorityError("git_identity_unavailable", {"error": "git_status_failed"})
+    if cached_quiet.returncode not in {0, 1}:
+        raise PublicationAuthorityError(
+            "git_identity_unavailable", {"error": "git_diff_cached_failed"}
+        )
+    staged = [line for line in cached_names.stdout.splitlines() if line.strip()]
+    porcelain_lines = porcelain_proc.stdout.splitlines()
+    return evaluate_git_publication_identity(
+        root=Path(root),
+        head=head_proc.stdout.strip(),
+        branch=branch_proc.stdout.strip(),
+        index_empty=cached_quiet.returncode == 0 and not staged,
+        porcelain_lines=porcelain_lines,
+        staged_paths=staged,
+        verify_filesystem=True,
+    )
 
 
 def _command_blob() -> str:
@@ -507,7 +904,18 @@ def passing_runtime_state() -> Dict[str, Any]:
 
 
 def passing_git_identity(head: str = EXPECTED_PRODUCTION_HEAD) -> Dict[str, Any]:
-    return {"head": head, "branch": REQUIRED_BRANCH, "index_empty": True}
+    return {
+        "head": head,
+        "branch": REQUIRED_BRANCH,
+        "index_empty": True,
+        "tracked_worktree_safe": True,
+        "untracked_worktree_safe": True,
+        "publication_code_matches_head": True,
+        "git_identity_valid": True,
+        "failure_reason": None,
+        "tolerated_paths": [],
+        "rejected_paths": [],
+    }
 
 
 def passing_session(
