@@ -1,0 +1,16 @@
+{
+  "name": "Triton",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "dashboard",
+      "command": ".venv/bin/streamlit run view_results.py --server.port 8501 --server.address 0.0.0.0 --server.headless true"
+    }
+  ],
+  "ports": [
+    {
+      "name": "Streamlit dashboard",
+      "port": 8501
+    }
+  ]
+}
