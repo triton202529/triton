@@ -1,1 +1,33 @@
+# Core data / ML stack
+# numpy/pandas are pinned to a range compatible with the whole ecosystem
+# (yfinance, alpaca-trade-api, textblob). pandas 3.x / numpy 2.3+ break several
+# of the older market-data libraries used here.
+numpy>=1.26,<2.3
+pandas>=2.1,<2.3
+pyarrow
+scikit-learn
+joblib
+tqdm
 
+# Visualization / dashboards
+matplotlib
+plotly
+streamlit
+
+# Market data / trading
+yfinance
+requests
+python-dotenv
+
+# Runtime deps of alpaca-trade-api (installed with --no-deps below because its
+# metadata pins pandas<1.6, which is incompatible with the rest of the stack).
+websockets
+websocket-client
+aiohttp
+msgpack
+deprecation
+PyYAML
+
+# News / sentiment
+newsapi-python
+textblob
