@@ -8,7 +8,7 @@ Production calls use the canonical data/live SQLite path (no env/session redirec
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 import streamlit as st
 
@@ -33,8 +33,12 @@ LABEL_READY = "SELL ARM — READY TO ARM"
 LABEL_AWAITING = "SELL ARM — AWAITING CONFIRMATION"
 LABEL_UNAVAILABLE = "SELL ARM — UNAVAILABLE"
 LABEL_NOT_REQUIRED = "SELL ARM — NOT REQUIRED"
-LABEL_COMPLETED = "SELL ARM — COMPLETED"
+LABEL_COMPLETED = "SELL completed"
 LABEL_ATTENTION = "SELL ARM — ATTENTION REQUIRED"
+COMPLETED_NEXT_ACTION = "Wait for a fresh cycle."
+COMPLETED_SELL_MESSAGE = (
+    "1 order submitted and filled. A new SELL requires a fresh cycle and review."
+)
 
 COLOR_GREEN = "GREEN"
 COLOR_AMBER = "AMBER"
@@ -47,6 +51,71 @@ _STATUS_STYLES = {
     COLOR_BLUE: {"bg": "rgba(78, 161, 255, 0.12)", "fg": "#E7ECF3", "border": "#4EA1FF"},
     COLOR_RED: {"bg": "rgba(239, 100, 97, 0.12)", "fg": "#E7ECF3", "border": "#EF6461"},
 }
+
+
+SAME_CYCLE_RECONCILIATION = "UNAVAILABLE_SAME_CYCLE_DISPATCH_RECONCILIATION"
+GENUINE_MALFORMED_REASONS = frozenset(
+    {
+        "missing_generated_at",
+        "unparseable_generated_at",
+        "naive_generated_at",
+        "future_generated_at",
+    }
+)
+
+
+def _packet_status(pres: Mapping[str, Any]) -> str:
+    packet = pres.get("packet") if isinstance(pres.get("packet"), dict) else {}
+    return str(
+        packet.get("packet_status") or packet.get("status") or packet.get("classification") or ""
+    )
+
+
+def _same_cycle_reconciliation(pres: Mapping[str, Any]) -> bool:
+    return _packet_status(pres) == SAME_CYCLE_RECONCILIATION
+
+
+def _completed_sell_evidence(pres: Mapping[str, Any]) -> bool:
+    if str(pres.get("authority_state") or "") != "CONSUMED":
+        return False
+    vis = pres.get("last_dispatch_visibility") or {}
+    submitted = int(vis.get("submitted") or 0)
+    filled = int(vis.get("filled") or 0)
+    failed = int(vis.get("failed") or 0)
+    return bool(vis.get("has_dispatch")) and submitted > 0 and filled > 0 and failed == 0
+
+
+def _genuine_malformed_packet(pres: Mapping[str, Any]) -> bool:
+    if _same_cycle_reconciliation(pres):
+        return False
+    deny = str(pres.get("arm_deny_reason") or "")
+    freshness = str(pres.get("freshness") or "")
+    if deny in GENUINE_MALFORMED_REASONS:
+        return True
+    if (
+        freshness == "MALFORMED"
+        and deny == "malformed_packet"
+        and not _completed_sell_evidence(pres)
+    ):
+        return True
+    return False
+
+
+def completed_sell_next_action(visual: Mapping[str, Any], challenge_state: str) -> str:
+    if visual.get("code") == "COMPLETED":
+        return COMPLETED_NEXT_ACTION
+    if challenge_state == "OPEN":
+        return "Type the confirmation phrase, then confirm."
+    if visual.get("label"):
+        return str(visual.get("reason") or "No additional action required.")
+    return "Review packet details below."
+
+
+def _completed_sell_reason(pres: Mapping[str, Any]) -> str:
+    vis = pres.get("last_dispatch_visibility") or {}
+    if int(vis.get("submitted") or 0) == 1 and int(vis.get("filled") or 0) == 1:
+        return COMPLETED_SELL_MESSAGE
+    return str(pres.get("last_dispatch_message") or "Authority consumed for this reviewed batch.")
 
 
 def _authority_matches_batch(pres: Dict[str, Any]) -> bool:
@@ -79,6 +148,20 @@ def map_sell_arm_visual_status(pres: Dict[str, Any]) -> Dict[str, Any]:
     elif freshness == "OUTCOME_UNKNOWN":
         reason = operator_fail_message("sell_outcome_unknown")
 
+    # Completed same-cycle SELL is waiting for a fresh cycle, not an unknown outcome.
+    if (
+        authority == "CONSUMED"
+        and _completed_sell_evidence(pres)
+        and _same_cycle_reconciliation(pres)
+        and not _genuine_malformed_packet(pres)
+    ):
+        return {
+            "label": LABEL_COMPLETED,
+            "color": COLOR_BLUE,
+            "reason": _completed_sell_reason(pres),
+            "code": "COMPLETED",
+        }
+
     # Attention-first gates (never ARMED).
     if freshness == "OUTCOME_UNKNOWN" or deny == "sell_outcome_unknown":
         return {
@@ -106,14 +189,26 @@ def map_sell_arm_visual_status(pres: Dict[str, Any]) -> Dict[str, Any]:
             "code": "ARMED",
         }
 
-    # Consumed matching authority → COMPLETED (not ARMED).
+    # Consumed matching authority, or same-cycle reconciliation with fill evidence.
     if authority == "CONSUMED" and _authority_matches_batch(pres):
         return {
             "label": LABEL_COMPLETED,
             "color": COLOR_BLUE,
-            "reason": pres.get("last_dispatch_message")
+            "reason": _completed_sell_reason(pres)
             or reason
             or "Authority consumed for this reviewed batch.",
+            "code": "COMPLETED",
+        }
+    if (
+        authority == "CONSUMED"
+        and not _genuine_malformed_packet(pres)
+        and (_same_cycle_reconciliation(pres) or _completed_sell_evidence(pres))
+        and _completed_sell_evidence(pres)
+    ):
+        return {
+            "label": LABEL_COMPLETED,
+            "color": COLOR_BLUE,
+            "reason": _completed_sell_reason(pres),
             "code": "COMPLETED",
         }
 
@@ -317,11 +412,7 @@ def render_paper_sell_arm_controls(
     st.caption(pres["no_submit_caption"])
     challenge_state = str(pres.get("challenge_state") or "ABSENT")
     authority_state = str(pres.get("authority_state") or "ABSENT")
-    next_action = "Review packet details below."
-    if challenge_state == "OPEN":
-        next_action = "Type the confirmation phrase, then confirm."
-    elif visual.get("label"):
-        next_action = str(visual.get("reason") or "No additional action required.")
+    next_action = completed_sell_next_action(visual, challenge_state)
     st.write(f"**Status:** {display_status(authority_state)}")
     if pres.get("authority_expires_at"):
         st.write(f"**Expires:** {pres['authority_expires_at']}")
@@ -329,7 +420,7 @@ def render_paper_sell_arm_controls(
         st.write(f"**Challenge expires:** {pres['challenge_expires_at']}")
     st.write(f"**Next action:** {next_action}")
     st.write(f"**Live execution:** blocked")
-    if pres.get("last_dispatch_message"):
+    if pres.get("last_dispatch_message") and visual.get("code") != "COMPLETED":
         st.write(f"**Last dispatch:** {pres.get('last_dispatch_message')}")
         vis = pres.get("last_dispatch_visibility") or {}
         if vis.get("dispatch_ids"):
@@ -358,6 +449,7 @@ def render_paper_sell_arm_controls(
         pres.get("arm_deny_reason")
         and not pres.get("arm_enabled")
         and not pres.get("confirm_enabled")
+        and visual.get("code") != "COMPLETED"
     ):
         # Status box already shows the concise reason; skip duplicate warning when identical.
         msg = operator_fail_message(str(pres["arm_deny_reason"]))
@@ -450,6 +542,13 @@ def render_paper_sell_arm_controls(
         st.write(f"Visual status: {visual.get('label')} ({visual.get('color')})")
         st.write(f"Slice hash: {pres.get('slice_hash') or 'n/a'}")
         st.write(f"Source packet fingerprint: {pres.get('source_packet_fingerprint') or 'n/a'}")
+        if pres.get("last_dispatch_message"):
+            st.write(f"Last dispatch: {pres.get('last_dispatch_message')}")
+            vis = pres.get("last_dispatch_visibility") or {}
+            if vis.get("dispatch_ids"):
+                st.write(
+                    f"Dispatch IDs: {', '.join(str(x) for x in vis.get('dispatch_ids') or [])}"
+                )
 
 
 def _apply_result(result: Dict[str, Any]) -> None:

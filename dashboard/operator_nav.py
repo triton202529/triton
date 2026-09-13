@@ -10,8 +10,9 @@ from dashboard.operator_console import OPERATOR_PAGES
 NAV_GROUPS: List[Tuple[str, List[str]]] = [
     ("Overview", ["Overview"]),
     ("Portfolio", ["Portfolio"]),
+    ("Performance", ["Performance"]),
     ("Trading", ["Orders", "Activity"]),
-    ("Performance", ["Reports"]),
+    ("Reports", ["Reports"]),
     ("Operations", ["Operations", "Risk & Alerts"]),
     ("System", ["Diagnostics"]),
 ]
@@ -38,6 +39,7 @@ def page_help() -> Dict[str, str]:
     return {
         "Overview": "Runtime, paper mode, and what needs attention.",
         "Portfolio": "Value, history, and current holdings.",
+        "Performance": "Verified accounting from the September 10 opening checkpoint.",
         "Orders": "Unified paper-order ledger.",
         "Activity": "What happened, in order.",
         "Reports": "Period performance from local evidence.",

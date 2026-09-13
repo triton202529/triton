@@ -2317,11 +2317,24 @@ def render_sidebar_execution_status(
     market_status = str(summary.get("market_status") or "UNKNOWN")
     market_as_of = summary.get("market_as_of") or "n/a"
     market_source = summary.get("market_source") or "guard_auto.is_market_open_et"
+    from dashboard.freshness_presentation import isolated_status_details_freshness
+    from dashboard.preview_data import isolation_active
+
+    if isolation_active():
+        fresh = isolated_status_details_freshness(summary.get("data_freshness"))
+        freshness_label = fresh["value"]
+    else:
+        fresh = {}
+        freshness_label = str(summary.get("data_freshness") or "UNKNOWN")
     st.caption(
         f"Pipeline health: **{rph}** · "
-        f"Data freshness: **{summary.get('data_freshness', 'UNKNOWN')}** · "
+        f"Data freshness: **{freshness_label}** · "
         f"Market: **{market_status}**"
     )
+    if fresh.get("note"):
+        st.caption(str(fresh["note"]))
+    if fresh.get("captured_source_status"):
+        st.caption(str(fresh["captured_source_status"]))
     st.caption(f"Market evidence: source=`{market_source}` · as_of={market_as_of}")
     paper_cert = str(summary.get("certification_status") or "PAPER:UNKNOWN")
     st.caption(
@@ -2431,7 +2444,13 @@ def render_dashboard_guard_summary(
 
     c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     c1.metric("Pipeline health", str(summary.get("runtime_pipeline_health") or "UNKNOWN"))
-    c2.metric("Data freshness", str(summary.get("data_freshness") or "UNKNOWN"))
+    from dashboard.freshness_presentation import isolated_status_details_freshness
+    from dashboard.preview_data import isolation_active
+
+    if isolation_active():
+        c2.metric("Data freshness", isolated_status_details_freshness()["value"])
+    else:
+        c2.metric("Data freshness", str(summary.get("data_freshness") or "UNKNOWN"))
     c3.metric("Pipeline HB age", ph_age_s)
     c4.metric("Watchdog", str(summary.get("watchdog") or "UNKNOWN"))
     c5.metric("Continuous loop", str(summary.get("continuous_loop") or "UNKNOWN"))
@@ -24447,11 +24466,14 @@ def _render_compact_left_rail_status() -> None:
         status = build_operator_status()
         lines = compact_system_status_lines(status)
         from dashboard.display_labels import display_status
+        from dashboard.freshness_presentation import shared_freshness_view
+        from dashboard.preview_data import isolation_active
 
         overall = display_status(lines["overall"])
         live = display_status(lines["live"])
         paper = display_status(lines["paper"])
-        freshness = display_status(lines["freshness"])
+        fresh = shared_freshness_view(status, isolated=isolation_active())
+        freshness = fresh["value"]
         continuous = lines.get("continuous") or "UNKNOWN"
         watchdog = lines.get("watchdog") or "UNKNOWN"
         live_note = "Required safety lock" if str(lines["live"]).upper() == "BLOCKED" else ""
@@ -24475,7 +24497,7 @@ def _render_compact_left_rail_status() -> None:
             f'<div class="triton-kv"><span class="k">Paper</span>'
             f'<span class="v">{status_badge(paper, tone=tone_for_status(paper))}</span></div>'
             f'<div class="triton-kv"><span class="k">Freshness</span>'
-            f'<span class="v">{status_badge(freshness, tone=tone_for_status(freshness))}</span></div>'
+            f'<span class="v">{status_badge(freshness, tone=fresh["tone"])}</span></div>'
             f'<div class="triton-kv"><span class="k">Watchdog</span>'
             f'<span class="v">{status_badge(watchdog, tone=_loop_tone(watchdog))}</span></div>'
             f'<div class="triton-kv"><span class="k">Continuous loop</span>'
@@ -24484,6 +24506,8 @@ def _render_compact_left_rail_status() -> None:
             unsafe_allow_html=True,
         )
         st.caption(f"Mode: {escape(status.get('overall_status') or 'UNKNOWN')}")
+        if fresh.get("note"):
+            st.caption(escape(fresh["note"]))
     except Exception:
         st.caption("System status: UNKNOWN")
 
@@ -24527,7 +24551,8 @@ def sidebar_controls() -> Tuple[str, str, str]:
             st.session_state["dashboard_nav_mode"] = "operator"
 
         current_dest = st.session_state.get("cc_top_destination", DEFAULT_UI_A_PAGE)
-        if current_dest not in COMMAND_CENTER_DESTINATIONS:
+        allowed_destinations = set(COMMAND_CENTER_DESTINATIONS) | set(ui_a_pages)
+        if current_dest not in allowed_destinations:
             current_dest = DEFAULT_UI_A_PAGE
             st.session_state["cc_top_destination"] = current_dest
 

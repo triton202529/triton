@@ -1,0 +1,158 @@
+{
+  "schema_version": "198I-ZA-SELL-READINESS-1",
+  "status": "UNAPPROVED_APPROVAL_READINESS_ONLY",
+  "generation_status": "ok",
+  "producer": "services.defensive_exit_approval_readiness",
+  "generated_at": "2026-09-08T19:49:10.443714+00:00",
+  "valid_until": "2026-09-08T20:00:00+00:00",
+  "freshness_ttl_minutes": 50,
+  "mode": "PAPER",
+  "live_execution_state": "BLOCKED",
+  "creates_no_authority": true,
+  "orders_submitted": false,
+  "approval_created": false,
+  "cycle_id": "mo-20260908_154810-9374425723aa45689f0cbea2bd3d2955",
+  "run_id": "2026-09-08T19:49:07+00:00",
+  "batch_id": "manage-mo-20260908_1548",
+  "plan_id": "manage_positions_plan@2026-09-08T19:49:07+00:00",
+  "plan_hash": "158fce006172ab78e105944b9335ddad7dde58319de11468b2b964d8293acd6d",
+  "approval_ready_symbols": [
+    "DIA",
+    "GE",
+    "ARKK"
+  ],
+  "approval_ready_actions": [
+    {
+      "symbol": "DIA",
+      "action": "EXIT",
+      "qty": 5.0,
+      "est_price": 528.27,
+      "est_notional": 2636.6000000000004
+    },
+    {
+      "symbol": "GE",
+      "action": "EXIT",
+      "qty": 1.0,
+      "est_price": 335.63,
+      "est_notional": 334.93
+    },
+    {
+      "symbol": "ARKK",
+      "action": "EXIT",
+      "qty": 32.0,
+      "est_price": 86.12,
+      "est_notional": 2751.36
+    }
+  ],
+  "total_proposed_notional": 5722.89,
+  "packet_generation_timestamp": "2026-09-08T19:49:10.443714+00:00",
+  "session_date": "2026-09-08",
+  "invocation_id": "mo-20260908_154810-9374425723aa45689f0cbea2bd3d2955",
+  "market_open_invocation_id": "mo-20260908_154810-9374425723aa45689f0cbea2bd3d2955",
+  "plan_generated_at": "2026-09-08T19:49:07+00:00",
+  "f_stage_completed_at": "2026-09-08T19:49:09.744761+00:00",
+  "f_stage_status": "COMPLETE",
+  "source_plan_sha256": "75f68d5ad04e6f251d7d120d66425605835c1f76760b208e5d6194d862edf6a0",
+  "selected_row_hash": "158fce006172ab78e105944b9335ddad7dde58319de11468b2b964d8293acd6d",
+  "positions_snapshot_sha256": "681e1e869255d41345f8c584f5a540e42e51e15a4e0cf64b79ec9698f3b2104f",
+  "open_orders_snapshot_sha256": "a9203c9b29b2cbd7c520330a9f018b5e91fb5b0f82a7a17b286701d167c84226",
+  "row_classifications": [
+    {
+      "symbol": "BITO",
+      "action": "NONE",
+      "qty": "",
+      "selected_for_execution": false,
+      "reason_code": "NO_ACTION_HOLD",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "NOT_SELECTED"
+    },
+    {
+      "symbol": "DBA",
+      "action": "NONE",
+      "qty": "",
+      "selected_for_execution": false,
+      "reason_code": "NO_ACTION_HOLD",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "NOT_SELECTED"
+    },
+    {
+      "symbol": "GS",
+      "action": "NONE",
+      "qty": "",
+      "selected_for_execution": false,
+      "reason_code": "NO_ACTION_HOLD",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "NOT_SELECTED"
+    },
+    {
+      "symbol": "MA",
+      "action": "NONE",
+      "qty": "",
+      "selected_for_execution": false,
+      "reason_code": "NO_ACTION_HOLD",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "NOT_SELECTED"
+    },
+    {
+      "symbol": "TSLA",
+      "action": "NONE",
+      "qty": "",
+      "selected_for_execution": false,
+      "reason_code": "NO_ACTION_HOLD",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "NOT_SELECTED"
+    },
+    {
+      "symbol": "DIA",
+      "action": "EXIT",
+      "qty": "5",
+      "selected_for_execution": true,
+      "reason_code": "EXIT_APPROVED_STALE_WEAK_CYCLES",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "AUTHORITY_READY",
+      "remaining_blocker": "MISSING_PAPER_SELL_AUTHORITY"
+    },
+    {
+      "symbol": "GE",
+      "action": "EXIT",
+      "qty": "1",
+      "selected_for_execution": true,
+      "reason_code": "EXIT_APPROVED",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "AUTHORITY_READY",
+      "remaining_blocker": "MISSING_PAPER_SELL_AUTHORITY"
+    },
+    {
+      "symbol": "ARKK",
+      "action": "EXIT",
+      "qty": "32",
+      "selected_for_execution": true,
+      "reason_code": "EXIT_APPROVED_STALE_WEAK_CYCLES",
+      "force_exit_override": null,
+      "rotation_id": null,
+      "risk_objective": null,
+      "classification": "AUTHORITY_READY",
+      "remaining_blocker": "MISSING_PAPER_SELL_AUTHORITY"
+    }
+  ],
+  "excluded_entry_only_count": 0,
+  "excluded_entry_only_symbols": [],
+  "excluded_entry_only_reason": null,
+  "arm_eligibility": "AUTHORITY_READY",
+  "remaining_blocker": "MISSING_PAPER_SELL_AUTHORITY",
+  "packet_status": "AUTHORITY_READY"
+}

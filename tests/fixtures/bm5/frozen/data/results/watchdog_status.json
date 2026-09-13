@@ -1,0 +1,410 @@
+{
+  "timestamp": "2026-09-08T22:59:19Z",
+  "watchdog_status": "OK",
+  "broker_connected": true,
+  "broker_status": "connected",
+  "broker_error": null,
+  "positions_count": 8,
+  "open_orders_count": 0,
+  "pending_orders_count": 0,
+  "largest_unrealized_loss": null,
+  "largest_unrealized_gain": 2400.540012,
+  "heartbeat": {
+    "timestamp": "2026-09-08T22:59:19Z",
+    "status": "OK",
+    "positions_count": 8,
+    "open_orders_count": 0
+  },
+  "positions": [
+    {
+      "symbol": "ARKK",
+      "quantity": 32.0,
+      "market_value": 2762.4704,
+      "unrealized_pl": 455.8344,
+      "unrealized_pl_pct": 19.762
+    },
+    {
+      "symbol": "BITO",
+      "quantity": 1326.0,
+      "market_value": 13976.04,
+      "unrealized_pl": 2400.540012,
+      "unrealized_pl_pct": 20.738
+    },
+    {
+      "symbol": "DBA",
+      "quantity": 86.0,
+      "market_value": 2505.18,
+      "unrealized_pl": 194.94996,
+      "unrealized_pl_pct": 8.439
+    },
+    {
+      "symbol": "DIA",
+      "quantity": 5.0,
+      "market_value": 2639.55,
+      "unrealized_pl": 315.033335,
+      "unrealized_pl_pct": 13.553
+    },
+    {
+      "symbol": "GE",
+      "quantity": 1.0,
+      "market_value": 335.16,
+      "unrealized_pl": 44.161111,
+      "unrealized_pl_pct": 15.176
+    },
+    {
+      "symbol": "GS",
+      "quantity": 1.0,
+      "market_value": 1036.53,
+      "unrealized_pl": 143.11,
+      "unrealized_pl_pct": 16.018
+    },
+    {
+      "symbol": "MA",
+      "quantity": 7.0,
+      "market_value": 3996.23,
+      "unrealized_pl": 521.580003,
+      "unrealized_pl_pct": 15.011
+    },
+    {
+      "symbol": "TSLA",
+      "quantity": 0.137141758,
+      "market_value": 50.309933,
+      "unrealized_pl": 0.60496,
+      "unrealized_pl_pct": 1.217
+    }
+  ],
+  "checks": {
+    "positions_error": null,
+    "orders_error": null,
+    "account_error": null
+  },
+  "capital_preservation": {
+    "score": 85,
+    "health_band": "HEALTHY",
+    "risk_trend": "STABLE",
+    "escalation_state": "YELLOW"
+  },
+  "capital_preservation_escalation": {
+    "escalation_state": "YELLOW",
+    "escalation_reason": [
+      "EXCESS_CONCENTRATION"
+    ],
+    "recommended_review_actions": [
+      "Review concentration risk"
+    ]
+  },
+  "capital_preservation_advisory": {
+    "highest_priority": "LEVEL_1",
+    "advisory_count": 1,
+    "top_issue": "Concentration Risk"
+  },
+  "capital_preservation_decision_support": {
+    "issue_count": 1,
+    "highest_priority": "LEVEL_1",
+    "top_issue": "Concentration Risk"
+  },
+  "governance_risk_summary": {
+    "governance_awareness_level": "INCREASED_MONITORING",
+    "governance_awareness_label": "Increased Monitoring",
+    "governance_status": "Increased Monitoring",
+    "governance_summary": [
+      "Concentration Risk"
+    ],
+    "escalation_state": "YELLOW"
+  },
+  "predictive_risk_intelligence": {
+    "risk_direction": "IMPROVING",
+    "risk_momentum": "IMPROVING",
+    "forecast_confidence": 95,
+    "projected_escalation": "YELLOW",
+    "projected_cps": 85.0,
+    "alert_velocity": 390.0,
+    "alert_acceleration": "INCREASING",
+    "estimated_days_to_threshold": null
+  },
+  "executive_risk_summary": {
+    "portfolio_health": "HEALTHY",
+    "escalation_state": "YELLOW",
+    "top_risks": [
+      "Concentration Risk"
+    ],
+    "governance_awareness": "Increased Monitoring",
+    "risk_direction": "IMPROVING"
+  },
+  "defensive_sandbox": {
+    "candidate_count": 1,
+    "top_candidate": "REDUCE_CONCENTRATION",
+    "simulation_only": true,
+    "execution_permitted": false
+  },
+  "human_approval_center": {
+    "pending_review": 0,
+    "approved": 1,
+    "rejected": 0,
+    "expired": 28,
+    "execution_permitted": false
+  },
+  "protective_action_policy": {
+    "global_execution_enabled": true,
+    "automated_trading_permitted": false,
+    "policy_count": 6,
+    "enabled_policy_count": 3
+  },
+  "governance_authorization": {
+    "overall_authorization": true,
+    "governance_authorized": true,
+    "operator_authorized": true,
+    "policy_authorized": true,
+    "execution_authorized": true
+  },
+  "execution_readiness": {
+    "readiness_status": "READY",
+    "checks_passing_count": 8,
+    "checks_total": 8,
+    "failed_checks": [],
+    "live_execution_permitted": false
+  },
+  "protective_action_trials": {
+    "trial_count": 4,
+    "baseline_cps": 85,
+    "simulation_only": true,
+    "execution_permitted": false
+  },
+  "protective_action_evaluation": {
+    "evaluation_count": 4,
+    "average_effectiveness": 50.5,
+    "beneficial_count": 2,
+    "negative_count": 1,
+    "top_trial": "Paper Exposure Reduction",
+    "top_score": 68
+  },
+  "adaptive_capital_preservation": {
+    "best_protection": "EXPOSURE_REDUCTION",
+    "average_effectiveness": 50.5,
+    "confidence": 96,
+    "best_trial_name": "Paper Exposure Reduction"
+  },
+  "capital_preservation_governor": {
+    "preservation_posture": "YELLOW",
+    "governor_confidence": 99,
+    "top_drivers": [
+      "Concentration Risk"
+    ],
+    "live_execution_permitted": false
+  },
+  "preservation_audit": {
+    "event_count": 22,
+    "latest_event_type": "ADAPTIVE_LEARNING",
+    "latest_event_result": "EXPOSURE_REDUCTION",
+    "latest_event_source": "Adaptive Capital Preservation",
+    "summary_by_event_type": {
+      "ADAPTIVE_LEARNING": 1,
+      "GOVERNOR": 1,
+      "EVALUATION": 4,
+      "TRIAL": 1,
+      "AUTHORIZATION": 1,
+      "READINESS": 1,
+      "ALERT": 1,
+      "SIMULATION": 8,
+      "ESCALATION": 1,
+      "ADVISORY": 1,
+      "DECISION_SUPPORT": 1,
+      "MONITORING": 1
+    }
+  },
+  "stress_test_results": {
+    "scenario_count": 6,
+    "pass_count": 2,
+    "warn_count": 4,
+    "fail_count": 0,
+    "average_survivability": 63.7
+  },
+  "preservation_certification": {
+    "certification_status": "CERTIFIED_FOR_PAPER_PROTECTION",
+    "certification_score": 83.0,
+    "certified_area_count": 8,
+    "failed_requirements": []
+  },
+  "risk_committee_oversight": {
+    "committee_status": "REVIEW_REQUIRED",
+    "overall_assessment": "HIGH_RISK",
+    "average_domain_score": 71.0,
+    "top_concerns": [
+      "Concentration Risk"
+    ]
+  },
+  "accountability_registry": {
+    "entry_count": 43,
+    "not_certified_count": 0,
+    "summary_by_origin": {
+      "Capital Preservation Governor": 2,
+      "Protective Action Evaluation": 8,
+      "Defensive Automation Sandbox": 1,
+      "Governance Authorization": 1,
+      "Watchdog Alert Engine": 1,
+      "Capital Preservation Escalation": 1,
+      "Human Approval Center": 29
+    }
+  },
+  "preservation_governance_board": {
+    "board_status": "REVIEW",
+    "governance_confidence": 89,
+    "preservation_authority": "HUMAN_CONTROLLED",
+    "automation_authorized": false,
+    "board_recommendations": [
+      "Committee review: Concentration Risk",
+      "Monitor capital preservation trends",
+      "Consider paper review of: Paper Exposure Reduction"
+    ]
+  },
+  "investment_committee_review": {
+    "committee_recommendation": "REVIEW_REQUIRED",
+    "confidence": 67,
+    "top_concerns": [
+      "Concentration Risk"
+    ],
+    "average_area_score": 74.6
+  },
+  "triton_maturity_assessment": {
+    "overall_maturity": 74,
+    "maturity_band": "ADVANCED",
+    "strongest_area": "Readiness",
+    "weakest_area": "Governance"
+  },
+  "strategic_oversight": {
+    "oversight_status": "REVIEW",
+    "strategic_confidence": 79,
+    "institutional_readiness": "ADVANCED",
+    "automation_status": "NOT_AUTHORIZED",
+    "top_strategic_concerns": [
+      "Concentration Risk"
+    ]
+  },
+  "decision_quality": {
+    "decision_quality_score": 79,
+    "quality_band": "HIGH",
+    "strongest_area": "Recommendation",
+    "weakest_area": "Escalation Consistency"
+  },
+  "institutional_intelligence": {
+    "institutional_intelligence_score": 73,
+    "institutional_band": "ADVANCED",
+    "coordination_score": 63,
+    "strongest_area": "Accountability",
+    "weakest_area": "Governance"
+  },
+  "strategic_self_improvement": {
+    "top_priority": "Governance",
+    "improvement_score": 99,
+    "recommended_focus": [
+      "Governance",
+      "Escalation Consistency",
+      "Oversight"
+    ],
+    "weakest_systems": [
+      "Governance",
+      "Escalation Consistency",
+      "Oversight",
+      "Advisory Accuracy"
+    ]
+  },
+  "institutional_memory": {
+    "memory_entries": 5000,
+    "last_major_event": "GOVERNOR_POSTURE_CHANGE",
+    "retention_status": "ACTIVE"
+  },
+  "institutional_knowledge_graph": {
+    "nodes": 29,
+    "relationships": 27,
+    "most_connected_area": "Certification"
+  },
+  "organizational_learning": {
+    "top_lesson": "Maturity lag in Governance (30/100)",
+    "confidence": 99,
+    "learning_status": "ACTIVE",
+    "top_priority": "Governance"
+  },
+  "causal_reasoning": {
+    "reasoning_count": 2,
+    "issues": [
+      "YELLOW escalation",
+      "Concentration risk persistence"
+    ]
+  },
+  "institutional_explanations": {
+    "explanation_count": 2,
+    "topics": [
+      "Governor",
+      "Authorization"
+    ]
+  },
+  "institutional_insights": {
+    "top_insight": "Concentration Risk is the primary preservation threat requiring governance review.",
+    "insight_confidence": 60,
+    "most_important_risk": "Concentration Risk",
+    "most_important_weakness": "Governance"
+  },
+  "strategic_reasoning": {
+    "top_strategic_issue": "Concentration Risk",
+    "strategic_importance": 99,
+    "impact_scope": "CROSS_DOMAIN",
+    "issue_count": 12
+  },
+  "consequence_forecasts": {
+    "forecast_count": 6,
+    "forecast_horizon_days": 90,
+    "high_severity_count": 0,
+    "top_forecast_issue": "Concentration Risk"
+  },
+  "institutional_wisdom": {
+    "confidence": 73,
+    "supporting_systems": 8,
+    "guidance_count": 10,
+    "wisdom_preview": "Concentration Risk is the primary preservation threat requiring governance review."
+  },
+  "scenario_planning": {
+    "scenario_count": 6,
+    "probability_sum": 100,
+    "top_scenario": "BEST_CASE"
+  },
+  "future_path_analysis": {
+    "path_count": 4,
+    "recommended_path": "GOVERNANCE_IMPROVEMENT",
+    "top_benefit": 100
+  },
+  "strategic_priorities": {
+    "top_priority": "Concentration Risk",
+    "highest_priority_issue": "Concentration Risk",
+    "priority_count": 6,
+    "recommended_path": "GOVERNANCE_IMPROVEMENT"
+  },
+  "attention_allocation": {
+    "highest_attention_area": "Governance Alignment",
+    "attention_score": 80,
+    "recommended_focus_percent": 37,
+    "allocation_count": 6
+  },
+  "system_coordination": {
+    "coordination_score": 68,
+    "strongest_connection": "Certification \u2192 Oversight",
+    "weakest_connection": "Preservation \u2192 Risk"
+  },
+  "institutional_optimization": {
+    "top_optimization": "GOVERNANCE_IMPROVEMENT",
+    "optimization_score": 100,
+    "expected_system_benefit": 88,
+    "highest_roi_improvement": "Concentration Risk"
+  },
+  "alerts": {
+    "active_count": 1,
+    "resolved_count": 200,
+    "newly_raised": [],
+    "newly_resolved": [],
+    "incident_intelligence": {
+      "incident_count_24h": 0,
+      "broker_disconnect_count": 0,
+      "max_disconnect_duration_minutes": 0.0,
+      "last_disconnect": null
+    }
+  }
+}

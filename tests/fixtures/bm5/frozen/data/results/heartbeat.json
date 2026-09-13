@@ -1,0 +1,10 @@
+{
+  "timestamp": "2026-09-09T00:47:14+00:00",
+  "status": "ok",
+  "stage": "market_open_cycle",
+  "last_success_stage": "market_open_cycle",
+  "message": "Market-open sequence completed (continuous loop / scheduled runner).",
+  "error": "",
+  "run_id": "",
+  "host": "AKIM-WALLACE"
+}

@@ -35,17 +35,23 @@ from dashboard.portfolio_chart import (
 )
 
 
-def _root() -> Path:
+def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _root() -> Path:
+    from dashboard.preview_data import isolation_active, preview_data_root
+
+    repo = _repo_root()
+    return preview_data_root(repo) if isolation_active(repo) else repo
+
+
 def _isolation_banner() -> None:
-    marker = _root() / "tmp" / "ui_a_isolation_marker.txt"
-    if marker.is_file():
+    from dashboard.preview_data import isolation_active, preview_banner_text
+
+    if isolation_active(_repo_root()):
         st.markdown(
-            '<div class="triton-iso-banner">'
-            "Isolated UI-A2 preview · visual review only · production paths are not used"
-            "</div>",
+            f'<div class="triton-iso-banner">{preview_banner_text(_repo_root())}</div>',
             unsafe_allow_html=True,
         )
 
@@ -111,7 +117,9 @@ def _sell_authority_state() -> Dict[str, str]:
             COLOR_RED: "crit",
         }.get(color, "muted")
         raw_label = str(visual.get("label") or "SELL — Unknown")
-        if "UNAVAILABLE" in raw_label.upper():
+        if raw_label == "SELL completed" or visual.get("code") == "COMPLETED":
+            raw_label = "SELL completed"
+        elif "UNAVAILABLE" in raw_label.upper():
             raw_label = "SELL — Unavailable"
         elif "SELL ARM" in raw_label.upper():
             raw_label = raw_label.replace("SELL ARM", "SELL").replace("  ", " ")
@@ -120,8 +128,33 @@ def _sell_authority_state() -> Dict[str, str]:
         return {"label": "SELL — Unavailable", "tone": "muted"}
 
 
+def _market_session_card() -> Dict[str, Any]:
+    from dashboard.market_session_card import market_session_card
+    from dashboard.preview_data import isolation_active, preview_as_of_datetime
+
+    now = preview_as_of_datetime() if isolation_active(_repo_root()) else None
+    return market_session_card(now=now)
+
+
+def _certified_totals():
+    from dashboard.performance_presentation import try_certified_page_totals
+    from dashboard.preview_data import expected_accounting_ledger_sha256, isolation_active
+
+    expected = None
+    if isolation_active(_repo_root()):
+        expected = expected_accounting_ledger_sha256(_repo_root())
+    return try_certified_page_totals(root=_root(), expected_sha256=expected)
+
+
+def _freshness_view(status: Mapping[str, Any]) -> Dict[str, Any]:
+    from dashboard.freshness_presentation import shared_freshness_view
+    from dashboard.preview_data import isolation_active
+
+    return shared_freshness_view(status, isolated=isolation_active(_repo_root()))
+
+
 def render_status_bar(status: Mapping[str, Any]) -> None:
-    """Eight required safety states — blocked/unknown never styled healthy."""
+    """Safety states — blocked/unknown never styled healthy."""
     live = status.get("live_execution") or {}
     paper = status.get("paper_arm") or {}
     live_perm = status.get("live_permission") or {}
@@ -133,6 +166,8 @@ def render_status_bar(status: Mapping[str, Any]) -> None:
         mode = "Live mode indicated"
     paper_exec = display_status(paper.get("display_status") or "Unknown")
     sell_auth = _sell_authority_state()
+    market = _market_session_card()
+    fresh = _freshness_view(status)
     live_value = "Blocked" if live.get("blocked") else "Not blocked"
     pipeline = oui.present_pipeline_heartbeat_label(
         freshness_class=freshness.get("class"),
@@ -174,6 +209,12 @@ def render_status_bar(status: Mapping[str, Any]) -> None:
                 "tone": "crit" if mode != "Paper Only" else "info",
             },
             {
+                "label": "Market session",
+                "value": market.get("value") or "Unavailable",
+                "tone": market.get("tone") or "crit",
+                "note": market.get("note"),
+            },
+            {
                 "label": "Paper execution",
                 "value": paper_exec,
                 "tone": oui.tone_for_status(paper_exec),
@@ -212,8 +253,9 @@ def render_status_bar(status: Mapping[str, Any]) -> None:
             },
             {
                 "label": "Data freshness",
-                "value": display_status(freshness.get("class") or "Unknown"),
-                "tone": oui.tone_for_status(freshness.get("class")),
+                "value": fresh["value"],
+                "tone": fresh["tone"],
+                "note": fresh.get("note"),
             },
         ]
     )
@@ -243,8 +285,23 @@ def render_authority_and_runtime_controls(status: Mapping[str, Any]) -> None:
 
 
 def _portfolio_metrics(
-    summary: Mapping[str, Any], history_rows: Sequence[Mapping[str, Any]]
+    summary: Mapping[str, Any],
+    history_rows: Sequence[Mapping[str, Any]],
+    *,
+    certified: Optional[Mapping[str, Any]] = None,
 ) -> None:
+    from dashboard.performance_presentation import SECOND_CLOSE_NOTE, UNAVAILABLE_LABEL
+
+    if certified and certified.get("available"):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Portfolio value", certified.get("portfolio_value"))
+        c2.metric("Period change", UNAVAILABLE_LABEL)
+        c3.metric("Cash", certified.get("cash"))
+        c4, c5 = st.columns(2)
+        c4.metric("Invested value", certified.get("market_value"))
+        c5.metric("Unrealized P/L", certified.get("unrealized_pl"))
+        st.caption(certified.get("period_change_note") or SECOND_CLOSE_NOTE)
+        return
     change = period_change(history_rows)
     c1, c2, c3 = st.columns(3)
     c1.metric("Portfolio value", money_text(summary.get("total_portfolio_value")))
@@ -258,8 +315,10 @@ def _portfolio_metrics(
     c4, c5 = st.columns(2)
     c4.metric("Invested value", money_text(summary.get("market_value")))
     c5.metric("Unrealized P/L", signed_text(summary.get("unrealized_pnl")))
+    from dashboard.preview_data import isolation_active
+
     realized = summary.get("realized_pnl")
-    if realized is None:
+    if isolation_active(_root()) or realized is None:
         st.caption(
             "Realized P/L: **Unavailable** — sale proceeds are not a cost-basis realized P/L figure."
         )
@@ -326,13 +385,18 @@ def render_overview_page() -> None:
         "Is TRITON running, is live blocked, and what needs attention?",
         kicker="Operator console",
     )
-    status = build_operator_status()
-    summary = build_portfolio_summary()
+    status = build_operator_status(root=_root())
+    summary = build_portfolio_summary(root=_root())
     render_status_bar(status)
 
+    certified = _certified_totals()
     hist = normalize_history_rows(_history_dicts(summary))
     latest = hist[-2:] if len(hist) >= 2 else hist
-    _portfolio_metrics(summary, latest)
+    _portfolio_metrics(summary, latest, certified=certified)
+
+    from dashboard.performance_page import render_overview_performance_summary
+
+    render_overview_performance_summary()
 
     render_authority_and_runtime_controls(status)
 
@@ -355,7 +419,7 @@ def render_overview_page() -> None:
 
     st.markdown("#### Recent activity")
     try:
-        payload = merge_activity_payload(collect_activity_events(since_hours=24.0))
+        payload = merge_activity_payload(collect_activity_events(root=_root(), since_hours=24.0))
         events = list(payload.get("events") or [])[:8]
     except Exception:
         events = []
@@ -373,6 +437,7 @@ def render_overview_page() -> None:
                 "cycle": cycle,
                 "live_execution": status.get("live_execution"),
                 "paper_arm": status.get("paper_arm"),
+                "market_session": _market_session_card().get("technical"),
             }
         )
 
@@ -391,6 +456,66 @@ def _history_dicts(summary: Mapping[str, Any]) -> List[Dict[str, Any]]:
         return []
 
 
+def _certified_holdings_table(holdings: Sequence[Mapping[str, Any]]) -> None:
+    if not holdings:
+        oui.render_empty_state("No holdings", "No certified position rows for this close.")
+        return
+    display = [
+        {
+            "Symbol": row.get("symbol"),
+            "Quantity": row.get("quantity"),
+            "Market value": row.get("market_value"),
+            "Average basis": row.get("average_basis"),
+            "Unrealized gain/loss": row.get("unrealized"),
+            "Weight": row.get("weight"),
+        }
+        for row in holdings
+    ]
+    render_operator_table(
+        display,
+        signed_columns=("Unrealized gain/loss",),
+        caption="Holdings are from the latest certified accounting close.",
+    )
+
+
+def _legacy_portfolio_history_section(summary: Mapping[str, Any]) -> None:
+    rows = normalize_history_rows(_history_dicts(summary))
+    with st.expander("Legacy portfolio history", expanded=False):
+        st.caption(
+            "Historical operational records are not used for verified performance calculations."
+        )
+        periods = available_periods(rows)
+        if not periods:
+            st.caption("No dated operational observations are available.")
+            return
+        default_idx = periods.index("1M") if "1M" in periods else len(periods) - 1
+        period = st.radio(
+            "Period", periods, index=default_idx, horizontal=True, key="ui_a_port_period"
+        )
+        filtered = filter_period(rows, period)
+        state = chart_state(filtered)
+        try:
+            fig = build_plotly_figure(filtered)
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception:
+            st.caption("Interactive chart unavailable — values below remain evidenced.")
+            st.line_chart(
+                {str(p["date"]): p["total_value"] for p in filtered} if filtered else {},
+                height=280,
+            )
+        tone = str(state.get("tone") or "unavailable")
+        tone_phrase = {
+            "positive": "up",
+            "negative": "down",
+            "neutral": "unchanged",
+            "unavailable": "unavailable",
+        }.get(tone, tone)
+        st.caption(
+            f"The selected operational period is {tone_phrase}. "
+            "Gaps are missing observations, not interpolated values."
+        )
+
+
 def render_portfolio_page() -> None:
     from services.operator_console_status import build_portfolio_summary
 
@@ -398,56 +523,30 @@ def render_portfolio_page() -> None:
     _isolation_banner()
     oui.render_page_intro(
         "Portfolio",
-        "Verified history only — missing dates stay blank.",
+        "Current totals from the latest certified accounting close.",
     )
-    summary = build_portfolio_summary()
-    if not summary.get("available"):
-        st.warning("Portfolio artifacts are unavailable or unreadable.")
-    rows = normalize_history_rows(_history_dicts(summary))
-    periods = available_periods(rows)
-    if not periods:
-        oui.render_empty_state(
-            "No portfolio history",
-            "No dated value observations are available.",
-        )
+    summary = build_portfolio_summary(root=_root())
+    certified = _certified_totals()
+    if certified and certified.get("available"):
+        _portfolio_metrics(summary, [], certified=certified)
+        st.markdown("#### Holdings")
+        _certified_holdings_table(certified.get("holdings") or [])
+        _legacy_portfolio_history_section(summary)
+    else:
+        if not summary.get("available"):
+            st.warning("Portfolio artifacts are unavailable or unreadable.")
+        rows = normalize_history_rows(_history_dicts(summary))
+        _portfolio_metrics(summary, rows[-2:] if len(rows) >= 2 else rows)
+        st.markdown("#### Holdings")
         _holdings_table(summary)
-        with st.expander("Data sources", expanded=False):
-            st.write(summary.get("evidence_paths"))
-        return
-
-    default_idx = periods.index("1M") if "1M" in periods else len(periods) - 1
-    period = st.radio("Period", periods, index=default_idx, horizontal=True, key="ui_a_port_period")
-    filtered = filter_period(rows, period)
-    change_rows = rows[-2:] if period == "1D" and len(rows) >= 2 else filtered
-    _portfolio_metrics(summary, change_rows)
-    state = chart_state(filtered)
-    try:
-        fig = build_plotly_figure(filtered)
-        st.plotly_chart(fig, use_container_width=True)
-    except Exception:
-        st.caption("Interactive chart unavailable — values below remain evidenced.")
-        st.line_chart(
-            {str(p["date"]): p["total_value"] for p in filtered} if filtered else {},
-            height=280,
-        )
-    tone = str(state.get("tone") or "unavailable")
-    tone_phrase = {
-        "positive": "up",
-        "negative": "down",
-        "neutral": "unchanged",
-        "unavailable": "unavailable",
-    }.get(tone, tone)
-    st.caption(
-        f"The selected period is {tone_phrase}. "
-        "Gaps are missing observations, not interpolated values."
-    )
-    st.markdown("#### Holdings")
-    _holdings_table(summary)
+        _legacy_portfolio_history_section(summary)
     if summary.get("concentration_warnings"):
         with st.expander("Concentration warnings", expanded=True):
             st.write(summary["concentration_warnings"])
     with st.expander("Data sources", expanded=False):
         st.write(summary.get("evidence_paths"))
+        if certified:
+            st.caption("Current totals source: certified accounting close.")
         st.caption(f"Last refresh: {oui.format_timestamp(summary.get('last_refresh_time'))}")
 
 
@@ -478,7 +577,7 @@ def _order_badge_fields(row: Mapping[str, Any]) -> Dict[str, Any]:
         "Status": display_status(status),
         "status_raw": status,
         "Symbol": row.get("symbol"),
-        "Side": display_status(row.get("side") or ""),
+        "Side": _display_order_side(row),
         "Quantity": quantity_text(
             row.get("selected_qty")
             if row.get("selected_qty") is not None
@@ -491,27 +590,48 @@ def _order_badge_fields(row: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _display_order_side(row: Mapping[str, Any]) -> str:
+    from dashboard.order_presentation import display_side
+
+    return display_side(row.get("side"))
+
+
 def render_orders_page() -> None:
-    from services.operator_console_status import build_orders_summary
-    from services.paper_order_ledger import (
-        LEDGER_RELATIVE,
-        dispatch_visibility,
-        filter_unified_rows,
-        unified_order_rows,
+    from dashboard.order_presentation import (
+        AuthoritativeLedgerError,
+        load_authoritative_presentation,
+        plan_table_row,
     )
+    from dashboard.preview_data import assert_not_production_path, expected_ledger_sha256
+    from services.operator_console_status import build_orders_summary
+    from services.paper_order_ledger import LEDGER_RELATIVE, filter_unified_rows, ledger_path
 
     oui.inject_operator_theme()
     _isolation_banner()
     oui.render_page_intro("Orders", "Unified paper-order ledger. Submitted is not filled.")
-    summary = build_orders_summary()
-    rows = unified_order_rows()
-    vis = dispatch_visibility(rows)
+    summary = build_orders_summary(root=_root())
+    assert_not_production_path(ledger_path(_root()), root=_repo_root())
+    try:
+        counts = load_authoritative_presentation(
+            root=_root(),
+            expected_sha256=expected_ledger_sha256(_repo_root()),
+        )
+    except AuthoritativeLedgerError as exc:
+        oui.render_empty_state(
+            "Authoritative ledger unavailable",
+            "Orders are not shown because the copied ledger is missing or does not match the frozen hash.",
+        )
+        st.caption(str(exc))
+        return
     t1, t2, t3, t4, t5 = st.columns(5)
-    t1.metric("Submitted", vis.get("submitted") or 0)
-    t2.metric("Filled", vis.get("filled") or 0)
-    t3.metric("Open", vis.get("open") or 0)
-    t4.metric("Skipped", vis.get("skipped") or 0)
-    t5.metric("Failed / rejected", int(vis.get("failed") or 0) + int(vis.get("rejected") or 0))
+    t1.metric("Broker orders", counts.get("broker_orders") or 0)
+    t2.metric("Filled", counts.get("filled") or 0)
+    t3.metric("Open", counts.get("open") or 0)
+    t4.metric("Skipped", counts.get("skipped") or 0)
+    t5.metric(
+        "Failed / rejected",
+        int(counts.get("failed") or 0) + int(counts.get("rejected") or 0),
+    )
 
     f1, f2, f3, f4 = st.columns(4)
     with f1:
@@ -533,7 +653,7 @@ def render_orders_page() -> None:
             key="ui_a_pol_status",
         )
     shown = filter_unified_rows(
-        rows,
+        counts["broker_rows"],
         trading_date=date_f or None,
         symbol=symbol_f or None,
         side=None if side_f == "ALL" else side_f,
@@ -563,7 +683,7 @@ def render_orders_page() -> None:
                 options=list(range(min(len(shown), 50))),
                 format_func=lambda i: (
                     f"{shown[i].get('symbol') or '—'} · "
-                    f"{display_status(shown[i].get('side') or '')} · "
+                    f"{_display_order_side(shown[i])} · "
                     f"{_order_badge_fields(shown[i])['Status']}"
                 ),
                 key="ui_a_order_detail",
@@ -582,15 +702,52 @@ def render_orders_page() -> None:
                         "source_pipeline",
                         "logical_key",
                         "source_artifact",
+                        "side",
                     ),
                 )
             )
 
+    plan_rows = list(counts.get("plan_rows") or [])
+    with st.expander(
+        f"Historical plans ({len(plan_rows)})",
+        expanded=False,
+    ):
+        st.caption(
+            "Legacy planning records. These are not broker orders and are not an order side."
+        )
+        if plan_rows:
+            render_operator_table([plan_table_row(r) for r in plan_rows[:200]])
+            with st.expander("Technical details", expanded=False):
+                st.json(
+                    [
+                        technical_payload(
+                            r,
+                            (
+                                "logical_key",
+                                "side",
+                                "source_pipeline",
+                                "action_disposition",
+                                "source_artifact",
+                                "kind",
+                            ),
+                        )
+                        for r in plan_rows[:50]
+                    ]
+                )
+        else:
+            st.caption("No historical planning records in the current evidence.")
+
     current = summary.get("current_open_orders") or {}
     with st.expander("Current open-order snapshot", expanded=False):
+        fresh = _freshness_view({"data_freshness": {"class": current.get("freshness")}})
         st.caption(
-            f"{display_status(current.get('freshness') or 'Unknown')} · "
-            f"{current.get('evidence_timestamp') or 'n/a'}"
+            f"{fresh['value']}"
+            + (f" · {fresh['note']}" if fresh.get("note") else "")
+            + (
+                f" · {current.get('evidence_timestamp')}"
+                if current.get("evidence_timestamp") and not fresh.get("isolated")
+                else ""
+            )
         )
         open_rows = current.get("rows") or []
         if open_rows:
@@ -599,6 +756,10 @@ def render_orders_page() -> None:
             st.caption(current.get("message") or "No open-order rows in this snapshot.")
     with st.expander("Evidence", expanded=False):
         st.write({"ledger": LEDGER_RELATIVE, **(summary.get("evidence_paths") or {})})
+        st.caption(
+            f"Broker orders={counts.get('broker_orders')} · "
+            f"historical plans={counts.get('historical_plans')}"
+        )
 
 
 def _activity_tone(event: Mapping[str, Any]) -> str:
@@ -687,7 +848,9 @@ def render_activity_page() -> None:
         )
     with cols[3]:
         query = st.text_input("Search", key="ui_a_act_q")
-    payload = merge_activity_payload(collect_activity_events(since_hours=float(hours)))
+    payload = merge_activity_payload(
+        collect_activity_events(root=_root(), since_hours=float(hours))
+    )
     events = filter_activity_events(
         payload, category=category, severity=severity, source="ALL", query=query
     )
@@ -711,7 +874,7 @@ def render_operations_page() -> None:
     oui.inject_operator_theme()
     _isolation_banner()
     oui.render_page_intro("Operations", "What is running, and what should you do next?")
-    status = build_operator_status()
+    status = build_operator_status(root=_root())
     render_status_bar(status)
     render_authority_and_runtime_controls(status)
 
@@ -743,6 +906,7 @@ def render_operations_page() -> None:
                 "broker": status.get("broker"),
                 "live_execution": status.get("live_execution"),
                 "paper_arm": status.get("paper_arm"),
+                "market_session": _market_session_card().get("technical"),
                 "evidence_paths": status.get("evidence_paths"),
             }
         )
@@ -756,7 +920,7 @@ def render_risk_alerts_page() -> None:
     oui.render_page_intro(
         "Risk & Alerts", "Read-only risk posture. Alerts cannot be dismissed here."
     )
-    summary = build_risk_alerts_summary()
+    summary = build_risk_alerts_summary(root=_root())
     st.metric("Capital preservation", display_status(summary.get("capital_preservation_posture")))
     if summary.get("recommended_operator_response"):
         st.caption(summary["recommended_operator_response"])
@@ -793,9 +957,16 @@ def render_reports_page() -> None:
     render_operator_reports_page()
 
 
+def render_performance_page() -> None:
+    from dashboard.performance_page import render_performance_page as _render
+
+    _render()
+
+
 UI_A_RENDERERS = {
     "Overview": render_overview_page,
     "Portfolio": render_portfolio_page,
+    "Performance": render_performance_page,
     "Orders": render_orders_page,
     "Activity": render_activity_page,
     "Reports": render_reports_page,

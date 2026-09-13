@@ -1,0 +1,29 @@
+{
+  "schema_version": "198H-PAPER-SELL-ARM-1",
+  "status": "PERMIT_FINALIZED",
+  "permit_token": "sell-permit-7d505ecd18604be5ac7d8b60ce7006ac",
+  "dispatch_intent_id": "sell-dispatch-5135a17d7fe74121",
+  "idempotency_key": "sell-arm|471ede2d45b1c8ffcd2298f9fd889df0cf815a2e4660c2fb8d13d8e7f8b9d89f|manage-mo-20260908_1031|sell-chal-3255d23ca3f94676",
+  "symbols": [
+    "GE"
+  ],
+  "actions": [
+    {
+      "symbol": "GE",
+      "action": "EXIT",
+      "qty": 8.0
+    }
+  ],
+  "symbols_submitted": [
+    "GE"
+  ],
+  "issued_at": "2026-09-08T15:17:53.678684+00:00",
+  "replay_forbidden": true,
+  "additional_symbols_forbidden": true,
+  "last_client_order_id": "triton-preplan-GE-EXIT-09b6490e74",
+  "last_submit_source": "broker_alpaca.submit_order",
+  "last_submit_at": "2026-09-08T15:17:59.391345+00:00",
+  "json_role": "AUDIT_EXPORT_ONLY",
+  "final_outcome": "SUCCESS",
+  "finalized_at": "2026-09-08T15:18:02.479293+00:00"
+}

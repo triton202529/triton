@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-09-08T22:59:25Z",
+  "readiness_status": "READY",
+  "checks": {
+    "governance": true,
+    "approval": true,
+    "policy": true,
+    "data_freshness": true,
+    "watchdog": true,
+    "broker": true,
+    "lifecycle": true,
+    "signals": true
+  },
+  "check_details": {
+    "governance": "Governance posture permits evaluation",
+    "approval": "Approved requests present",
+    "policy": "At least one protective policy enabled",
+    "data_freshness": "Core risk artifacts are fresh",
+    "watchdog": "Watchdog monitoring healthy",
+    "broker": "Broker connectivity OK (read-only)",
+    "lifecycle": "Effective lifecycle present and reconciled",
+    "signals": "signals.csv within freshness window"
+  },
+  "passing_checks": [
+    "governance",
+    "approval",
+    "policy",
+    "data_freshness",
+    "watchdog",
+    "broker",
+    "lifecycle",
+    "signals"
+  ],
+  "failed_checks": [],
+  "checks_passing_count": 8,
+  "checks_total": 8,
+  "mode": "PAPER_ONLY",
+  "paper_execution_permitted": true,
+  "live_execution_permitted": false,
+  "disclaimer": "Readiness assessment only. READY requires paper execution authorization and all operational checks. Live execution remains blocked.",
+  "lifecycle_diagnostics_timestamp": "2026-09-08T22:59:26Z",
+  "governance_mode": "GREEN",
+  "risk_increasing_actions_blocked": false,
+  "risk_reducing_paper_actions_allowed": false,
+  "degraded_mode_reason": [
+    "EXCESS_CONCENTRATION"
+  ],
+  "governance_degraded_mode_audit_timestamp": "2026-09-08T22:59:26Z"
+}

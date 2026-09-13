@@ -1,0 +1,13 @@
+{
+  "schema_version": "198H-PAPER-SELL-ARM-1",
+  "consumed_at": "2026-09-08T15:17:53.678684+00:00",
+  "audit_id": "sell-arm-audit-0fd67b6383de",
+  "authority_id": "sell-arm-audit-0fd67b6383de",
+  "idempotency_key": "sell-arm|471ede2d45b1c8ffcd2298f9fd889df0cf815a2e4660c2fb8d13d8e7f8b9d89f|manage-mo-20260908_1031|sell-chal-3255d23ca3f94676",
+  "plan_hash": "471ede2d45b1c8ffcd2298f9fd889df0cf815a2e4660c2fb8d13d8e7f8b9d89f",
+  "batch_id": "manage-mo-20260908_1031",
+  "result": "STARTED",
+  "consumption_rule": "CONSUME_ON_FIRST_DISPATCH_ATTEMPT",
+  "orders_submitted_unknown": false,
+  "consuming_dispatch_id": "sell-dispatch-5135a17d7fe74121"
+}

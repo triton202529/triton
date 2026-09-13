@@ -1,0 +1,1074 @@
+timestamp,session,symbol,lifecycle_state,signal,action,qty,price,order_type,authorization_status,governance_authorized,execution_authorized,readiness,broker_mode,duplicate_check_result,submitted_order_id,status,skip_reason
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,XLK,BUY,ENTRY,buy,8,180.89,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,AMD,BUY,ENTRY,buy,3,466.61,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,INTC,BUY,ENTRY,buy,15,97.84,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,SLV,BUY,ENTRY,buy,4,61.78,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,QQQ,BUY,ENTRY,buy,2,703.47,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,GBTC,BUY,ENTRY,buy,31,47.76,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,ARKK,BUY,ENTRY,buy,11,74.78,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,TSLA,BUY,ENTRY,buy,3,392.18,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,BITO,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,UNG,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,META,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,^IXIC,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,NVDA,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,XLE,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,GLD,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,MSFT,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,SPY,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,GS,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,IWM,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,USO,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,VOO,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,^GSPC,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,VTI,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,XLB,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,XOM,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,AAPL,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,XLY,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,MS,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,BLK,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,XLI,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,AMZN,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,CVX,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:38Z,exec_trades_20260605_231935,DBA,BUY,ENTRY,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-05T23:19:40Z,2026-06-05_PAPER,AAPL,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,AMD,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,AMZN,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,ARKK,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,BITO,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,BLK,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,CVX,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,DBA,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,GBTC,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,GLD,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,GS,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,INTC,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,IWM,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,META,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,MS,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,MSFT,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,NVDA,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,QQQ,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,SLV,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,SPY,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,TSLA,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,UNG,BUY,BUY,skip,0,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,BLOCK_NEW_BUY_OVERLAY:Performance risk overlay: underperforming asset
+2026-06-05T23:19:40Z,2026-06-05_PAPER,USO,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,VOO,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,VTI,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,XLB,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,XLE,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,XLI,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,XLK,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,XLY,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,XOM,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,^GSPC,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:40Z,2026-06-05_PAPER,^IXIC,BUY,BUY,plan,1,,,paper_env_only,true,false,NOT_READY,paper,,,planned,KEPT
+2026-06-05T23:19:53Z,2026-06-05_PAPER,,,,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=42490.22 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-06-05T23:19:53Z,2026-06-05_PAPER,,,,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=42490.22 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-05T23:22:40Z,phase148e_dup_test,UNG,BUY,BUY,buy,0,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,BLOCK_NEW_BUY_OVERLAY:Performance risk overlay: underperforming asset
+2026-06-05T23:22:53Z,phase148e_dup_test,AAPL,,,buy,1,307.33,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,AMD,,,buy,1,466.38,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,AMZN,,,buy,1,246.02,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,ARKK,,,buy,1,74.48,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,BITO,,,buy,1,8.22,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,BLK,,,buy,1,995.59,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,CVX,,,buy,1,187.3,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,DBA,,,buy,1,26.39,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,GBTC,,,buy,1,46.79,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,GLD,,,buy,1,396.23,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,GS,,,buy,1,1038.68,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,INTC,,,buy,1,98.23,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,IWM,,,buy,1,281.64,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,META,,,buy,1,593.0,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,MS,,,buy,1,211.92,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,MSFT,,,buy,1,416.67,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,NVDA,,,buy,1,205.1,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,QQQ,,,buy,1,705.05,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,SLV,,,buy,1,61.56,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,SPY,,,buy,1,737.54,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,TSLA,,,buy,1,391.0,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,USO,,,buy,1,133.02,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,VOO,,,buy,1,678.0,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,VTI,,,buy,1,363.38,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,XLB,,,buy,1,50.63,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,XLE,,,buy,1,57.66,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,XLI,,,buy,1,174.17,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,XLK,,,buy,1,180.3,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,XLY,,,buy,1,114.86,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,XOM,,,buy,1,149.91,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,^GSPC,,,buy,1,7383.74,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:53Z,phase148e_dup_test,^IXIC,,,buy,1,25709.43,limit,paper_env_only,true,false,NOT_READY,paper,,,planned,
+2026-06-05T23:22:55Z,phase148e_dup_test,AAPL,,,buy,1,307.3399963378906,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,AMD,,,buy,1,466.3800048828125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,AMZN,,,buy,1,246.02999877929688,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,ARKK,,,buy,1,74.48999786376953,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,BITO,,,buy,1,8.220000267028809,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,BLK,,,buy,1,995.5999755859376,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,CVX,,,buy,1,187.3099975585937,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,DBA,,,buy,1,26.39999961853028,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,GBTC,,,buy,1,46.79999923706055,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,GLD,,,buy,1,396.239990234375,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,GS,,,buy,1,1038.6800537109375,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,INTC,,,buy,1,99.16999816894533,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,IWM,,,buy,1,281.6499938964844,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,META,,,buy,1,593.0,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,MS,,,buy,1,211.92999267578125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,MSFT,,,buy,1,416.6700134277344,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,NVDA,,,buy,1,205.1000061035156,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,QQQ,,,buy,1,705.0599975585938,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,SLV,,,buy,1,61.56999969482422,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,SPY,,,buy,1,737.5499877929688,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,TSLA,,,buy,1,391.0,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,USO,,,buy,1,133.02000427246094,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,VOO,,,buy,1,678.0,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,VTI,,,buy,1,363.3800048828125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLB,,,buy,1,50.630001068115234,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLE,,,buy,1,57.66999816894531,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLI,,,buy,1,174.17999267578125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLK,,,buy,1,180.3000030517578,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLY,,,buy,1,114.86000061035156,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XOM,,,buy,1,149.9199981689453,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,^GSPC,,,buy,1,7383.740234375,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,^IXIC,,,buy,1,25709.431640625,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,UNG,BUY,BUY,buy,0,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,BLOCK_NEW_BUY_OVERLAY:Performance risk overlay: underperforming asset
+2026-06-05T23:22:55Z,phase148e_dup_test,AAPL,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,AMD,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,AMZN,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,ARKK,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,BITO,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,BLK,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,CVX,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,DBA,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,GBTC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,GLD,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,GS,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,INTC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,IWM,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,META,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,MS,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,MSFT,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,NVDA,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,QQQ,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,SLV,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,SPY,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,TSLA,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,USO,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,VOO,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,VTI,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLB,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLE,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLI,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLK,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XLY,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,XOM,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,^GSPC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,^IXIC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:22:55Z,phase148e_dup_test,,,,skip,,,,paper_env_only,true,false,NOT_READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-06-05T23:23:10Z,phase148e_dup_test,AAPL,,,buy,1,307.3399963378906,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,AMD,,,buy,1,466.3800048828125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,AMZN,,,buy,1,246.02999877929688,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,ARKK,,,buy,1,74.48999786376953,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,BITO,,,buy,1,8.220000267028809,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,BLK,,,buy,1,995.5999755859376,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,CVX,,,buy,1,187.3099975585937,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,DBA,,,buy,1,26.39999961853028,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,GBTC,,,buy,1,46.79999923706055,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,GLD,,,buy,1,396.239990234375,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,GS,,,buy,1,1038.6800537109375,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,INTC,,,buy,1,99.16999816894533,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,IWM,,,buy,1,281.6499938964844,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,META,,,buy,1,593.0,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,MS,,,buy,1,211.92999267578125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,MSFT,,,buy,1,416.6700134277344,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,NVDA,,,buy,1,205.1000061035156,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,QQQ,,,buy,1,705.0599975585938,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,SLV,,,buy,1,61.56999969482422,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,SPY,,,buy,1,737.5499877929688,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,TSLA,,,buy,1,391.0,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,USO,,,buy,1,133.02000427246094,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,VOO,,,buy,1,678.0,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,VTI,,,buy,1,363.3800048828125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLB,,,buy,1,50.630001068115234,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLE,,,buy,1,57.66999816894531,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLI,,,buy,1,174.17999267578125,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLK,,,buy,1,180.3000030517578,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLY,,,buy,1,114.86000061035156,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XOM,,,buy,1,149.9199981689453,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,^GSPC,,,buy,1,7383.740234375,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,^IXIC,,,buy,1,25709.431640625,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,UNG,BUY,BUY,buy,0,,,paper_env_only,true,false,NOT_READY,paper,,,skipped,BLOCK_NEW_BUY_OVERLAY:Performance risk overlay: underperforming asset
+2026-06-05T23:23:10Z,phase148e_dup_test,AAPL,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,AMD,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,AMZN,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,ARKK,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,BITO,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,BLK,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,CVX,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,DBA,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,GBTC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,GLD,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,GS,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,INTC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,IWM,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,META,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,MS,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,MSFT,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,NVDA,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,QQQ,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,SLV,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,SPY,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,TSLA,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,USO,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,VOO,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,VTI,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLB,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLE,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLI,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLK,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XLY,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,XOM,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,^GSPC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-05T23:23:10Z,phase148e_dup_test,^IXIC,,,skip,1,,,paper_env_only,true,false,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,XLK,BUY,ENTRY,buy,8,184.87,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,INTC,BUY,ENTRY,buy,13,108.26,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,AMD,BUY,ENTRY,buy,3,487.14,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,SLV,BUY,ENTRY,buy,4,62.4,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,GBTC,BUY,ENTRY,buy,30,49.47,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,ARKK,BUY,ENTRY,buy,11,75.65,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,TSLA,BUY,ENTRY,buy,3,398.07,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,QQQ,BUY,ENTRY,buy,2,718.45,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,BITO,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,UNG,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,META,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,NVDA,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,^IXIC,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,XLE,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,GLD,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,GS,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,USO,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,MSFT,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,SPY,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,IWM,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,VOO,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,^GSPC,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,XLB,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,VTI,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,XOM,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,XLY,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,AAPL,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,MS,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,XLI,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,BLK,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,CVX,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,AMZN,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:38:06Z,exec_trades_20260608_133802,DBA,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,XLK,BUY,ENTRY,buy,8,185.02,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,INTC,BUY,ENTRY,buy,13,108.65,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,AMD,BUY,ENTRY,buy,3,485.64,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,SLV,BUY,ENTRY,buy,4,62.44,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,GBTC,BUY,ENTRY,buy,30,49.45,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,ARKK,BUY,ENTRY,buy,11,75.53,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,TSLA,BUY,ENTRY,buy,3,399.67,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,QQQ,BUY,ENTRY,buy,2,718.89,limit,authorized,true,true,NOT_READY,paper,,,planned,
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,BITO,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,UNG,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,META,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,NVDA,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,^IXIC,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,XLE,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,GLD,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,GS,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,USO,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,MSFT,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,SPY,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,IWM,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,VOO,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,^GSPC,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,XLB,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,VTI,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,XOM,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,XLY,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,AAPL,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,MS,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,XLI,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,BLK,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,CVX,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,AMZN,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T13:42:13Z,exec_trades_20260608_134210,DBA,BUY,ENTRY,skip,,,,authorized,true,true,NOT_READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLK,BUY,ENTRY,buy,8,184.5,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,INTC,BUY,ENTRY,buy,13,108.21,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,AMD,BUY,ENTRY,buy,3,484.14,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,SLV,BUY,ENTRY,buy,4,61.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,GBTC,BUY,ENTRY,buy,30,49.64,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,ARKK,BUY,ENTRY,buy,11,75.99,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,TSLA,BUY,ENTRY,buy,3,403.61,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,QQQ,BUY,ENTRY,buy,2,717.97,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,BITO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,UNG,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,META,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,NVDA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,^IXIC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLE,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,GLD,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,GS,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,USO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,MSFT,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,SPY,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,IWM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,VOO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,^GSPC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLB,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,VTI,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XOM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLY,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,AAPL,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,MS,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLI,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,BLK,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,CVX,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,AMZN,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,DBA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLK,BUY,ENTRY,buy,8,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,INTC,BUY,ENTRY,buy,13,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,AMD,BUY,ENTRY,buy,3,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,SLV,BUY,ENTRY,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,GBTC,BUY,ENTRY,buy,30,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,ARKK,BUY,ENTRY,buy,11,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,TSLA,BUY,ENTRY,buy,3,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,QQQ,BUY,ENTRY,buy,2,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,BITO,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,FILTERED_BY_EXECUTION_QUALITY:internal=EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,UNG,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,FILTERED_BY_EXECUTION_QUALITY:internal=EXECUTION_QUALITY_TOP_N_CAP
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,META,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,NVDA,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,^IXIC,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLE,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,GLD,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,GS,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,USO,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,MSFT,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,SPY,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,IWM,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,VOO,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,^GSPC,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLB,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,VTI,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XOM,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLY,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,AAPL,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,MS,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLI,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,BLK,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,CVX,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,AMZN,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,DBA,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,EXCEEDS_POSITION_LIMIT:internal=MAX_NEW_POSITIONS_REACHED
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,XLK,BUY,ENTRY,buy,8,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,INTC,BUY,ENTRY,buy,13,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,AMD,BUY,ENTRY,buy,3,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,SLV,BUY,ENTRY,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,GBTC,BUY,ENTRY,buy,30,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,ARKK,BUY,ENTRY,buy,11,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,TSLA,BUY,ENTRY,buy,3,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:07Z,exec_trades_20260608_140805,QQQ,BUY,ENTRY,buy,2,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,XLK,BUY,BUY,buy,8,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,INTC,BUY,BUY,buy,13,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,AMD,BUY,BUY,buy,3,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,SLV,BUY,BUY,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,GBTC,BUY,BUY,buy,30,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,ARKK,BUY,BUY,buy,11,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,TSLA,BUY,BUY,buy,3,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:12Z,exec_trades_20260608_140805,QQQ,BUY,BUY,buy,2,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T14:08:16Z,exec_trades_20260608_140805,XLK,,,plan,8,,,authorized,true,true,READY,paper,,1e945491-adac-44f2-8ce9-d8836b9eccf5,submitted,
+2026-06-08T14:08:17Z,exec_trades_20260608_140805,INTC,,,plan,13,,,authorized,true,true,READY,paper,,b1f6dda4-0787-4fbc-a888-9f5875ef8f3d,submitted,
+2026-06-08T14:08:17Z,exec_trades_20260608_140805,AMD,,,plan,3,,,authorized,true,true,READY,paper,,ea9269c8-cd7c-418a-944b-a64f376eac84,submitted,
+2026-06-08T14:08:17Z,exec_trades_20260608_140805,SLV,,,plan,4,,,authorized,true,true,READY,paper,,f4c32b38-663f-431c-b28e-0828a16301fd,submitted,
+2026-06-08T14:08:17Z,exec_trades_20260608_140805,GBTC,,,plan,30,,,authorized,true,true,READY,paper,,138b5fec-c90e-4678-b506-6fe877e200e2,submitted,
+2026-06-08T14:08:17Z,exec_trades_20260608_140805,ARKK,,,plan,11,,,authorized,true,true,READY,paper,,18d6b8d7-95a2-4b2d-a457-9f7213304cd5,submitted,
+2026-06-08T14:08:17Z,exec_trades_20260608_140805,TSLA,,,plan,3,,,authorized,true,true,READY,paper,,6e704235-8ebc-45cf-9317-2a16d3cc31bc,submitted,
+2026-06-08T14:08:17Z,exec_trades_20260608_140805,QQQ,,,plan,2,,,authorized,true,true,READY,paper,,871b08ef-7be7-4cbc-ba31-7b0b999709fe,submitted,
+2026-06-08T15:02:09Z,manage_pos_20260608_150206,SLV,EXIT,EXIT,sell,4,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T15:02:09Z,manage_pos_20260608_150206,ARKK,ADD,ADD,buy,1,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T15:02:10Z,manage_pos_20260608_150206,SLV,,,plan,4,,,authorized,true,true,READY,paper,,a4262547-be66-42ff-b93a-39bed3059881,submitted,
+2026-06-08T15:02:10Z,manage_pos_20260608_150206,ARKK,,,plan,1,,,authorized,true,true,READY,paper,,abdc4bb5-c19e-4a98-8c6c-5ebb4991373f,submitted,
+2026-06-08T15:47:30Z,manage_pos_20260608_154728,TSLA,ROTATE_EXIT,ROTATE_EXIT,sell,3,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T15:47:31Z,manage_pos_20260608_154728,TSLA,,,plan,3,,,authorized,true,true,READY,paper,,55fe9287-eb2a-46ae-952c-cc965326678d,submitted,
+2026-06-08T16:32:52Z,manage_pos_20260608_163250,AMD,ROTATE_EXIT,ROTATE_EXIT,sell,3,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T16:32:53Z,manage_pos_20260608_163250,AMD,,,plan,3,,,authorized,true,true,READY,paper,,bcfbb23c-80b3-4808-8086-3405707425ab,submitted,
+2026-06-08T21:07:36Z,manage_pos_20260608_210733,GBTC,EXIT,EXIT,sell,30,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T21:07:36Z,manage_pos_20260608_210733,ARKK,EXIT,EXIT,sell,12,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T21:07:36Z,manage_pos_20260608_210733,INTC,EXIT,EXIT,sell,13,,,authorized,true,true,READY,paper,,,planned,
+2026-06-08T21:07:37Z,manage_pos_20260608_210733,GBTC,,,plan,30,,,authorized,true,true,READY,paper,,605f1585-44cf-46b3-9daa-c3759f4f61de,submitted,
+2026-06-08T21:07:37Z,manage_pos_20260608_210733,ARKK,,,plan,12,,,authorized,true,true,READY,paper,,f2789def-c3d8-4dcd-972a-f4c9e18d2d6a,submitted,
+2026-06-08T21:07:38Z,manage_pos_20260608_210733,INTC,,,plan,13,,,authorized,true,true,READY,paper,,24e68027-84eb-4b43-94af-c85730e80a29,submitted,
+2026-06-09T16:22:31Z,manage_pos_20260609_162230,XLK,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-06-09T16:22:32Z,manage_pos_20260609_162230,XLK,,,plan,8,,,authorized,true,true,READY,paper,,a1325470-c528-4a95-8892-2f383eed1627,submitted,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,SLV,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,BITO,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,XLE,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,GS,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,^IXIC,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,NO_PRICE_AVAILABLE
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,UNG,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,AAPL,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,USO,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,NFLX,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,GLD,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,XOM,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,MS,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,^GSPC,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,NO_PRICE_AVAILABLE
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,BRK-B,BUY,ENTRY,buy,3,485.75,limit,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,TSLA,BUY,ENTRY,buy,3,382.45,limit,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,ARKK,BUY,ENTRY,buy,11,73.29,limit,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,CVX,BUY,ENTRY,buy,7,190.49,limit,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,GBTC,BUY,ENTRY,buy,31,48.21,limit,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,XLK,BUY,ENTRY,buy,8,177.11,limit,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,VTI,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,EXECUTION_QUALITY_NO_CONFIRMATION
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,AMD,BUY,ENTRY,buy,3,451.59,limit,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,META,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,EXECUTION_QUALITY_NO_CONFIRMATION
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,NVDA,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,NEGATIVE_SCORE_BLOCK
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,MSFT,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,NEGATIVE_SCORE_BLOCK
+2026-06-10T20:20:05Z,exec_trades_20260610_201959,INTC,BUY,ENTRY,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,skipped,NEGATIVE_SCORE_BLOCK
+2026-06-12T20:59:11Z,manage_pos_20260612_205909,QQQ,EXIT,EXIT,sell,2,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-12T20:59:13Z,manage_pos_20260612_205909,QQQ,,,plan,2,,,denied,false,true,PARTIALLY_READY,paper,,a9366cd7-3ee8-49de-bb02-3a1a9596fbba,submitted,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,SCHW,BUY,ENTRY,buy,6,92.02,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,SLV,BUY,ENTRY,buy,4,59.71,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,WFC,BUY,ENTRY,buy,18,82.52,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,PFE,BUY,ENTRY,buy,59,25.31,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,BITO,BUY,ENTRY,buy,174,8.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,ABBV,BUY,ENTRY,buy,6,217.26,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,JNJ,BUY,ENTRY,buy,6,229.14,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,XLE,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,WMT,BUY,ENTRY,buy,12,117.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,CVX,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,XOM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,XLP,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,JPM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,MRK,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,MA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,XLF,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,T,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,BLK,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,V,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,XLV,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,DBA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,GLD,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,MSFT,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,DIA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,KO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,BRK-B,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,GBTC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:29:46Z,exec_trades_20260619_152944,USO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,SCHW,BUY,ENTRY,buy,6,92.02,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,SLV,BUY,ENTRY,buy,4,59.71,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,WFC,BUY,ENTRY,buy,18,82.52,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,PFE,BUY,ENTRY,buy,59,25.31,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,BITO,BUY,ENTRY,buy,174,8.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,ABBV,BUY,ENTRY,buy,6,217.26,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,JNJ,BUY,ENTRY,buy,6,229.14,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,XLE,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,WMT,BUY,ENTRY,buy,12,117.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,CVX,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,XOM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,JPM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,MRK,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,XLP,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,MA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,XLF,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,T,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,V,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,BLK,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,XLV,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,DBA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,GLD,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,MSFT,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,DIA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,KO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,BRK-B,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,GBTC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T15:46:50Z,exec_trades_20260619_154648,USO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,SCHW,BUY,ENTRY,buy,6,92.02,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,SLV,BUY,ENTRY,buy,4,59.71,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,WFC,BUY,ENTRY,buy,18,82.52,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,PFE,BUY,ENTRY,buy,59,25.31,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,BITO,BUY,ENTRY,buy,174,8.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,ABBV,BUY,ENTRY,buy,6,217.26,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,JNJ,BUY,ENTRY,buy,6,229.14,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,XLE,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,WMT,BUY,ENTRY,buy,12,117.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,CVX,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,EXECUTION_QUALITY_TOP_N_CAP
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,XOM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,JPM,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,MRK,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,XLP,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,MA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,XLF,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,T,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,V,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,BLK,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,XLV,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,DBA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,GLD,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,MSFT,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,DIA,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,KO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,BRK-B,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,GBTC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-19T16:58:09Z,exec_trades_20260619_165806,USO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,MAX_NEW_POSITIONS_REACHED
+2026-06-22T13:41:56Z,exec_trades_20260622_134154,UNG,BUY,ENTRY,buy,126,11.89,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:41:56Z,exec_trades_20260622_134154,SCHW,BUY,ENTRY,buy,6,91.91,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:41:56Z,exec_trades_20260622_134154,WFC,BUY,ENTRY,buy,17,83.38,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:41:56Z,exec_trades_20260622_134154,JPM,BUY,ENTRY,buy,4,328.82,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:41:56Z,exec_trades_20260622_134154,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BELOW_MIN_SCORE
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,UNG,BUY,ENTRY,buy,125,11.93,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,SCHW,BUY,ENTRY,buy,6,92.01,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,WFC,BUY,ENTRY,buy,17,83.38,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,JPM,BUY,ENTRY,buy,4,329.66,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BELOW_MIN_SCORE
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,UNG,BUY,ENTRY,buy,125,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,SCHW,BUY,ENTRY,buy,6,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,WFC,BUY,ENTRY,buy,17,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,JPM,BUY,ENTRY,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,BAC,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,FILTERED_BY_QUALITY:internal=BELOW_MIN_SCORE
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,UNG,BUY,ENTRY,buy,125,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,SCHW,BUY,ENTRY,buy,6,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,WFC,BUY,ENTRY,buy,17,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-22T13:42:49Z,exec_trades_20260622_134248,JPM,BUY,ENTRY,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-22T13:42:54Z,exec_trades_20260622_134248,UNG,BUY,BUY,buy,0,,,authorized,true,true,READY,paper,,,skipped,BLOCK_NEW_BUY_OVERLAY:Performance risk overlay: underperforming asset
+2026-06-22T13:42:54Z,exec_trades_20260622_134248,SCHW,BUY,BUY,buy,0,,,authorized,true,true,READY,paper,,,skipped,BLOCK_NEW_BUY_OVERLAY:Performance risk overlay: underperforming asset
+2026-06-22T13:42:54Z,exec_trades_20260622_134248,WFC,BUY,BUY,buy,17,,,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:42:54Z,exec_trades_20260622_134248,JPM,BUY,BUY,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-06-22T13:42:56Z,exec_trades_20260622_134248,WFC,,,plan,17,,,authorized,true,true,READY,paper,,7310d089-cbed-4e41-b07b-9c78568472b6,submitted,
+2026-06-22T13:42:56Z,exec_trades_20260622_134248,JPM,,,plan,4,,,authorized,true,true,READY,paper,,c2316589-5e16-4371-99e1-9aa16c136c05,submitted,
+2026-06-23T14:11:43Z,exec_trades_20260623_141141,UNG,BUY,ENTRY,buy,129,11.6,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-23T14:11:43Z,exec_trades_20260623_141141,SCHW,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-23T14:11:43Z,exec_trades_20260623_141141,WFC,ADD,ADD,skip,,,,authorized,true,true,READY,paper,,,skipped,ADD_BLOCKED_BY_SECTOR_HARD
+2026-06-23T14:11:43Z,exec_trades_20260623_141141,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-26T13:43:34Z,exec_trades_20260626_134332,UNG,BUY,ENTRY,buy,124,12.01,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T13:43:34Z,exec_trades_20260626_134332,SCHW,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-26T13:43:34Z,exec_trades_20260626_134332,WFC,ADD,ADD,skip,,,,authorized,true,true,READY,paper,,,skipped,ADD_BLOCKED_BY_SECTOR_HARD
+2026-06-26T13:43:34Z,exec_trades_20260626_134332,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-26T13:54:46Z,exec_trades_20260626_135445,XLK,BUY,ENTRY,buy,8,181.33,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T13:54:46Z,exec_trades_20260626_135445,TSLA,BUY,ENTRY,buy,4,373.99,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T13:54:46Z,exec_trades_20260626_135445,BITO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BELOW_MIN_SCORE
+2026-06-26T13:54:49Z,exec_trades_20260626_135448,UNG,BUY,ENTRY,buy,125,11.96,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T13:54:49Z,exec_trades_20260626_135448,SCHW,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-26T13:54:49Z,exec_trades_20260626_135448,WFC,ADD,ADD,skip,,,,authorized,true,true,READY,paper,,,skipped,ADD_BLOCKED_BY_SECTOR_HARD
+2026-06-26T13:54:49Z,exec_trades_20260626_135448,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-26T14:12:09Z,exec_trades_20260626_141208,XLK,BUY,ENTRY,buy,8,182.96,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:12:09Z,exec_trades_20260626_141208,TSLA,BUY,ENTRY,buy,3,377.81,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:12:09Z,exec_trades_20260626_141208,BITO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BELOW_MIN_SCORE
+2026-06-26T14:12:13Z,exec_trades_20260626_141211,UNG,BUY,ENTRY,buy,124,12.02,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:12:13Z,exec_trades_20260626_141211,SCHW,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-26T14:12:13Z,exec_trades_20260626_141211,WFC,ADD,ADD,skip,,,,authorized,true,true,READY,paper,,,skipped,ADD_BLOCKED_BY_SECTOR_HARD
+2026-06-26T14:12:13Z,exec_trades_20260626_141211,BAC,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BUY_BLOCKED_BY_SECTOR_HARD
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,XLK,BUY,ENTRY,buy,8,183.2,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,TSLA,BUY,ENTRY,buy,3,378.41,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,BITO,BUY,ENTRY,skip,,,,authorized,true,true,READY,paper,,,skipped,BELOW_MIN_SCORE
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,XLK,BUY,ENTRY,buy,8,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,TSLA,BUY,ENTRY,buy,3,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,BITO,BUY,ENTRY,buy,,,,authorized,true,true,READY,paper,,,skipped,FILTERED_BY_QUALITY:internal=BELOW_MIN_SCORE
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,XLK,BUY,ENTRY,buy,8,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-26T14:15:59Z,exec_trades_20260626_141558,TSLA,BUY,ENTRY,buy,3,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-26T14:16:02Z,exec_trades_20260626_141558,XLK,BUY,BUY,buy,8,,,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:16:02Z,exec_trades_20260626_141558,TSLA,BUY,BUY,buy,3,,,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:16:04Z,exec_trades_20260626_141558,XLK,,,plan,8,,,authorized,true,true,READY,paper,,6ed358f3-a112-475e-9709-54ed372e42db,submitted,
+2026-06-26T14:16:04Z,exec_trades_20260626_141558,TSLA,,,plan,3,,,authorized,true,true,READY,paper,,4ca2d981-540a-491b-a1a1-bff040d08fab,submitted,
+2026-06-26T14:52:10Z,exec_trades_20260626_145208,BITO,BUY,ENTRY,buy,184,8.14,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:52:10Z,exec_trades_20260626_145208,TSLA,ADD,ADD,skip,,,,authorized,true,true,READY,paper,,,skipped,ADD_BELOW_SCORE_THRESHOLD
+2026-06-26T14:52:10Z,exec_trades_20260626_145208,BITO,BUY,ENTRY,buy,184,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-26T14:52:10Z,exec_trades_20260626_145208,TSLA,ADD,ADD,buy,,,,authorized,true,true,READY,paper,,,skipped,FILTERED_BY_QUALITY:internal=ADD_BELOW_SCORE_THRESHOLD
+2026-06-26T14:52:10Z,exec_trades_20260626_145208,BITO,BUY,ENTRY,buy,184,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-26T14:52:13Z,exec_trades_20260626_145208,BITO,BUY,BUY,buy,184,,,authorized,true,true,READY,paper,,,planned,
+2026-06-26T14:52:14Z,exec_trades_20260626_145208,BITO,,,plan,184,,,authorized,true,true,READY,paper,,6baa526b-7565-4f12-b553-a9d40107d2af,submitted,
+2026-06-26T15:16:08Z,exec_trades_20260626_151607,TSLA,ADD,ADD,buy,3,381.16,limit,authorized,true,true,READY,paper,,,planned,
+2026-06-26T15:16:08Z,exec_trades_20260626_151607,TSLA,ADD,ADD,buy,3,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-06-26T15:16:08Z,exec_trades_20260626_151607,TSLA,ADD,ADD,buy,3,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-06-26T15:16:11Z,exec_trades_20260626_151607,TSLA,ADD,ADD,buy,3,,,authorized,true,true,READY,paper,,,planned,
+2026-06-26T15:16:12Z,exec_trades_20260626_151607,TSLA,,,plan,3,,,authorized,true,true,READY,paper,,95fd2bd8-e323-4eaf-9722-3c5a3a3ff239,submitted,
+2026-06-29T13:21:05Z,manage_pos_20260629_132058,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-06-29T13:33:25Z,manage_pos_20260629_133318,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-06-29T14:18:53Z,manage_pos_20260629_141845,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-06-29T14:32:04Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-06-29T14:33:43Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95165.73 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-06-29T14:33:43Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95165.73 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T14:34:33Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95160.77 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-06-29T14:34:33Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95160.77 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T14:56:59Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95166.78 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-06-29T14:56:59Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95166.78 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T15:07:26Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95169.26 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-06-29T15:07:26Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95169.26 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T15:07:49Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95167.82 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-06-29T15:07:49Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95167.82 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T15:19:58Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95131.25 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-06-29T15:19:58Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95131.25 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,GLD,EXIT,EXIT,sell,195,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,SLV,EXIT,EXIT,sell,44,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,CVX,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,PFE,EXIT,EXIT,sell,55,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,USO,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,T,EXIT,EXIT,sell,113,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,XOM,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,XLE,EXIT,EXIT,sell,26,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,PEP,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,TSLA,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,WMT,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,XLU,EXIT,EXIT,sell,5,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,HD,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,GS,EXIT,EXIT,sell,1,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:06Z,manage_pos_20260629_152057,GE,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T15:21:10Z,manage_pos_20260629_152057,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=96486.78 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T15:21:10Z,manage_pos_20260629_152057,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=96486.78 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,GLD,EXIT,EXIT,sell,195,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,SLV,EXIT,EXIT,sell,44,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,CVX,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,PFE,EXIT,EXIT,sell,55,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,USO,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,T,EXIT,EXIT,sell,113,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,XOM,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,XLE,EXIT,EXIT,sell,26,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,PEP,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,WMT,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,TSLA,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,HD,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:35Z,manage_pos_20260629_160628,GE,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T16:06:39Z,manage_pos_20260629_160628,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T16:06:39Z,manage_pos_20260629_160628,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T16:41:54Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T16:41:54Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T16:42:46Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T16:42:46Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T16:52:38Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T16:52:38Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=95376.43 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,GLD,EXIT,EXIT,sell,195,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,SLV,EXIT,EXIT,sell,44,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,CVX,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,PFE,EXIT,EXIT,sell,55,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,T,EXIT,EXIT,sell,113,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,XOM,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,XLE,EXIT,EXIT,sell,26,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,PEP,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,USO,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,WMT,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,XLU,EXIT,EXIT,sell,5,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,HD,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,GS,EXIT,EXIT,sell,1,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:21Z,manage_pos_20260629_172414,GE,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-29T17:24:25Z,manage_pos_20260629_172414,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T17:24:25Z,manage_pos_20260629_172414,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T17:41:53Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T17:41:53Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T18:07:28Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93504.14 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T18:07:28Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93504.14 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T19:28:21Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93504.69 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T19:28:21Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93504.69 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T19:34:09Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93505.24 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T19:34:09Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93505.24 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T19:39:45Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93506.89 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T19:39:45Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93506.89 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T19:42:34Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93507.44 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T19:42:34Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93507.44 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T19:50:20Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93507.44 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T19:50:20Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93507.44 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T19:50:43Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93507.44 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T19:50:43Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93507.44 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T21:31:10Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T21:31:10Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T21:31:27Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T21:31:27Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:22:32Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:22:32Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:22:50Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:22:50Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:49:17Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:49:17Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:49:39Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:49:39Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:52:57Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:52:57Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:53:15Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:53:15Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:58:50Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:58:50Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T22:59:08Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T22:59:08Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T23:04:56Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T23:04:56Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T23:05:13Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T23:05:13Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-29T23:46:20Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-29T23:46:20Z,2026-06-29_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-30T00:38:31Z,2026-06-30_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-30T00:38:31Z,2026-06-30_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=93501.94 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,GLD,EXIT,EXIT,sell,195,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,SLV,EXIT,EXIT,sell,44,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,CVX,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,USO,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,T,EXIT,EXIT,sell,113,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,XOM,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,PFE,EXIT,EXIT,sell,55,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,XLE,EXIT,EXIT,sell,26,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,PEP,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,WMT,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,HD,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:38Z,manage_pos_20260630_004029,GE,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-06-30T00:40:44Z,manage_pos_20260630_004029,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=92072.59 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-06-30T00:40:44Z,manage_pos_20260630_004029,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=92072.59 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,GLD,EXIT,EXIT,sell,195,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,SLV,EXIT,EXIT,sell,44,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,CVX,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,PFE,EXIT,EXIT,sell,55,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,USO,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,T,EXIT,EXIT,sell,113,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,XOM,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,XLE,EXIT,EXIT,sell,26,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,TSLA,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,WMT,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,PEP,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,PG,EXIT,EXIT,sell,10,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,MA,EXIT,EXIT,sell,7,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,ARKK,EXIT,EXIT,sell,33,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:54Z,manage_pos_20260702_181345,ABBV,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-02T18:13:59Z,manage_pos_20260702_181345,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=101803.42 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-02T18:13:59Z,manage_pos_20260702_181345,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=101803.42 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,SLV,EXIT,EXIT,sell,44,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,CVX,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,PFE,EXIT,EXIT,sell,55,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,USO,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,T,EXIT,EXIT,sell,113,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,XOM,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,XLE,EXIT,EXIT,sell,26,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,WMT,EXIT,EXIT,sell,8,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:43Z,manage_pos_20260706_143430,PEP,EXIT,EXIT,sell,9,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-06T14:34:49Z,manage_pos_20260706_143430,SLV,,,plan,44,,,denied,false,true,PARTIALLY_READY,paper,,adfd1d73-cf76-4f8a-8b7c-5341d6eb62ba,submitted,
+2026-07-06T14:34:49Z,manage_pos_20260706_143430,CVX,,,plan,12,,,denied,false,true,PARTIALLY_READY,paper,,8e11aa4e-ece6-4fee-a821-73e403b0ad24,submitted,
+2026-07-06T14:34:50Z,manage_pos_20260706_143430,PFE,,,plan,55,,,denied,false,true,PARTIALLY_READY,paper,,64100403-f05e-4377-84fa-55a18715c971,submitted,
+2026-07-06T14:34:50Z,manage_pos_20260706_143430,USO,,,plan,12,,,denied,false,true,PARTIALLY_READY,paper,,935fcff3-7b02-40f6-ae11-a12b6477d8ab,submitted,
+2026-07-06T14:34:51Z,manage_pos_20260706_143430,T,,,plan,113,,,denied,false,true,PARTIALLY_READY,paper,,8993490e-a274-41e3-84ab-64963ed4e489,submitted,
+2026-07-06T14:34:51Z,manage_pos_20260706_143430,XOM,,,plan,9,,,denied,false,true,PARTIALLY_READY,paper,,b783ee00-88d3-4d71-9f57-61919f3c242d,submitted,
+2026-07-06T14:34:51Z,manage_pos_20260706_143430,XLE,,,plan,26,,,denied,false,true,PARTIALLY_READY,paper,,bd248fc3-4e17-462a-ad56-48ba3b809d0f,submitted,
+2026-07-06T14:34:52Z,manage_pos_20260706_143430,WMT,,,plan,8,,,denied,false,true,PARTIALLY_READY,paper,,5388c365-ac02-4e83-a4c9-61a729884648,submitted,
+2026-07-06T14:34:52Z,manage_pos_20260706_143430,PEP,,,plan,9,,,denied,false,true,PARTIALLY_READY,paper,,98afcd7b-c2e8-4de0-aafc-714ecd93846a,submitted,
+2026-07-09T19:02:28Z,manage_pos_20260709_190222,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PLACE_HANDOFF_SCOPE] no rows remain after approved 197X scope filter
+2026-07-09T19:19:12Z,manage_pos_20260709_191907,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,EMPTY_AFTER_VALIDATION:[EMPTY] C:\Users\akimw\triton\data\live\manage_orders.csv
+2026-07-09T19:24:10Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,EMPTY_AFTER_VALIDATION:[EMPTY] C:\Users\akimw\triton\data\live\manage_orders.csv
+2026-07-09T19:24:14Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,EMPTY_AFTER_VALIDATION:[EMPTY] C:\Users\akimw\triton\data\live\manage_orders.csv
+2026-07-09T19:24:18Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,EMPTY_AFTER_VALIDATION:[EMPTY] C:\Users\akimw\triton\data\live\manage_orders.csv
+2026-07-09T19:28:03Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,EMPTY_AFTER_VALIDATION:[EMPTY] C:\Users\akimw\triton\data\live\manage_orders.csv
+2026-07-09T19:28:07Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,EMPTY_AFTER_VALIDATION:[EMPTY] C:\Users\akimw\triton\data\live\manage_orders.csv
+2026-07-09T19:28:11Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,EMPTY_AFTER_VALIDATION:[EMPTY] C:\Users\akimw\triton\data\live\manage_orders.csv
+2026-07-09T19:34:03Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-09T19:34:03Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:34:18Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-09T19:34:18Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:34:27Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-09T19:34:27Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:34:40Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-09T19:34:40Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:34:46Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-09T19:34:46Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:35:13Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-09T19:35:13Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:35:21Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-09T19:35:21Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:35:29Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-09T19:35:29Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-09T19:35:34Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-09T19:35:34Z,2026-07-09_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98528.00 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T13:43:20Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T13:43:20Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T13:43:28Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T13:43:28Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T13:43:36Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T13:43:36Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T13:43:41Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-10T13:43:41Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=98120.64 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T13:53:25Z,manage_pos_20260710_135319,UNG,EXIT,EXIT,sell,484,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-10T13:53:25Z,manage_pos_20260710_135319,PG,EXIT,EXIT,sell,10,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-10T13:53:25Z,manage_pos_20260710_135319,XLU,EXIT,EXIT,sell,5,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-10T13:53:25Z,manage_pos_20260710_135319,MRK,EXIT,EXIT,sell,41,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-10T13:53:25Z,manage_pos_20260710_135319,KO,EXIT,EXIT,sell,19,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-10T13:53:25Z,manage_pos_20260710_135319,JNJ,EXIT,EXIT,sell,6,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-10T13:53:25Z,manage_pos_20260710_135319,ABBV,EXIT,EXIT,sell,12,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-10T13:53:28Z,manage_pos_20260710_135319,UNG,,,plan,484,,,denied,false,true,PARTIALLY_READY,paper,,e2393dba-b1df-4d34-8583-bdddb635967f,submitted,
+2026-07-10T13:53:28Z,manage_pos_20260710_135319,PG,,,plan,10,,,denied,false,true,PARTIALLY_READY,paper,,d6e6ce16-392c-4c8e-bf2a-80cae4371096,submitted,
+2026-07-10T13:53:29Z,manage_pos_20260710_135319,XLU,,,plan,5,,,denied,false,true,PARTIALLY_READY,paper,,4bbfd46b-4411-4f4a-8b88-b5a737172aae,submitted,
+2026-07-10T13:53:29Z,manage_pos_20260710_135319,MRK,,,plan,41,,,denied,false,true,PARTIALLY_READY,paper,,47574d2d-5a9b-41f7-8e89-7411f6fb4c7b,submitted,
+2026-07-10T13:53:30Z,manage_pos_20260710_135319,KO,,,plan,19,,,denied,false,true,PARTIALLY_READY,paper,,c0ba7633-133c-4a0d-977d-d3e1d2c4d7ca,submitted,
+2026-07-10T13:53:30Z,manage_pos_20260710_135319,JNJ,,,plan,6,,,denied,false,true,PARTIALLY_READY,paper,,42fb618b-078c-4bf3-a0c5-02d64a1373e6,submitted,
+2026-07-10T13:53:31Z,manage_pos_20260710_135319,ABBV,,,plan,12,,,denied,false,true,PARTIALLY_READY,paper,,4ec2a1cf-9d8d-49bf-ac99-2880031ab1b6,submitted,
+2026-07-10T14:30:55Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=8160.61 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T14:30:55Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=8160.61 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T14:31:00Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=8160.45 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T14:31:00Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=8160.45 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T14:31:05Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=8160.29 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T14:31:05Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=8160.29 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T14:31:08Z,2026-07-10_PAPER,MA,,,sell,7,521.89,limit,denied,false,true,NOT_READY,paper,,,planned,
+2026-07-10T14:31:08Z,2026-07-10_PAPER,DIA,,,sell,6,523.85,limit,denied,false,true,NOT_READY,paper,,,planned,
+2026-07-10T14:31:08Z,2026-07-10_PAPER,ARKK,,,buy,8,80.99,limit,denied,false,true,NOT_READY,paper,,,planned,
+2026-07-10T14:31:08Z,2026-07-10_PAPER,GE,,,buy,2,358.06,limit,denied,false,true,NOT_READY,paper,,,planned,
+2026-07-10T19:05:03Z,2026-07-10_PAPER,MA,,,sell,7,521.6,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,DIA,,,sell,6,524.91,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,ARKK,,,buy,8,80.77,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,GE,,,buy,2,361.52,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,MA,,,skip,7,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,DIA,,,skip,6,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:03Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T19:05:03Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T19:05:08Z,2026-07-10_PAPER,MA,,,sell,7,521.6,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,DIA,,,sell,6,524.91,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,ARKK,,,buy,8,80.77,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,GE,,,buy,2,361.52,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,MA,,,skip,7,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,DIA,,,skip,6,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:08Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T19:05:08Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T19:05:13Z,2026-07-10_PAPER,MA,,,sell,7,521.6,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,DIA,,,sell,6,524.91,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,ARKK,,,buy,8,80.77,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,GE,,,buy,2,361.52,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,MA,,,skip,7,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,DIA,,,skip,6,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:13Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T19:05:13Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T19:05:15Z,2026-07-10_PAPER,MA,,,sell,7,521.6,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,DIA,,,sell,6,524.91,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,ARKK,,,buy,8,80.77,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,GE,,,buy,2,361.52,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,MA,,,skip,7,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,DIA,,,skip,6,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,NOT_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:05:15Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-10T19:05:15Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73937.81 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T19:47:30Z,2026-07-10_PAPER,ARKK,,,buy,8,80.69,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:30Z,2026-07-10_PAPER,GE,,,buy,2,361.17,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:30Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:30Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:30Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T19:47:30Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T19:47:34Z,2026-07-10_PAPER,ARKK,,,buy,8,80.69,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:34Z,2026-07-10_PAPER,GE,,,buy,2,361.17,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:34Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:34Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:34Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T19:47:34Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T19:47:38Z,2026-07-10_PAPER,ARKK,,,buy,8,80.69,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:38Z,2026-07-10_PAPER,GE,,,buy,2,361.17,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:38Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:38Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:38Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-10T19:47:38Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-10T19:47:40Z,2026-07-10_PAPER,ARKK,,,buy,8,80.69,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:40Z,2026-07-10_PAPER,GE,,,buy,2,361.17,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-07-10T19:47:40Z,2026-07-10_PAPER,ARKK,,,skip,8,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:40Z,2026-07-10_PAPER,GE,,,skip,2,,,denied,false,true,PARTIALLY_READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-07-10T19:47:40Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-10T19:47:40Z,2026-07-10_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=73199.10 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T00:06:25Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T00:06:25Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T00:06:33Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T00:06:33Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T00:06:37Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-11T00:06:37Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T00:07:21Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T00:07:21Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T00:07:28Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T00:07:28Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T00:07:33Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-11T00:07:33Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T01:58:57Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T01:58:57Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T01:59:06Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T01:59:06Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T01:59:10Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-11T01:59:10Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86889.79 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T02:10:39Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86201.35 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T02:10:39Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86201.35 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T02:10:45Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86201.35 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-11T02:10:45Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86201.35 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-11T02:10:49Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86201.35 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-11T02:10:49Z,2026-07-11_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86201.35 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:16:59Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:16:59Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:17:06Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:17:06Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:17:10Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-12T00:17:10Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:26:29Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:26:29Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:26:37Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:26:37Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:26:43Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-12T00:26:43Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:30:37Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:30:37Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:30:45Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:30:45Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:30:50Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-12T00:30:50Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:38:15Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:38:15Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:38:23Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:38:23Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:38:28Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-12T00:38:28Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:44:47Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:44:47Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:44:54Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-12T00:44:54Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-12T00:44:59Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-12T00:44:59Z,2026-07-12_PAPER,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86811.19 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-13T11:25:17Z,2026-07-13_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86279.95 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-13T11:25:17Z,2026-07-13_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86279.95 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-13T11:25:23Z,2026-07-13_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86279.95 (excl FORCE_EXIT 0.00) exceeds max 5000.00
+2026-07-13T11:25:23Z,2026-07-13_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86279.95 (excl FORCE_EXIT 0.00) exceeds max 5000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-13T11:25:27Z,2026-07-13_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=86279.95 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-13T11:25:27Z,2026-07-13_PAPER,,,,skip,,,,denied,false,true,NOT_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=86279.95 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-14T17:30:58Z,manage_pos_20260714_173053,GLD,EXIT,EXIT,sell,195,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-14T17:30:59Z,manage_pos_20260714_173053,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,MAX_NOTIONAL:est_batch_notional=72565.35 (excl FORCE_EXIT 0.00) exceeds max 50000.00
+2026-07-14T17:30:59Z,manage_pos_20260714_173053,,,,skip,,,,denied,false,true,PARTIALLY_READY,paper,,,blocked,"MAX_NOTIONAL:[BATCH_NOTIONAL_BLOCK] est_batch_notional=72565.35 (excl FORCE_EXIT 0.00) exceeds max 50000.00. (Hint: lower qty, raise cap carefully, or use --require-marketdata to make sizing deterministic.)"
+2026-07-14T17:39:16Z,manage_pos_20260714_173912,GLD,EXIT,EXIT,sell,48,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-14T17:39:17Z,manage_pos_20260714_173912,GLD,,,plan,48,,,denied,false,true,PARTIALLY_READY,paper,,a15f5076-bf21-48ff-9207-f9ec9f0a5c40,submitted,
+2026-07-15T13:44:29Z,manage_pos_20260715_134424,GLD,EXIT,EXIT,sell,131,,,denied,false,true,PARTIALLY_READY,paper,,,planned,
+2026-07-15T13:44:30Z,manage_pos_20260715_134424,GLD,,,plan,131,,,denied,false,true,PARTIALLY_READY,paper,,9244bd89-ac58-477b-a7ff-3c1c2644eabc,submitted,
+2026-07-17T16:40:38Z,exec_trades_20260717_164037,BITO,BUY,ENTRY,buy,173,8.63,limit,authorized,true,true,READY,paper,,,planned,
+2026-07-17T16:40:38Z,exec_trades_20260717_164037,BITO,BUY,ENTRY,buy,173,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-07-17T16:40:38Z,exec_trades_20260717_164037,BITO,BUY,ENTRY,buy,173,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-07-17T16:40:40Z,exec_trades_20260717_164037,BITO,BUY,BUY,buy,173,,,authorized,true,true,READY,paper,,,planned,
+2026-07-17T16:40:41Z,exec_trades_20260717_164037,BITO,,,plan,173,,,authorized,true,true,READY,paper,,89aada8d-493c-46f5-b1c1-d61ebb40835d,submitted,
+2026-07-17T17:26:09Z,exec_trades_20260717_172608,BITO,ADD,ADD,buy,171,8.73,limit,authorized,true,true,READY,paper,,,planned,
+2026-07-17T17:26:09Z,exec_trades_20260717_172608,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-07-17T17:26:09Z,exec_trades_20260717_172608,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-07-17T17:26:11Z,exec_trades_20260717_172608,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,
+2026-07-17T17:26:12Z,exec_trades_20260717_172608,BITO,,,plan,171,,,authorized,true,true,READY,paper,,8934936a-1b3b-4bfb-8f60-15bcd9352302,submitted,
+2026-07-17T18:57:12Z,exec_trades_20260717_185710,BITO,ADD,ADD,buy,171,8.74,limit,authorized,true,true,READY,paper,,,planned,
+2026-07-17T18:57:12Z,exec_trades_20260717_185710,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-07-17T18:57:12Z,exec_trades_20260717_185710,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-07-17T18:57:14Z,exec_trades_20260717_185710,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,
+2026-07-17T18:57:16Z,exec_trades_20260717_185710,BITO,,,plan,171,,,authorized,true,true,READY,paper,,532de592-9c0b-480b-9880-69e59b783d7a,submitted,
+2026-07-20T14:16:56Z,exec_trades_20260720_141655,BITO,ADD,ADD,buy,171,8.74,limit,authorized,true,true,READY,paper,,,planned,
+2026-07-20T14:16:56Z,exec_trades_20260720_141655,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-07-20T14:16:56Z,exec_trades_20260720_141655,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-07-20T14:16:59Z,exec_trades_20260720_141655,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,
+2026-07-20T14:17:00Z,exec_trades_20260720_141655,BITO,,,plan,171,,,authorized,true,true,READY,paper,,c0b358f8-4a1a-45f2-89bf-00db4b35f678,submitted,
+2026-07-20T17:18:14Z,exec_trades_20260720_171813,BITO,ADD,ADD,buy,168,8.9,limit,authorized,true,true,READY,paper,,,planned,
+2026-07-20T17:18:14Z,exec_trades_20260720_171813,BITO,ADD,ADD,buy,168,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-07-20T17:18:14Z,exec_trades_20260720_171813,BITO,ADD,ADD,buy,168,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-07-20T17:18:17Z,exec_trades_20260720_171813,BITO,ADD,ADD,buy,168,,,authorized,true,true,READY,paper,,,planned,
+2026-07-20T17:18:18Z,exec_trades_20260720_171813,BITO,,,plan,168,,,authorized,true,true,READY,paper,,42184499-b8c3-4d15-afa7-cf1a2b1403fc,submitted,
+2026-07-20T18:49:13Z,exec_trades_20260720_184912,BITO,ADD,ADD,buy,168,8.88,limit,authorized,true,true,READY,paper,,,planned,
+2026-07-20T18:49:13Z,exec_trades_20260720_184912,BITO,ADD,ADD,buy,168,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-07-20T18:49:13Z,exec_trades_20260720_184912,BITO,ADD,ADD,buy,168,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-07-20T18:49:15Z,exec_trades_20260720_184912,BITO,ADD,ADD,buy,168,,,authorized,true,true,READY,paper,,,planned,
+2026-07-20T18:49:17Z,exec_trades_20260720_184912,BITO,,,plan,168,,,authorized,true,true,READY,paper,,da33425e-6096-4866-af8e-e28665d94732,submitted,
+2026-08-03T17:51:44Z,exec_trades_20260803_175142,HD,ADD,ADD,buy,4,338.35,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-03T17:51:44Z,exec_trades_20260803_175142,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-03T17:51:44Z,exec_trades_20260803_175142,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-03T17:51:47Z,exec_trades_20260803_175142,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-03T17:51:49Z,exec_trades_20260803_175142,HD,,,plan,4,,,authorized,true,true,READY,paper,,7a847184-1e16-46ee-985c-91781943b2aa,submitted,
+2026-08-03T19:22:56Z,exec_trades_20260803_192255,HD,ADD,ADD,buy,4,340.4,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-03T19:22:56Z,exec_trades_20260803_192255,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-03T19:22:56Z,exec_trades_20260803_192255,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-03T19:22:59Z,exec_trades_20260803_192255,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-03T19:23:00Z,exec_trades_20260803_192255,HD,,,plan,4,,,authorized,true,true,READY,paper,,13ff84c0-2b86-45e1-b575-c4223d967392,submitted,
+2026-08-04T16:40:25Z,exec_trades_20260804_164024,HD,ADD,ADD,buy,4,350.35,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-04T16:40:25Z,exec_trades_20260804_164024,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-04T16:40:25Z,exec_trades_20260804_164024,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-04T16:40:28Z,exec_trades_20260804_164024,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-04T16:40:30Z,exec_trades_20260804_164024,HD,,,plan,4,,,authorized,true,true,READY,paper,,e8512116-c370-4e31-a551-c9925972fbed,submitted,
+2026-08-04T18:11:51Z,exec_trades_20260804_181149,HD,ADD,ADD,buy,4,351.44,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-04T18:11:51Z,exec_trades_20260804_181149,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-04T18:11:51Z,exec_trades_20260804_181149,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-04T18:11:54Z,exec_trades_20260804_181149,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-04T18:11:56Z,exec_trades_20260804_181149,HD,,,plan,4,,,authorized,true,true,READY,paper,,486d4fcd-572a-4bf6-8e59-0ad76ab9bb00,submitted,
+2026-08-04T18:57:28Z,exec_trades_20260804_185728,BITO,ADD,ADD,buy,171,8.73,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-04T18:57:28Z,exec_trades_20260804_185728,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-04T18:57:28Z,exec_trades_20260804_185728,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-04T18:57:31Z,exec_trades_20260804_185728,BITO,ADD,ADD,buy,171,,,authorized,true,true,READY,paper,,,planned,
+2026-08-04T18:57:32Z,exec_trades_20260804_185728,BITO,,,plan,171,,,authorized,true,true,READY,paper,,783b8e8b-b3a8-4311-be1b-04dfcbae3c83,submitted,
+2026-08-04T19:43:08Z,exec_trades_20260804_194307,HD,ADD,ADD,buy,4,350.42,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-04T19:43:08Z,exec_trades_20260804_194307,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-04T19:43:08Z,exec_trades_20260804_194307,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-04T19:43:11Z,exec_trades_20260804_194307,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-04T19:43:13Z,exec_trades_20260804_194307,HD,,,plan,4,,,authorized,true,true,READY,paper,,676164d5-a81f-4157-8dae-25afacfab1a8,submitted,
+2026-08-05T13:44:31Z,exec_trades_20260805_134429,BITO,ADD,ADD,buy,172,8.71,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-05T13:44:31Z,exec_trades_20260805_134429,BITO,ADD,ADD,buy,172,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-05T13:44:31Z,exec_trades_20260805_134429,BITO,ADD,ADD,buy,172,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-05T13:44:33Z,exec_trades_20260805_134429,BITO,ADD,ADD,buy,172,,,authorized,true,true,READY,paper,,,planned,
+2026-08-05T13:44:35Z,exec_trades_20260805_134429,BITO,,,plan,172,,,authorized,true,true,READY,paper,,326480c1-1f6d-4850-b2da-617a229bda22,submitted,
+2026-08-11T13:32:17Z,exec_trades_20260811_133216,HD,ADD,ADD,buy,4,353.64,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-11T13:32:17Z,exec_trades_20260811_133216,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-11T13:32:17Z,exec_trades_20260811_133216,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-11T13:32:19Z,exec_trades_20260811_133216,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-11T13:32:21Z,exec_trades_20260811_133216,HD,,,plan,4,,,authorized,true,true,READY,paper,,2b5fe8e0-c9b1-408e-a524-80a806ddf8ff,submitted,
+2026-08-11T15:03:39Z,exec_trades_20260811_150338,HD,ADD,ADD,buy,4,357.65,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-11T15:03:39Z,exec_trades_20260811_150338,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-11T15:03:39Z,exec_trades_20260811_150338,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-11T15:03:42Z,exec_trades_20260811_150338,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-11T15:03:43Z,exec_trades_20260811_150338,HD,,,plan,4,,,authorized,true,true,READY,paper,,afc037a7-5358-4eb3-9659-b200e05478de,submitted,
+2026-08-14T01:40:51Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:40:51Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: approval_contract_missing
+2026-08-14T01:40:51Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:40:51Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: hardened_paper_sell_arm_required
+2026-08-14T01:40:51Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:40:52Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: authority_expired
+2026-08-14T01:41:28Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:28Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: market_session_caller_open_authoritative_closed
+2026-08-14T01:41:28Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:28Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: approval_contract_missing
+2026-08-14T01:41:28Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:28Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: hardened_paper_sell_arm_required
+2026-08-14T01:41:28Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:28Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: authority_expired
+2026-08-14T01:41:28Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:29Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: market_session_caller_open_authoritative_closed
+2026-08-14T01:41:29Z,phase198i_e2e,AAPL,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:29Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: market_session_caller_open_authoritative_closed
+2026-08-14T01:41:29Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,80,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:29Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: batch_notional_exceeds_approval_cli_cap
+2026-08-14T01:41:29Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,0,,,authorized,true,true,READY,paper,,,skipped,EXIT_WITHOUT_POSITION:EXIT requires long position
+2026-08-14T01:41:29Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-08-14T01:41:29Z,phase198i_e2e,AAPL,ADD,ADD,buy,0,,,authorized,true,true,READY,paper,,,skipped,ADD_WITHOUT_POSITION:ADD requires existing broker position
+2026-08-14T01:41:29Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-08-14T01:41:29Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:41:29Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: market_session_caller_open_authoritative_closed
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,plan,8,,,authorized,true,true,READY,paper,,fake-ord-1,submitted,
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,sell,8,332.5,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,skip,8,,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,sell,8,332.5,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,skip,8,,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,sell,8,332.5,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,skip,8,,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,sell,8,332.5,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:41Z,phase198i_e2e,TSLA,,,skip,8,,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-08-14T01:43:41Z,phase198i_e2e,AAPL,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:41Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,UNKNOWN_DROP_REASON:[PAPER_SELL_ARM] dispatch blocked before submit: batch_symbol_set_mismatch_whole_batch_required
+2026-08-14T01:43:42Z,phase198i_e2e,TSLA,,,sell,80,332.5,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-08-14T01:43:42Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,80,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:42Z,phase198i_e2e,TSLA,,,skip,80,,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-08-14T01:43:42Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,0,,,authorized,true,true,READY,paper,,,skipped,EXIT_WITHOUT_POSITION:EXIT requires long position
+2026-08-14T01:43:42Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-08-14T01:43:42Z,phase198i_e2e,AAPL,ADD,ADD,buy,0,,,authorized,true,true,READY,paper,,,skipped,ADD_WITHOUT_POSITION:ADD requires existing broker position
+2026-08-14T01:43:42Z,phase198i_e2e,,,,skip,,,,authorized,true,true,READY,paper,,,blocked,BATCH_EMPTY:[BATCH_EMPTY] Nothing to place (all skipped or invalid).
+2026-08-14T01:43:42Z,phase198i_e2e,TSLA,,,sell,8,332.5,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,SESSION_INTENT_RECORD
+2026-08-14T01:43:42Z,phase198i_e2e,TSLA,EXIT,EXIT,sell,8,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T01:43:42Z,phase198i_e2e,TSLA,,,skip,8,,,authorized,true,true,READY,paper,blocked_duplicate,,blocked_duplicate,DUPLICATE_OPEN_ORDER:duplicate_block reason=SESSION_INTENT_RECORD
+2026-08-14T18:53:29Z,exec_trades_20260814_185328,HD,ADD,ADD,buy,4,340.41,limit,authorized,true,true,READY,paper,,,planned,
+2026-08-14T18:53:29Z,exec_trades_20260814_185328,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,KEPT
+2026-08-14T18:53:29Z,exec_trades_20260814_185328,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,kept,WRITTEN_TO_ORDERS_TODAY
+2026-08-14T18:53:32Z,exec_trades_20260814_185328,HD,ADD,ADD,buy,4,,,authorized,true,true,READY,paper,,,planned,
+2026-08-14T18:53:33Z,exec_trades_20260814_185328,HD,,,plan,4,,,authorized,true,true,READY,paper,,b3fc4687-5b6d-4eae-b07b-22772d70034f,submitted,

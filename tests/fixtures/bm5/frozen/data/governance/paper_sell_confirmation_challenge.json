@@ -1,0 +1,41 @@
+{
+  "challenge_id": "sell-chal-3255d23ca3f94676",
+  "nonce": "0a0a861a77e14cb18e12890aae160404",
+  "mode": "PAPER",
+  "account_fingerprint": "acctfp_7f7d0049a7f59a58",
+  "trading_date": "2026-09-08",
+  "cycle_id": "mo-20260908_103156-38529de605134c13a882776dbbc3c246",
+  "batch_id": "manage-mo-20260908_1031",
+  "plan_hash": "471ede2d45b1c8ffcd2298f9fd889df0cf815a2e4660c2fb8d13d8e7f8b9d89f",
+  "readiness_packet_hash": "42fd7058b4ed1d1d65bb4faa49946fd137aabc8ea24288d526f81785bd9a5823",
+  "authorized_scope": [
+    {
+      "symbol": "GE",
+      "action": "EXIT",
+      "max_qty": 9.0,
+      "max_notional": 3038.49
+    }
+  ],
+  "applied_cap": 5000.0,
+  "applied_cap_source": "APPROVAL_CLI_CAP",
+  "identity_schema": "198N-E-DUAL-IDENTITY-SELL-1",
+  "source_readiness_packet_hash": "cb24377f47155c959c76e1a6159221b9e7010daed80d7cdf8273cd2b4fadd3f5",
+  "authorized_slice_hash": "125e2eab101a42846e0cc04248d9966803fbe3be3c3d765a5305e8a0dcbc41c8",
+  "source_plan_sha256": "99e1ee398db9a214af12300f743ff4ac8385a47abf6ee7d06a1f8639e8c7f4c9",
+  "selected_row_hash": "471ede2d45b1c8ffcd2298f9fd889df0cf815a2e4660c2fb8d13d8e7f8b9d89f",
+  "generated_at": "2026-09-08T14:33:05.370254+00:00",
+  "market_open_invocation_id": "mo-20260908_103156-38529de605134c13a882776dbbc3c246",
+  "artifact_type": "PAPER_SELL_CONFIRMATION_CHALLENGE",
+  "schema_version": "198H-PAPER-SELL-ARM-1",
+  "challenge_hash": "1a4718e767e0875cdfaab514858d5592e916a078396e41ec9828e24c6b5d5975",
+  "issued_at": "2026-09-08T14:35:16.857473+00:00",
+  "expires_at": "2026-09-08T14:45:16.857473+00:00",
+  "run_id": "2026-09-08T14:33:03+00:00",
+  "plan_id": "manage_positions_plan@2026-09-08T14:33:03+00:00",
+  "status": "CONFIRMATION_CHALLENGE_ISSUED",
+  "creates_no_authority": true,
+  "orders_submitted": false,
+  "approval_created": false,
+  "live_execution_state": "BLOCKED",
+  "operator_button": "ARM_REVIEWED_SELLS"
+}

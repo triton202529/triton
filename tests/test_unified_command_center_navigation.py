@@ -41,6 +41,7 @@ def test_top_level_destinations_order_and_default():
     assert m, "COMMAND_CENTER_DESTINATIONS missing"
     items = re.findall(r'"([^"]+)"', m.group(1))
     assert items == [
+        "Overview",
         "Operations",
         "Activity",
         "Portfolio",
@@ -50,10 +51,10 @@ def test_top_level_destinations_order_and_default():
         "Diagnostics",
         "Advanced Dashboard",
     ]
-    assert items[0] == "Operations"
-    # Fresh session defaults to Operations via DEFAULT_OPERATOR_PAGE
+    assert items[0] == "Overview"
+    # Fresh sessions land on Overview via DEFAULT_UI_A_PAGE. OPERATOR_PAGES remains the contract list.
     assert "DEFAULT_OPERATOR_PAGE" in src
-    assert 'st.session_state["cc_top_destination"] = DEFAULT_OPERATOR_PAGE' in src
+    assert 'st.session_state["cc_top_destination"] = DEFAULT_UI_A_PAGE' in src
 
 
 def test_advanced_dashboard_reachable_same_sidebar():

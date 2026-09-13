@@ -137,7 +137,7 @@ def inject_operator_theme() -> None:
   }}
   .triton-safety-strip {{
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(9.4rem, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(8.2rem, 1fr));
     gap: 0.4rem;
     margin: 0 0 0.55rem 0;
   }}
@@ -235,6 +235,71 @@ def inject_operator_theme() -> None:
     font-size: 0.78rem;
     margin: 0 0 0.65rem 0;
   }}
+  .triton-perf-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+    gap: 0.55rem;
+    margin: 0 0 0.75rem 0;
+  }}
+  .triton-perf-card {{
+    background: {t["panel_2"]};
+    border: 1px solid {t["border"]};
+    border-radius: 4px;
+    padding: 0.55rem 0.65rem;
+    min-width: 0;
+  }}
+  .triton-perf-card.ok {{ border-color: {t["green"]}; }}
+  .triton-perf-card.warn {{ border-color: {t["amber"]}; }}
+  .triton-perf-card.crit {{ border-color: {t["red"]}; }}
+  .triton-perf-label {{
+    color: {t["muted"]};
+    font-size: 0.72rem;
+    margin: 0 0 0.2rem 0;
+  }}
+  .triton-perf-value {{
+    color: {t["text"]};
+    font-size: 1.02rem;
+    font-weight: 650;
+    word-break: break-word;
+  }}
+  .triton-chip-row {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.75rem 0;
+  }}
+  .triton-status-chip {{
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.74rem;
+    border: 1px solid {t["border"]};
+    color: {t["text"]};
+    background: {t["panel"]};
+  }}
+  .triton-status-chip.ok {{
+    border-color: {t["green"]};
+    background: rgba(57, 201, 138, 0.10);
+  }}
+  .triton-status-chip.warn {{
+    border-color: {t["amber"]};
+    background: rgba(242, 184, 75, 0.12);
+  }}
+  .triton-status-chip.crit {{
+    border-color: {t["red"]};
+    background: rgba(239, 100, 97, 0.12);
+  }}
+  .triton-status-chip.info {{
+    border-color: {t["blue"]};
+    background: rgba(78, 161, 255, 0.10);
+  }}
+  .triton-status-chip.muted {{
+    border-color: {t["border"]};
+    color: {t["muted"]};
+  }}
+  .js-plotly-plot, .plotly {{
+    max-width: 100%;
+  }}
   .triton-safety-cell {{
     background: {t["panel"]};
     border: 1px solid {t["border"]};
@@ -256,6 +321,10 @@ def inject_operator_theme() -> None:
   .triton-safety-cell.muted {{
     background: {t["panel"]};
     border-color: {t["border"]};
+  }}
+  .triton-safety-cell.info {{
+    background: rgba(78, 161, 255, 0.08);
+    border-color: {t["blue"]};
   }}
   .triton-live-blocked-banner {{
     background: rgba(239, 100, 97, 0.10);
@@ -448,11 +517,15 @@ def inject_operator_theme() -> None:
     color: {t["muted"]} !important;
   }}
   @media (max-width: 1280px) {{
-    .triton-safety-strip {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+    .triton-safety-strip {{ grid-template-columns: repeat(auto-fit, minmax(8.6rem, 1fr)); }}
     .block-container {{ padding-left: 0.75rem; padding-right: 0.75rem; }}
   }}
+  @media (max-width: 1100px) {{
+    .triton-safety-strip {{ grid-template-columns: repeat(auto-fit, minmax(7.8rem, 1fr)); }}
+    .triton-safety-value {{ font-size: 0.78rem; }}
+  }}
   @media (max-width: 900px) {{
-    .triton-safety-strip {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    .triton-safety-strip {{ grid-template-columns: repeat(auto-fit, minmax(7.4rem, 1fr)); }}
   }}
 </style>
         """,

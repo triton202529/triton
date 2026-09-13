@@ -153,6 +153,18 @@ KNOWN_LABELS: Dict[str, str] = {
     "period_type": "Period",
     "start_date": "Start Date",
     "end_date": "End Date",
+    "unavailable_same_cycle_dispatch_reconciliation": "Same-cycle dispatch reconciliation",
+    "sell_arm_completed": "SELL completed",
+    "historical_plan": "Historical plan",
+    "building_history": "Building History",
+    "opening_checkpoint": "Opening Checkpoint",
+    "certified_close": "Certified Close",
+    "gross_provisional": "Gross Provisional",
+    "pending_fee_reconciliation": "Pending Fee Reconciliation",
+    "evidence_conflict": "Evidence Conflict",
+    "total_return": "Total Return",
+    "total_return_evidence": "Total Return Evidence",
+    "margin_capable_unborrowed": "Margin Capable Unborrowed",
 }
 
 _UUID_RE = re.compile(
