@@ -147,10 +147,10 @@ def _certified_totals():
 
 
 def _freshness_view(status: Mapping[str, Any]) -> Dict[str, Any]:
-    from dashboard.freshness_presentation import shared_freshness_view
+    from dashboard.freshness_presentation import freshness_for_render
     from dashboard.preview_data import isolation_active
 
-    return shared_freshness_view(status, isolated=isolation_active(_repo_root()))
+    return dict(freshness_for_render(status, isolated=isolation_active(_repo_root())))
 
 
 def render_status_bar(status: Mapping[str, Any]) -> None:
@@ -602,7 +602,11 @@ def render_orders_page() -> None:
         load_authoritative_presentation,
         plan_table_row,
     )
-    from dashboard.preview_data import assert_not_production_path, expected_ledger_sha256
+    from dashboard.preview_data import (
+        assert_not_production_path,
+        expected_ledger_sha256,
+        isolation_active,
+    )
     from services.operator_console_status import build_orders_summary
     from services.paper_order_ledger import LEDGER_RELATIVE, filter_unified_rows, ledger_path
 
@@ -611,15 +615,18 @@ def render_orders_page() -> None:
     oui.render_page_intro("Orders", "Unified paper-order ledger. Submitted is not filled.")
     summary = build_orders_summary(root=_root())
     assert_not_production_path(ledger_path(_root()), root=_repo_root())
+    isolated = isolation_active(_repo_root())
+    expected = expected_ledger_sha256(_repo_root()) if isolated else None
     try:
         counts = load_authoritative_presentation(
             root=_root(),
-            expected_sha256=expected_ledger_sha256(_repo_root()),
+            expected_sha256=expected,
+            require_expected_hash=isolated,
         )
     except AuthoritativeLedgerError as exc:
         oui.render_empty_state(
             "Authoritative ledger unavailable",
-            "Orders are not shown because the copied ledger is missing or does not match the frozen hash.",
+            "Orders are not shown because the paper-order ledger is missing, unreadable, or failed validation.",
         )
         st.caption(str(exc))
         return
@@ -739,7 +746,13 @@ def render_orders_page() -> None:
 
     current = summary.get("current_open_orders") or {}
     with st.expander("Current open-order snapshot", expanded=False):
-        fresh = _freshness_view({"data_freshness": {"class": current.get("freshness")}})
+        from dashboard.freshness_presentation import shared_freshness_view
+        from dashboard.preview_data import isolation_active as _iso
+
+        fresh = shared_freshness_view(
+            {"data_freshness": {"class": current.get("freshness")}},
+            isolated=_iso(_repo_root()),
+        )
         st.caption(
             f"{fresh['value']}"
             + (f" · {fresh['note']}" if fresh.get("note") else "")

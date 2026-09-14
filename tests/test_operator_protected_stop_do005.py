@@ -839,7 +839,9 @@ def test_56_session_restoration_cannot_submit_stop():
 
 def test_57_page_load_cannot_submit_stop():
     src = (ROOT / "dashboard" / "operator_console.py").read_text(encoding="utf-8")
-    load = src[src.index("def render_operations_page") : src.index("_render_start_controls()")]
+    ops_start = src.index("def render_operations_page")
+    start_controls = src.index("_render_start_controls(", ops_start)
+    load = src[ops_start:start_controls]
     assert "execute_stop_triton" not in load
 
 

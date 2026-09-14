@@ -78,6 +78,18 @@ def _write_fixture(
         (live / "watchdog_loop.lock").write_text(
             _lock_text(pid, minutes_ago=wd_minutes_ago), encoding="utf-8"
         )
+    now = datetime.now(timezone.utc)
+    (live / "paper_arm_confirm.json").write_text(
+        json.dumps(
+            {
+                "timestamp": now.isoformat(),
+                "mode": "ASSISTED",
+                "expires_at": (now + timedelta(hours=2)).isoformat(),
+                "allow_execute": True,
+            }
+        ),
+        encoding="utf-8",
+    )
     (results / "execution_readiness.json").write_text(
         json.dumps({"live_execution_permitted": live_permitted, "readiness_status": "READY"}),
         encoding="utf-8",
@@ -1505,7 +1517,7 @@ def test_103_operations_shows_stop_and_start_stages_separately():
     """Scenario 103: Operations UI renders Stop and Start stages as separate captions."""
     src = _dashboard_src()
     assert (
-        "_render_start_controls()"
+        "_render_start_controls("
         in src.split("def render_operations_page", 1)[1].split("\ndef ", 1)[0]
     )
     controls = src.split("def _render_start_controls", 1)[1].split(

@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from services.paper_order_ledger import (
     SOURCE_FPLAN,
+    PaperOrderLedgerError,
     canonical_symbol,
     dispatch_visibility,
     ledger_path,
@@ -214,29 +215,75 @@ def assert_rows_derived_from_ledger_events(
             )
 
 
+def _assert_no_conflicting_identities(events: Sequence[Mapping[str, Any]]) -> None:
+    by_broker: Dict[str, Tuple[str, str]] = {}
+    for event in events:
+        bid = str(event.get("broker_order_id") or "").strip()
+        if not bid:
+            continue
+        symbol = str(event.get("symbol") or "").strip()
+        side = str(event.get("side") or "").strip().upper()
+        prev = by_broker.get(bid)
+        if prev is None:
+            by_broker[bid] = (symbol, side)
+            continue
+        prev_symbol, prev_side = prev
+        if prev_symbol and symbol and prev_symbol != symbol:
+            raise AuthoritativeLedgerError(f"authoritative_ledger_conflict_symbol:{bid}")
+        if (
+            prev_side
+            and side
+            and prev_side not in PLAN_SIDES
+            and side not in PLAN_SIDES
+            and prev_side != side
+        ):
+            raise AuthoritativeLedgerError(f"authoritative_ledger_conflict_side:{bid}")
+
+
 def load_authoritative_presentation(
     *,
     root: Optional[Path] = None,
     expected_sha256: Optional[str] = None,
+    require_expected_hash: bool = False,
 ) -> Dict[str, Any]:
-    """Load Orders presentation from the copied ledger only.
+    """Load Orders presentation from the supplied ledger only.
 
-    Historical plans may come from the frozen audit. Broker orders never do.
-    A missing or mismatched ledger fails closed instead of inventing rows.
+    Frozen preview/tests may require an explicit fixture hash. Production must
+    not pin the BM5 fixture hash. The ledger is hashed before and after the
+    read and fails closed if it changes, is missing, or is unreadable.
+    No synthetic fallback, broker call, file write, or lock is created.
     """
+    pinned = str(expected_sha256 or "").strip()
+    if require_expected_hash and not pinned:
+        raise AuthoritativeLedgerError("preview_expected_hash_missing")
     root_p = Path(root) if root is not None else Path(__file__).resolve().parents[1]
     ledger = ledger_path(root_p)
     if not ledger.is_file():
         raise AuthoritativeLedgerError("authoritative_ledger_missing")
-    digest = file_sha256(ledger)
-    if expected_sha256 and digest != expected_sha256:
-        raise AuthoritativeLedgerError(f"authoritative_ledger_hash_mismatch:{digest}")
-    events = load_events(ledger)
-    broker = [dict(row) for row in reduce_ledger(root=root_p) if not is_historical_plan_row(row)]
-    assert_rows_derived_from_ledger_events(broker, events)
+    digest_before = file_sha256(ledger)
+    if pinned and digest_before != pinned:
+        raise AuthoritativeLedgerError(f"authoritative_ledger_hash_mismatch:{digest_before}")
+    try:
+        events = load_events(ledger)
+        reduced = [dict(row) for row in reduce_ledger(root=root_p)]
+    except PaperOrderLedgerError as exc:
+        raise AuthoritativeLedgerError(f"authoritative_ledger_{exc.reason}") from exc
+    digest_after = file_sha256(ledger)
+    if digest_before != digest_after:
+        raise AuthoritativeLedgerError(
+            f"authoritative_ledger_unstable:{digest_before}:{digest_after}"
+        )
+    if not events:
+        raise AuthoritativeLedgerError("authoritative_ledger_empty")
+    if not reduced:
+        raise AuthoritativeLedgerError("authoritative_ledger_unreducible")
+    _assert_no_conflicting_identities(events)
+    broker = [row for row in reduced if not is_historical_plan_row(row)]
+    if broker:
+        assert_rows_derived_from_ledger_events(broker, events)
     plans = load_historical_plan_rows(root=root_p)
     counts = presentation_order_counts(broker + plans)
-    counts["ledger_sha256"] = digest
+    counts["ledger_sha256"] = digest_before
     counts["ledger_events"] = len(events)
     counts["ledger_path"] = str(ledger)
     return counts

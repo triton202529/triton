@@ -21,7 +21,22 @@ PAGES = ROOT / "pages"
 
 FIXED_NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=timezone.utc)
 
+# Landing-page radio order from dashboard/operator_nav.py (Overview is the landing page).
+CANONICAL_OPERATOR_PAGES = [
+    "Overview",
+    "Portfolio",
+    "Performance",
+    "Orders",
+    "Activity",
+    "Reports",
+    "Operations",
+    "Risk & Alerts",
+    "Diagnostics",
+]
+
+# Legacy Command Center constant in view_results.py (includes Overview; not the radio list).
 COMMAND_CENTER_DESTINATIONS = [
+    "Overview",
     "Operations",
     "Activity",
     "Portfolio",
@@ -99,6 +114,21 @@ def test_native_multipage_nav_disabled_via_supported_config():
 
 
 def test_custom_command_center_nav_present_and_destinations_once():
+    nav = (ROOT / "dashboard" / "operator_nav.py").read_text(encoding="utf-8")
+    groups = re.search(
+        r"^NAV_GROUPS:.*?=\s*\[(.*?)\]\s*^UI_A_PAGES",
+        nav,
+        re.S | re.M,
+    )
+    assert groups
+    pages: list[str] = []
+    for inner in re.findall(r'\("[^"]+",\s*\[(.*?)\]\)', groups.group(1), re.S):
+        pages.extend(re.findall(r'"([^"]+)"', inner))
+    assert pages == CANONICAL_OPERATOR_PAGES
+    assert len(pages) == len(set(pages))
+    assert "Overview" in pages and "Performance" in pages
+    assert re.search(r'DEFAULT_UI_A_PAGE\s*=\s*"Overview"', nav)
+
     src = VIEW.read_text(encoding="utf-8", errors="replace")
     m = re.search(
         r"COMMAND_CENTER_DESTINATIONS:\s*List\[str\]\s*=\s*\[(.*?)\]",
@@ -109,8 +139,10 @@ def test_custom_command_center_nav_present_and_destinations_once():
     items = re.findall(r'"([^"]+)"', m.group(1))
     assert items == COMMAND_CENTER_DESTINATIONS
     assert len(items) == len(set(items))
+    assert items[0] == "Overview"
     assert "st.radio(" in src
-    assert '"Destination"' in src or "Destination" in src
+    assert "all_destinations()" in src or "ui_a_pages" in src
+    assert '"Destination"' in src or "Destination" in src or '"Page"' in src
     assert "OPERATOR_RENDERERS" in src
 
 

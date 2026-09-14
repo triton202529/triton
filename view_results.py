@@ -2317,15 +2317,25 @@ def render_sidebar_execution_status(
     market_status = str(summary.get("market_status") or "UNKNOWN")
     market_as_of = summary.get("market_as_of") or "n/a"
     market_source = summary.get("market_source") or "guard_auto.is_market_open_et"
-    from dashboard.freshness_presentation import isolated_status_details_freshness
+    from dashboard.freshness_presentation import (
+        current_freshness_presentation,
+        freshness_for_render,
+        isolated_status_details_freshness,
+        technical_freshness_evidence,
+    )
     from dashboard.preview_data import isolation_active
+    from services.operator_console_status import build_operator_status
 
+    bound = current_freshness_presentation()
+    if bound is None:
+        bound = freshness_for_render(
+            build_operator_status(),
+            isolated=isolation_active(),
+        )
     if isolation_active():
-        fresh = isolated_status_details_freshness(summary.get("data_freshness"))
-        freshness_label = fresh["value"]
-    else:
-        fresh = {}
-        freshness_label = str(summary.get("data_freshness") or "UNKNOWN")
+        isolated_status_details_freshness(bound.get("raw_class"))
+    freshness_label = str(bound.get("value") or "Unknown")
+    fresh = dict(bound)
     st.caption(
         f"Pipeline health: **{rph}** · "
         f"Data freshness: **{freshness_label}** · "
@@ -2415,6 +2425,14 @@ def render_sidebar_execution_status(
     integrity = summary.get("integrity_display") or {}
     if integrity.get("show_integrity_lock_caption"):
         st.caption(f"Data integrity lock: {integrity.get('integrity_lock_detail')}")
+    with st.expander("Technical details", expanded=False):
+        st.caption("Raw freshness evidence — not a second current status.")
+        st.json(
+            technical_freshness_evidence(
+                bound,
+                guard_data_freshness=summary.get("data_freshness"),
+            )
+        )
 
 
 def render_dashboard_guard_summary(
@@ -2444,13 +2462,23 @@ def render_dashboard_guard_summary(
 
     c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     c1.metric("Pipeline health", str(summary.get("runtime_pipeline_health") or "UNKNOWN"))
-    from dashboard.freshness_presentation import isolated_status_details_freshness
+    from dashboard.freshness_presentation import (
+        current_freshness_presentation,
+        freshness_for_render,
+        isolated_status_details_freshness,
+    )
     from dashboard.preview_data import isolation_active
+    from services.operator_console_status import build_operator_status
 
+    bound = current_freshness_presentation()
+    if bound is None:
+        bound = freshness_for_render(
+            build_operator_status(),
+            isolated=isolation_active(),
+        )
     if isolation_active():
-        c2.metric("Data freshness", isolated_status_details_freshness()["value"])
-    else:
-        c2.metric("Data freshness", str(summary.get("data_freshness") or "UNKNOWN"))
+        isolated_status_details_freshness(bound.get("raw_class"))
+    c2.metric("Data freshness", str(bound.get("value") or "Unknown"))
     c3.metric("Pipeline HB age", ph_age_s)
     c4.metric("Watchdog", str(summary.get("watchdog") or "UNKNOWN"))
     c5.metric("Continuous loop", str(summary.get("continuous_loop") or "UNKNOWN"))
@@ -24466,13 +24494,18 @@ def _render_compact_left_rail_status() -> None:
         status = build_operator_status()
         lines = compact_system_status_lines(status)
         from dashboard.display_labels import display_status
-        from dashboard.freshness_presentation import shared_freshness_view
+        from dashboard.freshness_presentation import (
+            bind_freshness_presentation,
+            reset_freshness_presentation,
+            shared_freshness_view,
+        )
         from dashboard.preview_data import isolation_active
 
         overall = display_status(lines["overall"])
         live = display_status(lines["live"])
         paper = display_status(lines["paper"])
-        fresh = shared_freshness_view(status, isolated=isolation_active())
+        reset_freshness_presentation()
+        fresh = bind_freshness_presentation(status, isolated=isolation_active())
         freshness = fresh["value"]
         continuous = lines.get("continuous") or "UNKNOWN"
         watchdog = lines.get("watchdog") or "UNKNOWN"

@@ -24,10 +24,9 @@ def isolation_root() -> Path:
 
 
 def isolation_active(root: Optional[Path] = None) -> bool:
-    candidates = [isolation_root()]
-    if root is not None:
-        candidates.append(Path(root))
-    return any((path / MARKER_RELATIVE).is_file() for path in candidates)
+    """True only for the inspected root (or this worktree when omitted)."""
+    target = Path(root) if root is not None else isolation_root()
+    return (target / MARKER_RELATIVE).is_file()
 
 
 def preview_data_root(root: Optional[Path] = None) -> Path:
@@ -49,7 +48,14 @@ def load_preview_capture(root: Optional[Path] = None) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def expected_ledger_sha256(root: Optional[Path] = None) -> str:
+def expected_ledger_sha256(root: Optional[Path] = None) -> Optional[str]:
+    """Pinned hash for isolated preview/tests only.
+
+    Production must validate the current canonical ledger and must not inherit
+    the BM5 fixture hash. Isolated preview keeps its configured fixture pin.
+    """
+    if not isolation_active(root):
+        return None
     captured = str(load_preview_capture(root).get("ledger_sha256") or "").strip()
     return captured or EXPECTED_LEDGER_SHA256
 
