@@ -338,3 +338,36 @@ def percent_text(value: Any, *, signed: bool = False) -> str:
     if signed:
         return f"{num:+.2f}%"
     return f"{num:.2f}%"
+
+
+def ratio_percent_text(value: Any, *, signed: bool = False) -> str:
+    """Format a reducer ratio (0.001327) as a percentage (+0.13%)."""
+    if value is None or value == "":
+        return "Unavailable"
+    text = str(value).strip()
+    if not text or text.upper() == "UNAVAILABLE":
+        return "Unavailable"
+    try:
+        from decimal import Decimal, ROUND_HALF_UP
+
+        points = (Decimal(text) * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return "Unavailable"
+    if signed and points > 0:
+        return f"+{points}%"
+    return f"{points}%"
+
+
+def profit_factor_text(value: Any) -> str:
+    if value is None or value == "":
+        return "Unavailable"
+    text = str(value).strip()
+    if not text or text.upper() == "UNAVAILABLE":
+        return "Unavailable"
+    try:
+        from decimal import Decimal, ROUND_HALF_UP
+
+        num = Decimal(text).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return "Unavailable"
+    return f"{num}×"

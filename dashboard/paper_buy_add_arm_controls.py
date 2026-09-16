@@ -62,7 +62,9 @@ def render_paper_buy_add_arm_controls(
 
     st.caption(pres["no_start_caption"])
     st.write(f"**Status:** {display_status(status)}")
-    st.write(f"**Expires:** {pres.get('expires_at') or 'unavailable'}")
+    from dashboard.time_presentation import format_operator_datetime
+
+    st.write(f"**Expires:** {format_operator_datetime(pres.get('expires_at'))}")
     remaining = pres.get("remaining_minutes")
     if remaining is None:
         st.write("**Next action:** Review expiry and evidence below.")

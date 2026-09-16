@@ -34,19 +34,16 @@ def escape(value: Any) -> str:
     return html.escape("" if value is None else str(value), quote=True)
 
 
-def format_timestamp(value: Any, *, fallback: str = "UNKNOWN") -> str:
-    """Best-effort display formatting; never invents a clock reading."""
-    if value is None or value == "":
-        return fallback
-    text = str(value).strip()
-    if not text:
-        return fallback
-    try:
-        normalized = text.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(normalized)
-        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-    except Exception:
-        return text
+def format_timestamp(value: Any, *, fallback: str = "Unavailable") -> str:
+    """Ordinary-page Eastern Time. Naive or malformed values stay Unavailable."""
+    from dashboard.time_presentation import UNAVAILABLE_LABEL, format_operator_datetime
+
+    rendered = format_operator_datetime(value)
+    if rendered != UNAVAILABLE_LABEL:
+        return rendered
+    if value in (None, ""):
+        return fallback if fallback else UNAVAILABLE_LABEL
+    return UNAVAILABLE_LABEL
 
 
 def inject_operator_theme() -> None:

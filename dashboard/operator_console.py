@@ -169,7 +169,9 @@ def _render_start_controls(status_snapshot: dict | None = None) -> None:
     from dashboard import operator_ui as _oui_actions
     from services.operator_console_status import build_operator_status as _build_ops_status
 
-    _status_for_actions = status_snapshot if isinstance(status_snapshot, dict) else _build_ops_status()
+    _status_for_actions = (
+        status_snapshot if isinstance(status_snapshot, dict) else _build_ops_status()
+    )
     _cont_a = _status_for_actions.get("continuous") or {}
     _wd_a = _status_for_actions.get("watchdog") or {}
     _live_a = _status_for_actions.get("live_execution") or {}
@@ -209,7 +211,11 @@ def _render_start_controls(status_snapshot: dict | None = None) -> None:
     ):
         with st.expander(
             "Start technical evidence"
-            + (" (historical — not current runtime status)" if action_view.get("start_suppressed") else ""),
+            + (
+                " (historical — not current runtime status)"
+                if action_view.get("start_suppressed")
+                else ""
+            ),
             expanded=False,
         ):
             st.json(
@@ -569,7 +575,7 @@ def _render_stop_control_column(
         "This does **not** create or extend paper-arm authorization."
     )
     st.caption(
-        f"Preflight expires: {st.session_state.get('stop_preflight_expires_at')} · "
+        f"Preflight expires: {oui.format_timestamp(st.session_state.get('stop_preflight_expires_at'))} · "
         f"decision={st.session_state.get('stop_preflight_decision')} · "
         f"targets={st.session_state.get('stop_preflight_targets')}"
     )
@@ -713,7 +719,7 @@ def _render_restart_control_column(
         "continue unless Stop fully completes and a new Start evaluation passes."
     )
     st.caption(
-        f"Preflight expires: {st.session_state.get('restart_preflight_expires_at')} · "
+        f"Preflight expires: {oui.format_timestamp(st.session_state.get('restart_preflight_expires_at'))} · "
         f"decision={st.session_state.get('restart_preflight_decision')} · "
         f"stop_required={st.session_state.get('restart_stop_required')} · "
         f"targets={st.session_state.get('restart_preflight_targets')}"
@@ -1027,9 +1033,7 @@ def render_operations_page() -> None:
                 },
                 {
                     "label": "Session context",
-                    "value": oui.display_or_unknown(
-                        (market.get("session_phase") or market_state)
-                    ),
+                    "value": oui.display_or_unknown((market.get("session_phase") or market_state)),
                 },
                 {"label": "Pipeline heartbeat", "value": pipeline_hb["display"]},
                 {"label": "Next expected cycle", "value": next_expected},

@@ -300,7 +300,8 @@ def _portfolio_metrics(
         c4, c5 = st.columns(2)
         c4.metric("Invested value", certified.get("market_value"))
         c5.metric("Unrealized P/L", certified.get("unrealized_pl"))
-        st.caption(certified.get("period_change_note") or SECOND_CLOSE_NOTE)
+        if certified.get("period_change_note"):
+            st.caption(certified["period_change_note"])
         return
     change = period_change(history_rows)
     c1, c2, c3 = st.columns(3)
@@ -414,7 +415,16 @@ def render_overview_page() -> None:
     cycle = status.get("cycle") or {}
     c1, c2, c3 = st.columns(3)
     c1.metric("Last completed", oui.format_timestamp(cycle.get("last_completed_at")))
-    c2.metric("Next expected", display_label(cycle.get("next_expected_at") or "Unavailable"))
+    next_expected = cycle.get("next_expected_at")
+    from dashboard.time_presentation import parse_aware_datetime
+
+    if parse_aware_datetime(next_expected):
+        next_shown = oui.format_timestamp(next_expected)
+    elif next_expected:
+        next_shown = display_label(next_expected)
+    else:
+        next_shown = "Unavailable"
+    c2.metric("Next expected", next_shown)
     c3.metric("Overdue", "Yes" if cycle.get("overdue") else "No")
 
     st.markdown("#### Recent activity")
@@ -825,7 +835,9 @@ def _render_activity_timeline(
             with st.expander(f"Evidence · {label}", expanded=False):
                 for ev in items:
                     st.caption(f"Source: {ev.get('source')}")
-                    st.caption(f"Path: {ev.get('evidence_path')}")
+                    evidence_path = str(ev.get("evidence_path") or "")
+                    if evidence_path and ":" not in evidence_path[:3] and "\\" not in evidence_path:
+                        st.caption(f"Artifact: {evidence_path}")
                     st.code(str(ev.get("raw_reference") or ""), language="text")
     st.markdown("</div>", unsafe_allow_html=True)
 

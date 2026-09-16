@@ -166,8 +166,8 @@ def test_spy_qqq_same_september_11_date(tmp_path: Path):
     qqq = next(row for row in view["benchmarks"] if row["symbol"] == "QQQ")
     assert spy["adjusted_close"] == "$764.29"
     assert qqq["adjusted_close"] == "$714.88"
-    assert spy["methodology"] == "Total return evidence"
-    assert qqq["methodology"] == "Total return evidence"
+    assert spy["methodology"] == "Total return"
+    assert qqq["methodology"] == "Total return"
     assert spy["comparison"] == UNAVAILABLE_LABEL
 
 
@@ -271,8 +271,7 @@ def test_buy_sell_and_start_contracts_unchanged():
 def test_preview_banner_uses_evidence_timestamp():
     label = preview_capture_label("2026-09-11T22:47:19+00:00")
     assert label.startswith("Preview data captured at ")
-    assert "2026-09-11" in label
-    assert "ET" in label
+    assert "September 11, 2026 at 6:47 PM ET" in label
 
 
 def test_two_close_test_only_fixture_renders_future_metrics(tmp_path: Path):

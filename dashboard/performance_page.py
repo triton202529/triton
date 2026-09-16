@@ -108,7 +108,8 @@ def _equity_figure(view: Mapping[str, Any]) -> Any:
     hover = []
     for point, y in zip(points, ys):
         ytxt = f"${y:,.2f}" if y is not None else UNAVAILABLE_LABEL
-        hover.append(f"{point.get('kind')}<br>{point.get('timestamp')}<br>Equity: {ytxt}")
+        when = point.get("timestamp_et") or point.get("timestamp")
+        hover.append(f"{point.get('kind')}<br>{when}<br>Equity: {ytxt}")
     if xs and any(y is not None for y in ys):
         fig.add_trace(
             go.Scatter(
@@ -236,7 +237,7 @@ def render_performance_page(root=None) -> None:
         rows = [
             {
                 "Checkpoint": p.get("kind"),
-                "Timestamp": p.get("timestamp"),
+                "Timestamp": p.get("timestamp_et") or p.get("timestamp"),
                 "Equity": money_safe(p.get("equity")),
             }
             for p in view.get("checkpoints") or []
@@ -250,10 +251,18 @@ def render_performance_page(root=None) -> None:
         [
             {"label": "Time-weighted return", "value": view.get("time_weighted_return")},
             {"label": "Maximum drawdown", "value": view.get("maximum_drawdown")},
-            {"label": "SPY comparison", "value": view.get("spy_comparison")},
-            {"label": "QQQ comparison", "value": view.get("qqq_comparison")},
+            {
+                "label": view.get("spy_comparison_label") or "SPY return",
+                "value": view.get("spy_comparison"),
+            },
+            {
+                "label": view.get("qqq_comparison_label") or "QQQ return",
+                "value": view.get("qqq_comparison"),
+            },
         ]
     )
+    if view.get("comparison_period"):
+        st.caption(f"SPY and QQQ use the identical certified dates ({view['comparison_period']}).")
     with st.expander("More performance metrics", expanded=False):
         _metric_cards(
             [
@@ -272,6 +281,8 @@ def render_performance_page(root=None) -> None:
             ]
         )
         st.caption(view.get("grouped_metrics_note") or MORE_METRICS_NOTE)
+        if view.get("exposure_adjusted_note"):
+            st.caption(f"Exposure-adjusted return: {view['exposure_adjusted_note']}")
     if view.get("submit_to_fill_slippage") != UNAVAILABLE_LABEL:
         st.caption(f"Submit-to-fill slippage: {view.get('submit_to_fill_slippage')}")
     st.caption(f"Decision slippage: {view.get('decision_slippage')}")

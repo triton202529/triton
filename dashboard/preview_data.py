@@ -7,7 +7,6 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from zoneinfo import ZoneInfo
 
 PROD_ROOT = Path(r"C:\Users\akimw\triton")
 EXPECTED_LEDGER_SHA256 = "6ce03a05bf553eb8a9dce5938f964f2a24dd1f1e4ee1437e5f9f87d4cc6e9aee"
@@ -42,7 +41,7 @@ def load_preview_capture(root: Optional[Path] = None) -> Dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
@@ -66,17 +65,11 @@ def expected_accounting_ledger_sha256(root: Optional[Path] = None) -> str:
 
 
 def preview_capture_label(captured_at: str) -> str:
-    text = str(captured_at or "").strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(text)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        local = dt.astimezone(ZoneInfo("America/New_York"))
-        stamp = local.strftime("%Y-%m-%d %H:%M:%S ET")
-    except ValueError:
-        stamp = captured_at
+    from dashboard.time_presentation import UNAVAILABLE_LABEL, format_operator_datetime
+
+    stamp = format_operator_datetime(captured_at)
+    if stamp == UNAVAILABLE_LABEL:
+        stamp = str(captured_at or UNAVAILABLE_LABEL)
     return f"Preview data captured at {stamp}"
 
 

@@ -12,7 +12,14 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from dashboard.display_labels import display_label, money_text, quantity_text, signed_text
+from dashboard.display_labels import (
+    display_label,
+    money_text,
+    profit_factor_text,
+    quantity_text,
+    ratio_percent_text,
+    signed_text,
+)
 from dashboard.preview_data import PROD_ROOT, assert_not_production_path, isolation_active
 from services.performance_accounting import (
     EVENT_FILL_BUY,
@@ -89,6 +96,12 @@ def metric_text(value: Any, *, kind: str = "money") -> str:
             return str(value)
     if kind == "status":
         return display_label(value)
+    if kind == "ratio_pct":
+        return ratio_percent_text(value, signed=False)
+    if kind == "signed_ratio_pct":
+        return ratio_percent_text(value, signed=True)
+    if kind == "profit_factor":
+        return profit_factor_text(value)
     return str(value)
 
 
@@ -222,13 +235,17 @@ def checkpoint_axis_label(session_date: Any, kind: str) -> str:
 def _checkpoints(
     cutover: Mapping[str, Any], closes: Sequence[Mapping[str, Any]]
 ) -> List[Dict[str, Any]]:
+    from dashboard.time_presentation import format_operator_datetime
+
     points: List[Dict[str, Any]] = []
     if cutover:
         session_date = str(cutover.get("as_of_utc") or "")[:10] or None
+        raw_open = cutover.get("as_of_utc")
         points.append(
             {
                 "kind": KIND_OPENING,
-                "timestamp": cutover.get("as_of_utc"),
+                "timestamp": raw_open,
+                "timestamp_et": format_operator_datetime(raw_open),
                 "equity": cutover.get("equity"),
                 "session_date": session_date,
                 "axis_label": checkpoint_axis_label(session_date, KIND_OPENING),
@@ -237,10 +254,12 @@ def _checkpoints(
         )
     for close in closes:
         session_date = close.get("session_date")
+        raw_ts = close.get("evidence_timestamp")
         points.append(
             {
                 "kind": KIND_CERTIFIED,
-                "timestamp": close.get("evidence_timestamp"),
+                "timestamp": raw_ts,
+                "timestamp_et": format_operator_datetime(raw_ts),
                 "equity": close.get("equity"),
                 "session_date": session_date,
                 "axis_label": checkpoint_axis_label(session_date, KIND_CERTIFIED),
@@ -282,23 +301,37 @@ def _fee_display(reduced: Mapping[str, Any]) -> str:
     return FEE_PENDING_LABEL
 
 
-def _benchmark_rows(benchmarks: Mapping[str, Any], session_date: str) -> List[Dict[str, Any]]:
+def _benchmark_rows(
+    benchmarks: Mapping[str, Any],
+    session_date: str,
+    *,
+    period: Optional[Mapping[str, Any]] = None,
+) -> List[Dict[str, Any]]:
     session = dict(benchmarks.get(session_date) or {})
+    period = dict(period or {})
     rows: List[Dict[str, Any]] = []
     for symbol in ("SPY", "QQQ"):
         item = dict(session.get(symbol) or {})
         if not item:
             continue
-        kind = str(item.get("return_kind") or "")
+        kind = str(item.get("return_kind") or period.get(f"{symbol.lower()}_return_kind") or "")
+        raw_return = period.get(f"{symbol.lower()}_return")
         rows.append(
             {
                 "symbol": symbol,
                 "session_date": session_date,
                 "adjusted_close": metric_text(item.get("price")),
-                "methodology": (
-                    "Total return evidence" if kind == "TOTAL_RETURN" else display_label(kind)
+                "methodology": ("Total return" if kind == "TOTAL_RETURN" else display_label(kind)),
+                "comparison": (
+                    metric_text(raw_return, kind="signed_ratio_pct")
+                    if raw_return is not None
+                    else UNAVAILABLE_LABEL
                 ),
-                "comparison": UNAVAILABLE_LABEL,
+                "comparison_period": (
+                    f"{period.get('from_session')} to {period.get('to_session')}"
+                    if period.get("from_session") and period.get("to_session")
+                    else None
+                ),
                 "price_raw": item.get("price"),
                 "return_kind": kind,
             }
@@ -371,6 +404,10 @@ def load_performance_view(
     elif latest is not None:
         external_total = str(latest.get("external_cash_flow_since_prior") or "0")
     twr = metrics.get("time_weighted_return")
+    period = (metrics.get("periods") or [None])[-1] if close_count >= 2 else None
+    period = dict(period or {}) if period else {}
+    spy_kind = str(period.get("spy_return_kind") or "")
+    qqq_kind = str(period.get("qqq_return_kind") or "")
     return {
         "ok": True,
         "fail_closed_title": FAIL_CLOSED_TITLE,
@@ -402,27 +439,30 @@ def load_performance_view(
         "earliest_first_return_date": EARLIEST_FIRST_RETURN_DATE if close_count < 2 else None,
         "cutover_is_not_a_return": True,
         "historical_return": UNAVAILABLE_LABEL,
-        "time_weighted_return": (
-            metric_text(twr, kind="status") if is_unavailable(twr) else metric_text(twr)
-        ),
-        "maximum_drawdown": metric_text(metrics.get("maximum_drawdown")),
+        "time_weighted_return": metric_text(twr, kind="signed_ratio_pct"),
+        "maximum_drawdown": metric_text(metrics.get("maximum_drawdown"), kind="ratio_pct"),
         "spy_comparison": (
             UNAVAILABLE_LABEL
             if close_count < 2
-            else metric_text(
-                (metrics.get("periods") or [{}])[-1].get("spy_return")
-                if metrics.get("periods")
-                else UNAVAILABLE
-            )
+            else metric_text(period.get("spy_return"), kind="signed_ratio_pct")
         ),
         "qqq_comparison": (
             UNAVAILABLE_LABEL
             if close_count < 2
-            else metric_text(
-                (metrics.get("periods") or [{}])[-1].get("qqq_return")
-                if metrics.get("periods")
-                else UNAVAILABLE
-            )
+            else metric_text(period.get("qqq_return"), kind="signed_ratio_pct")
+        ),
+        "spy_return_kind": spy_kind or None,
+        "qqq_return_kind": qqq_kind or None,
+        "spy_comparison_label": (
+            "SPY return · Total return" if spy_kind == "TOTAL_RETURN" else "SPY return"
+        ),
+        "qqq_comparison_label": (
+            "QQQ return · Total return" if qqq_kind == "TOTAL_RETURN" else "QQQ return"
+        ),
+        "comparison_period": (
+            f"{period.get('from_session')} to {period.get('to_session')}"
+            if period.get("from_session") and period.get("to_session")
+            else None
         ),
         "net_realized_pl": (
             UNAVAILABLE_LABEL
@@ -439,12 +479,19 @@ def load_performance_view(
                 kind="signed",
             )
         ),
-        "win_rate": metric_text(metrics.get("win_rate")),
+        "win_rate": metric_text(metrics.get("win_rate"), kind="ratio_pct"),
         "average_winner": metric_text(metrics.get("average_winner")),
         "average_loser": metric_text(metrics.get("average_loser")),
-        "profit_factor": metric_text(metrics.get("profit_factor")),
-        "average_market_exposure": metric_text(metrics.get("average_exposure")),
-        "exposure_adjusted_return": metric_text(metrics.get("exposure_adjusted_return")),
+        "profit_factor": metric_text(metrics.get("profit_factor"), kind="profit_factor"),
+        "average_market_exposure": metric_text(metrics.get("average_exposure"), kind="ratio_pct"),
+        "exposure_adjusted_return": metric_text(
+            metrics.get("exposure_adjusted_return"), kind="signed_ratio_pct"
+        ),
+        "exposure_adjusted_note": (
+            "Unavailable because evidence is insufficient"
+            if is_unavailable(metrics.get("exposure_adjusted_return"))
+            else None
+        ),
         "decision_slippage": metric_text(metrics.get("decision_to_fill_slippage_notional")),
         "submit_to_fill_slippage": metric_text(metrics.get("submit_to_fill_slippage_notional")),
         "fees": _fee_display(reduced),
@@ -488,7 +535,11 @@ def load_performance_view(
         "holdings": _holdings(latest) if latest else [],
         "activity": activity,
         "benchmarks": (
-            _benchmark_rows(reduced.get("benchmarks") or {}, latest_session)
+            _benchmark_rows(
+                reduced.get("benchmarks") or {},
+                latest_session,
+                period=period,
+            )
             if latest_session
             else []
         ),
@@ -561,7 +612,9 @@ def certified_page_totals(view: Mapping[str, Any]) -> Dict[str, Any]:
         "market_value": view.get("market_value"),
         "unrealized_pl": view.get("unrealized_pl"),
         "period_change": UNAVAILABLE_LABEL,
-        "period_change_note": SECOND_CLOSE_NOTE,
+        "period_change_note": (
+            SECOND_CLOSE_NOTE if int(view.get("certified_close_count") or 0) < 2 else None
+        ),
         "holdings": list(view.get("holdings") or []),
         "source": "certified_accounting_close",
         "uses_portfolio_history": False,

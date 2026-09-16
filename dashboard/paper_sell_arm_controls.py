@@ -414,10 +414,12 @@ def render_paper_sell_arm_controls(
     authority_state = str(pres.get("authority_state") or "ABSENT")
     next_action = completed_sell_next_action(visual, challenge_state)
     st.write(f"**Status:** {display_status(authority_state)}")
+    from dashboard.time_presentation import format_operator_datetime
+
     if pres.get("authority_expires_at"):
-        st.write(f"**Expires:** {pres['authority_expires_at']}")
+        st.write(f"**Expires:** {format_operator_datetime(pres['authority_expires_at'])}")
     elif pres.get("challenge_expires_at"):
-        st.write(f"**Challenge expires:** {pres['challenge_expires_at']}")
+        st.write(f"**Challenge expires:** {format_operator_datetime(pres['challenge_expires_at'])}")
     st.write(f"**Next action:** {next_action}")
     st.write(f"**Live execution:** blocked")
     if pres.get("last_dispatch_message") and visual.get("code") != "COMPLETED":

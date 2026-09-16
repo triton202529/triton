@@ -80,9 +80,13 @@ def _format_cell(value: Any) -> str:
     if isinstance(value, bool):
         return "Yes" if value else "No"
     if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d %H:%M:%S UTC")
+        from dashboard.time_presentation import format_operator_datetime
+
+        return format_operator_datetime(value)
     if isinstance(value, date):
-        return value.isoformat()
+        from dashboard.time_presentation import format_date_only
+
+        return format_date_only(value)
     if isinstance(value, float):
         if value != value:  # NaN
             return "Unavailable"
@@ -90,6 +94,10 @@ def _format_cell(value: Any) -> str:
             return f"{value:,.0f}"
         return f"{value:,.4f}".rstrip("0").rstrip(".")
     text = str(value)
+    from dashboard.time_presentation import format_operator_datetime, parse_aware_datetime
+
+    if parse_aware_datetime(text) is not None:
+        return format_operator_datetime(text)
     if is_raw_identifier(text):
         return text
     if "_" in text and text == text.lower():
