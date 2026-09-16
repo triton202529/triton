@@ -145,14 +145,13 @@ def long_buy_qualifies_for_add(
     *,
     logic: LifecycleLogicConfig,
 ) -> bool:
-    """Used by build_effective_lifecycle to align LONG+BUY→ADD with the same rules as decide_action."""
-    d = _scalar_float(delta_pct)
-    c = _scalar_float(confidence)
-    if not logic.enabled:
-        return math.isfinite(d) and d >= LEGACY_ADD_DELTA_THRESHOLD
-    d_ok = math.isfinite(d) and d >= logic.add_delta_pct_min
-    c_ok = math.isfinite(c) and c >= logic.add_confidence_min
-    return d_ok and c_ok
+    """ADD quality is never granted from Random Forest residual.
+
+    Operational delta_pct is non-authoritative (NaN). A finite residual must
+    not promote LONG+BUY to ADD.
+    """
+    _ = (delta_pct, confidence, logic)
+    return False
 
 
 def long_qualifies_for_exit_delta(
@@ -160,11 +159,9 @@ def long_qualifies_for_exit_delta(
     *,
     logic: LifecycleLogicConfig,
 ) -> bool:
-    """Signal-agnostic EXIT on deterioration (same as first EXIT check in decide_action)."""
-    if not logic.enabled:
-        return False
-    d = _scalar_float(delta_pct)
-    return math.isfinite(d) and d <= logic.exit_delta_pct_threshold
+    """Predicted-return residual must not create an EXIT."""
+    _ = (delta_pct, logic)
+    return False
 
 
 def long_qualifies_for_trim(
@@ -172,11 +169,9 @@ def long_qualifies_for_trim(
     *,
     logic: LifecycleLogicConfig,
 ) -> bool:
-    """TRIM band for LONG (after EXIT checks)."""
-    if not logic.enabled:
-        return False
-    d = _scalar_float(delta_pct)
-    return math.isfinite(d) and d <= logic.trim_delta_pct_threshold
+    """Predicted-return residual must not create a TRIM."""
+    _ = (delta_pct, logic)
+    return False
 
 
 # ------------------------------------------------------------
@@ -256,38 +251,16 @@ def _coerce_float(series: pd.Series) -> pd.Series:
 
 
 def _ensure_delta_pct(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep operational delta_pct non-authoritative.
+
+    Random Forest predicted_close must never refill delta_pct. Missing,
+    malformed, or empty values stay NaN so consumers fail closed instead of
+    recovering the old residual gate.
     """
-    If delta_pct missing, derive it from predicted_close + close when possible:
-      delta_pct = (predicted_close - close) / close
-    Also supports alt column names.
-    """
-    if "delta_pct" in df.columns and df["delta_pct"].notna().any():
-        return df
-
-    # find close column
-    close_col = None
-    for c in ("close", "Close", "price", "last", "last_price"):
-        if c in df.columns:
-            close_col = c
-            break
-
-    # find predicted close column
-    pred_col = None
-    for c in ("predicted_close", "pred", "yhat", "pred_close", "predicted"):
-        if c in df.columns:
-            pred_col = c
-            break
-
-    if close_col and pred_col:
-        c = _coerce_float(df[close_col])
-        p = _coerce_float(df[pred_col])
-        with np.errstate(divide="ignore", invalid="ignore"):
-            delta = (p - c) / c.replace(0.0, np.nan)
-        df["delta_pct"] = delta
-    else:
-        # keep column present for downstream expectations
+    if "delta_pct" not in df.columns:
         df["delta_pct"] = np.nan
-
+        return df
+    df["delta_pct"] = pd.to_numeric(df["delta_pct"], errors="coerce")
     return df
 
 
@@ -343,6 +316,96 @@ def _set_ticker_state(state: Dict[str, Any], ticker: str, tstate: Dict[str, Any]
     state[ticker] = tstate
 
 
+def _rf_era_decide_action(
+    *,
+    cfg: LifecycleConfig,
+    logic: LifecycleLogicConfig,
+    signal: str,
+    rf_delta_pct: float,
+    confidence: float,
+    pos_state: str,
+    last_change_date: Optional[date],
+    cooldown_until: Optional[date],
+    as_of_date: Optional[date],
+) -> Tuple[str, str]:
+    """Pre-RF2 counterfactual: residual used as a hard gate. Diagnostic only."""
+    if as_of_date is None:
+        as_of_date = _today_utc_date()
+
+    if cooldown_until and as_of_date < cooldown_until and signal == "BUY" and pos_state == "FLAT":
+        return "WAIT", "cooldown_flat_buy_blocked"
+
+    hold_age = _days_between(last_change_date, as_of_date)
+    can_exit = hold_age >= max(0, cfg.min_hold_days)
+
+    d = rf_delta_pct
+    c = confidence
+    if not math.isfinite(d):
+        d = float("nan")
+    if not math.isfinite(c):
+        c = float("nan")
+
+    if pos_state == "FLAT":
+        if signal == "BUY":
+            strength = d if math.isfinite(d) else (c if math.isfinite(c) else 0.0)
+            if not math.isfinite(strength):
+                strength = 0.0
+            if strength >= cfg.buy_delta_pct:
+                return "BUY", "flat_buy_to_buy"
+            return "WAIT", "flat_buy_weak_to_wait"
+        return "WAIT", "flat_non_buy_wait"
+
+    if pos_state == "LONG":
+        if logic.enabled:
+            if can_exit:
+                if math.isfinite(d) and d <= logic.exit_delta_pct_threshold:
+                    return "EXIT", "long_exit_delta_threshold"
+                if math.isfinite(d) and d <= logic.trim_delta_pct_threshold:
+                    return "TRIM", "long_mild_deterioration_to_trim"
+        else:
+            if signal == "SELL":
+                if not can_exit:
+                    return "HOLD", "long_sell_blocked_min_hold"
+                if math.isfinite(d) and d <= cfg.trim_delta_pct:
+                    return "EXIT", "long_bearish_reversal_to_exit"
+                if math.isfinite(d) and d <= cfg.exit_delta_pct:
+                    return "TRIM", "long_mild_deterioration_to_trim"
+                return "HOLD", "long_sell_but_not_strong"
+
+        if signal == "BUY":
+            if logic.enabled:
+                d_ok = math.isfinite(d) and d >= logic.add_delta_pct_min
+                c_ok = math.isfinite(c) and c >= logic.add_confidence_min
+                if d_ok and c_ok:
+                    return "ADD", "long_strong_buy_to_add"
+                return "HOLD", "long_weak_buy_to_hold"
+            strength = d if math.isfinite(d) else (c if math.isfinite(c) else 0.0)
+            if not math.isfinite(strength):
+                strength = 0.0
+            if strength >= cfg.add_delta_pct:
+                return "ADD", "long_strong_buy_to_add"
+            return "HOLD", "long_weak_buy_to_hold"
+
+        if signal == "SELL":
+            if not can_exit:
+                return "HOLD", "long_sell_blocked_min_hold"
+            if logic.enabled:
+                if math.isfinite(c) and c >= logic.exit_confidence_min:
+                    return "EXIT", "long_bearish_reversal_to_exit"
+                return "HOLD", "long_sell_but_not_strong"
+
+        if signal == "HOLD":
+            return (
+                ("HOLD", "long_hold_signal_hold")
+                if cfg.hold_means_keep_position
+                else ("WAIT", "long_hold_to_wait")
+            )
+
+        return cfg.default_action_when_unknown, "unknown_signal_long"
+
+    return cfg.default_action_when_unknown, "unknown_position_state"
+
+
 def decide_action(
     *,
     cfg: LifecycleConfig,
@@ -357,7 +420,10 @@ def decide_action(
 ) -> Tuple[str, str]:
     """
     Returns (lifecycle_action, lifecycle_decision_reason).
-    LONG: EXIT/TRIM from delta/confidence (when enabled) run before ADD/HOLD for any signal.
+
+    Random Forest residual / operational delta_pct is never used to veto BUY,
+    promote HOLD to TRIM/EXIT, or grant ADD. Feature signal, cooldown, min-hold,
+    and explicit SELL conviction remain.
     """
     if as_of_date is None:
         as_of_date = _today_utc_date()
@@ -368,67 +434,45 @@ def decide_action(
     hold_age = _days_between(last_change_date, as_of_date)
     can_exit = hold_age >= max(0, cfg.min_hold_days)
 
-    d = delta_pct
     c = confidence
-    if not math.isfinite(d):
-        d = float("nan")
     if not math.isfinite(c):
         c = float("nan")
+    _ = delta_pct  # operational residual is non-authoritative
 
-    # FLAT — preserve prior behavior (strength = delta then confidence)
     if pos_state == "FLAT":
         if signal == "BUY":
-            strength = d if math.isfinite(d) else (c if math.isfinite(c) else 0.0)
-            if not math.isfinite(strength):
-                strength = 0.0
-            if strength >= cfg.buy_delta_pct:
+            if math.isfinite(c) and c >= cfg.buy_delta_pct:
                 return "BUY", "flat_buy_to_buy"
-            return "WAIT", "flat_buy_weak_to_wait"
+            if math.isfinite(c):
+                return "WAIT", "flat_buy_weak_to_wait"
+            return "BUY", "flat_buy_to_buy"
         return "WAIT", "flat_non_buy_wait"
 
-    # LONG — deterioration (EXIT/TRIM) is evaluated before ADD/HOLD for any signal.
     if pos_state == "LONG":
-        if logic.enabled:
-            if can_exit:
-                # 1) EXIT — delta only (applies before ADD/HOLD for any signal)
-                if math.isfinite(d) and d <= logic.exit_delta_pct_threshold:
-                    return "EXIT", "long_exit_delta_threshold"
-                # 2) TRIM
-                if math.isfinite(d) and d <= logic.trim_delta_pct_threshold:
-                    return "TRIM", "long_mild_deterioration_to_trim"
-        else:
-            # Legacy: trim/exit only on explicit SELL
+        if not logic.enabled:
             if signal == "SELL":
                 if not can_exit:
                     return "HOLD", "long_sell_blocked_min_hold"
-                if math.isfinite(d) and d <= cfg.trim_delta_pct:
-                    return "EXIT", "long_bearish_reversal_to_exit"
-                if math.isfinite(d) and d <= cfg.exit_delta_pct:
-                    return "TRIM", "long_mild_deterioration_to_trim"
-                return "HOLD", "long_sell_but_not_strong"
+                return "EXIT", "long_bearish_reversal_to_exit"
+            if signal == "BUY":
+                return "HOLD", "long_weak_buy_to_hold"
+            if signal == "HOLD":
+                return (
+                    ("HOLD", "long_hold_signal_hold")
+                    if cfg.hold_means_keep_position
+                    else ("WAIT", "long_hold_to_wait")
+                )
+            return cfg.default_action_when_unknown, "unknown_signal_long"
 
         if signal == "BUY":
-            if logic.enabled:
-                # 3) ADD — only after EXIT/TRIM bands did not fire
-                if long_buy_qualifies_for_add(d, c, logic=logic):
-                    return "ADD", "long_strong_buy_to_add"
-                return "HOLD", "long_weak_buy_to_hold"
-            strength = d if math.isfinite(d) else (c if math.isfinite(c) else 0.0)
-            if not math.isfinite(strength):
-                strength = 0.0
-            if strength >= cfg.add_delta_pct:
-                return "ADD", "long_strong_buy_to_add"
             return "HOLD", "long_weak_buy_to_hold"
 
         if signal == "SELL":
             if not can_exit:
                 return "HOLD", "long_sell_blocked_min_hold"
-            if logic.enabled:
-                # 3b) EXIT on bearish conviction after delta bands (explicit SELL only)
-                if math.isfinite(c) and c >= logic.exit_confidence_min:
-                    return "EXIT", "long_bearish_reversal_to_exit"
-                return "HOLD", "long_sell_but_not_strong"
-            # logic.disabled + SELL handled in legacy branch above
+            if math.isfinite(c) and c >= logic.exit_confidence_min:
+                return "EXIT", "long_bearish_reversal_to_exit"
+            return "HOLD", "long_sell_but_not_strong"
 
         if signal == "HOLD":
             return (
@@ -636,6 +680,9 @@ def apply_lifecycle(
     signal_changed_flags: list[bool] = []
     held_states: list[str] = []
     state_transitions: list[str] = []
+    rf_former_actions: list[str] = []
+    rf_former_reasons: list[str] = []
+    rf_would_have_changed: list[bool] = []
 
     for i in range(len(df)):
         row = df.iloc[i]
@@ -658,6 +705,18 @@ def apply_lifecycle(
             logic=logic,
             signal=sig,
             delta_pct=delta_pct,
+            confidence=confidence,
+            pos_state=pos_state,
+            last_change_date=last_change_date,
+            cooldown_until=cooldown_until,
+            as_of_date=as_of,
+        )
+        rf_delta = _scalar_float(row.get("rf_delta_pct"))
+        former_action, former_reason = _rf_era_decide_action(
+            cfg=cfg,
+            logic=logic,
+            signal=sig,
+            rf_delta_pct=rf_delta,
             confidence=confidence,
             pos_state=pos_state,
             last_change_date=last_change_date,
@@ -769,6 +828,9 @@ def apply_lifecycle(
         signal_changed_flags.append(bool(diag["signal_changed"]))
         held_states.append(held_now)
         state_transitions.append(state_transition)
+        rf_former_actions.append(former_action)
+        rf_former_reasons.append(former_reason)
+        rf_would_have_changed.append(former_action != action)
 
     df["lifecycle_action"] = lifecycle_actions
     df["lifecycle_decision_reason"] = lifecycle_decision_reasons
@@ -788,6 +850,18 @@ def apply_lifecycle(
     df["signal_changed"] = signal_changed_flags
     df["held_state"] = held_states
     df["state_transition"] = state_transitions
+    df["rf_shadow_only"] = True
+    df["rf_former_lifecycle_action"] = rf_former_actions
+    df["rf_former_lifecycle_reason"] = rf_former_reasons
+    df["rf_would_have_changed"] = rf_would_have_changed
+    if "rf_delta_pct" not in df.columns:
+        df["rf_delta_pct"] = np.nan
+    if "rf_predicted_close" not in df.columns:
+        df["rf_predicted_close"] = np.nan
+    if "rf_evidence_status" not in df.columns:
+        df["rf_evidence_status"] = "unavailable"
+    if "rf_evidence_timestamp" not in df.columns:
+        df["rf_evidence_timestamp"] = ""
 
     # Fill NaNs in new numeric columns with 0.0 (safe defaults for first-seen tickers).
     for _col in ("prior_confidence", "prior_score", "confidence_change", "score_change"):

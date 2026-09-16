@@ -489,6 +489,19 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def _optional_delta(x: Any) -> float:
+    """Parse residual without silently substituting zero for missing/NaN."""
+    try:
+        if x is None:
+            return float("nan")
+        if isinstance(x, float) and math.isnan(x):
+            return float("nan")
+        v = float(x)
+        return v if math.isfinite(v) else float("nan")
+    except Exception:
+        return float("nan")
+
+
 def _round_price(p: float) -> float:
     if p >= 1.0:
         return round(p, 2)
@@ -764,14 +777,20 @@ def _compute_rotation_score(
     profit_weight: float,
     signal_weight: float,
 ) -> float:
-    """Lower score = weaker (more negative profit / more negative delta)."""
+    """Lower score = weaker (more negative profit). RF residual is ignored."""
     pp = float(profit_pct) if profit_pct is not None else 0.0
-    return float(profit_weight) * pp + float(signal_weight) * float(delta_pct)
+    if not math.isfinite(pp):
+        pp = 0.0
+    if not math.isfinite(delta_pct):
+        return float(profit_weight) * pp
+    _ = signal_weight
+    return float(profit_weight) * pp
 
 
 def _compute_weak_signal_score(delta_pct: float, confidence: float) -> float:
-    """Weakest names sort ascending on this (lifecycle signal quality)."""
-    return float(delta_pct) * float(confidence)
+    """Weakest names sort ascending. RF residual is not used for ranking."""
+    _ = delta_pct
+    return float(confidence) if math.isfinite(confidence) else 0.0
 
 
 def _market_values_by_symbol(pos_path: Path, pos_map: Dict[str, float]) -> Dict[str, float]:
@@ -1332,7 +1351,7 @@ def build_management_plan(
         stance_disp = mgmt_stance or resolve_management_stance(row)
         rationale = str(row.get("rationale") or "")
         conf = _safe_float(row.get("confidence"), 0.0)
-        d_pct = _safe_float(row.get("delta_pct"), 0.0)
+        d_pct = _optional_delta(row.get("delta_pct"))
         score = _compute_rotation_score(profit_pct, d_pct, profit_weight=pw, signal_weight=sw)
 
         sym_state = get_symbol_state(state, sym)
@@ -1664,19 +1683,24 @@ def build_management_plan(
 
         exit_stance = mgmt_stance == "EXIT"
         trim_stance = mgmt_stance == "TRIM"
-        exit_immediate = exit_stance or (d_pct <= exit_delta) or force_exit or high_drag_forced
+        residual_exit = math.isfinite(d_pct) and d_pct <= exit_delta
+        exit_immediate = exit_stance or residual_exit or force_exit or high_drag_forced
 
         c_weak = int(sym_state.get("consecutive_weak_cycles") or 0)
         stale_exit = False
         if not exit_immediate:
-            if mgmt_stance in ("HOLD", "WAIT", "FLAT") and exit_delta < d_pct < 0:
+            if (
+                math.isfinite(d_pct)
+                and mgmt_stance in ("HOLD", "WAIT", "FLAT")
+                and exit_delta < d_pct < 0
+            ):
                 c_weak += 1
                 if c_weak >= stale_n:
                     stale_exit = True
                     c_weak = 0
-            elif d_pct >= 0:
+            elif math.isfinite(d_pct) and d_pct >= 0:
                 c_weak = 0
-            elif d_pct <= exit_delta:
+            elif math.isfinite(d_pct) and d_pct <= exit_delta:
                 c_weak = 0
         else:
             c_weak = 0
@@ -1788,7 +1812,9 @@ def build_management_plan(
                 }
             )
             continue
-        weak_trim_sig = (mgmt_stance in ("HOLD", "WAIT") and d_pct <= weak_trim) or force_trim
+        weak_trim_sig = (
+            mgmt_stance in ("HOLD", "WAIT") and math.isfinite(d_pct) and d_pct <= weak_trim
+        ) or force_trim
         want_trim = trim_stance or weak_trim_sig
         if want_trim and force_trim:
             _trim_flag = (
@@ -1979,7 +2005,7 @@ def build_management_plan(
             if skip_open and sym in open_sell_syms:
                 continue
             conf = _safe_float(row.get("confidence"), 0.0)
-            d_pct = _safe_float(row.get("delta_pct"), 0.0)
+            d_pct = _optional_delta(row.get("delta_pct"))
             weak_score = _compute_weak_signal_score(d_pct, conf)
             eff, lc, st = tri_stance(row)
             stance_disp = rot_mgmt_stance or resolve_management_stance(row)
@@ -2284,7 +2310,7 @@ def build_management_plan(
             stance_disp = rot_mgmt_stance or resolve_management_stance(row)
             rationale = str(row.get("rationale") or "")
             conf = _safe_float(row.get("confidence"), 0.0)
-            d_pct = _safe_float(row.get("delta_pct"), 0.0)
+            d_pct = _optional_delta(row.get("delta_pct"))
             score = _compute_rotation_score(profit_pct, d_pct, profit_weight=pw, signal_weight=sw)
             cands.append(
                 {
@@ -2332,7 +2358,7 @@ def build_management_plan(
                 "profit_pct": tc["profit_pct"],
                 "forced_rotation": True,
             }
-            if d_pct <= mild:
+            if math.isfinite(d_pct) and d_pct <= mild:
                 exit_candidates += 1
                 sym_state["last_management_action"] = "EXIT"
                 exit_pool.append(
@@ -2343,7 +2369,7 @@ def build_management_plan(
                     }
                 )
             elif (profit_known and profit_pct is not None and float(profit_pct) >= small_p) or (
-                d_pct <= weak_tr
+                math.isfinite(d_pct) and d_pct <= weak_tr
             ):
                 trim_candidates += 1
                 sym_state["last_management_action"] = "TRIM"

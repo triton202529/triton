@@ -284,6 +284,7 @@ def _deterministic_effective_stance(
         return ep, st_out, ""
 
     if ep_u == "LONG" and es_u == "BUY":
+        # RF residual must not remap LONG+BUY to EXIT/TRIM/ADD.
         if long_qualifies_for_exit_delta(delta_pct, logic=_logic):
             return ep, "EXIT", "effective_long_buy_resolved_to_exit_delta"
         if long_qualifies_for_trim(delta_pct, logic=_logic):

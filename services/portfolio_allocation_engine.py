@@ -29,13 +29,12 @@ risk posture, performance health, an `allocation_score`, and a
                   AND lifecycle_action in {BUY, ADD}
                   AND edge_score is strong
                   AND confidence >= 0.50
-                  AND delta_pct > 0
     F. WATCH      if not held and signal is positive but not strong enough
     G. HOLD       otherwise
 
-Allocation-score combines: edge_score, confidence, delta_pct, performance
-health, risk penalty, and a current-weight overweight penalty. It is used
-to rank entry/add candidates in the JSON summary (`top_5_opportunities`).
+Allocation-score combines: edge_score, confidence, performance
+health, risk penalty, and a current-weight overweight penalty. Random Forest
+residual is shadow-only and is not used for eligibility, sizing, or ranking.
 
 Backwards compatibility:
     `recommended_action` values `EXIT` and `TRIM` are unchanged — these are
@@ -607,7 +606,9 @@ def _allocation_score(
     """
     edge_norm = _clamp(_to_float_or_zero(edge_score), -1.0, 1.0)
     conf_norm = _clamp(_to_float_or_zero(confidence), 0.0, 1.0)
-    delta_norm = _clamp(_to_float_or_zero(delta_pct) * 10.0, -1.0, 1.0)
+    # Random Forest residual is shadow-only; ranking must not depend on it.
+    _ = delta_pct
+    delta_norm = 0.0
     perf_term = _perf_health_term(perf_bucket)
     risk_p = _risk_penalty(risk_components)
     weight_p = _weight_penalty(weight_pct)
@@ -656,6 +657,7 @@ def _decide_action(
     eff_stance_u = (effective_stance or "").strip().upper()
     lc_action_u = (lifecycle_action or "").strip().upper()
     signal_u = (signal or "").strip().upper()
+    _ = delta_pct  # RF residual is shadow-only; never gates OPEN_NEW.
 
     # D
     if is_held and eff_stance_u in EFFECTIVE_STANCE_ADD_OK and strong_edge and risk_ok:
@@ -664,21 +666,14 @@ def _decide_action(
             f"held_and_effective_stance={eff_stance_u}_and_strong_edge",
         )
 
-    # E
+    # E — OPEN_NEW does not require Random Forest residual > 0.
     conf_ok = (confidence is not None) and (confidence >= MIN_OPEN_NEW_CONFIDENCE)
-    delta_ok = (delta_pct is not None) and (delta_pct > 0.0)
-    if (
-        (not is_held)
-        and lc_action_u in LIFECYCLE_ACTION_OPEN_OK
-        and strong_edge
-        and conf_ok
-        and delta_ok
-    ):
+    if (not is_held) and lc_action_u in LIFECYCLE_ACTION_OPEN_OK and strong_edge and conf_ok:
         return (
             ACTION_OPEN_NEW,
             (
                 f"new_and_lifecycle_action={lc_action_u}_and_strong_edge_"
-                f"conf>={MIN_OPEN_NEW_CONFIDENCE}_delta>0"
+                f"conf>={MIN_OPEN_NEW_CONFIDENCE}"
             ),
         )
 
@@ -693,8 +688,6 @@ def _decide_action(
                 why.append("edge_weak")
             if confidence is None or confidence < MIN_OPEN_NEW_CONFIDENCE:
                 why.append(f"conf<{MIN_OPEN_NEW_CONFIDENCE}")
-            if delta_pct is None or delta_pct <= 0:
-                why.append("delta<=0")
             return ACTION_WATCH, "positive_signal_but_" + (",".join(why) or "below_threshold")
 
     # G

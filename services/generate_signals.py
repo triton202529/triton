@@ -63,7 +63,6 @@ from services.artifacts_writer import write_heartbeat  # noqa: E402
 PREDICTIONS_DIR = "data/predictions"
 PROCESSED_DIR = "data/processed"
 RESULTS_DIR = "data/results"
-os.makedirs(RESULTS_DIR, exist_ok=True)
 
 OUT_WITH_RATIONALE = os.path.join(RESULTS_DIR, "signals_with_rationale.csv")
 OUT_SIGNALS = os.path.join(RESULTS_DIR, "signals.csv")  # backward compatibility
@@ -141,9 +140,15 @@ def publish_operational_signal_csvs(signals: pd.DataFrame) -> None:
         ) from exc
 
 
-# Legacy thresholds (still used as a fallback when feature history is too short).
+# Legacy thresholds retained for diagnostics only. Short-history fallback no longer
+# emits BUY/SELL from Random Forest residual; RF is shadow-only.
 BUY_DELTA = 0.002  # +0.20%
 SELL_DELTA = -0.002  # -0.20%
+RF_SHADOW_ONLY = True
+RF_EVIDENCE_VALID = "valid"
+RF_EVIDENCE_STALE = "stale"
+RF_EVIDENCE_UNAVAILABLE = "unavailable"
+RF_EVIDENCE_MALFORMED = "malformed"
 
 # Feature-based signal thresholds on the composite bullishness score [0, 1].
 SCORE_BUY_THRESHOLD = 0.65
@@ -166,6 +171,77 @@ MAX_LAG_SESSIONS = int(os.getenv("TRITON_ASOF_MAX_LAG_SESSIONS", "1"))
 # -----------------------------
 # Helpers
 # -----------------------------
+def _finite_float(x: Any) -> Optional[float]:
+    try:
+        if x is None:
+            return None
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v):
+        return None
+    return v
+
+
+def classify_rf_shadow_evidence(
+    *,
+    predicted_close_raw: Any,
+    close: Any,
+    row_date: Any,
+    session_asof: date_type,
+    column_present: bool,
+) -> Dict[str, Any]:
+    """Classify Random Forest residual as diagnostic shadow evidence only.
+
+    Never returns a synthetic prediction. Missing/malformed values stay
+    unavailable; a finite prediction that is older than the session is stale.
+    """
+    ts = ""
+    row_dt = pd.to_datetime(row_date, errors="coerce")
+    if not pd.isna(row_dt):
+        try:
+            ts = str(pd.Timestamp(row_dt).normalize().date())
+        except Exception:
+            ts = str(row_dt)
+
+    pred = _finite_float(predicted_close_raw)
+    close_f = _finite_float(close)
+    rf_delta: Optional[float] = None
+    if pred is not None and close_f is not None and close_f != 0.0:
+        rf_delta = (pred / close_f) - 1.0
+        if not math.isfinite(rf_delta):
+            rf_delta = None
+
+    status = RF_EVIDENCE_UNAVAILABLE
+    if not column_present:
+        status = RF_EVIDENCE_UNAVAILABLE
+    elif predicted_close_raw is None or (
+        isinstance(predicted_close_raw, float) and not math.isfinite(predicted_close_raw)
+    ):
+        status = RF_EVIDENCE_UNAVAILABLE
+    elif pred is None:
+        status = RF_EVIDENCE_MALFORMED
+    elif close_f is None or close_f == 0.0 or rf_delta is None:
+        status = RF_EVIDENCE_MALFORMED
+    else:
+        status = RF_EVIDENCE_VALID
+        if not pd.isna(row_dt):
+            try:
+                rd = pd.Timestamp(row_dt).normalize().date()
+                if rd < session_asof:
+                    status = RF_EVIDENCE_STALE
+            except Exception:
+                status = RF_EVIDENCE_STALE
+
+    return {
+        "rf_predicted_close": pred if pred is not None else float("nan"),
+        "rf_delta_pct": rf_delta if rf_delta is not None else float("nan"),
+        "rf_evidence_timestamp": ts,
+        "rf_evidence_status": status,
+        "rf_shadow_only": True,
+    }
+
+
 def utc_now_z() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -471,7 +547,6 @@ def build_enhanced_rationale(
     volatility = _safe_float(feat_row.get("volatility_14"))
     is_breakout = bool(feat_row.get("breakout", False))
 
-    pct_pred = f"{delta_pct * 100:+.2f}%"
     pct_r7 = f"{r7 * 100:+.2f}%"
     pct_trend = f"{trend_strength * 100:+.2f}%"
 
@@ -492,73 +567,58 @@ def build_enhanced_rationale(
     if signal == "BUY":
         # Prefer narrative combinations for strong BUYs.
         if is_breakout and mom > 0.6:
-            return (
-                f"Price breakout above recent highs with {pct_r7} 7d momentum; "
-                f"bullish setup (model {pct_pred})."
-            )
+            return f"Price breakout above recent highs with {pct_r7} 7d momentum; bullish setup."
         if mom > 0.6 and trend > 0.6:
             return (
                 f"Strong upward momentum ({pct_r7} over 7d) with bullish trend alignment "
-                f"(MA7 {pct_trend} vs MA21). Model {pct_pred}."
+                f"(MA7 {pct_trend} vs MA21)."
             )
         if is_breakout:
-            return f"Breakout above 10-day high with supportive structure; model {pct_pred}."
+            return "Breakout above 10-day high with supportive structure."
         if trend > 0.6:
             return (
-                f"Bullish trend alignment (MA7 {pct_trend} above MA21) with constructive momentum; "
-                f"model {pct_pred}."
+                f"Bullish trend alignment (MA7 {pct_trend} above MA21) with constructive momentum."
             )
         if mom > 0.6:
-            return f"Positive momentum ({pct_r7} over 7d) leading a BUY bias; model {pct_pred}."
+            return f"Positive momentum ({pct_r7} over 7d) leading a BUY bias."
         return (
             f"Composite score {score:.2f} above BUY threshold; "
-            f"led by {top_name} and {second_name}. Model {pct_pred}."
+            f"led by {top_name} and {second_name}."
         )
 
     if signal == "SELL":
         if mom < 0.4 and trend < 0.4:
             return (
                 f"Downward momentum ({pct_r7} over 7d) with bearish trend (MA7 {pct_trend} "
-                f"below MA21). Model {pct_pred}."
+                f"below MA21)."
             )
         if trend < 0.4:
-            return (
-                f"Bearish trend alignment (MA7 {pct_trend} below MA21) pressuring price; "
-                f"model {pct_pred}."
-            )
+            return f"Bearish trend alignment (MA7 {pct_trend} below MA21) pressuring price."
         if mom < 0.4:
-            return (
-                f"Negative momentum ({pct_r7} over 7d) with weakening structure; model {pct_pred}."
-            )
+            return f"Negative momentum ({pct_r7} over 7d) with weakening structure."
         if vol < 0.35:
             return (
                 f"Elevated volatility (daily sigma {volatility * 100:.2f}%) eroding signal quality; "
-                f"de-risk bias. Model {pct_pred}."
+                f"de-risk bias."
             )
         return (
             f"Composite score {score:.2f} below SELL threshold; "
-            f"led by {top_name} and {second_name}. Model {pct_pred}."
+            f"led by {top_name} and {second_name}."
         )
 
     # HOLD
     if abs(score - 0.5) < 0.05:
         return (
             f"Low conviction signal with mixed trend and weak momentum "
-            f"(score {score:.2f}); HOLD. Model {pct_pred}."
+            f"(score {score:.2f}); HOLD."
         )
     if mom > 0.55 and trend < 0.45:
-        return (
-            f"Momentum positive ({pct_r7}) but trend not yet aligned; wait for confirmation. "
-            f"Model {pct_pred}."
-        )
+        return f"Momentum positive ({pct_r7}) but trend not yet aligned; wait for confirmation."
     if trend > 0.55 and mom < 0.45:
-        return (
-            f"Trend supportive (MA7 {pct_trend}) but momentum soft; HOLD pending follow-through. "
-            f"Model {pct_pred}."
-        )
+        return f"Trend supportive (MA7 {pct_trend}) but momentum soft; HOLD pending follow-through."
     return (
         f"Mixed signals: {top_name} and {second_name} diverging; "
-        f"composite {score:.2f} in HOLD band. Model {pct_pred}."
+        f"composite {score:.2f} in HOLD band."
     )
 
 
@@ -842,6 +902,7 @@ def main() -> None:
 
     # Write diagnostics JSON (always)
     try:
+        os.makedirs(os.path.dirname(ASOF_DIAG_PATH) or ".", exist_ok=True)
         with open(ASOF_DIAG_PATH, "w", encoding="utf-8") as f:
             json.dump(diag_payload, f, indent=2)
     except Exception:
@@ -878,7 +939,7 @@ def main() -> None:
         if "date" not in df.columns and "Date" in df.columns:
             df = df.rename(columns={"Date": "date"})
 
-        required = {"date", "close", "predicted_close"}
+        required = {"date", "close"}
         missing = required - set(df.columns)
         if missing:
             _skip(ticker, f"missing_required_cols({','.join(sorted(missing))})")
@@ -887,8 +948,10 @@ def main() -> None:
         df = df.copy()
         df["date"] = normalize_date(df["date"])
         df["close"] = pd.to_numeric(df["close"], errors="coerce")
-        df["predicted_close"] = pd.to_numeric(df["predicted_close"], errors="coerce")
-        df = df.dropna(subset=["date", "close", "predicted_close"])
+        rf_col_present = "predicted_close" in df.columns
+        if rf_col_present:
+            df["predicted_close"] = pd.to_numeric(df["predicted_close"], errors="coerce")
+        df = df.dropna(subset=["date", "close"])
         if df.empty:
             _skip(ticker, "all_rows_invalid_after_coerce")
             continue
@@ -908,8 +971,18 @@ def main() -> None:
         row_date = row_date.normalize()
 
         close = float(latest_row["close"])
-        pred = float(latest_row["predicted_close"])
-        delta_pct = (pred / close) - 1.0
+        pred_raw = latest_row["predicted_close"] if rf_col_present else None
+        rf_shadow = classify_rf_shadow_evidence(
+            predicted_close_raw=pred_raw,
+            close=close,
+            row_date=row_date,
+            session_asof=session_asof,
+            column_present=rf_col_present,
+        )
+        # Compatibility display of the RF observation. Operational residual is never
+        # written to delta_pct, so consumers cannot recover the old RF gate.
+        pred_display = rf_shadow["rf_predicted_close"]
+        operational_delta_pct = float("nan")
 
         # --- Feature-based signal generation ---
         hist = _build_history_frame(df, ticker)
@@ -929,9 +1002,11 @@ def main() -> None:
             score = composite_score(components)
             sig = decide_signal(score)
             confidence = signal_confidence(score)
-            rationale = build_enhanced_rationale(sig, score, components, feat_row, delta_pct)
+            rationale = build_enhanced_rationale(
+                sig, score, components, feat_row, operational_delta_pct
+            )
         else:
-            # Fallback: short history -> stick with prediction-delta signal.
+            # Short history: HOLD. RF residual is diagnostic only and must not mint BUY/SELL.
             feat_row = pd.Series(dtype=float)
             components = {
                 "momentum_score": 0.5,
@@ -939,25 +1014,12 @@ def main() -> None:
                 "volatility_score": 0.5,
                 "breakout_score": 0.5,
             }
-            if delta_pct >= BUY_DELTA:
-                sig = "BUY"
-            elif delta_pct <= SELL_DELTA:
-                sig = "SELL"
-            else:
-                sig = "HOLD"
-            # Legacy fallback confidence derived from delta magnitude (floored for usability).
-            conf_raw = min(1.0, abs(delta_pct) * 50.0)  # 2% delta -> 1.0
-            confidence = (
-                float(max(0.5, conf_raw))
-                if sig != "HOLD"
-                else float(max(0.5, 0.5 + abs(delta_pct) * 10))
-            )
-            score = 0.5 + (0.5 if sig == "BUY" else (-0.5 if sig == "SELL" else 0.0)) * min(
-                1.0, abs(delta_pct) * 50.0
-            )
-            rationale = build_rationale(delta_pct, BUY_DELTA, SELL_DELTA)
+            sig = "HOLD"
+            confidence = 0.5
+            score = 0.5
+            rationale = "Insufficient feature history; HOLD. Random Forest residual is shadow-only."
 
-        # Safety: never emit NaNs.
+        # Safety: never emit NaNs in feature score/confidence.
         if pd.isna(confidence):
             confidence = 0.5
         if pd.isna(score):
@@ -970,8 +1032,8 @@ def main() -> None:
                 "session_as_of_date": pd.Timestamp(session_asof),
                 "ticker": ticker,
                 "close": close,
-                "predicted_close": pred,
-                "delta_pct": float(delta_pct),
+                "predicted_close": pred_display,
+                "delta_pct": operational_delta_pct,
                 "signal": sig,
                 # Keep enough precision so downstream filters see real variance across tickers.
                 "confidence": float(round(float(confidence), 6)),
@@ -982,6 +1044,11 @@ def main() -> None:
                 "volatility_score": float(round(components["volatility_score"], 6)),
                 "rationale": rationale,
                 "generated_at_utc": generated_at,
+                "rf_predicted_close": rf_shadow["rf_predicted_close"],
+                "rf_delta_pct": rf_shadow["rf_delta_pct"],
+                "rf_evidence_timestamp": rf_shadow["rf_evidence_timestamp"],
+                "rf_evidence_status": rf_shadow["rf_evidence_status"],
+                "rf_shadow_only": True,
             }
         )
 
