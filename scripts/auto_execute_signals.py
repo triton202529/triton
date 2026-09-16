@@ -55,9 +55,10 @@ for _, row in latest_signals.iterrows():
             logs.append([timestamp, ticker, "HOLD", 0, None, "SKIPPED", "No action"])
             continue
 
-        if not risk_check(ticker, signal, api):
+        risk_allowed, risk_reason = risk_check(ticker, signal, api)
+        if not risk_allowed:
             print(f"⚠️ Trade blocked by risk control: {ticker} {signal}")
-            logs.append([timestamp, ticker, signal, 0, None, "BLOCKED", "Blocked by risk control"])
+            logs.append([timestamp, ticker, signal, 0, None, "BLOCKED", risk_reason])
             continue
 
         if signal == "BUY":

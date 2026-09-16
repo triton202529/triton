@@ -8,7 +8,7 @@ import yfinance as yf
 
 # Allow importing from the parent directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from services.feature_generator import add_technical_indicators
+from services.feature_generator import add_technical_indicators, combine_ticker_frames
 
 # Tickers to fetch
 TICKERS = [
@@ -29,15 +29,23 @@ os.makedirs(os.path.dirname(PROCESSED_FILE), exist_ok=True)
 os.makedirs(os.path.dirname(FAILED_LOG), exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Clear old results & log
-for file in os.listdir(RESULTS_DIR):
-    file_path = os.path.join(RESULTS_DIR, file)
-    if os.path.isfile(file_path):
-        os.remove(file_path)
-print("🧹 Cleared old files from data/results/")
-
 # Start with empty failed tickers set
 failed_tickers = set()
+
+def clear_old_ticker_results(results_dir=RESULTS_DIR):
+    """Remove generated ticker parquet files without deleting CSV artifacts."""
+    removed = 0
+    for file in os.listdir(results_dir):
+        file_path = os.path.join(results_dir, file)
+        if os.path.isfile(file_path) and file.endswith(".parquet"):
+            os.remove(file_path)
+            removed += 1
+    return removed
+
+def reset_failed_ticker_log():
+    failed_tickers.clear()
+    with open(FAILED_LOG, "w") as log:
+        log.write("")
 
 def log_failed_ticker(ticker, reason="fetch error"):
     """Logs a failed ticker without duplicates"""
@@ -77,6 +85,10 @@ def fetch_data(ticker, retries=3, wait=2):
 def main():
     all_data = []
 
+    removed = clear_old_ticker_results()
+    print(f"🧹 Cleared {removed} old ticker parquet files from data/results/")
+    reset_failed_ticker_log()
+
     print(f"📊 Fetching data for {len(TICKERS)} tickers...")
     for ticker in tqdm(TICKERS):
         df = fetch_data(ticker)
@@ -89,7 +101,7 @@ def main():
         return
 
     print("✨ Combining and adding features...")
-    full_df = pd.concat(all_data).dropna(subset=["close"])
+    full_df = combine_ticker_frames(all_data)
     spy_df = full_df[full_df["ticker"] == "SPY"]
 
     enhanced_frames = []
@@ -109,7 +121,7 @@ def main():
         print("❌ All feature generation failed. Nothing to save.")
         return
 
-    final_df = pd.concat(enhanced_frames).dropna()
+    final_df = combine_ticker_frames(enhanced_frames)
     final_df.to_parquet(PROCESSED_FILE, index=False)
 
     print(f"✅ Saved merged dataset to: {PROCESSED_FILE}")
