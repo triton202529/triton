@@ -8,7 +8,7 @@ import yfinance as yf
 
 # Allow importing from the parent directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from services.feature_generator import add_technical_indicators
+from services.feature_generator import add_technical_indicators, combine_ticker_frames
 
 # Tickers to fetch
 TICKERS = [
@@ -101,7 +101,7 @@ def main():
         return
 
     print("✨ Combining and adding features...")
-    full_df = pd.concat(all_data).dropna(subset=["close"])
+    full_df = combine_ticker_frames(all_data)
     spy_df = full_df[full_df["ticker"] == "SPY"]
 
     enhanced_frames = []
@@ -121,7 +121,7 @@ def main():
         print("❌ All feature generation failed. Nothing to save.")
         return
 
-    final_df = pd.concat(enhanced_frames).dropna()
+    final_df = combine_ticker_frames(enhanced_frames)
     final_df.to_parquet(PROCESSED_FILE, index=False)
 
     print(f"✅ Saved merged dataset to: {PROCESSED_FILE}")
