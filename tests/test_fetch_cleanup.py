@@ -13,6 +13,7 @@ class FetchAndPrepareCleanupTests(unittest.TestCase):
         fake_tqdm.tqdm = lambda values: values
         fake_feature_generator = types.ModuleType("services.feature_generator")
         fake_feature_generator.add_technical_indicators = lambda df, spy_df=None: df
+        fake_feature_generator.combine_ticker_frames = lambda frames: frames[0] if frames else None
 
         import_stubs = {
             "pandas": types.ModuleType("pandas"),
