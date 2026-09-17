@@ -7,10 +7,13 @@
 # 2) Fall back to "legacy" files: data/raw/{TICKER}_YYYY-MM-DD_to_YYYY-MM-DD.csv
 # 3) If multiple legacy files exist for a ticker, use the most recent by end-date (or mtime fallback)
 #
-# PERMANENT AS_OF FIX (Jan 2026):
+# PERMANENT AS_OF FIX (Jan 2026 / Phase 198T-SF3):
 # - Compute AS_OF_DATE as the *last completed NYSE session* (ET) (authoritative)
-# - After preprocessing, verify df.max(date) >= AS_OF_DATE (date-grain)
-# - If behind: SKIP writing parquet (always). If strict flag is on, exit non-zero at end.
+# - Drop any bars after AS_OF_DATE (no partial/future session bars)
+# - Write available complete bars with date <= AS_OF_DATE (catch-up allowed when
+#   vendor lag leaves raw one session behind AS_OF). Never invent or forward-fill.
+# - If behind AS_OF: still write catch-up bars; record behind_asof. Strict mode
+#   exits non-zero at end when any ticker lacks the exact AS_OF bar.
 #
 # NEW (Step B hardening):
 # - If a LIVE file exists but is stale, auto-fallback to freshest legacy file (if newer).
@@ -301,6 +304,20 @@ def main() -> int:
                 skipped_count += 1
                 continue
 
+            # Never publish partial/future bars beyond the authoritative completed session.
+            n_future = int((df["date"] > as_of_dt).sum())
+            if n_future:
+                df = df[df["date"] <= as_of_dt].copy()
+                print(
+                    f"✂️ {ticker}: dropped {n_future} bar(s) after AS_OF_DATE={as_of_str} "
+                    "(partial/future excluded)"
+                )
+
+            if df.empty:
+                print(f"⚠️ {ticker}: no bars on or before AS_OF_DATE={as_of_str}. Skipping.")
+                skipped_count += 1
+                continue
+
             last_dt = pd.to_datetime(df["date"].max(), errors="coerce")
             if pd.isna(last_dt):
                 print(f"⚠️ {ticker}: could not parse max(date). Skipping.")
@@ -308,7 +325,9 @@ def main() -> int:
                 continue
             last_dt = last_dt.normalize()
 
-            # ✅ AS_OF completeness check (ALWAYS skip write if behind)
+            # Catch-up write: when raw lags AS_OF but still has newer complete bars than a
+            # stuck processed file would, publish what is available (<= AS_OF). Exact-session
+            # gaps remain visible via behind_asof (+ strict exit).
             if last_dt < as_of_dt:
                 behind_count += 1
                 behind_details.append(
@@ -317,12 +336,13 @@ def main() -> int:
                         "raw_file": fn,
                         "last_date": str(last_dt.date()),
                         "as_of_date": as_of_str,
+                        "action": "catch_up_write",
                     }
                 )
-                msg = f"⛔ {ticker}: STALE RAW/PROCESSED DATA (last_date={last_dt.date()} < AS_OF_DATE={as_of_str})"
-                print(msg + " — skipping parquet write")
-                skipped_count += 1
-                continue
+                print(
+                    f"⚠️ {ticker}: behind AS_OF (last_date={last_dt.date()} < AS_OF_DATE={as_of_str}) "
+                    "— writing available complete bars (catch-up; not exact session)"
+                )
 
             output_path = PROCESSED_DIR / f"{ticker}.parquet"
             df.to_parquet(output_path, index=False)

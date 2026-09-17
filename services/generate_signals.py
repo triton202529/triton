@@ -10,18 +10,20 @@ Phase 1.5:
 - Heartbeat ok/fail
 - Windows import bootstrap
 
-AS_OF Discipline (clean + robust):
+AS_OF Discipline (fail-closed session contract):
 - session_as_of_date = NYSE last completed session date (ET, calendar-aware via pandas_market_calendars)
-- effective_as_of_date:
-    * Default: session_as_of_date
-    * If predictions coverage for session_as_of_date is low (provider lag), downgrade to a data-supported date
-      so pipeline can complete while logging the issue loudly.
-- Hard fail if predictions are truly stale (more than MAX_LAG_SESSIONS behind).
+- Premarket and open-session evaluation use the latest completed XNYS session.
+- After regular or early close, that newly completed session is used only when the full daily bar exists.
+- Holidays and weekends use the preceding completed XNYS session. No weekday fallback.
+- effective_as_of_date is always the authoritative session date. Never a data-supported substitute.
+- Tradable coverage uses tickers.txt equities/ETFs only (index ^ symbols are reported separately).
+- If tradable coverage < TRITON_ASOF_COVERAGE, the batch is non-actionable: no lifecycle rows.
+- A missing or older bar never emits BUY/ADD/HOLD/TRIM/EXIT/WAIT; it is an explicit skip.
 
 Env controls:
-- TRITON_STRICT_ASOF=1/0             (default 1) : if 1, still enforces freshness via MAX_LAG_SESSIONS
-- TRITON_ASOF_COVERAGE=0.90          (default 0.90) : fraction of tickers that must have session bar to keep session_as_of
-- TRITON_ASOF_MAX_LAG_SESSIONS=1     (default 1) : fail if effective_as_of is behind session_as_of by more than this many sessions
+- TRITON_STRICT_ASOF=1/0             (default 1) : if 1, raise after publishing empty rows when coverage fails
+- TRITON_ASOF_COVERAGE=0.90          (default 0.90) : fraction of tradable tickers that must have the expected session bar
+- TRITON_ASOF_MAX_LAG_SESSIONS=1     (default 1) : retained for diagnostics; no weekday/data-supported fallback
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ import math
 import re
 import json
 import time
+import hashlib
 from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -63,10 +66,20 @@ from services.artifacts_writer import write_heartbeat  # noqa: E402
 PREDICTIONS_DIR = "data/predictions"
 PROCESSED_DIR = "data/processed"
 RESULTS_DIR = "data/results"
+TICKERS_PATH = os.path.join("data", "config", "tickers.txt")
 
 OUT_WITH_RATIONALE = os.path.join(RESULTS_DIR, "signals_with_rationale.csv")
 OUT_SIGNALS = os.path.join(RESULTS_DIR, "signals.csv")  # backward compatibility
 ASOF_DIAG_PATH = os.path.join(RESULTS_DIR, "signals_asof_diagnostics.json")
+INDEX_PREFIX = "^"
+SKIP_MISSING_EXPECTED_SESSION_BAR = "MISSING_EXPECTED_SESSION_BAR"
+SKIP_MISSING_PREDICTION_FILE = "MISSING_PREDICTION_FILE"
+SKIP_EMPTY_PREDICTION_FILE = "EMPTY_PREDICTION_FILE"
+SKIP_FUTURE_DATED_BAR = "FUTURE_DATED_BAR"
+SKIP_DUPLICATE_DATE = "DUPLICATE_DATE"
+SKIP_MALFORMED_DATE = "MALFORMED_DATE"
+SKIP_INDEX_ONLY_EXCLUDED = "INDEX_ONLY_EXCLUDED"
+SKIP_BATCH_COVERAGE_BELOW_THRESHOLD = "BATCH_COVERAGE_BELOW_THRESHOLD"
 _OPERATIONAL_REQUIRED_COLS = {
     "date",
     "as_of_date",
@@ -266,20 +279,16 @@ def _nyse_last_completed_session_date(now_utc: Optional[pd.Timestamp] = None) ->
 
     sched = nyse.schedule(start_date=start, end_date=end)
     if sched is None or sched.empty:
-        # Fallback: previous weekday
-        d = now_utc.date()
-        while d.weekday() >= 5:
-            d = d - timedelta(days=1)
-        return d
+        raise RuntimeError(
+            "NYSE calendar returned no sessions in window; weekday fallback is forbidden."
+        )
 
     closes = pd.to_datetime(sched["market_close"], utc=True)
     completed = sched[closes <= now_utc]
     if completed.empty:
-        # before first close in window -> fallback
-        d = now_utc.date() - timedelta(days=1)
-        while d.weekday() >= 5:
-            d = d - timedelta(days=1)
-        return d
+        raise RuntimeError(
+            "No completed NYSE session in calendar window; weekday fallback is forbidden."
+        )
 
     last = completed.iloc[-1]
     return last.name.date()
@@ -355,6 +364,214 @@ def _load_processed_history(ticker: str) -> pd.DataFrame:
         return pd.read_parquet(path)
     except Exception:
         return pd.DataFrame()
+
+
+def _processed_path_for_ticker(ticker: str) -> Optional[str]:
+    path = os.path.join(PROCESSED_DIR, f"{ticker}.parquet")
+    if os.path.isfile(path):
+        return path
+    alt = os.path.join(PROCESSED_DIR, f"{ticker}.csv")
+    if os.path.isfile(alt):
+        return alt
+    return None
+
+
+def _processed_session_close(
+    ticker: str, session_asof: date_type
+) -> Tuple[Optional[pd.Timestamp], Optional[float], Optional[str]]:
+    """
+    Return (session_ts, close, source_path) when processed has the exact session bar.
+
+    Used so operational feature freshness does not depend on a current RF prediction
+    container. RF remains diagnostic-only and is never inferred from this path.
+    """
+    path = _processed_path_for_ticker(ticker)
+    if not path:
+        return None, None, None
+    try:
+        if path.endswith(".parquet"):
+            proc = pd.read_parquet(path)
+        else:
+            proc = pd.read_csv(path)
+    except Exception:
+        return None, None, None
+    if proc is None or proc.empty:
+        return None, None, None
+    cols = {str(c).lower(): c for c in proc.columns}
+    date_col = cols.get("date") or cols.get("datetime")
+    close_col = cols.get("close")
+    if not date_col or not close_col:
+        return None, None, None
+    work = pd.DataFrame(
+        {
+            "date": normalize_date(proc[date_col]),
+            "close": pd.to_numeric(proc[close_col], errors="coerce"),
+        }
+    ).dropna(subset=["date", "close"])
+    if work.empty:
+        return None, None, None
+    sess_ts = pd.Timestamp(session_asof).normalize()
+    # Never consume bars after the authoritative completed session.
+    work = work[work["date"] <= sess_ts]
+    exact = work[work["date"] == sess_ts]
+    if exact.empty:
+        return None, None, None
+    row = exact.iloc[-1]
+    return sess_ts, float(row["close"]), path
+
+
+def _processed_session_history(
+    ticker: str, session_asof: date_type
+) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[float]]:
+    """Return (OHLCV history clipped to session, path, session close).
+
+    Requires the exact completed-session bar. Bars after session_asof are dropped.
+    """
+    path = _processed_path_for_ticker(ticker)
+    if not path:
+        return None, None, None
+    try:
+        proc = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path)
+    except Exception:
+        return None, None, None
+    if proc is None or proc.empty:
+        return None, None, None
+    cols = {str(c).lower(): c for c in proc.columns}
+    date_col = cols.get("date") or cols.get("datetime")
+    close_col = cols.get("close")
+    if not date_col or not close_col:
+        return None, None, None
+    out = pd.DataFrame(
+        {
+            "date": normalize_date(proc[date_col]),
+            "close": pd.to_numeric(proc[close_col], errors="coerce"),
+        }
+    )
+    high_col = cols.get("high")
+    if high_col:
+        out["high"] = pd.to_numeric(proc[high_col], errors="coerce")
+    else:
+        out["high"] = out["close"]
+    out = out.dropna(subset=["date", "close"]).sort_values("date")
+    sess_ts = pd.Timestamp(session_asof).normalize()
+    out = out[out["date"] <= sess_ts]
+    exact = out[out["date"] == sess_ts]
+    if exact.empty:
+        return None, None, None
+    close = float(exact.iloc[-1]["close"])
+    return out.reset_index(drop=True), path, close
+
+
+def _processed_actual_latest(ticker: str, session_asof: date_type) -> str:
+    """Latest processed bar date on or before session, else MISSING."""
+    path = _processed_path_for_ticker(ticker)
+    if not path:
+        return "MISSING"
+    try:
+        proc = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path)
+    except Exception:
+        return "MISSING"
+    if proc is None or proc.empty:
+        return "MISSING"
+    cols = {str(c).lower(): c for c in proc.columns}
+    date_col = cols.get("date") or cols.get("datetime")
+    if not date_col:
+        return "MISSING"
+    dts = normalize_date(proc[date_col]).dropna()
+    sess_ts = pd.Timestamp(session_asof).normalize()
+    dts = dts[dts <= sess_ts]
+    if dts.empty:
+        return "MISSING"
+    return str(pd.Timestamp(dts.max()).date())
+
+
+def _rf_shadow_from_pred_df(
+    pred_df: Optional[pd.DataFrame],
+    *,
+    session_asof: date_type,
+    close: float,
+) -> Dict[str, Any]:
+    """Classify RF residual from an optional prediction frame. Never infers values."""
+    if pred_df is None or pred_df.empty:
+        return classify_rf_shadow_evidence(
+            predicted_close_raw=None,
+            close=close,
+            row_date="",
+            session_asof=session_asof,
+            column_present=False,
+        )
+    work = pred_df.copy()
+    if "date" not in work.columns and "Date" in work.columns:
+        work = work.rename(columns={"Date": "date"})
+    if "date" not in work.columns:
+        return classify_rf_shadow_evidence(
+            predicted_close_raw=None,
+            close=close,
+            row_date="",
+            session_asof=session_asof,
+            column_present=False,
+        )
+    work["date"] = normalize_date(work["date"])
+    sess_ts = pd.Timestamp(session_asof).normalize()
+    work = work.dropna(subset=["date"])
+    work = work[work["date"] <= sess_ts]
+    rf_col = "predicted_close" in work.columns
+    if rf_col:
+        work["predicted_close"] = pd.to_numeric(work["predicted_close"], errors="coerce")
+    if work.empty:
+        return classify_rf_shadow_evidence(
+            predicted_close_raw=None,
+            close=close,
+            row_date="",
+            session_asof=session_asof,
+            column_present=rf_col,
+        )
+    exact = work[work["date"] == sess_ts]
+    row = (exact if not exact.empty else work.sort_values("date")).iloc[-1]
+    pred_raw = row["predicted_close"] if rf_col else None
+    return classify_rf_shadow_evidence(
+        predicted_close_raw=pred_raw,
+        close=close,
+        row_date=row["date"],
+        session_asof=session_asof,
+        column_present=rf_col,
+    )
+
+
+def _score_from_history(
+    hist: pd.DataFrame, sess_ts: pd.Timestamp
+) -> Tuple[str, float, float, Dict[str, float], pd.Series, str]:
+    """Feature signal from history clipped to the completed session. RF is not used."""
+    if not hist.empty:
+        hist = hist[hist["date"] <= sess_ts].reset_index(drop=True)
+    operational_delta_pct = float("nan")
+    if len(hist) >= MIN_FEATURE_BARS:
+        feats = compute_feature_signals(hist)
+        feat_row = feats.iloc[-1]
+        components = score_components(feat_row)
+        score = composite_score(components)
+        sig = decide_signal(score)
+        confidence = signal_confidence(score)
+        rationale = build_enhanced_rationale(
+            sig, score, components, feat_row, operational_delta_pct
+        )
+    else:
+        feat_row = pd.Series(dtype=float)
+        components = {
+            "momentum_score": 0.5,
+            "trend_score": 0.5,
+            "volatility_score": 0.5,
+            "breakout_score": 0.5,
+        }
+        sig = "HOLD"
+        confidence = 0.5
+        score = 0.5
+        rationale = "Insufficient feature history; HOLD. Random Forest residual is shadow-only."
+    if pd.isna(confidence):
+        confidence = 0.5
+    if pd.isna(score):
+        score = 0.5
+    return sig, float(confidence), float(score), components, feat_row, rationale
 
 
 def _build_history_frame(pred_df: pd.DataFrame, ticker: str) -> pd.DataFrame:
@@ -692,69 +909,124 @@ def resolve_ticker(path: str, df: pd.DataFrame) -> str:
     return t if is_valid_ticker(t) else ""
 
 
+def _is_index_ticker(ticker: str) -> bool:
+    return str(ticker or "").startswith(INDEX_PREFIX)
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _load_optional_tickers(path: str) -> List[str]:
+    if not path or not os.path.isfile(path):
+        return []
+    seen: List[str] = []
+    with open(path, "r", encoding="utf-8-sig") as fh:
+        for line in fh:
+            token = str(line).strip().upper()
+            if not token or token.startswith("#"):
+                continue
+            if token not in seen:
+                seen.append(token)
+    return seen
+
+
+def _empty_operational_frame() -> pd.DataFrame:
+    cols = list(_OPERATIONAL_REQUIRED_COLS) + [
+        "momentum_score",
+        "trend_score",
+        "breakout_score",
+        "volatility_score",
+        "rf_predicted_close",
+        "rf_delta_pct",
+        "rf_evidence_timestamp",
+        "rf_evidence_status",
+        "rf_shadow_only",
+    ]
+    ordered: List[str] = []
+    for col in cols:
+        if col not in ordered:
+            ordered.append(col)
+    return pd.DataFrame(columns=ordered)
+
+
 # -----------------------------
 # AS_OF policy
 # -----------------------------
 def compute_asof_policy(
-    latest_by_ticker: Dict[str, date_type], session_asof: date_type
+    latest_by_ticker: Dict[str, date_type],
+    session_asof: date_type,
+    *,
+    tradable_tickers: Optional[List[str]] = None,
+    index_tickers: Optional[List[str]] = None,
 ) -> Tuple[date_type, Dict[str, Any]]:
     """
-    Decide effective_as_of_date based on coverage and freshness.
+    Authoritative expected session is always session_asof.
+
+    Coverage is tradable-only. Below ASOF_COVERAGE the batch is non-actionable.
+    There is no data-supported date substitution.
     """
-    n = len(latest_by_ticker)
-    if n == 0:
-        return session_asof, {"coverage": 0.0, "reason": "no_tickers"}
+    index_set = {str(t).strip().upper() for t in (index_tickers or []) if t}
+    if tradable_tickers is None:
+        tradable_list = [
+            t for t in latest_by_ticker.keys() if not _is_index_ticker(t) and t not in index_set
+        ]
+    else:
+        tradable_list = [str(t).strip().upper() for t in tradable_tickers if t]
+        tradable_list = [t for t in tradable_list if t and not _is_index_ticker(t)]
 
-    # coverage: fraction of tickers that have >= session_asof (i.e. have session bar)
-    have_session = sum(1 for d in latest_by_ticker.values() if d >= session_asof)
-    coverage = have_session / float(n)
+    if index_tickers is None:
+        index_list = [t for t in latest_by_ticker.keys() if _is_index_ticker(t)]
+    else:
+        index_list = [str(t).strip().upper() for t in index_tickers if t]
 
-    # data-supported candidate: most recent date that a large fraction has
-    # We use the max of all latest dates, but also compute a "median latest" for stability.
-    all_dates = sorted(latest_by_ticker.values())
-    max_date = all_dates[-1]
-    med_date = all_dates[n // 2]
+    n = len(tradable_list)
+    have_session = sum(1 for t in tradable_list if latest_by_ticker.get(t) == session_asof)
+    coverage = (have_session / float(n)) if n else 0.0
 
+    all_dates = sorted(latest_by_ticker.values()) if latest_by_ticker else []
+    max_date = all_dates[-1] if all_dates else None
+    med_date = all_dates[len(all_dates) // 2] if all_dates else None
+
+    batch_actionable = bool(n > 0 and coverage >= ASOF_COVERAGE)
     diag: Dict[str, Any] = {
         "session_asof_date": str(session_asof),
         "tickers": n,
+        "governed_tickers": n + len(index_list),
+        "tradable_tickers": n,
+        "index_tickers": len(index_list),
         "have_session": have_session,
         "coverage": round(coverage, 4),
-        "max_prediction_date": str(max_date),
-        "median_prediction_date": str(med_date),
+        "max_prediction_date": str(max_date) if max_date is not None else None,
+        "median_prediction_date": str(med_date) if med_date is not None else None,
         "asof_coverage_threshold": ASOF_COVERAGE,
         "strict_asof": STRICT_ASOF,
         "max_lag_sessions": MAX_LAG_SESSIONS,
+        "batch_actionable": batch_actionable,
+        "effective_asof_date": str(session_asof),
+        "lag_sessions_vs_session": 0,
     }
 
-    # If coverage is good -> keep strict session_asof.
-    if coverage >= ASOF_COVERAGE:
-        diag["effective_reason"] = "coverage_ok_use_session"
+    if n == 0:
+        diag["effective_reason"] = "no_tradable_tickers"
+        diag["fail"] = bool(STRICT_ASOF)
         return session_asof, diag
 
-    # Otherwise downgrade to what the data actually supports (max_date is safest for those that DO have newer)
-    # but we enforce a lag limit vs session_asof.
-    effective = max_date
-    lag_sessions = 0
-    # count lag in session steps (approx) by walking sessions from effective->session
-    # (only needed when effective < session)
-    if effective < session_asof:
-        # move forward from effective until >= session_asof
-        cur = effective
-        while cur < session_asof and lag_sessions <= 10:
-            cur = _next_session_date(cur)
-            lag_sessions += 1
-
-    diag["effective_reason"] = "coverage_low_use_data_supported"
-    diag["effective_asof_date"] = str(effective)
-    diag["lag_sessions_vs_session"] = lag_sessions
-
-    if STRICT_ASOF and lag_sessions > MAX_LAG_SESSIONS:
-        diag["fail"] = True
-    else:
+    if batch_actionable:
+        diag["effective_reason"] = "coverage_ok_use_session"
         diag["fail"] = False
+        return session_asof, diag
 
-    return effective, diag
+    diag["effective_reason"] = "coverage_low_batch_unavailable"
+    diag["fail"] = bool(STRICT_ASOF)
+    return session_asof, diag
 
 
 def _emit_signal_universe_block(
@@ -802,9 +1074,8 @@ def main() -> None:
     pred_files = sorted(glob.glob(os.path.join(PREDICTIONS_DIR, "*_predictions.parquet"))) + sorted(
         glob.glob(os.path.join(PREDICTIONS_DIR, "*_predictions.csv"))
     )
-    if not pred_files:
-        print(f"🚫 No predictions found in {PREDICTIONS_DIR}. Run train_model.py first.")
-        raise SystemExit(0)
+    # Prediction files are optional RF shadow evidence. A missing predictions
+    # directory must not prevent operational rows from current processed bars.
 
     generated_at = utc_now_z()
 
@@ -822,23 +1093,131 @@ def main() -> None:
     # ──────────────────────────────────────────────────────────────────
     attempted_tickers: set[str] = set()
     ticker_skip_reason: Dict[str, str] = {}
+    skip_records: List[Dict[str, Any]] = []
+    source_hash_by_path: Dict[str, str] = {}
+    source_hash_by_ticker: Dict[str, str] = {}
+    current_tradable_symbols: List[str] = []
+    current_index_symbols: List[str] = []
 
-    def _skip(label: str, reason: str) -> None:
+    def _file_hash(path: Optional[str]) -> str:
+        if not path:
+            return ""
+        if path not in source_hash_by_path:
+            try:
+                source_hash_by_path[path] = _sha256_file(path)
+            except OSError:
+                source_hash_by_path[path] = ""
+        return source_hash_by_path[path]
+
+    def _skip(
+        label: str,
+        reason: str,
+        *,
+        actual: str = "MISSING",
+        expected: Optional[date_type] = None,
+        source_path: Optional[str] = None,
+        source_sha256: Optional[str] = None,
+        symbol_class: Optional[str] = None,
+    ) -> None:
         if not label:
             label = "<unknown>"
         attempted_tickers.add(label)
-        ticker_skip_reason.setdefault(label, reason)
-        print(f"[SIGNAL_SKIP] ticker={label} reason={reason}", flush=True)
+        if label in ticker_skip_reason:
+            return
+        ticker_skip_reason[label] = reason
+        sha = source_sha256 if source_sha256 is not None else _file_hash(source_path)
+        if label and sha:
+            source_hash_by_ticker.setdefault(label, sha)
+        rec = {
+            "symbol": label,
+            "expected_session_date": str(expected if expected is not None else session_asof),
+            "actual_latest_bar_date": actual if actual else "MISSING",
+            "reason": reason,
+            "source_sha256": sha or "",
+            "evidence_timestamp": generated_at,
+            "class": symbol_class or ("index" if _is_index_ticker(label) else "tradable"),
+        }
+        skip_records.append(rec)
+        print(
+            f"[SIGNAL_SKIP] ticker={label} reason={reason} "
+            f"expected={rec['expected_session_date']} actual={rec['actual_latest_bar_date']} "
+            f"source_sha256={rec['source_sha256']} evidence_ts={generated_at}",
+            flush=True,
+        )
+
+    def _persist_diag(extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        payload = {
+            "generated_at_utc": generated_at,
+            "now_utc": str(now_utc),
+            **diag,
+            "per_symbol_skips": skip_records,
+            "current_tradable_symbols": list(current_tradable_symbols),
+            "current_index_symbols": list(current_index_symbols),
+            "skip_count": len(skip_records),
+        }
+        if extra:
+            payload.update(extra)
+        try:
+            os.makedirs(os.path.dirname(ASOF_DIAG_PATH) or ".", exist_ok=True)
+            with open(ASOF_DIAG_PATH, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, default=str)
+        except Exception:
+            pass
+        return payload
+
+    governed = _load_optional_tickers(TICKERS_PATH)
+    tradable_universe = [t for t in governed if not _is_index_ticker(t)]
+    index_universe = [t for t in governed if _is_index_ticker(t)]
 
     # First pass: discover latest date per ticker
     latest_by_ticker: Dict[str, date_type] = {}
     parsed_files: List[Tuple[str, str]] = []
 
+    pred_df_by_ticker: Dict[str, pd.DataFrame] = {}
+    pred_error_by_ticker: Dict[str, str] = {}
+
+    def _processed_session_ok(label: str) -> bool:
+        ticker = _u(label)
+        if not is_valid_ticker(ticker):
+            return False
+        hit, close_v, _path = _processed_session_close(ticker, session_asof)
+        return hit is not None and close_v is not None
+
+    def _rf_file_issue(
+        label: str,
+        reason: str,
+        *,
+        actual: str = "MISSING",
+        source_path: Optional[str] = None,
+        source_sha256: Optional[str] = None,
+    ) -> None:
+        """RF-container defects never skip a current processed session bar."""
+        label_u = _u(label) if label else ""
+        if label_u:
+            pred_error_by_ticker[label_u] = reason
+        if label_u and _processed_session_ok(label_u):
+            attempted_tickers.add(label_u)
+            return
+        _skip(
+            label,
+            reason,
+            actual=actual,
+            source_path=source_path,
+            source_sha256=source_sha256,
+        )
+
     for path in pred_files:
+        file_sha = _file_hash(path)
         df = load_pred_file(path)
         if df.empty:
             label = infer_ticker_from_filename(path) or os.path.basename(path)
-            _skip(label, "load_failed_or_empty")
+            _rf_file_issue(
+                label,
+                SKIP_EMPTY_PREDICTION_FILE,
+                actual="MISSING",
+                source_path=path,
+                source_sha256=file_sha,
+            )
             continue
 
         ticker = resolve_ticker(path, df)
@@ -867,175 +1246,135 @@ def main() -> None:
                 inferred = infer_ticker_from_filename(path)
                 if inferred and not is_valid_ticker(inferred):
                     reason = f"invalid_ticker_from_filename({inferred})"
-            _skip(label, reason)
+            _rf_file_issue(label, reason, source_path=path, source_sha256=file_sha)
             continue
 
         attempted_tickers.add(ticker)
+        source_hash_by_ticker[ticker] = file_sha
 
         if "date" not in df.columns and "Date" in df.columns:
             df = df.rename(columns={"Date": "date"})
 
         if "date" not in df.columns:
-            _skip(ticker, "missing_date_column")
+            _rf_file_issue(ticker, "missing_date_column", source_path=path, source_sha256=file_sha)
             continue
 
         dser = normalize_date(df["date"]).dropna()
         if dser.empty:
-            _skip(ticker, "no_parseable_dates")
+            _rf_file_issue(
+                ticker,
+                SKIP_MALFORMED_DATE,
+                actual="MISSING",
+                source_path=path,
+                source_sha256=file_sha,
+            )
             continue
 
         latest = pd.to_datetime(dser.max(), errors="coerce")
         if pd.isna(latest):
-            _skip(ticker, "max_date_nat")
+            _rf_file_issue(
+                ticker,
+                SKIP_MALFORMED_DATE,
+                actual="MISSING",
+                source_path=path,
+                source_sha256=file_sha,
+            )
             continue
 
-        latest_by_ticker[ticker] = latest.date()
         parsed_files.append((ticker, path))
+        pred_df_by_ticker[ticker] = df
 
-    effective_asof, diag = compute_asof_policy(latest_by_ticker, session_asof)
+    if not governed:
+        discovered: List[str] = []
+        if os.path.isdir(PROCESSED_DIR):
+            for name in sorted(os.listdir(PROCESSED_DIR)):
+                if not (name.endswith(".parquet") or name.endswith(".csv")):
+                    continue
+                stem = _u(name.rsplit(".", 1)[0])
+                if is_valid_ticker(stem) and stem not in discovered:
+                    discovered.append(stem)
+        tradable_universe = [t for t in discovered if not _is_index_ticker(t)]
+        index_universe = [t for t in discovered if _is_index_ticker(t)]
 
-    diag_payload = {
-        "generated_at_utc": generated_at,
-        "now_utc": str(now_utc),
-        **diag,
-    }
+    # Operational freshness is processed-only. Prediction dates never raise coverage.
+    for ticker in sorted(set(tradable_universe + index_universe)):
+        sess_hit, close_v, _proc_path = _processed_session_close(ticker, session_asof)
+        if sess_hit is not None and close_v is not None:
+            latest_by_ticker[ticker] = session_asof
+            attempted_tickers.add(ticker)
+            continue
+        actual = _processed_actual_latest(ticker, session_asof)
+        if actual and actual != "MISSING":
+            try:
+                actual_d = date_type.fromisoformat(str(actual)[:10])
+            except ValueError:
+                actual_d = None
+            if actual_d is not None and actual_d != session_asof:
+                latest_by_ticker[ticker] = actual_d
+            attempted_tickers.add(ticker)
 
-    # Write diagnostics JSON (always)
-    try:
-        os.makedirs(os.path.dirname(ASOF_DIAG_PATH) or ".", exist_ok=True)
-        with open(ASOF_DIAG_PATH, "w", encoding="utf-8") as f:
-            json.dump(diag_payload, f, indent=2)
-    except Exception:
-        pass
-
-    # If strict + truly stale -> fail here (clearer than later)
-    if diag_payload.get("fail", False):
-        # show top stale tickers
-        stale = sorted(
-            [(t, d) for t, d in latest_by_ticker.items() if d < session_asof], key=lambda x: x[0]
+    for label in tradable_universe + index_universe:
+        if label in latest_by_ticker or label in attempted_tickers:
+            continue
+        _skip(
+            label,
+            SKIP_MISSING_EXPECTED_SESSION_BAR,
+            actual="MISSING",
+            symbol_class="index" if _is_index_ticker(label) else "tradable",
         )
-        lines = "\n".join([f"- {t} latest={d} expected={session_asof}" for t, d in stale[:50]])
-        raise RuntimeError(
-            "AS_OF invariant violated: predictions are too far behind the last completed NYSE session.\n"
-            f"session_as_of_date={session_asof}\n"
-            f"effective_as_of_date={effective_asof}\n"
-            f"coverage={diag_payload.get('coverage')}\n"
-            f"Stale tickers (up to 50 shown):\n{lines}\n"
-            f"See: {ASOF_DIAG_PATH}\n"
-            "Fix upstream: ensure train_model fetch window includes the completed bar (end-date inclusivity)."
-        )
+
+    effective_asof, diag = compute_asof_policy(
+        latest_by_ticker,
+        session_asof,
+        tradable_tickers=tradable_universe or None,
+        index_tickers=index_universe or None,
+    )
+    batch_actionable = bool(diag.get("batch_actionable"))
+    diag_payload = _persist_diag()
 
     print(f"✅ effective_as_of_date: {effective_asof} (see {ASOF_DIAG_PATH})")
 
-    # Second pass: produce one row per ticker using latest row with date <= effective_asof
+    # Second pass: governed universe. Processed session bar is operational source.
     rows_out: List[Dict[str, Any]] = []
+    operational_provenance: List[Dict[str, Any]] = []
+    sess_ts = pd.Timestamp(session_asof).normalize()
+    emit_order = list(tradable_universe) + list(index_universe)
 
-    for ticker, path in parsed_files:
-        df = load_pred_file(path)
-        if df.empty:
-            _skip(ticker, "reread_failed_pass2")
-            continue
-
-        if "date" not in df.columns and "Date" in df.columns:
-            df = df.rename(columns={"Date": "date"})
-
-        required = {"date", "close"}
-        missing = required - set(df.columns)
-        if missing:
-            _skip(ticker, f"missing_required_cols({','.join(sorted(missing))})")
-            continue
-
-        df = df.copy()
-        df["date"] = normalize_date(df["date"])
-        df["close"] = pd.to_numeric(df["close"], errors="coerce")
-        rf_col_present = "predicted_close" in df.columns
-        if rf_col_present:
-            df["predicted_close"] = pd.to_numeric(df["predicted_close"], errors="coerce")
-        df = df.dropna(subset=["date", "close"])
-        if df.empty:
-            _skip(ticker, "all_rows_invalid_after_coerce")
-            continue
-        df = df.sort_values("date")
-
-        eff_dt = pd.Timestamp(effective_asof).normalize()
-        df_upto = df[df["date"] <= eff_dt]
-        if df_upto.empty:
-            _skip(ticker, "no_rows_on_or_before_asof")
-            continue
-
-        latest_row = df_upto.iloc[-1]
-        row_date = pd.to_datetime(latest_row["date"], errors="coerce")
-        if pd.isna(row_date):
-            _skip(ticker, "row_date_nat")
-            continue
-        row_date = row_date.normalize()
-
-        close = float(latest_row["close"])
-        pred_raw = latest_row["predicted_close"] if rf_col_present else None
-        rf_shadow = classify_rf_shadow_evidence(
-            predicted_close_raw=pred_raw,
-            close=close,
-            row_date=row_date,
-            session_asof=session_asof,
-            column_present=rf_col_present,
-        )
-        # Compatibility display of the RF observation. Operational residual is never
-        # written to delta_pct, so consumers cannot recover the old RF gate.
-        pred_display = rf_shadow["rf_predicted_close"]
-        operational_delta_pct = float("nan")
-
-        # --- Feature-based signal generation ---
-        hist = _build_history_frame(df, ticker)
-        # Only look at history up to and including the effective AS_OF row.
-        if not hist.empty:
-            hist = hist[hist["date"] <= eff_dt].reset_index(drop=True)
-
-        use_features = len(hist) >= MIN_FEATURE_BARS
-        components: Dict[str, float]
-        score: float
-        feat_row: pd.Series
-
-        if use_features:
-            feats = compute_feature_signals(hist)
-            feat_row = feats.iloc[-1]
-            components = score_components(feat_row)
-            score = composite_score(components)
-            sig = decide_signal(score)
-            confidence = signal_confidence(score)
-            rationale = build_enhanced_rationale(
-                sig, score, components, feat_row, operational_delta_pct
+    def _append_row(
+        *,
+        ticker: str,
+        close: float,
+        hist: pd.DataFrame,
+        rf_shadow: Dict[str, Any],
+        row_date: pd.Timestamp,
+        source_path: str,
+        file_sha: str,
+        source_kind: str,
+    ) -> None:
+        current_tradable_symbols.append(ticker)
+        if not batch_actionable:
+            _skip(
+                ticker,
+                SKIP_BATCH_COVERAGE_BELOW_THRESHOLD,
+                actual=str(session_asof),
+                source_path=source_path,
+                source_sha256=file_sha,
             )
-        else:
-            # Short history: HOLD. RF residual is diagnostic only and must not mint BUY/SELL.
-            feat_row = pd.Series(dtype=float)
-            components = {
-                "momentum_score": 0.5,
-                "trend_score": 0.5,
-                "volatility_score": 0.5,
-                "breakout_score": 0.5,
-            }
-            sig = "HOLD"
-            confidence = 0.5
-            score = 0.5
-            rationale = "Insufficient feature history; HOLD. Random Forest residual is shadow-only."
-
-        # Safety: never emit NaNs in feature score/confidence.
-        if pd.isna(confidence):
-            confidence = 0.5
-        if pd.isna(score):
-            score = 0.5
-
+            return
+        sig, confidence, score, components, _feat_row, rationale = _score_from_history(
+            hist, sess_ts
+        )
+        pred_display = rf_shadow["rf_predicted_close"]
         rows_out.append(
             {
                 "date": row_date,
-                "as_of_date": eff_dt,
-                "session_as_of_date": pd.Timestamp(session_asof),
+                "as_of_date": sess_ts,
+                "session_as_of_date": sess_ts,
                 "ticker": ticker,
                 "close": close,
                 "predicted_close": pred_display,
-                "delta_pct": operational_delta_pct,
+                "delta_pct": float("nan"),
                 "signal": sig,
-                # Keep enough precision so downstream filters see real variance across tickers.
                 "confidence": float(round(float(confidence), 6)),
                 "score": float(round(float(score), 6)),
                 "momentum_score": float(round(components["momentum_score"], 6)),
@@ -1051,18 +1390,116 @@ def main() -> None:
                 "rf_shadow_only": True,
             }
         )
+        operational_provenance.append(
+            {
+                "ticker": ticker,
+                "field_group": "operational_signal",
+                "session_date": str(session_asof),
+                "input_date": str(pd.Timestamp(row_date).date()),
+                "source_path": source_path,
+                "source_sha256": file_sha,
+                "source_kind": source_kind,
+                "close": close,
+                "signal": sig,
+                "confidence": float(round(float(confidence), 6)),
+            }
+        )
 
-    if not rows_out:
-        # Even a fully-empty output deserves a summary so operators see
-        # WHY (e.g. all 64 tickers got skipped for the same reason).
+    for ticker in emit_order:
+        proc_hist, proc_path, proc_close = _processed_session_history(ticker, session_asof)
+        pred_path = next((p for t, p in parsed_files if t == ticker), None)
+        pred_df = pred_df_by_ticker.get(ticker)
+        file_sha = source_hash_by_ticker.get(ticker, "")
+        if pred_path:
+            file_sha = file_sha or _file_hash(pred_path)
+
+        if proc_hist is not None and proc_path and proc_close is not None:
+            file_sha = _file_hash(proc_path) or file_sha
+            source_hash_by_ticker[ticker] = file_sha
+            attempted_tickers.add(ticker)
+            if _is_index_ticker(ticker):
+                current_index_symbols.append(ticker)
+                _skip(
+                    ticker,
+                    SKIP_INDEX_ONLY_EXCLUDED,
+                    actual=str(session_asof),
+                    source_path=proc_path,
+                    source_sha256=file_sha,
+                    symbol_class="index",
+                )
+                continue
+            rf_shadow = _rf_shadow_from_pred_df(
+                pred_df, session_asof=session_asof, close=float(proc_close)
+            )
+            _append_row(
+                ticker=ticker,
+                close=float(proc_close),
+                hist=proc_hist,
+                rf_shadow=rf_shadow,
+                row_date=sess_ts,
+                source_path=proc_path,
+                file_sha=file_sha,
+                source_kind="processed",
+            )
+            continue
+
+        # No current processed session bar: fail closed. Prediction OHLCV is never operational.
+        actual = _processed_actual_latest(ticker, session_asof)
+        if _is_index_ticker(ticker):
+            current_index_symbols.append(ticker)
+            _skip(
+                ticker,
+                SKIP_INDEX_ONLY_EXCLUDED,
+                actual=actual if actual != "MISSING" else "MISSING",
+                symbol_class="index",
+            )
+            continue
+        proc_existing = _processed_path_for_ticker(ticker)
+        _skip(
+            ticker,
+            SKIP_MISSING_EXPECTED_SESSION_BAR,
+            actual=actual,
+            source_path=proc_existing,
+            source_sha256=_file_hash(proc_existing) if proc_existing else "",
+        )
+
+    def _publish_empty_and_maybe_fail(message: str) -> None:
+        empty = _empty_operational_frame()
+        publish_operational_signal_csvs(empty)
+        _persist_diag(
+            {
+                "operational_rows": 0,
+                "batch_actionable": False,
+            }
+        )
         _emit_signal_universe_block(
             attempted_tickers=attempted_tickers,
             ticker_skip_reason=ticker_skip_reason,
             processed_tickers=set(),
             prediction_files_found=len(pred_files),
         )
-        print("🚫 No signals generated (no valid prediction rows).")
+        print(message)
+        if diag.get("fail", False):
+            stale = sorted(
+                [(t, d) for t, d in latest_by_ticker.items() if d != session_asof],
+                key=lambda x: x[0],
+            )
+            lines = "\n".join([f"- {t} latest={d} expected={session_asof}" for t, d in stale[:50]])
+            raise RuntimeError(
+                "AS_OF invariant violated: predictions are too far behind the last completed NYSE session.\n"
+                f"session_as_of_date={session_asof}\n"
+                f"effective_as_of_date={effective_asof}\n"
+                f"coverage={diag.get('coverage')}\n"
+                f"Stale tickers (up to 50 shown):\n{lines}\n"
+                f"See: {ASOF_DIAG_PATH}\n"
+                "Fix upstream: ensure train_model fetch window includes the completed bar (end-date inclusivity)."
+            )
         raise SystemExit(0)
+
+    if (not batch_actionable) or (not rows_out):
+        _publish_empty_and_maybe_fail(
+            "🚫 No lifecycle-authoritative signals generated (freshness contract fail-closed)."
+        )
 
     signals = pd.DataFrame(rows_out)
     signals["ticker"] = signals["ticker"].astype(str).map(_u)
@@ -1087,8 +1524,25 @@ def main() -> None:
 
     signals = signals.sort_values(["ticker", "date"], kind="mergesort")
 
+    bar_dates = pd.to_datetime(signals["date"], errors="coerce").dt.normalize()
+    as_of_dates = pd.to_datetime(signals["as_of_date"], errors="coerce").dt.normalize()
+    session_dates = pd.to_datetime(signals["session_as_of_date"], errors="coerce").dt.normalize()
+    if (
+        not bar_dates.eq(as_of_dates).all()
+        or not as_of_dates.eq(session_dates).all()
+        or not as_of_dates.eq(sess_ts).all()
+    ):
+        raise RuntimeError("freshness contract: refused to publish relabeled or non-session bars")
+
     # Publish only after the complete operational frame is built and valid.
     publish_operational_signal_csvs(signals)
+    _persist_diag(
+        {
+            "operational_rows": int(len(signals)),
+            "batch_actionable": True,
+            "operational_provenance": operational_provenance,
+        }
+    )
     signals_no_rat = signals.drop(columns=["rationale"]).rename(
         columns={"confidence": "confidence_score"}
     )

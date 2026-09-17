@@ -444,10 +444,26 @@ def _pred_frame(ticker: str, last: date, rows: int = 30, include_pred: bool = Tr
     return pd.DataFrame(data)
 
 
+def _processed_ohlcv(last: date, rows: int = 40) -> pd.DataFrame:
+    dates = pd.bdate_range(end=pd.Timestamp(last), periods=rows)
+    close = np.linspace(50.0, 55.0, rows)
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "open": close * 0.99,
+            "high": close * 1.01,
+            "low": close * 0.98,
+            "close": close,
+            "volume": np.full(rows, 1_000_000.0),
+        }
+    )
+
+
 def test_generate_signals_emits_shadow_fields_and_nan_operational_delta(tmp_path, monkeypatch):
     gs, results, preds = _bind_generate(monkeypatch, tmp_path)
     last = date(2026, 8, 18)
     _pred_frame("AAA", last).to_parquet(preds / "AAA_predictions.parquet", index=False)
+    _processed_ohlcv(last).to_parquet(tmp_path / "data" / "processed" / "AAA.parquet", index=False)
     monkeypatch.setattr(gs, "_nyse_last_completed_session_date", lambda now_utc=None: last)
     monkeypatch.setattr(gs, "utc_now_z", lambda: "2026-08-19T12:00:00Z")
     monkeypatch.setattr(
@@ -479,6 +495,7 @@ def test_generate_signals_missing_predicted_close_does_not_skip_ticker(tmp_path,
     _pred_frame("BBB", last, include_pred=False).to_parquet(
         preds / "BBB_predictions.parquet", index=False
     )
+    _processed_ohlcv(last).to_parquet(tmp_path / "data" / "processed" / "BBB.parquet", index=False)
     monkeypatch.setattr(gs, "_nyse_last_completed_session_date", lambda now_utc=None: last)
     monkeypatch.setattr(gs, "utc_now_z", lambda: "2026-08-19T12:00:00Z")
     monkeypatch.setattr(
