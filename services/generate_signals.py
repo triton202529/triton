@@ -80,6 +80,7 @@ SKIP_DUPLICATE_DATE = "DUPLICATE_DATE"
 SKIP_MALFORMED_DATE = "MALFORMED_DATE"
 SKIP_INDEX_ONLY_EXCLUDED = "INDEX_ONLY_EXCLUDED"
 SKIP_BATCH_COVERAGE_BELOW_THRESHOLD = "BATCH_COVERAGE_BELOW_THRESHOLD"
+SKIP_INVALID_PROCESSED_SESSION_BAR = "INVALID_PROCESSED_SESSION_BAR"
 _OPERATIONAL_REQUIRED_COLS = {
     "date",
     "as_of_date",
@@ -376,48 +377,194 @@ def _processed_path_for_ticker(ticker: str) -> Optional[str]:
     return None
 
 
+class _ProcessedSessionView:
+    """Single validity decision for coverage counting and operational emission."""
+
+    __slots__ = ("ok", "path", "close", "hist", "reason", "actual")
+
+    def __init__(
+        self,
+        *,
+        ok: bool,
+        path: Optional[str],
+        close: Optional[float],
+        hist: Optional[pd.DataFrame],
+        reason: Optional[str],
+        actual: str,
+    ) -> None:
+        self.ok = ok
+        self.path = path
+        self.close = close
+        self.hist = hist
+        self.reason = reason
+        self.actual = actual
+
+
+def _session_ohlcv_skip_reason(row: pd.Series) -> Optional[str]:
+    """Reject missing, nonfinite, nonpositive, or same-basis OHLC-shape failures.
+
+    Equality is valid. Prices are not normalized or synthesized.
+    """
+    open_v = _finite_float(row.get("open"))
+    high_v = _finite_float(row.get("high"))
+    low_v = _finite_float(row.get("low"))
+    close_v = _finite_float(row.get("close"))
+    volume_v = _finite_float(row.get("volume"))
+    if open_v is None or high_v is None or low_v is None or close_v is None or volume_v is None:
+        return SKIP_INVALID_PROCESSED_SESSION_BAR
+    if open_v <= 0.0 or high_v <= 0.0 or low_v <= 0.0 or close_v <= 0.0 or volume_v < 0.0:
+        return SKIP_INVALID_PROCESSED_SESSION_BAR
+    if high_v < open_v or high_v < close_v or low_v > open_v or low_v > close_v or high_v < low_v:
+        return SKIP_INVALID_PROCESSED_SESSION_BAR
+    return None
+
+
+def _inspect_processed_session(ticker: str, session_asof: date_type) -> _ProcessedSessionView:
+    """Shared first-pass / second-pass processed-bar contract.
+
+    RF prediction files are never consulted. Invalid evidence is not repaired.
+    """
+    path = _processed_path_for_ticker(ticker)
+    missing = _ProcessedSessionView(
+        ok=False,
+        path=path,
+        close=None,
+        hist=None,
+        reason=SKIP_MISSING_EXPECTED_SESSION_BAR,
+        actual="MISSING",
+    )
+    if not path:
+        return missing
+    try:
+        proc = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path)
+    except Exception:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_INVALID_PROCESSED_SESSION_BAR,
+            actual="MISSING",
+        )
+    if proc is None or proc.empty:
+        return missing
+    cols = {str(c).lower(): c for c in proc.columns}
+    date_col = cols.get("date") or cols.get("datetime")
+    if not date_col:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_MALFORMED_DATE,
+            actual="MISSING",
+        )
+    work = pd.DataFrame({"date": normalize_date(proc[date_col])})
+    for name in ("open", "high", "low", "close", "volume"):
+        src = cols.get(name)
+        work[name] = pd.to_numeric(proc[src], errors="coerce") if src else float("nan")
+    dated = work.dropna(subset=["date"])
+    if dated.empty:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_MALFORMED_DATE,
+            actual="MISSING",
+        )
+    if bool(dated["date"].duplicated().any()):
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_DUPLICATE_DATE,
+            actual=str(pd.Timestamp(dated["date"].max()).date()),
+        )
+    sess_ts = pd.Timestamp(session_asof).normalize()
+    clipped = dated[dated["date"] <= sess_ts].sort_values("date")
+    latest = str(pd.Timestamp(clipped["date"].max()).date()) if not clipped.empty else "MISSING"
+    exact = clipped[clipped["date"] == sess_ts]
+    if exact.empty:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_MISSING_EXPECTED_SESSION_BAR,
+            actual=latest,
+        )
+    if len(exact) > 1:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_DUPLICATE_DATE,
+            actual=str(session_asof),
+        )
+    row = exact.iloc[-1]
+    close_v = _finite_float(row.get("close"))
+    if close_v is None:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_MISSING_EXPECTED_SESSION_BAR,
+            actual=str(session_asof),
+        )
+    shape_reason = _session_ohlcv_skip_reason(row)
+    if shape_reason:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=shape_reason,
+            actual=str(session_asof),
+        )
+    feature_hist = clipped.dropna(subset=["close"]).copy()
+    if "high" not in feature_hist.columns:
+        feature_hist["high"] = feature_hist["close"]
+    else:
+        feature_hist["high"] = feature_hist["high"].where(
+            feature_hist["high"].notna(), feature_hist["close"]
+        )
+    if len(feature_hist) < MIN_FEATURE_BARS:
+        return _ProcessedSessionView(
+            ok=False,
+            path=path,
+            close=None,
+            hist=None,
+            reason=SKIP_INVALID_PROCESSED_SESSION_BAR,
+            actual=str(session_asof),
+        )
+    close_v = float(row["close"])
+    return _ProcessedSessionView(
+        ok=True,
+        path=path,
+        close=close_v,
+        hist=feature_hist.reset_index(drop=True),
+        reason=None,
+        actual=str(session_asof),
+    )
+
+
 def _processed_session_close(
     ticker: str, session_asof: date_type
 ) -> Tuple[Optional[pd.Timestamp], Optional[float], Optional[str]]:
     """
-    Return (session_ts, close, source_path) when processed has the exact session bar.
+    Return (session_ts, close, source_path) when processed has a valid session bar.
 
     Used so operational feature freshness does not depend on a current RF prediction
     container. RF remains diagnostic-only and is never inferred from this path.
     """
-    path = _processed_path_for_ticker(ticker)
-    if not path:
+    view = _inspect_processed_session(ticker, session_asof)
+    if not view.ok or view.close is None or not view.path:
         return None, None, None
-    try:
-        if path.endswith(".parquet"):
-            proc = pd.read_parquet(path)
-        else:
-            proc = pd.read_csv(path)
-    except Exception:
-        return None, None, None
-    if proc is None or proc.empty:
-        return None, None, None
-    cols = {str(c).lower(): c for c in proc.columns}
-    date_col = cols.get("date") or cols.get("datetime")
-    close_col = cols.get("close")
-    if not date_col or not close_col:
-        return None, None, None
-    work = pd.DataFrame(
-        {
-            "date": normalize_date(proc[date_col]),
-            "close": pd.to_numeric(proc[close_col], errors="coerce"),
-        }
-    ).dropna(subset=["date", "close"])
-    if work.empty:
-        return None, None, None
-    sess_ts = pd.Timestamp(session_asof).normalize()
-    # Never consume bars after the authoritative completed session.
-    work = work[work["date"] <= sess_ts]
-    exact = work[work["date"] == sess_ts]
-    if exact.empty:
-        return None, None, None
-    row = exact.iloc[-1]
-    return sess_ts, float(row["close"]), path
+    return pd.Timestamp(session_asof).normalize(), float(view.close), view.path
 
 
 def _processed_session_history(
@@ -425,41 +572,13 @@ def _processed_session_history(
 ) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[float]]:
     """Return (OHLCV history clipped to session, path, session close).
 
-    Requires the exact completed-session bar. Bars after session_asof are dropped.
+    Requires the exact completed-session bar and the same validity decision as
+    coverage. Bars after session_asof are dropped. Invalid bars are not repaired.
     """
-    path = _processed_path_for_ticker(ticker)
-    if not path:
+    view = _inspect_processed_session(ticker, session_asof)
+    if not view.ok or view.hist is None or view.close is None or not view.path:
         return None, None, None
-    try:
-        proc = pd.read_parquet(path) if path.endswith(".parquet") else pd.read_csv(path)
-    except Exception:
-        return None, None, None
-    if proc is None or proc.empty:
-        return None, None, None
-    cols = {str(c).lower(): c for c in proc.columns}
-    date_col = cols.get("date") or cols.get("datetime")
-    close_col = cols.get("close")
-    if not date_col or not close_col:
-        return None, None, None
-    out = pd.DataFrame(
-        {
-            "date": normalize_date(proc[date_col]),
-            "close": pd.to_numeric(proc[close_col], errors="coerce"),
-        }
-    )
-    high_col = cols.get("high")
-    if high_col:
-        out["high"] = pd.to_numeric(proc[high_col], errors="coerce")
-    else:
-        out["high"] = out["close"]
-    out = out.dropna(subset=["date", "close"]).sort_values("date")
-    sess_ts = pd.Timestamp(session_asof).normalize()
-    out = out[out["date"] <= sess_ts]
-    exact = out[out["date"] == sess_ts]
-    if exact.empty:
-        return None, None, None
-    close = float(exact.iloc[-1]["close"])
-    return out.reset_index(drop=True), path, close
+    return view.hist, view.path, float(view.close)
 
 
 def _processed_actual_latest(ticker: str, session_asof: date_type) -> str:
@@ -1443,24 +1562,26 @@ def main() -> None:
             )
             continue
 
-        # No current processed session bar: fail closed. Prediction OHLCV is never operational.
-        actual = _processed_actual_latest(ticker, session_asof)
+        # No valid current processed session bar: fail closed. Prediction OHLCV is never operational.
+        view = _inspect_processed_session(ticker, session_asof)
+        actual = view.actual or _processed_actual_latest(ticker, session_asof)
         if _is_index_ticker(ticker):
             current_index_symbols.append(ticker)
             _skip(
                 ticker,
                 SKIP_INDEX_ONLY_EXCLUDED,
                 actual=actual if actual != "MISSING" else "MISSING",
+                source_path=view.path,
+                source_sha256=_file_hash(view.path) if view.path else "",
                 symbol_class="index",
             )
             continue
-        proc_existing = _processed_path_for_ticker(ticker)
         _skip(
             ticker,
-            SKIP_MISSING_EXPECTED_SESSION_BAR,
+            view.reason or SKIP_MISSING_EXPECTED_SESSION_BAR,
             actual=actual,
-            source_path=proc_existing,
-            source_sha256=_file_hash(proc_existing) if proc_existing else "",
+            source_path=view.path,
+            source_sha256=_file_hash(view.path) if view.path else "",
         )
 
     def _publish_empty_and_maybe_fail(message: str) -> None:
