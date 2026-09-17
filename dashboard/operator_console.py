@@ -9,9 +9,14 @@ Runtime-control callbacks and eligibility decisions are unchanged.
 
 from __future__ import annotations
 
+import csv
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
+
+_OPERATOR_CONSOLE_ROOT = Path(__file__).resolve().parents[1]
 
 OPERATOR_PAGES = [
     "Operations",
@@ -38,6 +43,135 @@ SIMULATION_LABEL_FRAGMENTS = (
 
 def is_simulation_nav_label(label: str) -> bool:
     return any(frag.lower() in str(label).lower() for frag in SIMULATION_LABEL_FRAGMENTS)
+
+
+_HELD_SKIP_REASONS = frozenset(
+    {
+        "INVALID_PROCESSED_SESSION_BAR",
+        "STALE_PROCESSED_SESSION_BAR",
+        "MISSING_PROCESSED_SESSION_BAR",
+    }
+)
+_INDEPENDENT_RISK_ACTIONS = frozenset({"FORCE_EXIT", "TRIM_PRIORITY"})
+_PLAN_BLOCK_CODES = frozenset({"STALE_LIFECYCLE_NO_POSITION", "LIFECYCLE_SKIPPED_HELD"})
+
+
+def collect_held_risk_plan_blocked_alerts(*, root: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Read dated skip + plan evidence for held names whose risk cannot reach F.
+
+    Rendering only. Does not invoke Stop, Start, Restart, or any trading control.
+    Does not imply a SELL was placed.
+    """
+    base = Path(root) if root is not None else _OPERATOR_CONSOLE_ROOT
+    results = base / "data" / "results"
+    diag_path = results / "signals_asof_diagnostics.json"
+    pos_path = results / "positions_snapshot.csv"
+    overlay_path = results / "performance_risk_overlay.csv"
+    plan_path = results / "manage_positions_plan.csv"
+    if not diag_path.is_file() or not pos_path.is_file():
+        return []
+
+    try:
+        diag = json.loads(diag_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    session = str(diag.get("session_asof_date") or diag.get("effective_asof_date") or "")
+    skips: Dict[str, Dict[str, Any]] = {}
+    for rec in diag.get("per_symbol_skips") or []:
+        if not isinstance(rec, dict):
+            continue
+        reason = str(rec.get("reason") or "")
+        if reason not in _HELD_SKIP_REASONS:
+            continue
+        sym = str(rec.get("symbol") or rec.get("ticker") or "").strip().upper()
+        if not sym or sym.startswith("^"):
+            continue
+        skips[sym] = rec
+
+    held: Dict[str, Dict[str, str]] = {}
+    with pos_path.open(encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh):
+            tick = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+            try:
+                qty = float(row.get("qty") or row.get("quantity") or 0)
+            except Exception:
+                qty = 0.0
+            if tick and qty > 1e-9:
+                held[tick] = row
+
+    overlay: Dict[str, str] = {}
+    if overlay_path.is_file():
+        with overlay_path.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                tick = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+                overlay[tick] = str(row.get("risk_flag") or "")
+
+    plans: Dict[str, Dict[str, str]] = {}
+    if plan_path.is_file():
+        with plan_path.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                tick = str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+                if tick:
+                    plans[tick] = row
+
+    alerts: List[Dict[str, Any]] = []
+    for sym, skip in skips.items():
+        if sym not in held:
+            continue
+        flag = overlay.get(sym, "")
+        risk_hits = [a for a in _INDEPENDENT_RISK_ACTIONS if a in flag.upper()]
+        if not risk_hits:
+            continue
+        blocked_action = risk_hits[0]
+        plan = plans.get(sym) or {}
+        plan_code = str(plan.get("reason_code") or "")
+        selected = str(plan.get("selected_for_execution") or "").lower() in {"true", "1"}
+        final_action = str(plan.get("final_action") or "").upper()
+        reached = selected and final_action in {"EXIT", "TRIM", "SELL"}
+        if reached:
+            continue
+        if plan and plan_code not in _PLAN_BLOCK_CODES and final_action not in {"", "NONE"}:
+            # Plan exists with some other non-exit action; still blocked if not selected.
+            if selected:
+                continue
+        evidence_date = str(
+            skip.get("expected_session_date") or skip.get("actual_latest_bar_date") or session
+        )
+        skip_reason = str(skip.get("reason") or "")
+        plan_reason = plan_code or "NO_PROTECTED_PLAN_ROW"
+        alerts.append(
+            {
+                "symbol": sym,
+                "evidence_date": evidence_date,
+                "skip_reason": skip_reason,
+                "blocked_action": blocked_action,
+                "plan_reason": plan_reason,
+                "operator_review_required": True,
+                "sell_placed": False,
+                "message": (
+                    f"{sym}: processed evidence dated {evidence_date} is "
+                    f"{'stale' if 'STALE' in skip_reason else 'invalid'} "
+                    f"({skip_reason}). Independent {blocked_action} cannot reach "
+                    f"the protected plan ({plan_reason}). Operator review required. "
+                    f"No SELL was placed."
+                ),
+            }
+        )
+    return alerts
+
+
+def _render_held_risk_plan_blocked_alerts(*, root: Optional[Path] = None) -> None:
+    alerts = collect_held_risk_plan_blocked_alerts(root=root)
+    if not alerts:
+        return
+    st.subheader("Held-risk plan blocked")
+    for alert in alerts:
+        st.warning(alert["message"])
+    st.caption(
+        "These names are currently held, excluded for dated processed-bar evidence, "
+        "and an independent risk action cannot reach the protected plan. "
+        "This is not a SELL confirmation."
+    )
 
 
 def operator_page_list() -> List[str]:
@@ -955,6 +1089,8 @@ def render_operations_page() -> None:
             st.session_state.pop("activity_feed_cache", None)
             st.rerun()
 
+    _render_held_risk_plan_blocked_alerts()
+
     live_value = "BLOCKED" if live.get("blocked") else "NOT BLOCKED"
     paper_value = oui.display_or_unknown(paper.get("display_status"))
     # Continuous stale warning uses pipeline heartbeat only (heartbeat.json).
@@ -1582,6 +1718,7 @@ def render_risk_alerts_page() -> None:
     st.caption(
         "Read-only risk and watchdog posture. Alerts cannot be dismissed or overridden here."
     )
+    _render_held_risk_plan_blocked_alerts()
     summary = build_risk_alerts_summary()
     st.metric(
         "Capital-preservation posture", summary.get("capital_preservation_posture") or "UNKNOWN"

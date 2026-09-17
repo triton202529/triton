@@ -71,6 +71,7 @@ import pandas as pd
 
 from services.effective_lifecycle import load_exit_logic_config
 from services.governance_degraded_mode import classify_portfolio_action_risk
+from services.signal_lifecycle import resolve_row_confidence
 
 # -----------------------------------------------------------
 # Paths
@@ -465,9 +466,10 @@ def _load_signals_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
         sym = _norm_symbol(r.get(sym_col))
         if not sym:
             continue
+        resolved_conf, _reason = resolve_row_confidence(r)
         out[sym] = {
             "signal": str(r.get("signal") or "").strip().upper(),
-            "confidence": _to_float(r.get("confidence")),
+            "confidence": resolved_conf,
             "score": _to_float(r.get("score")),
             "delta_pct": _to_float(r.get(delta_col)) if delta_col else None,
         }
@@ -505,7 +507,7 @@ def _load_lifecycle_effective_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]
             "effective_position_state": str(r.get("effective_position_state") or "")
             .strip()
             .upper(),
-            "confidence": _to_float(r.get("confidence")),
+            "confidence": resolve_row_confidence(r)[0],
             "delta_pct": _to_float(r.get(delta_col)) if delta_col else None,
             "signal": str(r.get("signal") or "").strip().upper(),
         }

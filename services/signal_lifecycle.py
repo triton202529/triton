@@ -139,6 +139,40 @@ def _scalar_float(x: Any) -> float:
         return float("nan")
 
 
+CONFIDENCE_CONFLICT_EPS = 1e-6
+CONFIDENCE_REASON_OK = "confidence"
+CONFIDENCE_REASON_SCORE_ALIAS = "confidence_score"
+CONFIDENCE_REASON_MISSING = "missing_or_nonfinite_confidence"
+CONFIDENCE_REASON_CONFLICT = "conflicting_confidence"
+
+
+def resolve_row_confidence(row: Mapping[str, Any] | pd.Series) -> Tuple[Optional[float], str]:
+    """Resolve one finite confidence or reject missing/nonfinite/conflicting evidence.
+
+    ``signals_with_rationale.csv`` carries ``confidence``. Legacy ``signals.csv``
+    renames the same proven score to ``confidence_score``. Prefer ``confidence``
+    when it is finite. Accept ``confidence_score`` only when ``confidence`` is
+    absent/nonfinite. If both are finite and disagree, reject — do not pick a
+    winner and do not invent ``delta_pct`` or a strong edge.
+    """
+    if row is None:
+        return None, CONFIDENCE_REASON_MISSING
+    getter = row.get if hasattr(row, "get") else None
+    if getter is None:
+        return None, CONFIDENCE_REASON_MISSING
+    primary = _scalar_float(getter("confidence"))
+    alias = _scalar_float(getter("confidence_score"))
+    primary_ok = math.isfinite(primary)
+    alias_ok = math.isfinite(alias)
+    if primary_ok and alias_ok and abs(primary - alias) > CONFIDENCE_CONFLICT_EPS:
+        return None, CONFIDENCE_REASON_CONFLICT
+    if primary_ok:
+        return float(primary), CONFIDENCE_REASON_OK
+    if alias_ok:
+        return float(alias), CONFIDENCE_REASON_SCORE_ALIAS
+    return None, CONFIDENCE_REASON_MISSING
+
+
 def long_buy_qualifies_for_add(
     delta_pct: Any,
     confidence: Any,
@@ -441,11 +475,11 @@ def decide_action(
 
     if pos_state == "FLAT":
         if signal == "BUY":
-            if math.isfinite(c) and c >= cfg.buy_delta_pct:
+            if not math.isfinite(c):
+                return "WAIT", "flat_buy_missing_confidence"
+            if c >= cfg.buy_delta_pct:
                 return "BUY", "flat_buy_to_buy"
-            if math.isfinite(c):
-                return "WAIT", "flat_buy_weak_to_wait"
-            return "BUY", "flat_buy_to_buy"
+            return "WAIT", "flat_buy_weak_to_wait"
         return "WAIT", "flat_non_buy_wait"
 
     if pos_state == "LONG":
@@ -697,7 +731,14 @@ def apply_lifecycle(
 
         sig = row["_signal_norm"]
         delta_pct = _scalar_float(row.get("delta_pct"))
-        confidence = _scalar_float(row.get("confidence"))
+        resolved_conf, _conf_reason = resolve_row_confidence(row)
+        confidence = float(resolved_conf) if resolved_conf is not None else float("nan")
+        # Persist the proven score under ``confidence`` so effective lifecycle
+        # and allocation see the same finite value. Do not invent delta_pct.
+        persist = confidence if math.isfinite(confidence) else np.nan
+        if "confidence" not in df.columns:
+            df["confidence"] = np.nan
+        df.iloc[i, df.columns.get_loc("confidence")] = persist
         score_val = _scalar_float(row.get("score"))
 
         action, decision_reason = decide_action(
