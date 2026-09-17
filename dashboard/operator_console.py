@@ -508,6 +508,7 @@ def _render_start_controls(status_snapshot: dict | None = None) -> None:
 def _render_stop_control_column(
     stop_el: Dict[str, Any], *, start_busy: bool, restart_busy: bool = False
 ) -> None:
+    from dashboard import operator_ui as oui
     from services.operator_stop_action import (
         ACTION_STOP,
         CONFIRMATION_PHRASE,
@@ -654,6 +655,7 @@ def _render_stop_control_column(
 def _render_restart_control_column(
     restart_el: Dict[str, Any], *, start_busy: bool, stop_busy: bool
 ) -> None:
+    from dashboard import operator_ui as oui
     from services.operator_restart_action import (
         ACTION_RESTART,
         CONFIRMATION_PHRASE,

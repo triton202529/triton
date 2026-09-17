@@ -657,19 +657,26 @@ def _rebuild_lifecycle(src: Path) -> int:
     from services.lifecycle_artifact_guard import (
         allow_partial_lifecycle_writes,
         count_dataframe_rows,
-        minimum_required_rows,
+        evaluate_lifecycle_source_gate,
         write_lifecycle_csv_protected,
     )
 
     src_rows = count_dataframe_rows(df)
-    min_rows = minimum_required_rows()
-    if src_rows < min_rows and not allow_partial_lifecycle_writes():
+    gate = evaluate_lifecycle_source_gate(df)
+    if not gate.get("ok") and not allow_partial_lifecycle_writes():
         print(
             f"[LIFECYCLE_SOURCE_REJECT] source={src.name} rows={src_rows} "
-            f"min_rows={min_rows} reason=insufficient_signal_rows",
+            f"min_rows={gate.get('min_rows')} reason={gate.get('reason') or 'insufficient_signal_rows'}",
             flush=True,
         )
         return 3
+    deferred_held = (gate.get("details") or {}).get("deferred_skipped_held") or []
+    for sym in deferred_held:
+        print(
+            f"[LIFECYCLE_SKIPPED_HELD] symbol={sym} "
+            f"action=defer_independent_risk silent_hold=false unauthorized_sell=false",
+            flush=True,
+        )
 
     # Critical broker-state sync: stale LONG state was causing FLAT account
     # BUY signals to become HOLD. Sync before apply_lifecycle reads STATE_PATH.
