@@ -84,6 +84,58 @@ from services.execution_intelligence import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_PRODUCTION_ROOT = Path(r"C:\Users\akimw\triton")
+
+
+class IsolatedPaperLedgerRootError(ValueError):
+    """Explicit isolated store cannot be used for paper-order ledger writes."""
+
+    def __init__(self, reason: str, details: Optional[Dict[str, Any]] = None):
+        self.reason = reason
+        self.details = details or {}
+        super().__init__(reason)
+
+
+def _path_is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def resolve_pre_plan_paper_ledger_root(*, store_root: Optional[Path] = None) -> Path:
+    """Choose the repo-like root for pre-plan paper_order_events.jsonl.
+
+    No override, or the module/canonical production governance store, keeps
+    ROOT (the historical Path(__file__).parents[1] production path). An
+    explicit isolated store routes every paper-order write for that dispatch
+    to that store. Invalid isolated roots fail closed and never fall back to
+    the production ledger.
+    """
+    module_root = Path(__file__).resolve().parents[1]
+    if store_root is None:
+        return module_root
+    resolved = Path(store_root).resolve()
+    default_gov = (module_root / "data" / "governance").resolve()
+    canonical_root = CANONICAL_PRODUCTION_ROOT.resolve()
+    canonical_gov = (canonical_root / "data" / "governance").resolve()
+    if resolved in {module_root.resolve(), default_gov, canonical_root, canonical_gov}:
+        return module_root
+    for data_root in ((module_root / "data").resolve(), (canonical_root / "data").resolve()):
+        if resolved == data_root or _path_is_under(resolved, data_root):
+            raise IsolatedPaperLedgerRootError(
+                "isolated_ledger_root_inside_production_data",
+                {"store_root": str(resolved)},
+            )
+    if not resolved.exists() or not resolved.is_dir():
+        raise IsolatedPaperLedgerRootError(
+            "isolated_ledger_root_unavailable",
+            {"store_root": str(resolved)},
+        )
+    return resolved
+
+
 DEFAULT_LIFECYCLE_CSV = ROOT / "data" / "results" / "signal_lifecycle.csv"
 EFFECTIVE_LIFECYCLE_PATH = ROOT / "data" / "results" / "signal_lifecycle_effective.csv"
 TRADE_OPPORTUNITIES_PATH = ROOT / "data" / "results" / "trade_opportunities.csv"
@@ -1567,6 +1619,7 @@ def _submit_pre_plan_authorized_sell_orders(
     mode: str = "paper",
     verbose: bool = False,
     db_path: Optional[Path] = None,
+    ledger_root: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Submit exact pre-plan authorized sells through hardened broker boundary."""
     from services.broker_alpaca import broker_order_auth_context
@@ -1574,6 +1627,24 @@ def _submit_pre_plan_authorized_sell_orders(
         PaperSellDispatchBlocked,
         finalize_paper_sell_dispatch,
     )
+
+    try:
+        resolved_ledger_root = (
+            Path(ledger_root).resolve()
+            if ledger_root is not None
+            else resolve_pre_plan_paper_ledger_root(store_root=store_root)
+        )
+    except IsolatedPaperLedgerRootError as exc:
+        return {
+            "placed": 0,
+            "failed": 0,
+            "outcome": None,
+            "reason": exc.reason,
+            "broker_ref": None,
+            "broker_submissions": [],
+            "paper_order_ledger": {"ok": False, "reason": exc.reason, "details": exc.details},
+            "paper_order_ledger_root": None,
+        }
 
     placed = 0
     failed = 0
@@ -1692,7 +1763,7 @@ def _submit_pre_plan_authorized_sell_orders(
                 )
                 or None,
                 event_timestamp=None,
-                root=Path(__file__).resolve().parents[1],
+                root=resolved_ledger_root,
             )
         except Exception:
             ledger_result = {
@@ -1708,6 +1779,7 @@ def _submit_pre_plan_authorized_sell_orders(
         "broker_ref": ",".join(broker_ids) if broker_ids else None,
         "broker_submissions": submissions,
         "paper_order_ledger": ledger_result,
+        "paper_order_ledger_root": str(resolved_ledger_root),
     }
 
 
@@ -1737,6 +1809,17 @@ def dispatch_unused_authorized_sell_slice_pre_plan(
     now = now or utc_now()
     if str(mode).lower() != "paper" or broker is None:
         return {"attempted": False, "dispatched": False, "reason": "skipped_not_paper"}
+    try:
+        ledger_root = resolve_pre_plan_paper_ledger_root(store_root=store_root)
+    except IsolatedPaperLedgerRootError as exc:
+        return {
+            "attempted": False,
+            "dispatched": False,
+            "consumed": False,
+            "reason": exc.reason,
+            "details": exc.details,
+            "paper_order_ledger_root": None,
+        }
 
     authority = find_unused_pre_plan_authority(db_path=db_path, now=now)
     if not authority:
@@ -1785,6 +1868,7 @@ def dispatch_unused_authorized_sell_slice_pre_plan(
         mode=mode,
         verbose=verbose,
         db_path=db_path,
+        ledger_root=ledger_root,
     )
     return {
         "attempted": True,
@@ -1794,6 +1878,7 @@ def dispatch_unused_authorized_sell_slice_pre_plan(
         "broker_submissions": submit_result.get("placed", 0),
         "submit": submit_result,
         "dispatch_intent_id": guard.dispatch_intent_id,
+        "paper_order_ledger_root": str(ledger_root),
     }
 
 
