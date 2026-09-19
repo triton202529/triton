@@ -47,12 +47,17 @@ POSITIONS = RESULTS / "positions_snapshot.csv"
 RISK_OVERLAY = RESULTS / "performance_risk_overlay.csv"
 ALLOC_RECOMMENDATIONS = RESULTS / "portfolio_allocation_recommendations.csv"
 ALLOC_SUMMARY = RESULTS / "portfolio_allocation_summary.json"
+LIFECYCLE_EFFECTIVE = RESULTS / "signal_lifecycle_effective.csv"
 AUDIT_JSON = RESULTS / "paper_entry_loop_stage_audit.json"
 LAST_MARKET_DECISION_JSON = RESULTS / "paper_entry_loop_stage_last_market_decision.json"
 DISPATCH_CONTRACT_PATH = LIVE / "paper_entry_dispatch_contract.json"
 DISPATCH_CONTRACT_TTL_MINUTES = 15
 EXEC_TRADES_CFG = CONFIG / "execute_trades.json"
 GOVERNED_ALLOC_SOURCE = "portfolio_allocation_recommendations.csv"
+ENTRY_LIFECYCLE_STANCES = frozenset({"BUY", "ADD"})
+REASON_LIFECYCLE_STANCE_NOT_ENTRY = "LIFECYCLE_STANCE_NOT_ENTRY"
+REASON_LIFECYCLE_STANCE_MISSING = "LIFECYCLE_STANCE_MISSING"
+REASON_LIFECYCLE_SESSION_UNPROVEN = "LIFECYCLE_SESSION_UNPROVEN"
 
 _EXECUTE_INVOKED = False
 
@@ -266,6 +271,88 @@ def _norm(val: Any) -> str:
     return str(val or "").strip().upper()
 
 
+def _normalize_session_date(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    text = str(value).strip()
+    if not text:
+        return ""
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    try:
+        ts = pd.to_datetime(text, errors="coerce")
+    except Exception:
+        return ""
+    if ts is None or pd.isna(ts):
+        return ""
+    return pd.Timestamp(ts).strftime("%Y-%m-%d")
+
+
+def _load_authoritative_lifecycle_entry_map() -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """
+    Current-session effective lifecycle stances for paper BUY/ADD eligibility.
+    Allocation OPEN_NEW/ADD is not sufficient; stance must be BUY or ADD.
+    """
+    path = RESULTS / "signal_lifecycle_effective.csv"
+    info: Dict[str, Any] = {
+        "ok": False,
+        "session_date": None,
+        "reason": REASON_LIFECYCLE_SESSION_UNPROVEN,
+        "row_count": 0,
+        "source": str(path),
+    }
+    if not path.is_file():
+        info["reason"] = "lifecycle_effective_missing"
+        return {}, info
+    try:
+        df = pd.read_csv(path, low_memory=False)
+    except Exception as exc:
+        info["reason"] = f"lifecycle_effective_unreadable:{exc}"
+        return {}, info
+    if df is None or df.empty:
+        info["reason"] = "lifecycle_effective_empty"
+        return {}, info
+    sessions = set()
+    for col in ("session_as_of_date", "session_date", "as_of_date"):
+        if col not in df.columns:
+            continue
+        found = {_normalize_session_date(v) for v in df[col].tolist()}
+        found.discard("")
+        if len(found) == 1:
+            sessions = found
+            break
+        if len(found) > 1:
+            info["reason"] = "lifecycle_session_mixed"
+            return {}, info
+    if len(sessions) != 1:
+        info["reason"] = REASON_LIFECYCLE_SESSION_UNPROVEN
+        return {}, info
+    session = sessions.pop()
+    sym_col = "ticker" if "ticker" in df.columns else ("symbol" if "symbol" in df.columns else None)
+    if not sym_col:
+        info["reason"] = "lifecycle_effective_schema_invalid"
+        return {}, info
+    stances: Dict[str, str] = {}
+    for _, row in df.iterrows():
+        sym = _norm(row.get(sym_col))
+        if not sym:
+            continue
+        stance = _norm(
+            row.get("effective_stance") or row.get("lifecycle_action") or row.get("stance")
+        )
+        stances[sym] = stance
+    info["ok"] = True
+    info["session_date"] = session
+    info["reason"] = None
+    info["row_count"] = len(stances)
+    return stances, info
+
+
 def _file_age_minutes(path: Path) -> Optional[float]:
     if not path.is_file():
         return None
@@ -450,6 +537,8 @@ def _evaluate_allocation_entry_row(
     open_buy: Set[Tuple[str, str]],
     held: Set[str],
     at_cap: bool,
+    lifecycle_stance: str,
+    lifecycle_ok: bool,
 ) -> Tuple[bool, List[str], str]:
     blocked_reasons: List[str] = []
     row_flag = str(row.get("risk_flag") or "OK")
@@ -470,6 +559,12 @@ def _evaluate_allocation_entry_row(
         blocked_reasons.append("ADD_REQUIRES_EXISTING_POSITION")
     if action not in ("OPEN_NEW", "ADD"):
         blocked_reasons.append(f"ALLOCATION_ACTION_{action or 'UNKNOWN'}")
+    if not lifecycle_ok:
+        blocked_reasons.append(REASON_LIFECYCLE_SESSION_UNPROVEN)
+    elif not lifecycle_stance:
+        blocked_reasons.append(REASON_LIFECYCLE_STANCE_MISSING)
+    elif lifecycle_stance not in ENTRY_LIFECYCLE_STANCES:
+        blocked_reasons.append(REASON_LIFECYCLE_STANCE_NOT_ENTRY)
     if (sym, "BUY") in open_buy:
         blocked_reasons.append("OPEN_BUY_ORDER")
     if at_cap and action == "OPEN_NEW":
@@ -498,8 +593,12 @@ def _load_governed_allocation_candidates() -> Tuple[List[Dict[str, Any]], Dict[s
     Governed paper-entry candidates from portfolio_allocation_recommendations.csv.
     trade_opportunities.csv is enrichment-only (not an execution source).
     """
+    try:
+        source_used = str(ALLOC_RECOMMENDATIONS.relative_to(ROOT)).replace("\\", "/")
+    except ValueError:
+        source_used = str(ALLOC_RECOMMENDATIONS)
     handoff: Dict[str, Any] = {
-        "source_file_used": str(ALLOC_RECOMMENDATIONS.relative_to(ROOT)).replace("\\", "/"),
+        "source_file_used": source_used,
         "source_file_mtime": None,
         "allocation_candidates_count": 0,
         "allocation_open_new_count": 0,
@@ -533,6 +632,8 @@ def _load_governed_allocation_candidates() -> Tuple[List[Dict[str, Any]], Dict[s
     held = _load_held_symbols()
     max_pos = _effective_max_positions()
     at_cap = len(held) >= max_pos
+    lifecycle_stances, lifecycle_info = _load_authoritative_lifecycle_entry_map()
+    handoff["lifecycle_entry_gate"] = lifecycle_info
 
     candidates: List[Dict[str, Any]] = []
     rejected: Dict[str, List[str]] = {}
@@ -559,6 +660,8 @@ def _load_governed_allocation_candidates() -> Tuple[List[Dict[str, Any]], Dict[s
             open_buy=open_buy,
             held=held,
             at_cap=at_cap,
+            lifecycle_stance=lifecycle_stances.get(sym, ""),
+            lifecycle_ok=bool(lifecycle_info.get("ok")),
         )
         if eligible:
             eligible_symbols.append(sym)

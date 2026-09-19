@@ -21,11 +21,14 @@ Run:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import math
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -40,6 +43,23 @@ DEFAULT_OPPORTUNITIES_CSV = RESULTS_DIR / "trade_opportunities.csv"
 DEFAULT_RISK_OVERLAY_CSV = RESULTS_DIR / "performance_risk_overlay.csv"
 DEFAULT_PERF_BY_SYMBOL_CSV = RESULTS_DIR / "performance_intelligence_by_symbol.csv"
 DEFAULT_OUTPUT_CSV = RESULTS_DIR / "edge_sizing_recommendations.csv"
+DEFAULT_LIFECYCLE_EFFECTIVE_CSV = RESULTS_DIR / "signal_lifecycle_effective.csv"
+
+EDGE_PROVENANCE_SCHEMA = "198T-SF23-EDGE-PROVENANCE-1"
+OPPS_PROVENANCE_SCHEMA = "198T-SF23-OPPORTUNITIES-PROVENANCE-1"
+STATUS_VALID = "VALID"
+STATUS_FAIL_CLOSED = "FAIL_CLOSED"
+PROVENANCE_COLUMNS = (
+    "session_date",
+    "lifecycle_sha256",
+    "opportunities_sha256",
+    "provenance_status",
+)
+OPPS_PROVENANCE_COLUMNS = (
+    "session_date",
+    "lifecycle_sha256",
+    "provenance_status",
+)
 
 
 # ------------------------------------------------------------------
@@ -144,6 +164,295 @@ def _risk_components(risk_flag: str) -> set[str]:
     if not risk_flag:
         return set()
     return {c.strip() for c in risk_flag.split("|") if c.strip()}
+
+
+# ------------------------------------------------------------------
+# Current-session provenance (mtime is never evidence)
+# ------------------------------------------------------------------
+def sha256_file(path: Path) -> Optional[str]:
+    try:
+        if not path.is_file():
+            return None
+    except OSError:
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def provenance_sidecar_path(csv_path: Path) -> Path:
+    return csv_path.parent / f"{csv_path.stem}_provenance.json"
+
+
+def normalize_session_date(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    text = str(value).strip()
+    if not text:
+        return ""
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    try:
+        ts = pd.to_datetime(text, errors="coerce")
+    except Exception:
+        return ""
+    if ts is None or pd.isna(ts):
+        return ""
+    return pd.Timestamp(ts).strftime("%Y-%m-%d")
+
+
+def unique_session_date_from_df(df: Optional[pd.DataFrame]) -> str:
+    """Single session_as_of_date/session_date, else empty (unproven)."""
+    if df is None or df.empty:
+        return ""
+    for col in ("session_as_of_date", "session_date", "as_of_date"):
+        if col not in df.columns:
+            continue
+        found = {normalize_session_date(v) for v in df[col].tolist()}
+        found.discard("")
+        if len(found) == 1:
+            return found.pop()
+        if len(found) > 1:
+            return ""
+    return ""
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _empty_edge_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "ticker",
+            "opportunity_type",
+            "confidence",
+            "delta_pct",
+            "total_pl",
+            "risk_flag",
+            "edge_score",
+            "sizing_tier",
+            "size_multiplier",
+            "reason",
+            *PROVENANCE_COLUMNS,
+        ]
+    )
+
+
+def attach_provenance_columns(
+    df: pd.DataFrame,
+    *,
+    session_date: str,
+    lifecycle_sha256: str,
+    opportunities_sha256: str,
+    status: str,
+) -> pd.DataFrame:
+    out = df.copy() if df is not None else pd.DataFrame()
+    if out.empty:
+        out = _empty_edge_frame()
+    out["session_date"] = session_date or ""
+    out["lifecycle_sha256"] = lifecycle_sha256 or ""
+    out["opportunities_sha256"] = opportunities_sha256 or ""
+    out["provenance_status"] = status
+    return out
+
+
+def write_edge_provenance_sidecar(
+    csv_path: Path,
+    *,
+    status: str,
+    session_date: str = "",
+    lifecycle_sha256: str = "",
+    opportunities_sha256: str = "",
+    row_count: int = 0,
+    tickers: Optional[List[str]] = None,
+    invalid_reason: Optional[str] = None,
+) -> None:
+    payload = {
+        "schema": EDGE_PROVENANCE_SCHEMA,
+        "status": status,
+        "session_date": session_date or None,
+        "generated_at_utc": _utc_now_iso(),
+        "lifecycle_sha256": lifecycle_sha256 or None,
+        "opportunities_sha256": opportunities_sha256 or None,
+        "row_count": int(row_count),
+        "tickers": list(tickers or []),
+        "invalid_reason": invalid_reason,
+    }
+    write_json_atomic(provenance_sidecar_path(csv_path), payload)
+
+
+def write_fail_closed_edge(
+    out_path: Path,
+    reason: str,
+    *,
+    session_date: str = "",
+    lifecycle_sha256: str = "",
+    opportunities_sha256: str = "",
+) -> None:
+    """Replace any prior edge CSV so it cannot be treated as current evidence."""
+    empty = _empty_edge_frame()
+    _atomic_write_csv(empty, out_path)
+    write_edge_provenance_sidecar(
+        out_path,
+        status=STATUS_FAIL_CLOSED,
+        session_date=session_date,
+        lifecycle_sha256=lifecycle_sha256,
+        opportunities_sha256=opportunities_sha256,
+        row_count=0,
+        tickers=[],
+        invalid_reason=reason,
+    )
+    print(
+        f"[EDGE_SIZING_FAIL_CLOSED] reason={reason} path={out_path}",
+        flush=True,
+    )
+
+
+def load_json_sidecar(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def evaluate_opportunities_provenance(
+    opps_path: Path, lifecycle_path: Path
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """Opportunities are current only with a VALID sidecar bound to this lifecycle."""
+    info: Dict[str, Any] = {
+        "session_date": "",
+        "lifecycle_sha256": sha256_file(lifecycle_path) or "",
+        "opportunities_sha256": sha256_file(opps_path) or "",
+    }
+    sidecar = load_json_sidecar(provenance_sidecar_path(opps_path))
+    if sidecar is None:
+        return False, "opportunities_provenance_sidecar_missing", info
+    if sidecar.get("schema") != OPPS_PROVENANCE_SCHEMA:
+        return False, "opportunities_provenance_schema_mismatch", info
+    if str(sidecar.get("status") or "").upper() != STATUS_VALID:
+        return False, "opportunities_provenance_not_valid", info
+    lc_sha = info["lifecycle_sha256"]
+    if not lc_sha or lc_sha != sidecar.get("lifecycle_sha256"):
+        return False, "opportunities_lifecycle_hash_mismatch", info
+    lifecycle_df = _safe_read_csv(lifecycle_path, label="signal_lifecycle_effective")
+    session = unique_session_date_from_df(lifecycle_df)
+    if not session or session != sidecar.get("session_date"):
+        return False, "opportunities_session_unproven", info
+    info["session_date"] = session
+    if not info["opportunities_sha256"]:
+        return False, "opportunities_file_missing", info
+    return True, "", info
+
+
+def load_proven_edge_sizing_map(
+    edge_path: Path,
+    *,
+    lifecycle_path: Path,
+    opportunities_path: Path,
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+    """
+    Allocation join: only current-session, hash-bound, unique, finite edge rows.
+    File mtime is ignored. Missing/stale/forged evidence returns an empty map.
+    """
+    diag: Dict[str, Any] = {
+        "status": STATUS_FAIL_CLOSED,
+        "reason": None,
+        "proven_row_count": 0,
+        "session_date": None,
+    }
+    sidecar = load_json_sidecar(provenance_sidecar_path(edge_path))
+    if sidecar is None:
+        diag["reason"] = "edge_provenance_sidecar_missing"
+        return {}, diag
+    if sidecar.get("schema") != EDGE_PROVENANCE_SCHEMA:
+        diag["reason"] = "edge_provenance_schema_mismatch"
+        return {}, diag
+    if str(sidecar.get("status") or "").upper() != STATUS_VALID:
+        diag["reason"] = "edge_provenance_not_valid"
+        return {}, diag
+
+    lc_sha = sha256_file(lifecycle_path) or ""
+    opps_sha = sha256_file(opportunities_path) or ""
+    if not lc_sha or lc_sha != sidecar.get("lifecycle_sha256"):
+        diag["reason"] = "edge_lifecycle_hash_mismatch"
+        return {}, diag
+    if not opps_sha or opps_sha != sidecar.get("opportunities_sha256"):
+        diag["reason"] = "edge_opportunities_hash_mismatch"
+        return {}, diag
+
+    opps_ok, opps_reason, opps_info = evaluate_opportunities_provenance(
+        opportunities_path, lifecycle_path
+    )
+    if not opps_ok:
+        diag["reason"] = opps_reason
+        return {}, diag
+
+    session = opps_info.get("session_date") or ""
+    if not session or session != sidecar.get("session_date"):
+        diag["reason"] = "edge_session_unproven"
+        return {}, diag
+
+    df = _safe_read_csv(edge_path, label="edge_sizing_recommendations")
+    if df.empty:
+        diag["status"] = STATUS_VALID
+        diag["session_date"] = session
+        diag["proven_row_count"] = 0
+        return {}, diag
+
+    counts: Dict[str, int] = {}
+    for _, row in df.iterrows():
+        sym = _norm_sym(row.get("ticker") if "ticker" in df.columns else row.get("symbol"))
+        if not sym:
+            diag["reason"] = "edge_row_missing_ticker"
+            return {}, diag
+        counts[sym] = counts.get(sym, 0) + 1
+    if any(n > 1 for n in counts.values()):
+        diag["reason"] = "edge_duplicate_tickers"
+        return {}, diag
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for _, row in df.iterrows():
+        sym = _norm_sym(row.get("ticker") if "ticker" in df.columns else row.get("symbol"))
+        if str(row.get("provenance_status") or "").upper() != STATUS_VALID:
+            continue
+        if normalize_session_date(row.get("session_date")) != session:
+            continue
+        if str(row.get("lifecycle_sha256") or "") != lc_sha:
+            continue
+        if str(row.get("opportunities_sha256") or "") != opps_sha:
+            continue
+        score = _to_float(row.get("edge_score"))
+        if score is None:
+            continue
+        out[sym] = {
+            "edge_score": score,
+            "sizing_tier": str(row.get("sizing_tier") or "").strip().upper(),
+            "risk_flag": str(row.get("risk_flag") or "").strip().upper(),
+            "confidence": _to_float(row.get("confidence")),
+            "delta_pct": _to_float(row.get("delta_pct")),
+        }
+    diag["status"] = STATUS_VALID
+    diag["session_date"] = session
+    diag["proven_row_count"] = len(out)
+    return out, diag
 
 
 # ------------------------------------------------------------------
@@ -384,22 +693,72 @@ def run(
     risk_path: Path = DEFAULT_RISK_OVERLAY_CSV,
     perf_path: Path = DEFAULT_PERF_BY_SYMBOL_CSV,
     out_path: Path = DEFAULT_OUTPUT_CSV,
+    lifecycle_path: Path = DEFAULT_LIFECYCLE_EFFECTIVE_CSV,
 ) -> int:
     """
-    Public entry point. Returns 0 on success, 2 if the primary opportunities
-    input is missing/empty (clean exit, per spec).
+    Public entry point. Returns 0 when current-session evidence is written
+    (including a proven empty file). Returns 2 after fail-closed replacement
+    when opportunities provenance cannot be proven.
     """
-    opps = _safe_read_csv(opps_path, label="trade_opportunities")
-    if opps.empty:
-        _warn(
-            f"trade_opportunities missing or empty at {opps_path}; "
-            "no recommendations will be produced."
+    opps_ok, opps_reason, opps_info = evaluate_opportunities_provenance(opps_path, lifecycle_path)
+    session_date = str(opps_info.get("session_date") or "")
+    lifecycle_sha = str(opps_info.get("lifecycle_sha256") or "")
+    opps_sha = str(opps_info.get("opportunities_sha256") or "")
+    if not opps_ok:
+        _warn(f"opportunities provenance failed ({opps_reason}); replacing prior edge file")
+        write_fail_closed_edge(
+            out_path,
+            opps_reason,
+            session_date=session_date,
+            lifecycle_sha256=lifecycle_sha,
+            opportunities_sha256=opps_sha,
         )
         return 2
+
+    opps = _safe_read_csv(opps_path, label="trade_opportunities")
     risk_overlay = _safe_read_csv(risk_path, label="performance_risk_overlay")
     perf_by_symbol = _safe_read_csv(perf_path, label="performance_intelligence_by_symbol")
 
+    if opps.empty:
+        recs = _empty_edge_frame()
+        print("[EDGE_DIAGNOSTICS] no recommendations generated", flush=True)
+        print(
+            "[EDGE_SIZING] total=0 strong=0 normal=0 weak=0 blocked=0",
+            flush=True,
+        )
+        recs = attach_provenance_columns(
+            recs,
+            session_date=session_date,
+            lifecycle_sha256=lifecycle_sha,
+            opportunities_sha256=opps_sha,
+            status=STATUS_VALID,
+        )
+        _atomic_write_csv(recs, out_path)
+        write_edge_provenance_sidecar(
+            out_path,
+            status=STATUS_VALID,
+            session_date=session_date,
+            lifecycle_sha256=lifecycle_sha,
+            opportunities_sha256=opps_sha,
+            row_count=0,
+            tickers=[],
+        )
+        print(f"[EDGE_SIZING_OUT] path={out_path}", flush=True)
+        return 0
+
     recs = build_recommendations(opps, risk_overlay, perf_by_symbol)
+    tickers = []
+    if not recs.empty and "ticker" in recs.columns:
+        tickers = [_norm_sym(v) for v in recs["ticker"].tolist() if _norm_sym(v)]
+        if len(tickers) != len(set(tickers)):
+            write_fail_closed_edge(
+                out_path,
+                "edge_duplicate_tickers",
+                session_date=session_date,
+                lifecycle_sha256=lifecycle_sha,
+                opportunities_sha256=opps_sha,
+            )
+            return 2
 
     counts = {"STRONG_EDGE": 0, "NORMAL_EDGE": 0, "WEAK_EDGE": 0, "BLOCKED": 0}
     if not recs.empty:
@@ -448,7 +807,23 @@ def run(
         flush=True,
     )
 
+    recs = attach_provenance_columns(
+        recs,
+        session_date=session_date,
+        lifecycle_sha256=lifecycle_sha,
+        opportunities_sha256=opps_sha,
+        status=STATUS_VALID,
+    )
     _atomic_write_csv(recs, out_path)
+    write_edge_provenance_sidecar(
+        out_path,
+        status=STATUS_VALID,
+        session_date=session_date,
+        lifecycle_sha256=lifecycle_sha,
+        opportunities_sha256=opps_sha,
+        row_count=len(recs),
+        tickers=tickers,
+    )
     print(f"[EDGE_SIZING_OUT] path={out_path}", flush=True)
     return 0
 
@@ -480,17 +855,37 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="performance_intelligence_by_symbol.csv (optional join)",
     )
     ap.add_argument(
+        "--lifecycle-effective",
+        type=Path,
+        default=DEFAULT_LIFECYCLE_EFFECTIVE_CSV,
+        help="signal_lifecycle_effective.csv used for session provenance",
+    )
+    ap.add_argument(
         "--out",
         type=Path,
         default=DEFAULT_OUTPUT_CSV,
         help="Output CSV path",
     )
+    ap.add_argument(
+        "--invalidate-current-evidence",
+        action="store_true",
+        help="Replace any prior edge file with fail-closed empty evidence and exit 0.",
+    )
     args = ap.parse_args(argv)
+    if args.invalidate_current_evidence:
+        write_fail_closed_edge(
+            args.out,
+            "producer_failed_or_incomplete",
+            lifecycle_sha256=sha256_file(args.lifecycle_effective) or "",
+            opportunities_sha256=sha256_file(args.opportunities) or "",
+        )
+        return 0
     return run(
         opps_path=args.opportunities,
         risk_path=args.risk_overlay,
         perf_path=args.perf_by_symbol,
         out_path=args.out,
+        lifecycle_path=args.lifecycle_effective,
     )
 
 

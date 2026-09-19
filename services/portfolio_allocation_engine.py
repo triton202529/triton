@@ -23,11 +23,11 @@ risk posture, performance health, an `allocation_score`, and a
     C. BLOCK      if risk_flag contains BLOCK_NEW_BUY
     D. ADD        if currently held
                   AND effective_stance in {ADD, HOLD}
-                  AND edge_score is strong
+                  AND proven current-session edge_score is strong
                   AND risk_flag is OK
     E. OPEN_NEW   if not currently held
                   AND lifecycle_action in {BUY, ADD}
-                  AND edge_score is strong
+                  AND proven current-session edge_score is strong
                   AND confidence >= 0.50
     F. WATCH      if not held and signal is positive but not strong enough
     G. HOLD       otherwise
@@ -69,6 +69,7 @@ if str(ROOT) not in sys.path:
 
 import pandas as pd
 
+from services.edge_sizing_engine import load_proven_edge_sizing_map
 from services.effective_lifecycle import load_exit_logic_config
 from services.governance_degraded_mode import classify_portfolio_action_risk
 from services.signal_lifecycle import resolve_row_confidence
@@ -85,6 +86,7 @@ DEFAULT_RISK_OVERLAY_CSV = RESULTS_DIR / "performance_risk_overlay.csv"
 DEFAULT_PERF_BY_SYMBOL_CSV = RESULTS_DIR / "performance_intelligence_by_symbol.csv"
 DEFAULT_SIGNALS_CSV = RESULTS_DIR / "signals_with_rationale.csv"
 DEFAULT_LIFECYCLE_EFFECTIVE_CSV = RESULTS_DIR / "signal_lifecycle_effective.csv"
+DEFAULT_OPPORTUNITIES_CSV = RESULTS_DIR / "trade_opportunities.csv"
 
 DEFAULT_OUTPUT_CSV = RESULTS_DIR / "portfolio_allocation_recommendations.csv"
 DEFAULT_OUTPUT_JSON = RESULTS_DIR / "portfolio_allocation_summary.json"
@@ -1067,6 +1069,7 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--perf-by-symbol", default=str(DEFAULT_PERF_BY_SYMBOL_CSV))
     p.add_argument("--signals", default=str(DEFAULT_SIGNALS_CSV))
     p.add_argument("--lifecycle-effective", default=str(DEFAULT_LIFECYCLE_EFFECTIVE_CSV))
+    p.add_argument("--opportunities", default=str(DEFAULT_OPPORTUNITIES_CSV))
     p.add_argument("--config", default=str(DEFAULT_EXECUTE_TRADES_CONFIG))
     p.add_argument("--out-csv", default=str(DEFAULT_OUTPUT_CSV))
     p.add_argument("--out-json", default=str(DEFAULT_OUTPUT_JSON))
@@ -1079,7 +1082,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("[PORTFOLIO_ALLOCATION] starting (read-only intelligence layer)", flush=True)
 
     positions_df = _safe_read_csv(Path(args.positions), label="positions_snapshot.csv")
-    edge_df = _safe_read_csv(Path(args.edge_sizing), label="edge_sizing_recommendations.csv")
     risk_df = _safe_read_csv(Path(args.risk_overlay), label="performance_risk_overlay.csv")
     perf_df = _safe_read_csv(
         Path(args.perf_by_symbol), label="performance_intelligence_by_symbol.csv"
@@ -1090,7 +1092,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     positions = _load_positions_map(positions_df)
-    edge_sizing = _load_edge_sizing_map(edge_df)
+    edge_sizing, edge_provenance = load_proven_edge_sizing_map(
+        Path(args.edge_sizing),
+        lifecycle_path=Path(args.lifecycle_effective),
+        opportunities_path=Path(args.opportunities),
+    )
+    if edge_provenance.get("reason"):
+        _warn(
+            "edge evidence unproven for OPEN_NEW/ADD "
+            f"({edge_provenance.get('reason')}); treating as missing"
+        )
     risk_overlay = _load_risk_overlay_map(risk_df)
     perf_by_symbol = _load_perf_by_symbol_map(perf_df)
     signals = _load_signals_map(signals_df)
@@ -1108,6 +1119,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_positions=max_positions,
         max_positions_source=max_positions_source,
     )
+    summary["edge_provenance"] = edge_provenance
 
     out_csv = Path(args.out_csv)
     out_json = Path(args.out_json)

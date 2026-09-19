@@ -36,6 +36,15 @@ from services.edge_ranking import (
     enrich_with_edge,
     FILTERED_BUCKET,
 )
+from services.edge_sizing_engine import (
+    OPPS_PROVENANCE_SCHEMA,
+    STATUS_FAIL_CLOSED,
+    STATUS_VALID,
+    provenance_sidecar_path,
+    sha256_file,
+    unique_session_date_from_df,
+    write_json_atomic,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = PROJECT_ROOT / "data" / "results"
@@ -124,11 +133,60 @@ CONTEXT_COLS = [
     "reconciled_with_broker",
     "reconciled_reason",
     "stance_adjustment",
+    "session_date",
+    "lifecycle_sha256",
+    "provenance_status",
 ]
 
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def write_opportunities_with_provenance(
+    out_path: Path,
+    df: pd.DataFrame,
+    *,
+    lifecycle_path: Path,
+    status: str,
+    invalid_reason: Optional[str] = None,
+) -> str:
+    """Replace trade_opportunities.csv with current-session provenance. Never reuse mtime."""
+    lc_sha = sha256_file(lifecycle_path) or ""
+    session = ""
+    try:
+        if lifecycle_path.is_file() and lifecycle_path.stat().st_size > 0:
+            session = unique_session_date_from_df(pd.read_csv(lifecycle_path, low_memory=False))
+    except Exception:
+        session = ""
+    emit_status = status
+    reason = invalid_reason
+    if emit_status == STATUS_VALID and not session:
+        emit_status = STATUS_FAIL_CLOSED
+        reason = reason or "opportunities_session_unproven"
+    out = df.copy() if df is not None else pd.DataFrame()
+    out["session_date"] = session
+    out["lifecycle_sha256"] = lc_sha
+    out["provenance_status"] = emit_status
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(out_path, index=False)
+    tickers: List[str] = []
+    if not out.empty and "ticker" in out.columns:
+        tickers = sorted({str(v).strip().upper() for v in out["ticker"].tolist() if str(v).strip()})
+    write_json_atomic(
+        provenance_sidecar_path(out_path),
+        {
+            "schema": OPPS_PROVENANCE_SCHEMA,
+            "status": emit_status,
+            "session_date": session or None,
+            "generated_at_utc": _utc_iso(),
+            "lifecycle_sha256": lc_sha or None,
+            "row_count": int(len(out)),
+            "tickers": tickers,
+            "invalid_reason": reason,
+        },
+    )
+    return emit_status
 
 
 def load_effective(path: Path) -> pd.DataFrame:
@@ -142,9 +200,7 @@ def load_effective(path: Path) -> pd.DataFrame:
     if "ticker" not in df.columns:
         raise ValueError("signal_lifecycle_effective.csv must include ticker")
     if "effective_position_state" not in df.columns:
-        raise ValueError(
-            "signal_lifecycle_effective.csv must include effective_position_state"
-        )
+        raise ValueError("signal_lifecycle_effective.csv must include effective_position_state")
     df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
     return df
 
@@ -160,9 +216,7 @@ def _series_lifecycle_action(df: pd.DataFrame) -> pd.Series:
     return s.fillna("").astype(str).str.strip().str.upper()
 
 
-def classify_opportunity_from_lifecycle(
-    pos_u: str, lifecycle_action_u: str
-) -> Optional[str]:
+def classify_opportunity_from_lifecycle(pos_u: str, lifecycle_action_u: str) -> Optional[str]:
     """
     Map effective position + lifecycle intent → opportunity_type.
     Authoritative: ENTRY = FLAT+BUY; ADD = LONG+ADD only (LONG+BUY must not appear after effective build).
@@ -276,8 +330,11 @@ def _output_columns(sub: pd.DataFrame) -> list[str]:
     tail = ["opportunity_type", "exploration_flag"]
     edge_tail = [c for c in EDGE_OUTPUT_COLS if c in sub.columns]
     exec_tail = [c for c in EXEC_CONTEXT_COLS if c in sub.columns]
+    prov_tail = [
+        c for c in ("session_date", "lifecycle_sha256", "provenance_status") if c in sub.columns
+    ]
     return (
-        [c for c in head if c in sub.columns] + optional + tail + edge_tail + exec_tail
+        [c for c in head if c in sub.columns] + optional + tail + edge_tail + exec_tail + prov_tail
     )
 
 
@@ -518,12 +575,8 @@ def _load_execution_context_optional() -> Optional[pd.DataFrame]:
             combined[col] = pd.Series([None] * len(combined))
 
     combined["spread_bucket"] = combined["spread_bucket"].apply(_norm_upper_or_unknown)
-    combined["execution_risk_flag"] = combined["execution_risk_flag"].apply(
-        _norm_upper_or_unknown
-    )
-    combined["execution_style"] = combined["execution_style"].apply(
-        _norm_upper_or_unknown
-    )
+    combined["execution_risk_flag"] = combined["execution_risk_flag"].apply(_norm_upper_or_unknown)
+    combined["execution_style"] = combined["execution_style"].apply(_norm_upper_or_unknown)
     combined["quote_reason"] = combined["quote_reason"].apply(_norm_upper_or_unknown)
     combined["liquidity_pressure_bucket"] = combined["liquidity_pressure_bucket"].apply(
         _norm_upper_or_unknown
@@ -587,10 +640,7 @@ def _merge_execution_context(
 
     ctx = _load_execution_context_optional()
     sources: List[str] = []
-    if (
-        EXECUTION_INTELLIGENCE_CSV.exists()
-        and EXECUTION_INTELLIGENCE_CSV.stat().st_size > 0
-    ):
+    if EXECUTION_INTELLIGENCE_CSV.exists() and EXECUTION_INTELLIGENCE_CSV.stat().st_size > 0:
         sources.append(EXECUTION_INTELLIGENCE_CSV.name)
     if EXECUTION_PLAN_CSV.exists() and EXECUTION_PLAN_CSV.stat().st_size > 0:
         sources.append(EXECUTION_PLAN_CSV.name)
@@ -687,19 +737,13 @@ def _merge_execution_context(
                 "liquidity_pressure_bucket",
             ):
                 if col in enriched.columns:
-                    cond = cond | (
-                        enriched[col].astype(str).str.upper() != EXEC_CTX_UNKNOWN
-                    )
+                    cond = cond | (enriched[col].astype(str).str.upper() != EXEC_CTX_UNKNOWN)
             for num_col in ("spread_bps", "spread_pct"):
                 if num_col in enriched.columns:
                     cond = cond | enriched[num_col].notna()
             if "quote_is_stale" in enriched.columns:
-                cond = cond | enriched["quote_is_stale"].apply(
-                    lambda v: v is True or v is False
-                )
-            matched = (
-                enriched.loc[cond]["ticker"].astype(str).str.upper().unique().tolist()
-            )
+                cond = cond | enriched["quote_is_stale"].apply(lambda v: v is True or v is False)
+            matched = enriched.loc[cond]["ticker"].astype(str).str.upper().unique().tolist()
             diag["matched_symbols"] = len(matched)
             diag["coverage_ratio"] = round(len(matched) / len(unique_tickers), 6)
     diag["unknown_rows"] = (
@@ -739,18 +783,12 @@ def _enrich_opportunities_with_edge(
     components = _load_feature_components_optional()
     if components is not None and "ticker" in enriched.columns:
         # Avoid clobbering existing columns (e.g. confidence already present).
-        merge_cols = [
-            c for c in components.columns if c == "ticker" or c not in enriched.columns
-        ]
+        merge_cols = [c for c in components.columns if c == "ticker" or c not in enriched.columns]
         if len(merge_cols) > 1:
             try:
-                enriched = enriched.merge(
-                    components[merge_cols], on="ticker", how="left"
-                )
+                enriched = enriched.merge(components[merge_cols], on="ticker", how="left")
                 diag["edge_components_loaded"] = True
-                diag["edge_components_columns"] = [
-                    c for c in merge_cols if c != "ticker"
-                ]
+                diag["edge_components_columns"] = [c for c in merge_cols if c != "ticker"]
             except Exception:
                 # Defensive: never break opportunity build because of optional enrichment.
                 enriched = out_df.copy()
@@ -765,9 +803,7 @@ def _enrich_opportunities_with_edge(
             enriched["sizing_bucket"].fillna("").astype(str).value_counts().to_dict()
         )
     if "allocation_multiplier" in enriched.columns:
-        diag["edge_eligible_rows"] = int(
-            (enriched["allocation_multiplier"] > 0.0).sum()
-        )
+        diag["edge_eligible_rows"] = int((enriched["allocation_multiplier"] > 0.0).sum())
 
     return enriched, diag
 
@@ -868,9 +904,7 @@ def build_opportunities_clean(
             "input_rows": input_rows_total,
             "blocked_execution_rows": blocked_due_exec,
             "note": (
-                "no rows left after execution_blocked filter"
-                if blocked_due_exec
-                else "empty input"
+                "no rows left after execution_blocked filter" if blocked_due_exec else "empty input"
             ),
         }
         return pd.DataFrame(columns=out_cols), zdiag, pd.DataFrame()
@@ -978,8 +1012,13 @@ def main() -> int:
     gate = evaluate_lifecycle_gate(path=args.in_path)
     print(gate.format_block())
     if gate.status == "BLOCKED":
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame().to_csv(args.out, index=False)
+        emit_status = write_opportunities_with_provenance(
+            args.out,
+            pd.DataFrame(),
+            lifecycle_path=args.in_path,
+            status=STATUS_VALID,
+            invalid_reason=None,
+        )
         diag: Dict[str, Any] = {
             "timestamp": _utc_iso(),
             "lifecycle_gate": gate.to_dict(),
@@ -1003,12 +1042,19 @@ def main() -> int:
         print(
             "[build_trade_opportunities] blocked: lifecycle gate; wrote empty trade_opportunities.csv"
         )
-        return 0
+        return 0 if emit_status == STATUS_VALID else 2
 
     try:
         df = load_effective(args.in_path)
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr)
+        write_opportunities_with_provenance(
+            args.out,
+            pd.DataFrame(),
+            lifecycle_path=args.in_path,
+            status=STATUS_FAIL_CLOSED,
+            invalid_reason="lifecycle_load_failed",
+        )
         return 2
 
     allow_new_orders, allow_new_trades = _parse_hard_risk_flags()
@@ -1046,7 +1092,12 @@ def main() -> int:
         out_df = out_df[_output_columns(out_df)].reset_index(drop=True)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    out_df.to_csv(args.out, index=False)
+    emit_status = write_opportunities_with_provenance(
+        args.out,
+        out_df,
+        lifecycle_path=args.in_path,
+        status=STATUS_VALID,
+    )
 
     try:
         diag["reason_code_semantics"] = {
@@ -1125,6 +1176,12 @@ def main() -> int:
         print(
             "[build_trade_opportunities] idle: no strict opportunities; exploration pool empty or failed filters"
         )
+    if emit_status != STATUS_VALID:
+        print(
+            f"[build_trade_opportunities] FAIL_CLOSED provenance status={emit_status}",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

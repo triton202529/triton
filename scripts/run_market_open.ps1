@@ -12,7 +12,8 @@
 #       readiness/certification never evaluate stale inputs (Phase 198W).
 #       Soft-fails to a safe-block: no orders, no artifacts, snapshot kept.
 #   E0. Universe hydration preflight (stranded symbol sync; no orders)
-#   E. Rebuild intelligence   (outcomes, pnl, perf, risk overlay, allocation)
+#   E. Rebuild intelligence   (outcomes, pnl, perf, risk overlay,
+#       current-session opportunities + edge, allocation)
 #   F. Run position management (drives exits / rotation)
 #
 # Behaviour:
@@ -398,6 +399,60 @@ try {
              -PyArgs @("-m","services.build_performance_intelligence")
     Run-Step -Label "E4. PERFORMANCE RISK OVERLAY" `
              -PyArgs @("-m","services.performance_risk_overlay")
+
+    # ── E4.5 / E4.6. Current-session opportunities + edge before allocation ──
+    # These producers must not abort the sequence: EXIT/TRIM still need E5.
+    # A failed or incomplete producer replaces any prior edge file so the June
+    # CSV cannot remain current evidence.
+    Write-Host ""
+    Write-Host "[E4.5 BUILD TRADE OPPORTUNITIES]" -ForegroundColor Yellow
+    Write-Host ">>> python -m services.build_trade_opportunities" -ForegroundColor Cyan
+    $prevEapOpps = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $oppsOut = & python -m services.build_trade_opportunities 2>&1
+        $oppsRc = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEapOpps
+    }
+    if ($null -eq $oppsRc) { $oppsRc = 1 }
+    foreach ($line in @($oppsOut)) {
+        $text = if ($null -eq $line) { "" } else { [string]$line }
+        Write-Host $text
+    }
+    $edgeRc = 2
+    if ([int]$oppsRc -eq 0) {
+        Write-Host ""
+        Write-Host "[E4.6 EDGE SIZING ENGINE]" -ForegroundColor Yellow
+        Write-Host ">>> python -m services.edge_sizing_engine" -ForegroundColor Cyan
+        $prevEapEdge = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $edgeOut = & python -m services.edge_sizing_engine 2>&1
+            $edgeRc = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $prevEapEdge
+        }
+        if ($null -eq $edgeRc) { $edgeRc = 1 }
+        foreach ($line in @($edgeOut)) {
+            $text = if ($null -eq $line) { "" } else { [string]$line }
+            Write-Host $text
+        }
+    } else {
+        Write-Host ""
+        Write-Host "[E4.6 EDGE SIZING ENGINE] skipped (opportunities producer failed); invalidating prior edge evidence" -ForegroundColor Yellow
+    }
+    if (([int]$oppsRc -ne 0) -or ([int]$edgeRc -ne 0)) {
+        Write-Host "[FAIL-CLOSED] replacing prior edge file so it is not current evidence" -ForegroundColor Yellow
+        $prevEapInv = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & python -m services.edge_sizing_engine --invalidate-current-evidence 2>&1 | ForEach-Object { Write-Host $_ }
+        } finally {
+            $ErrorActionPreference = $prevEapInv
+        }
+    }
+
     Run-Step -Label "E5. PORTFOLIO ALLOCATION ENGINE" `
              -PyArgs @("-m","services.portfolio_allocation_engine")
 

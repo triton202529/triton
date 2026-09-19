@@ -1143,6 +1143,191 @@ def validate_paper_entry_dispatch_contract(
     return True, "OK", meta
 
 
+PAPER_ENTRY_LIFECYCLE_STANCES = frozenset({"BUY", "ADD"})
+REASON_LIFECYCLE_SESSION_UNPROVEN = "LIFECYCLE_SESSION_UNPROVEN"
+REASON_LIFECYCLE_STANCE_MISSING = "LIFECYCLE_STANCE_MISSING"
+REASON_LIFECYCLE_STANCE_NOT_ENTRY = "LIFECYCLE_STANCE_NOT_ENTRY"
+REASON_EDGE_EVIDENCE_UNPROVEN = "EDGE_EVIDENCE_UNPROVEN"
+
+
+def _normalize_session_date(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"nan", "none", "nat", "unknown"}:
+        return ""
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").date().isoformat()
+    except Exception:
+        return ""
+
+
+def load_independent_current_session_lifecycle_stances(
+    lifecycle_path: Optional[Path] = None,
+) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """
+    Independently read current-session effective lifecycle stances.
+    Caller-supplied allocation labels or dispatch contracts are ignored.
+    """
+    path = (
+        Path(lifecycle_path)
+        if lifecycle_path is not None
+        else (RESULTS / "signal_lifecycle_effective.csv")
+    )
+    info: Dict[str, Any] = {
+        "ok": False,
+        "session_date": None,
+        "reason": REASON_LIFECYCLE_SESSION_UNPROVEN,
+        "row_count": 0,
+        "source": str(path),
+    }
+    if not path.is_file():
+        info["reason"] = "lifecycle_effective_missing"
+        return {}, info
+    try:
+        df = pd.read_csv(path, low_memory=False)
+    except Exception as exc:
+        info["reason"] = f"lifecycle_effective_unreadable:{exc}"
+        return {}, info
+    if df is None or df.empty:
+        info["reason"] = "lifecycle_effective_empty"
+        return {}, info
+    sessions = set()
+    for col in ("session_as_of_date", "session_date", "as_of_date"):
+        if col not in df.columns:
+            continue
+        found = {_normalize_session_date(v) for v in df[col].tolist()}
+        found.discard("")
+        if len(found) == 1:
+            sessions = found
+            break
+        if len(found) > 1:
+            info["reason"] = "lifecycle_session_mixed"
+            return {}, info
+    if len(sessions) != 1:
+        info["reason"] = REASON_LIFECYCLE_SESSION_UNPROVEN
+        return {}, info
+    session = sessions.pop()
+    sym_col = "ticker" if "ticker" in df.columns else ("symbol" if "symbol" in df.columns else None)
+    if not sym_col:
+        info["reason"] = "lifecycle_effective_schema_invalid"
+        return {}, info
+    stances: Dict[str, str] = {}
+    for _, row in df.iterrows():
+        sym = _norm_sym(row.get(sym_col))
+        if not sym:
+            continue
+        stance = (
+            str(
+                row.get("effective_stance")
+                or row.get("lifecycle_action")
+                or row.get("stance")
+                or ""
+            )
+            .strip()
+            .upper()
+        )
+        stances[sym] = stance
+    info["ok"] = True
+    info["session_date"] = session
+    info["reason"] = None
+    info["row_count"] = len(stances)
+    return stances, info
+
+
+def _row_is_paper_buy_add(row: Any) -> bool:
+    stance = _opp_to_stance(row)
+    if stance in PAPER_ENTRY_LIFECYCLE_STANCES:
+        return True
+    action = str(getattr(row, "get", lambda *_: "")("recommended_action") or "").strip().upper()
+    if action in ("OPEN_NEW", "ADD"):
+        return True
+    ot = str(row.get("opportunity_type") or "").strip().upper()
+    return ot in ("ENTRY", "ADD", "OPEN_NEW")
+
+
+def _row_is_sell_side(row: Any) -> bool:
+    stance = _opp_to_stance(row)
+    return stance in ("TRIM", "EXIT")
+
+
+def apply_paper_buy_add_entry_boundary(
+    df: pd.DataFrame,
+    *,
+    allocation_used: bool = False,
+    dispatch_contract: Optional[Dict[str, Any]] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Last common paper BUY/ADD boundary before any broker method.
+
+    Independently verifies same-symbol current-session lifecycle BUY/ADD and
+    proven current-session edge. A dispatch contract, allocation label, or
+    opportunities path is not sufficient.
+    """
+    meta: Dict[str, Any] = {
+        "applied": True,
+        "rejected": {},
+        "allowed": [],
+        "sell_rows_preserved": 0,
+        "allocation_used": bool(allocation_used or dispatch_contract),
+        "broker_invoked": False,
+    }
+    if df is None or df.empty:
+        meta["empty_input"] = True
+        return df if df is not None else pd.DataFrame(), meta
+
+    stances, lc_info = load_independent_current_session_lifecycle_stances()
+    meta["lifecycle_gate"] = lc_info
+    proven: Dict[str, Any] = {}
+    edge_diag: Dict[str, Any] = {}
+    try:
+        from services.edge_sizing_engine import load_proven_edge_sizing_map
+
+        proven, edge_diag = load_proven_edge_sizing_map(
+            EDGE_SIZING_RECOMMENDATIONS_CSV,
+            lifecycle_path=RESULTS / "signal_lifecycle_effective.csv",
+            opportunities_path=DEFAULT_OPPS,
+        )
+    except Exception as exc:
+        edge_diag = {"status": "FAIL_CLOSED", "reason": f"edge_join_error:{exc}"}
+    meta["edge_provenance"] = edge_diag
+
+    keep_idx: List[Any] = []
+    allowed: List[str] = []
+    rejected: Dict[str, List[str]] = {}
+    sell_n = 0
+    for idx, row in df.iterrows():
+        if _row_is_sell_side(row) and not _row_is_paper_buy_add(row):
+            keep_idx.append(idx)
+            sell_n += 1
+            continue
+        if not _row_is_paper_buy_add(row):
+            keep_idx.append(idx)
+            continue
+        sym = _norm_sym(row.get("ticker") if "ticker" in df.columns else row.get("symbol"))
+        reasons: List[str] = []
+        if not lc_info.get("ok"):
+            reasons.append(str(lc_info.get("reason") or REASON_LIFECYCLE_SESSION_UNPROVEN))
+        else:
+            stance = str(stances.get(sym) or "").strip().upper()
+            if not stance:
+                reasons.append(REASON_LIFECYCLE_STANCE_MISSING)
+            elif stance not in PAPER_ENTRY_LIFECYCLE_STANCES:
+                reasons.append(REASON_LIFECYCLE_STANCE_NOT_ENTRY)
+        if not proven or sym not in proven:
+            reasons.append(REASON_EDGE_EVIDENCE_UNPROVEN)
+        if reasons:
+            rejected[sym or f"row_{idx}"] = reasons
+            continue
+        keep_idx.append(idx)
+        if sym and sym not in allowed:
+            allowed.append(sym)
+    meta["rejected"] = rejected
+    meta["allowed"] = allowed
+    meta["sell_rows_preserved"] = sell_n
+    if not keep_idx:
+        return df.iloc[0:0].copy(), meta
+    return df.loc[keep_idx].copy(), meta
+
+
 def enforce_dispatch_plan_symbols(
     planned: List[PlannedOrder],
     contract: Dict[str, Any],
@@ -4447,6 +4632,21 @@ def preview_planned_buy_symbols(
             meta["planner_selected_symbols"] = []
         return [], meta
 
+    if str(mode).lower() == "paper":
+        df, boundary = apply_paper_buy_add_entry_boundary(
+            df,
+            allocation_used=governed_mode,
+            dispatch_contract=None,
+        )
+        meta["paper_entry_boundary"] = boundary
+        if df.empty:
+            meta["empty_opportunities"] = True
+            meta["planner_selected_symbols"] = []
+            meta["planner_rejected_symbols"] = {
+                sym: ",".join(reasons) for sym, reasons in (boundary.get("rejected") or {}).items()
+            }
+            return [], meta
+
     positions, acct, broker = load_broker_state(mode)
     session_tag = f"preview_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
@@ -4699,7 +4899,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
     else:
         df = load_trade_opportunities(op_path)
-    positions, acct, broker = load_broker_state(args.mode)
+    paper_boundary: Dict[str, Any] = {}
+    if str(args.mode).lower() == "paper":
+        df, paper_boundary = apply_paper_buy_add_entry_boundary(
+            df,
+            allocation_used=bool(dispatch_contract),
+            dispatch_contract=dispatch_contract,
+        )
+        dispatch_meta["paper_entry_boundary"] = paper_boundary
+        if paper_boundary.get("rejected"):
+            print(
+                "[execute_trades] paper BUY/ADD boundary rejected "
+                f"{sorted(paper_boundary['rejected'])}",
+                flush=True,
+            )
+    if df is None or df.empty:
+        positions, acct, broker = {}, AccountSnapshot(), None
+    else:
+        positions, acct, broker = load_broker_state(args.mode)
 
     planned: List[PlannedOrder] = []
     plan_lines: List[PlanLine] = []
