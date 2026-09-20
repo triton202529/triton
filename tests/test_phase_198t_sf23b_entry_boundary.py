@@ -271,7 +271,7 @@ def test_no_contract_direct_main_does_not_touch_broker(monkeypatch, tmp_path: Pa
         )(),
     )
     rc = execute_main(["--mode", "paper", "--execute"])
-    assert rc == 0
+    assert rc == 2
     assert _BROKER == []
     assert _FORBIDDEN == []
 

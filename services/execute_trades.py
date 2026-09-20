@@ -62,6 +62,8 @@ DEFAULT_OPPS = RESULTS / "trade_opportunities.csv"
 DEFAULT_ALLOC_RECOMMENDATIONS = RESULTS / "portfolio_allocation_recommendations.csv"
 DISPATCH_CONTRACT_DEFAULT_PATH = LIVE / "paper_entry_dispatch_contract.json"
 DISPATCH_AUDIT_PATH = RESULTS / "execute_trades_dispatch_audit.json"
+EXECUTE_DISPATCH_CONTRACT_MAX_AGE_MINUTES = 15
+REASON_DISPATCH_CONTRACT_REQUIRED = "DISPATCH_CONTRACT_REQUIRED"
 DEFAULT_ORDERS_TODAY = LIVE / "orders_today.csv"
 EXEC_PLAN_JSON = RESULTS / "execution_plan.json"
 EXEC_PLAN_CSV = RESULTS / "execution_plan.csv"
@@ -1093,7 +1095,11 @@ def compute_dispatch_contract_checksum(doc: Dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def load_paper_entry_dispatch_contract(path: Path) -> Tuple[Optional[Dict[str, Any]], str]:
+def load_paper_entry_dispatch_contract(
+    path: Path,
+    *,
+    require_checksum: bool = False,
+) -> Tuple[Optional[Dict[str, Any]], str]:
     if not path.is_file():
         return None, "dispatch contract file missing"
     try:
@@ -1103,11 +1109,49 @@ def load_paper_entry_dispatch_contract(path: Path) -> Tuple[Optional[Dict[str, A
     if not isinstance(doc, dict):
         return None, "dispatch contract invalid shape"
     expected = doc.get("checksum")
+    if require_checksum and not expected:
+        return None, "dispatch contract checksum missing"
     if expected:
         actual = compute_dispatch_contract_checksum(doc)
         if str(expected) != actual:
             return None, "dispatch contract checksum mismatch"
     return doc, ""
+
+
+def require_execute_dispatch_contract(
+    path: Optional[Path],
+    *,
+    mode: str,
+) -> Tuple[Optional[Dict[str, Any]], str, Dict[str, Any]]:
+    """Fail-closed BUY/ADD execute proof. Does not synthesize or default a contract."""
+    meta: Dict[str, Any] = {"execute_trades_dispatch_mode": True}
+    if path is None:
+        return None, REASON_DISPATCH_CONTRACT_REQUIRED, meta
+    meta["dispatch_contract_path"] = str(path)
+    doc, load_err = load_paper_entry_dispatch_contract(path, require_checksum=True)
+    if load_err or doc is None:
+        return None, f"DISPATCH_CONTRACT_INVALID:{load_err}", meta
+    ok, reason, val_meta = validate_paper_entry_dispatch_contract(doc, mode=mode)
+    meta.update(val_meta)
+    if not ok:
+        return None, reason, meta
+    if str(mode or "").lower() != "paper":
+        return None, "DISPATCH_MODE_MISMATCH", meta
+    if doc.get("live_execution_permitted") is not False:
+        return None, "DISPATCH_LIVE_EXECUTION_FORBIDDEN", meta
+    if str(doc.get("paper_arm_status") or "").upper() != "VALID":
+        return None, "DISPATCH_PAPER_ARM_NOT_VALID", meta
+    gen = _parse_dispatch_dt(doc.get("generated_at_utc"))
+    if gen is None:
+        return None, "DISPATCH_GENERATED_AT_MISSING", meta
+    now = datetime.now(timezone.utc)
+    if gen > now + timedelta(seconds=30):
+        return None, "DISPATCH_GENERATED_AT_FUTURE", meta
+    if (now - gen) > timedelta(minutes=EXECUTE_DISPATCH_CONTRACT_MAX_AGE_MINUTES):
+        return None, "DISPATCH_CONTRACT_STALE", meta
+    meta["dispatch_id"] = doc.get("dispatch_id")
+    meta["planner_input_mode"] = doc.get("planner_input_mode")
+    return doc, "OK", meta
 
 
 def validate_paper_entry_dispatch_contract(
@@ -1148,6 +1192,7 @@ REASON_LIFECYCLE_SESSION_UNPROVEN = "LIFECYCLE_SESSION_UNPROVEN"
 REASON_LIFECYCLE_STANCE_MISSING = "LIFECYCLE_STANCE_MISSING"
 REASON_LIFECYCLE_STANCE_NOT_ENTRY = "LIFECYCLE_STANCE_NOT_ENTRY"
 REASON_EDGE_EVIDENCE_UNPROVEN = "EDGE_EVIDENCE_UNPROVEN"
+REASON_INDEPENDENT_BLOCK_NEW_BUY = "INDEPENDENT_BLOCK_NEW_BUY"
 
 
 def _normalize_session_date(value: Any) -> str:
@@ -1233,6 +1278,63 @@ def load_independent_current_session_lifecycle_stances(
     return stances, info
 
 
+def load_independent_block_new_buy_symbols(
+    overlay_path: Optional[Path] = None,
+) -> Tuple[Set[str], Dict[str, Any]]:
+    """Independently read BLOCK_NEW_BUY / FORCE_EXIT from the current overlay.
+
+    Uses patched RESULTS, never a synthesized fallback and never a production
+    default path. Missing overlay means no symbols are blocked by this gate.
+    """
+    path = (
+        Path(overlay_path)
+        if overlay_path is not None
+        else (RESULTS / "performance_risk_overlay.csv")
+    )
+    info: Dict[str, Any] = {"ok": True, "source": str(path), "count": 0, "reason": None}
+    blocked: Set[str] = set()
+    if not path.is_file():
+        info["reason"] = "risk_overlay_missing"
+        return blocked, info
+    try:
+        df = pd.read_csv(path, low_memory=False)
+    except Exception as exc:
+        info["ok"] = False
+        info["reason"] = f"risk_overlay_unreadable:{exc}"
+        return blocked, info
+    if df is None or df.empty:
+        info["reason"] = "risk_overlay_empty"
+        return blocked, info
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    if "ticker" in df.columns:
+        sym_col: Optional[str] = "ticker"
+    elif "symbol" in df.columns:
+        sym_col = "symbol"
+    else:
+        sym_col = None
+    if "risk_flag" in df.columns:
+        flag_col: Optional[str] = "risk_flag"
+    elif "drag_flag" in df.columns:
+        flag_col = "drag_flag"
+    else:
+        flag_col = None
+    if not sym_col or not flag_col:
+        info["ok"] = False
+        info["reason"] = "risk_overlay_columns_missing"
+        return blocked, info
+    for _, row in df.iterrows():
+        sym = _norm_sym(row.get(sym_col))
+        if not sym:
+            continue
+        raw = str(row.get(flag_col) or "").strip().upper()
+        parts = {p.strip() for p in raw.split("|") if p.strip()}
+        if "BLOCK_NEW_BUY" in parts or "FORCE_EXIT" in parts:
+            blocked.add(sym)
+    info["count"] = len(blocked)
+    return blocked, info
+
+
 def _row_is_paper_buy_add(row: Any) -> bool:
     stance = _opp_to_stance(row)
     if stance in PAPER_ENTRY_LIFECYCLE_STANCES:
@@ -1258,9 +1360,10 @@ def apply_paper_buy_add_entry_boundary(
     """
     Last common paper BUY/ADD boundary before any broker method.
 
-    Independently verifies same-symbol current-session lifecycle BUY/ADD and
-    proven current-session edge. A dispatch contract, allocation label, or
-    opportunities path is not sufficient.
+    Independently verifies same-symbol current-session lifecycle BUY/ADD,
+    proven current-session edge, and independent BLOCK_NEW_BUY / FORCE_EXIT.
+    A dispatch contract, allocation label, or opportunities path is not
+    sufficient. Does not copy paper_entry_loop_stage arm or confirmation logic.
     """
     meta: Dict[str, Any] = {
         "applied": True,
@@ -1276,6 +1379,8 @@ def apply_paper_buy_add_entry_boundary(
 
     stances, lc_info = load_independent_current_session_lifecycle_stances()
     meta["lifecycle_gate"] = lc_info
+    blocked_new_buy, risk_info = load_independent_block_new_buy_symbols()
+    meta["independent_risk"] = risk_info
     proven: Dict[str, Any] = {}
     edge_diag: Dict[str, Any] = {}
     try:
@@ -1314,6 +1419,10 @@ def apply_paper_buy_add_entry_boundary(
                 reasons.append(REASON_LIFECYCLE_STANCE_NOT_ENTRY)
         if not proven or sym not in proven:
             reasons.append(REASON_EDGE_EVIDENCE_UNPROVEN)
+        if risk_info.get("ok") is False:
+            reasons.append(str(risk_info.get("reason") or REASON_INDEPENDENT_BLOCK_NEW_BUY))
+        elif sym in blocked_new_buy:
+            reasons.append(REASON_INDEPENDENT_BLOCK_NEW_BUY)
         if reasons:
             rejected[sym or f"row_{idx}"] = reasons
             continue
@@ -4380,10 +4489,15 @@ def maybe_execute_plan(
     drop_rows: Optional[List[Dict[str, Any]]] = None,
     session_tag: str = "",
     plan_extra: Optional[Dict[str, Any]] = None,
+    dispatch_contract: Optional[Dict[str, Any]] = None,
 ) -> Tuple[int, int, List[str]]:
     """Returns (exit_code, orders_executed_as_intent, block_reasons)."""
     if dry_run or not planned:
         return 0, 0, []
+
+    buy_add_planned = [p for p in planned if str(getattr(p, "side", "") or "").lower() == "buy"]
+    if buy_add_planned and not dispatch_contract:
+        return 2, 0, [REASON_DISPATCH_CONTRACT_REQUIRED]
 
     if broker is None:
         return 1, 0, ["BROKER_UNAVAILABLE"]
@@ -4829,9 +4943,35 @@ def main(argv: Optional[List[str]] = None) -> int:
     dispatch_contract: Optional[Dict[str, Any]] = None
     dispatch_meta: Dict[str, Any] = {"execute_trades_dispatch_mode": False}
     dispatch_path: Optional[Path] = None
-    if args.dispatch_contract:
+    if args.execute:
+        if not args.dispatch_contract:
+            return _dispatch_block_and_exit(
+                reason=REASON_DISPATCH_CONTRACT_REQUIRED,
+                mode=args.mode,
+                contract=None,
+                dispatch_meta={"execute_trades_dispatch_mode": True},
+                dry_run=False,
+            )
         dispatch_path = Path(args.dispatch_contract)
-        doc, load_err = load_paper_entry_dispatch_contract(dispatch_path)
+        doc, val_reason, val_meta = require_execute_dispatch_contract(dispatch_path, mode=args.mode)
+        dispatch_meta = dict(val_meta)
+        if doc is None:
+            return _dispatch_block_and_exit(
+                reason=val_reason,
+                mode=args.mode,
+                contract=None,
+                dispatch_meta=dispatch_meta,
+                dry_run=False,
+            )
+        dispatch_contract = doc
+        print(
+            f"[execute_trades] dispatch_mode=true dispatch_id={doc.get('dispatch_id')} "
+            f"final_selected={doc.get('final_selected_symbols')}",
+            flush=True,
+        )
+    elif args.dispatch_contract:
+        dispatch_path = Path(args.dispatch_contract)
+        doc, load_err = load_paper_entry_dispatch_contract(dispatch_path, require_checksum=True)
         if load_err or doc is None:
             return _dispatch_block_and_exit(
                 reason=f"DISPATCH_CONTRACT_INVALID:{load_err}",
@@ -5350,6 +5490,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         drop_rows=drop_rows,
         session_tag=session_tag,
         plan_extra={"sector_cap_summary": sector_summary},
+        dispatch_contract=dispatch_contract,
     )
     summary.orders_executed = executed
     summary.blocked = rc == 2
