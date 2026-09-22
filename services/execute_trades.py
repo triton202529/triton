@@ -538,7 +538,11 @@ def _row_final_quality_score(row: pd.Series) -> float:
     then post-attach / post-adaptation `_exec_final_score` when set (so runtime adaptation
     actually affects gating and sizing); otherwise confidence × delta_pct via
     entry_priority_score (same base as pre-div BUY/ADD scoring).
+    BUY/ADD rows with rejected operational evidence do not fall through to zero.
     """
+    reject = str(row.get("_quality_evidence_reject") or "").strip()
+    if reject and _opp_to_stance(row) in ("BUY", "ADD"):
+        return float("nan")
     if "_div_final" in row.index:
         fin = row.get("_div_final")
         try:
@@ -566,6 +570,26 @@ def _row_final_quality_score(row: pd.Series) -> float:
                     return v
         except Exception:
             pass
+    stance = _opp_to_stance(row)
+    if stance in ("BUY", "ADD"):
+        reject = str(row.get("_quality_evidence_reject") or "").strip()
+        if reject:
+            return float("nan")
+        if "_operational_quality" in row.index:
+            try:
+                op = row.get("_operational_quality")
+                if op is not None and not pd.isna(op):
+                    parsed = float(op)
+                    if math.isfinite(parsed):
+                        return parsed
+            except Exception:
+                return float("nan")
+        value, err = _parse_operational_composite_score(
+            row.get("score") if "score" in row.index else None
+        )
+        if err or value is None:
+            return float("nan")
+        return value
     conf = _safe_float(row.get("confidence"), 0.0)
     d_pct = _safe_float(row.get("delta_pct"), 0.0)
     return entry_priority_score(conf, d_pct)
@@ -598,30 +622,37 @@ def _normalize_exec_final_score_percentile_rank(df: pd.DataFrame) -> pd.DataFram
         return df
     out = df.copy()
     raw = pd.to_numeric(out["_exec_final_score"], errors="coerce")
-    if bool(raw.isna().any()):
-        fill = float(raw.min()) if raw.notna().any() else 0.0
-        raw = raw.fillna(fill)
-    n = int(len(out))
+    if "_quality_evidence_reject" in out.columns:
+        rejected = out["_quality_evidence_reject"].fillna("").astype(str).str.strip().ne("")
+    else:
+        rejected = pd.Series(False, index=out.index)
+    finite_mask = raw.map(lambda v: isinstance(v, (int, float)) and math.isfinite(float(v)))
+    valid = (~rejected) & finite_mask
+    scored = raw[valid]
+    n = int(valid.sum())
+    if n == 0:
+        print("[SCORE_DISTRIBUTION] n=0 no proven operational quality rows")
+        return out
     print(
-        f"[SCORE_DISTRIBUTION] n={n} min={float(raw.min()):.6f} max={float(raw.max()):.6f} "
-        f"mean={float(raw.mean()):.6f} median={float(raw.median()):.6f}"
+        f"[SCORE_DISTRIBUTION] n={n} min={float(scored.min()):.6f} max={float(scored.max()):.6f} "
+        f"mean={float(scored.mean()):.6f} median={float(scored.median()):.6f}"
     )
     if n < 2:
         x = 1.0
-        out["_exec_final_score"] = x
-        out["final_score"] = x
+        out.loc[valid, "_exec_final_score"] = x
+        out.loc[valid, "final_score"] = x
         if "_div_final" in out.columns:
-            out["_div_final"] = x
+            out.loc[valid, "_div_final"] = x
         print(
             "[SCORE_DISTRIBUTION] normalized=percentile_rank n=1 min=1.0 max=1.0 mean=1.0 median=1.0"
         )
         return out
-    rmin = raw.rank(method="min", ascending=True)
+    rmin = scored.rank(method="min", ascending=True)
     norm = (rmin - 1.0) / float(n - 1)
-    out["_exec_final_score"] = norm
-    out["final_score"] = norm
+    out.loc[valid, "_exec_final_score"] = norm
+    out.loc[valid, "final_score"] = norm
     if "_div_final" in out.columns:
-        out["_div_final"] = norm
+        out.loc[valid, "_div_final"] = norm
     npv = pd.to_numeric(out["_exec_final_score"], errors="coerce")
     print(
         f"[SCORE_DISTRIBUTION] normalized=percentile_rank min={float(npv.min()):.6f} max={float(npv.max()):.6f} "
@@ -796,6 +827,139 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+REASON_QUALITY_EVIDENCE_MISSING = "QUALITY_EVIDENCE_MISSING"
+REASON_QUALITY_EVIDENCE_STALE = "QUALITY_EVIDENCE_STALE"
+REASON_QUALITY_EVIDENCE_MALFORMED = "QUALITY_EVIDENCE_MALFORMED"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _parse_operational_composite_score(raw: Any) -> Tuple[Optional[float], Optional[str]]:
+    """Parse generate_signals composite `score`.
+
+    That score is the current non-RF operational quality: a documented [0, 1]
+    blend of processed-bar momentum, trend, breakout, and volatility.
+    Confidence is derived from it, and edge_score adds confidence again, so
+    neither is an independent quality input. rf_delta_pct is never read.
+    A missing value stays missing. It is not coerced to a tradable 0.
+    """
+    if raw is None:
+        return None, REASON_QUALITY_EVIDENCE_MISSING
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text == "" or text.lower() in {"nan", "none", "null", "nat"}:
+            return None, REASON_QUALITY_EVIDENCE_MISSING
+        try:
+            value = float(text)
+        except Exception:
+            return None, REASON_QUALITY_EVIDENCE_MALFORMED
+    else:
+        try:
+            if pd.isna(raw):
+                return None, REASON_QUALITY_EVIDENCE_MISSING
+        except Exception:
+            pass
+        try:
+            value = float(raw)
+        except Exception:
+            return None, REASON_QUALITY_EVIDENCE_MALFORMED
+    if math.isnan(value) or math.isinf(value):
+        return None, REASON_QUALITY_EVIDENCE_MALFORMED
+    if value < 0.0 or value > 1.0:
+        return None, REASON_QUALITY_EVIDENCE_MALFORMED
+    return float(value), None
+
+
+def _operational_quality_binding(lifecycle_path: Optional[Path] = None) -> Dict[str, Any]:
+    path = (
+        Path(lifecycle_path)
+        if lifecycle_path is not None
+        else (RESULTS / "signal_lifecycle_effective.csv")
+    )
+    _stances, info = load_independent_current_session_lifecycle_stances(path)
+    sha = _sha256_file(path) if path.is_file() else ""
+    return {
+        "ok": bool(info.get("ok")) and bool(sha),
+        "session": info.get("session_date") if info.get("ok") else None,
+        "sha": sha,
+        "info": info,
+        "path": str(path),
+    }
+
+
+def _row_operational_quality(
+    row: pd.Series, binding: Dict[str, Any]
+) -> Tuple[Optional[float], Optional[str]]:
+    """Validate composite score against the current effective-lifecycle binding."""
+    preset = str(row.get("_quality_evidence_reject") or "").strip()
+    if preset:
+        return None, preset
+    if "score" not in row.index:
+        return None, REASON_QUALITY_EVIDENCE_MISSING
+    value, err = _parse_operational_composite_score(row.get("score"))
+    if err:
+        return None, err
+    if not binding.get("ok") or not binding.get("session") or not binding.get("sha"):
+        return None, REASON_QUALITY_EVIDENCE_STALE
+    provenance = str(row.get("provenance_status") or "").strip().upper()
+    if not provenance:
+        return None, REASON_QUALITY_EVIDENCE_MISSING
+    if provenance != "VALID":
+        return None, REASON_QUALITY_EVIDENCE_STALE
+    session = _normalize_session_date(row.get("session_date") or row.get("session_as_of_date"))
+    if not session:
+        return None, REASON_QUALITY_EVIDENCE_MISSING
+    if session != binding.get("session"):
+        return None, REASON_QUALITY_EVIDENCE_STALE
+    row_sha = str(row.get("lifecycle_sha256") or "").strip().lower()
+    if not row_sha:
+        return None, REASON_QUALITY_EVIDENCE_MISSING
+    if row_sha != str(binding.get("sha") or "").lower():
+        return None, REASON_QUALITY_EVIDENCE_STALE
+    return value, None
+
+
+def _annotate_operational_quality(df: pd.DataFrame, binding: Dict[str, Any]) -> pd.DataFrame:
+    """Mark BUY/ADD rows whose composite score is missing, stale, or malformed."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    if "_quality_evidence_reject" not in out.columns:
+        out["_quality_evidence_reject"] = ""
+    if "_operational_quality" not in out.columns:
+        out["_operational_quality"] = float("nan")
+    counts: Dict[str, int] = {}
+    if "ticker" in out.columns:
+        for raw_ticker in out["ticker"].tolist():
+            sym = _norm_sym(raw_ticker)
+            if sym:
+                counts[sym] = counts.get(sym, 0) + 1
+    for idx in out.index:
+        row = out.loc[idx]
+        stance = _opp_to_stance(row)
+        if stance not in ("BUY", "ADD"):
+            continue
+        sym = _norm_sym(row.get("ticker"))
+        if sym and counts.get(sym, 0) > 1:
+            out.at[idx, "_quality_evidence_reject"] = REASON_QUALITY_EVIDENCE_MALFORMED
+            out.at[idx, "_operational_quality"] = float("nan")
+            continue
+        value, err = _row_operational_quality(row, binding)
+        if err:
+            out.at[idx, "_quality_evidence_reject"] = err
+            out.at[idx, "_operational_quality"] = float("nan")
+        else:
+            out.at[idx, "_quality_evidence_reject"] = ""
+            out.at[idx, "_operational_quality"] = float(value)
+    return out
+
+
 def _norm_sym(x: Any) -> str:
     return identity_key(x)
 
@@ -907,6 +1071,9 @@ def _map_planner_skip_to_audit_reason(code: str) -> str:
     mapping = {
         "BELOW_MIN_SCORE": "final_score too low",
         "NEGATIVE_SCORE_BLOCK": "final_score too low",
+        "QUALITY_EVIDENCE_MISSING": "QUALITY_EVIDENCE_MISSING",
+        "QUALITY_EVIDENCE_STALE": "QUALITY_EVIDENCE_STALE",
+        "QUALITY_EVIDENCE_MALFORMED": "QUALITY_EVIDENCE_MALFORMED",
         "SCORE_SIZED_TOO_SMALL": "sizing zero",
         "BELOW_MIN_ORDER_NOTIONAL": "sizing zero",
         "BELOW_MIN_NOTIONAL": "sizing zero",
@@ -1757,6 +1924,14 @@ def _compute_diversification_adjustment(
 
 def _diversification_diagnostics_stats(scored: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Min/median/max and dominance note; dominance uses median(|effective_adj|) vs median(base)."""
+
+    def _finite_final(item: Dict[str, Any]) -> bool:
+        try:
+            return math.isfinite(float(item.get("final")))
+        except Exception:
+            return False
+
+    scored = [x for x in scored if _finite_final(x)]
     if not scored:
         return {}
     bases = [float(x["base"]) for x in scored]
@@ -1844,7 +2019,14 @@ def _maybe_reorder_df_for_diversification(
             continue
         conf = _safe_float(row.get("confidence"), 0.0)
         d_pct = _safe_float(row.get("delta_pct"), 0.0)
-        base = entry_priority_score(conf, d_pct)
+        reject = str(row.get("_quality_evidence_reject") or "").strip()
+        op_raw = row.get("_operational_quality") if "_operational_quality" in row.index else None
+        try:
+            base = float(op_raw) if op_raw is not None and not pd.isna(op_raw) else float("nan")
+        except Exception:
+            base = float("nan")
+        if reject or not math.isfinite(base):
+            base = float("nan")
         est = _estimate_buy_add_notional_for_ranking(
             sym,
             row,
@@ -1868,7 +2050,7 @@ def _maybe_reorder_df_for_diversification(
         raw_adj = float(raw_adj)
         scale = float(cfg.get("diversification_scale", 0.02) or 0.02)
         eff_adj = raw_adj * scale
-        final = base + eff_adj
+        final = base + eff_adj if math.isfinite(base) else float("nan")
         sec_lab = get_sector(sym)
         scored.append(
             {
@@ -1896,7 +2078,12 @@ def _maybe_reorder_df_for_diversification(
     if not scored:
         return df, {**empty, "enabled": True, "adjusted": 0}
 
-    order = sorted(range(len(scored)), key=lambda i: (-scored[i]["final"], scored[i]["pos"]))
+    def _div_sort_key(i: int) -> Tuple[float, int]:
+        fin = scored[i]["final"]
+        rank = -fin if isinstance(fin, (int, float)) and math.isfinite(fin) else float("inf")
+        return (rank, scored[i]["pos"])
+
+    order = sorted(range(len(scored)), key=_div_sort_key)
     out = work.copy()
     for c in ("_div_base", "_div_adj", "_div_final", "_div_raw_adj"):
         if c not in out.columns:
@@ -2038,6 +2225,7 @@ def build_execution_plan(
         "top_positive": [],
         "top_negative": [],
     }
+    df = _annotate_operational_quality(df, _operational_quality_binding())
     working_df = df
     if not working_df.empty:
         working_df, div_summary = _maybe_reorder_df_for_diversification(
@@ -2202,7 +2390,14 @@ def build_execution_plan(
         }
 
         def _quality_skip_reason(sym_q: str, row_q: pd.Series) -> Optional[str]:
+            evidence = str(row_q.get("_quality_evidence_reject") or "").strip()
+            if evidence:
+                print(f"[QUALITY_EVIDENCE] symbol={sym_q} reason={evidence}")
+                return evidence
             fs = _row_execution_final_score(row_q)
+            if not math.isfinite(fs):
+                print(f"[QUALITY_EVIDENCE] symbol={sym_q} reason={REASON_QUALITY_EVIDENCE_MISSING}")
+                return REASON_QUALITY_EVIDENCE_MISSING
             if bool(cfg.get("block_negative_final_score", True)) and fs < 0:
                 print(f"[QUALITY_BLOCK] symbol={sym_q} final_score={fs:.4f}")
                 quality_summary["blocked_negative"] = quality_summary.get("blocked_negative", 0) + 1

@@ -231,7 +231,7 @@ $script:MarketOpenInvocationId = {json.dumps(inv)}
 $script:HandoffSessionDate = {json.dumps(session_date)}
 $script:HandoffIssuedAt = {json.dumps(issued_at)}
 {_handoff_fn_source()}
-Write-InvocationHandoff -Status {json.dumps(status)} -InterlockSha256 {json.dumps(interlock_sha)} -FBindingSha256 {json.dumps(f_binding_sha)}
+Write-InvocationHandoff -Status {json.dumps(status)} -InvocationId {json.dumps(inv)} -InterlockSha256 {json.dumps(interlock_sha)} -FBindingSha256 {json.dumps(f_binding_sha)}
 """
     return subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
@@ -871,10 +871,12 @@ def test_two_cycle_mixed_plan_fake_broker(tmp_path, monkeypatch):
         "DISPATCH_IN_PROGRESS",
     }
 
+    cycle2_inv = "mo-20260817_140500-cccccccccccccccccccccccccccccccc"
+    assert cycle2_inv != INV
     _write_plan(tmp_path, rows, ts=(NOW + timedelta(minutes=5)).isoformat())
     write_cycle_binding(
         results_root=tmp_path,
-        invocation_id="mo-20260817_140500-cccccccccccccccccccccccccccccccc",
+        invocation_id=cycle2_inv,
         plan_generated_at=(NOW + timedelta(minutes=5)).isoformat(),
         f_stage_status="COMPLETE",
         now=NOW + timedelta(minutes=5),
@@ -885,11 +887,11 @@ def test_two_cycle_mixed_plan_fake_broker(tmp_path, monkeypatch):
         submitted_outcomes={"TSLA": "SUBMITTED"},
         orders_executed=1,
     )
-    monkeypatch.setenv(INVOCATION_ENV, "mo-20260817_140500-cccccccccccccccccccccccccccccccc")
+    monkeypatch.setenv(INVOCATION_ENV, cycle2_inv)
     cycle2 = generate_from_manage_artifacts(
         results_root=tmp_path,
         now=NOW + timedelta(minutes=6),
-        expected_invocation_id="mo-20260817_140500-cccccccccccccccccccccccccccccccc",
+        expected_invocation_id=cycle2_inv,
     )
     assert cycle2["ok"] is True
     sell_syms = [a["symbol"] for a in cycle2["packet"]["approval_ready_actions"]]

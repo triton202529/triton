@@ -40,8 +40,342 @@
 #   - Does NOT modify any Python trading logic.
 #   - Does NOT place orders directly; manage_positions handles all order
 #     placement through its own existing safety guards.
+#
+# -FunctionsOnly defines the handoff writer and returns before Set-Location,
+# transcript, invocation-id creation, PENDING/READY writes, and broker stages.
+
+param(
+    [switch]$FunctionsOnly
+)
 
 $ErrorActionPreference = "Stop"
+
+function Get-FileSha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path $Path)) { return $null }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            $hash = $sha.ComputeHash($fs)
+            return ([BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+        } finally {
+            $fs.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Test-HandoffIsolatedRoot {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $full = [System.IO.Path]::GetFullPath($Root)
+    $temp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    if (-not $temp.EndsWith('\')) { $temp = $temp + '\' }
+    if ($full.StartsWith($temp, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+    foreach ($seg in ($full -split '[\\/]')) {
+        if ($seg -like '*isolated*') { return $true }
+    }
+    return $false
+}
+
+function Assert-HandoffPathUnderRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+    $rootFull = [System.IO.Path]::GetFullPath($Root)
+    if (-not $rootFull.EndsWith('\')) { $rootFull = $rootFull + '\' }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    if (-not $full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "HANDOFF_OUTPUT_OUTSIDE_ROOT"
+    }
+}
+function Resolve-HandoffResultsRoot {
+    param(
+        [string]$RepoRoot = "",
+        [string]$ResultsRoot = ""
+    )
+    $repoBound = -not [string]::IsNullOrWhiteSpace($RepoRoot)
+    $resultsBound = -not [string]::IsNullOrWhiteSpace($ResultsRoot)
+    if (-not $repoBound -and -not $resultsBound) {
+        return $null
+    }
+    $derived = $null
+    if ($repoBound) {
+        $derived = [System.IO.Path]::GetFullPath(
+            (Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) "data\results")
+        )
+    }
+    if ($resultsBound) {
+        $given = [System.IO.Path]::GetFullPath($ResultsRoot)
+        if ($null -ne $derived) {
+            $left = $derived.TrimEnd('\')
+            $right = $given.TrimEnd('\')
+            if (-not $left.Equals($right, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "HANDOFF_ROOT_CONFLICT"
+            }
+        }
+        else {
+            $derived = $given
+        }
+    }
+    return $derived
+}
+
+function Write-MarketOpenSequenceStatus {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Status,
+        [string] $FailedStep = "",
+        [string] $Reason = "",
+        [int] $ExitCode = 0,
+        [string] $RepoRoot = "",
+        [string] $ResultsRoot = ""
+    )
+    $repoBound = $PSBoundParameters.ContainsKey("RepoRoot") -and -not [string]::IsNullOrWhiteSpace($RepoRoot)
+    $resultsBound = $PSBoundParameters.ContainsKey("ResultsRoot") -and -not [string]::IsNullOrWhiteSpace($ResultsRoot)
+    if ($repoBound -or $resultsBound) {
+        $checkRoot = $(if ($repoBound) { $RepoRoot } else { $ResultsRoot })
+        if (-not (Test-HandoffIsolatedRoot -Root $checkRoot)) {
+            throw "HANDOFF_ISOLATED_ROOT_REFUSED"
+        }
+        $statusDir = Resolve-HandoffResultsRoot -RepoRoot $(if ($repoBound) { $RepoRoot } else { "" }) -ResultsRoot $(if ($resultsBound) { $ResultsRoot } else { "" })
+    }
+    else {
+        $statusDir = Join-Path $script:repoRoot "data\results"
+    }
+    if (-not (Test-Path $statusDir)) {
+        New-Item -ItemType Directory -Path $statusDir -Force | Out-Null
+    }
+    $statusPath = Join-Path $statusDir "market_open_sequence_status.json"
+    if ($repoBound -or $resultsBound) {
+        Assert-HandoffPathUnderRoot -Root $statusDir -Path $statusPath
+    }
+    $payload = [ordered]@{
+        generated_at             = (Get-Date).ToUniversalTime().ToString("o")
+        status                   = $Status
+        failed_step              = $FailedStep
+        reason                   = $Reason
+        exit_code                = $ExitCode
+        broker_orders_submitted  = $false
+        live_execution_permitted = $false
+    }
+    ($payload | ConvertTo-Json) | Set-Content -Path $statusPath -Encoding UTF8
+}
+
+function Write-Utf8NoBomAtomicFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+    $tmp = $Path + ".tmp"
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $bytes = $encoding.GetBytes($Text)
+    $fs = $null
+    try {
+        $fs = New-Object System.IO.FileStream(
+            $tmp,
+            [System.IO.FileMode]::Create,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $fs.Write($bytes, 0, $bytes.Length)
+        $fs.Flush($true)
+    } finally {
+        if ($null -ne $fs) { $fs.Dispose() }
+    }
+    # Refuse to replace dest with an incomplete tmp payload.
+    if (-not (Test-Path -LiteralPath $tmp)) {
+        throw "HANDOFF_TMP_MISSING"
+    }
+    $tmpLen = (Get-Item -LiteralPath $tmp).Length
+    if ($tmpLen -le 0 -or $tmpLen -ne $bytes.Length) {
+        throw "HANDOFF_TMP_INCOMPLETE"
+    }
+    Move-Item -LiteralPath $tmp -Destination $Path -Force
+}
+
+function Write-InvocationHandoff {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("PENDING", "READY")][string]$Status,
+        [string]$InterlockSha256 = "",
+        [string]$FBindingSha256 = "",
+        [string]$RepoRoot = "",
+        [string]$ResultsRoot = "",
+        [string]$InvocationId = "",
+        [string]$SessionDate = "",
+        [string]$IssuedAt = "",
+        [string]$ReadyAt = "",
+        [string]$GeneratedAt = "",
+        [string]$HandoffPath = "",
+        [string]$InterlockPath = "",
+        [string]$ReadinessPath = "",
+        [string]$ReadinessSha256 = "",
+        [hashtable]$SourceArtifactHashes = $null,
+        [string]$Mode = "",
+        [object]$LiveExecutionPermitted = $null,
+        [switch]$Isolated
+    )
+
+    $repoBound = $PSBoundParameters.ContainsKey("RepoRoot") -and -not [string]::IsNullOrWhiteSpace($RepoRoot)
+    $resultsBound = $PSBoundParameters.ContainsKey("ResultsRoot") -and -not [string]::IsNullOrWhiteSpace($ResultsRoot)
+    $explicitRoot = $repoBound -or $resultsBound
+    $isolatedCall = [bool]$Isolated -or $explicitRoot
+    $readyStamp = ""
+    $generatedStamp = ""
+    if ([string]::IsNullOrWhiteSpace($InvocationId)) {
+        if ($isolatedCall) { throw "HANDOFF_ISOLATED_INVOCATION_ID_REQUIRED" }
+        throw "HANDOFF_INVOCATION_ID_REQUIRED"
+    }
+    $invocation = $InvocationId
+
+    if ($isolatedCall) {
+        if (-not $explicitRoot) { throw "HANDOFF_ISOLATED_REPO_ROOT_REQUIRED" }
+        if (-not $PSBoundParameters.ContainsKey("SessionDate") -or [string]::IsNullOrWhiteSpace($SessionDate)) {
+            throw "HANDOFF_ISOLATED_SESSION_REQUIRED"
+        }
+        if (-not $PSBoundParameters.ContainsKey("IssuedAt") -or [string]::IsNullOrWhiteSpace($IssuedAt)) {
+            throw "HANDOFF_ISOLATED_ISSUED_AT_REQUIRED"
+        }
+        $checkRoot = $(if ($repoBound) { $RepoRoot } else { $ResultsRoot })
+        if (-not (Test-HandoffIsolatedRoot -Root $checkRoot)) {
+            throw "HANDOFF_ISOLATED_ROOT_REFUSED"
+        }
+        if (-not $PSBoundParameters.ContainsKey("LiveExecutionPermitted")) {
+            throw "HANDOFF_LIVE_EVIDENCE_MISSING"
+        }
+        if (($LiveExecutionPermitted -isnot [bool]) -or ($LiveExecutionPermitted -ne $false)) {
+            throw "HANDOFF_LIVE_EVIDENCE_AMBIGUOUS"
+        }
+        $modeNorm = ""
+        if ($null -ne $Mode) { $modeNorm = $Mode.Trim().ToUpperInvariant() }
+        if (($modeNorm -ne "PAPER") -and ($modeNorm -ne "PAPER_ONLY")) {
+            throw "HANDOFF_MODE_NOT_PAPER"
+        }
+        $resolvedResults = Resolve-HandoffResultsRoot -RepoRoot $(if ($repoBound) { $RepoRoot } else { "" }) -ResultsRoot $(if ($resultsBound) { $ResultsRoot } else { "" })
+        $dest = Join-Path $resolvedResults "market_open_invocation_handoff.json"
+        if ($PSBoundParameters.ContainsKey("HandoffPath") -and -not [string]::IsNullOrWhiteSpace($HandoffPath)) {
+            $dest = $HandoffPath
+        }
+        Assert-HandoffPathUnderRoot -Root $resolvedResults -Path $dest
+        if ($Status -eq "READY") {
+            if ([string]::IsNullOrWhiteSpace($InterlockPath) -or [string]::IsNullOrWhiteSpace($InterlockSha256)) {
+                throw "HANDOFF_INTERLOCK_REQUIRED"
+            }
+            if ((-not $PSBoundParameters.ContainsKey("ReadyAt")) -and (-not $PSBoundParameters.ContainsKey("GeneratedAt"))) {
+                throw "HANDOFF_ISOLATED_TIME_REQUIRED"
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($InterlockPath)) {
+            Assert-HandoffPathUnderRoot -Root $resolvedResults -Path $InterlockPath
+            $actualInterlock = Get-FileSha256Hex -Path $InterlockPath
+            if ([string]::IsNullOrWhiteSpace($actualInterlock)) { throw "HANDOFF_INTERLOCK_UNREADABLE" }
+            if (-not [string]::IsNullOrWhiteSpace($InterlockSha256)) {
+                if ($actualInterlock.ToLowerInvariant() -ne $InterlockSha256.Trim().ToLowerInvariant()) {
+                    throw "HANDOFF_INTERLOCK_HASH_MISMATCH"
+                }
+            }
+        }
+        if ($PSBoundParameters.ContainsKey("ReadinessPath") -or $PSBoundParameters.ContainsKey("ReadinessSha256")) {
+            if ([string]::IsNullOrWhiteSpace($ReadinessPath) -or [string]::IsNullOrWhiteSpace($ReadinessSha256)) {
+                throw "HANDOFF_READINESS_HASH_MISMATCH"
+            }
+            Assert-HandoffPathUnderRoot -Root $resolvedResults -Path $ReadinessPath
+            $actualReady = Get-FileSha256Hex -Path $ReadinessPath
+            if ([string]::IsNullOrWhiteSpace($actualReady)) { throw "HANDOFF_READINESS_HASH_MISMATCH" }
+            if ($actualReady.ToLowerInvariant() -ne $ReadinessSha256.Trim().ToLowerInvariant()) {
+                throw "HANDOFF_READINESS_HASH_MISMATCH"
+            }
+        }
+        if ($null -ne $SourceArtifactHashes) {
+            foreach ($key in @($SourceArtifactHashes.Keys)) {
+                Assert-HandoffPathUnderRoot -Root $resolvedResults -Path ([string]$key)
+                $actualSrc = Get-FileSha256Hex -Path ([string]$key)
+                $expected = ([string]$SourceArtifactHashes[$key]).Trim().ToLowerInvariant()
+                if ([string]::IsNullOrWhiteSpace($actualSrc) -or ($actualSrc.ToLowerInvariant() -ne $expected)) {
+                    throw "HANDOFF_SOURCE_HASH_MISMATCH"
+                }
+            }
+        }
+        $session = $SessionDate
+        $issued = $IssuedAt
+        if (-not [string]::IsNullOrWhiteSpace($ReadyAt)) { $readyStamp = $ReadyAt }
+        elseif (-not [string]::IsNullOrWhiteSpace($GeneratedAt)) { $readyStamp = $GeneratedAt }
+        if (-not [string]::IsNullOrWhiteSpace($GeneratedAt)) { $generatedStamp = $GeneratedAt }
+        elseif (-not [string]::IsNullOrWhiteSpace($ReadyAt)) { $generatedStamp = $ReadyAt }
+        $destDir = Split-Path -Parent $dest
+        if (-not (Test-Path -LiteralPath $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+    }
+    else {
+        $session = $script:HandoffSessionDate
+        if ($PSBoundParameters.ContainsKey("SessionDate") -and -not [string]::IsNullOrWhiteSpace($SessionDate)) {
+            $session = $SessionDate
+        }
+        $issued = $script:HandoffIssuedAt
+        if ($PSBoundParameters.ContainsKey("IssuedAt") -and -not [string]::IsNullOrWhiteSpace($IssuedAt)) {
+            $issued = $IssuedAt
+        }
+        $dest = $script:HandoffPath
+        if ($PSBoundParameters.ContainsKey("HandoffPath") -and -not [string]::IsNullOrWhiteSpace($HandoffPath)) {
+            $dest = $HandoffPath
+        }
+    }
+
+    $payload = [ordered]@{
+        schema_version            = 2
+        status                    = $Status
+        market_open_invocation_id = $invocation
+        session_date              = $session
+        issued_at                 = $issued
+        source                    = "scripts/run_market_open.ps1"
+        creates_no_authority      = $true
+        live_execution_permitted  = $false
+        broker_orders_submitted   = $false
+    }
+    if ($Status -eq "READY") {
+        if ($Isolated) {
+            $payload["ready_at"] = $readyStamp
+            $payload["generated_at"] = $generatedStamp
+        }
+        else {
+            $stamp = (Get-Date).ToUniversalTime().ToString("o")
+            if ($PSBoundParameters.ContainsKey("ReadyAt") -and -not [string]::IsNullOrWhiteSpace($ReadyAt)) {
+                $stamp = $ReadyAt
+            }
+            $payload["ready_at"] = $stamp
+            $payload["generated_at"] = $stamp
+            if ($PSBoundParameters.ContainsKey("GeneratedAt") -and -not [string]::IsNullOrWhiteSpace($GeneratedAt)) {
+                $payload["generated_at"] = $GeneratedAt
+            }
+        }
+        $payload["interlock_sha256"] = $InterlockSha256
+        $payload["f_binding_sha256"] = $FBindingSha256
+    }
+    else {
+        $payload["generated_at"] = $issued
+        $payload["ready_at"] = $null
+        $payload["interlock_sha256"] = $null
+        $payload["f_binding_sha256"] = $null
+    }
+    $json = $payload | ConvertTo-Json
+    try {
+        Write-Utf8NoBomAtomicFile -Path $dest -Text $json
+    }
+    catch {
+        Write-Host ("[INVOCATION] write_failed status=" + $Status + " err=" + $_.Exception.Message) -ForegroundColor Red
+        throw
+    }
+    Write-Host ("[INVOCATION] status=" + $Status + " id=" + $invocation) -ForegroundColor Cyan
+}
+
+# Supersede any prior READY immediately — PENDING is never entry-usable.
+if ($FunctionsOnly) {
+    return
+}
 
 # ── Pin to repo root so the script works from any cwd ────────────────
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -87,96 +421,7 @@ if (-not (Test-Path $handoffDir)) {
     New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 }
 $script:HandoffPath = Join-Path $handoffDir "market_open_invocation_handoff.json"
-
-function Get-FileSha256Hex {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path $Path)) { return $null }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $fs = [System.IO.File]::OpenRead($Path)
-        try {
-            $hash = $sha.ComputeHash($fs)
-            return ([BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
-        } finally {
-            $fs.Dispose()
-        }
-    } finally {
-        $sha.Dispose()
-    }
-}
-
-function Write-Utf8NoBomAtomicFile {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Text
-    )
-    $tmp = $Path + ".tmp"
-    $encoding = New-Object System.Text.UTF8Encoding($false)
-    $bytes = $encoding.GetBytes($Text)
-    $fs = $null
-    try {
-        $fs = New-Object System.IO.FileStream(
-            $tmp,
-            [System.IO.FileMode]::Create,
-            [System.IO.FileAccess]::Write,
-            [System.IO.FileShare]::None
-        )
-        $fs.Write($bytes, 0, $bytes.Length)
-        $fs.Flush($true)
-    } finally {
-        if ($null -ne $fs) { $fs.Dispose() }
-    }
-    # Refuse to replace dest with an incomplete tmp payload.
-    if (-not (Test-Path -LiteralPath $tmp)) {
-        throw "HANDOFF_TMP_MISSING"
-    }
-    $tmpLen = (Get-Item -LiteralPath $tmp).Length
-    if ($tmpLen -le 0 -or $tmpLen -ne $bytes.Length) {
-        throw "HANDOFF_TMP_INCOMPLETE"
-    }
-    Move-Item -LiteralPath $tmp -Destination $Path -Force
-}
-
-function Write-InvocationHandoff {
-    param(
-        [Parameter(Mandatory = $true)][ValidateSet("PENDING", "READY")][string]$Status,
-        [string]$InterlockSha256 = "",
-        [string]$FBindingSha256 = ""
-    )
-    $payload = [ordered]@{
-        schema_version            = 2
-        status                    = $Status
-        market_open_invocation_id = $script:MarketOpenInvocationId
-        session_date              = $script:HandoffSessionDate
-        issued_at                 = $script:HandoffIssuedAt
-        source                    = "scripts/run_market_open.ps1"
-        creates_no_authority      = $true
-        live_execution_permitted  = $false
-        broker_orders_submitted   = $false
-    }
-    if ($Status -eq "READY") {
-        $payload["ready_at"] = (Get-Date).ToUniversalTime().ToString("o")
-        $payload["generated_at"] = $payload["ready_at"]
-        $payload["interlock_sha256"] = $InterlockSha256
-        $payload["f_binding_sha256"] = $FBindingSha256
-    } else {
-        $payload["generated_at"] = $script:HandoffIssuedAt
-        $payload["ready_at"] = $null
-        $payload["interlock_sha256"] = $null
-        $payload["f_binding_sha256"] = $null
-    }
-    $json = $payload | ConvertTo-Json
-    try {
-        Write-Utf8NoBomAtomicFile -Path $script:HandoffPath -Text $json
-    } catch {
-        Write-Host ("[INVOCATION] write_failed status=" + $Status + " err=" + $_.Exception.Message) -ForegroundColor Red
-        throw
-    }
-    Write-Host ("[INVOCATION] status=" + $Status + " id=" + $script:MarketOpenInvocationId) -ForegroundColor Cyan
-}
-
-# Supersede any prior READY immediately — PENDING is never entry-usable.
-Write-InvocationHandoff -Status "PENDING"
+Write-InvocationHandoff -Status "PENDING" -InvocationId $script:MarketOpenInvocationId
 Write-Host ("[INVOCATION] handoff=" + $script:HandoffPath) -ForegroundColor Cyan
 
 # ── Run-Step: invoke a python module and abort on non-zero exit ──────
@@ -266,30 +511,6 @@ function Run-RefreshStep {
         return $false
     }
     return $true
-}
-
-function Write-MarketOpenSequenceStatus {
-    param(
-        [Parameter(Mandatory = $true)] [string] $Status,
-        [string] $FailedStep = "",
-        [string] $Reason = "",
-        [int] $ExitCode = 0
-    )
-    $statusDir = Join-Path $repoRoot "data\results"
-    if (-not (Test-Path $statusDir)) {
-        New-Item -ItemType Directory -Path $statusDir -Force | Out-Null
-    }
-    $statusPath = Join-Path $statusDir "market_open_sequence_status.json"
-    $payload = [ordered]@{
-        generated_at             = (Get-Date).ToUniversalTime().ToString("o")
-        status                   = $Status
-        failed_step              = $FailedStep
-        reason                   = $Reason
-        exit_code                = $ExitCode
-        broker_orders_submitted  = $false
-        live_execution_permitted = $false
-    }
-    ($payload | ConvertTo-Json) | Set-Content -Path $statusPath -Encoding UTF8
 }
 
 $exitCode = 0
@@ -485,6 +706,7 @@ try {
         throw "STEP_FAILED:F2. PAPER SELL READINESS PACKET:HANDOFF_INTERLOCK_MISSING"
     }
     Write-InvocationHandoff -Status "READY" `
+        -InvocationId $script:MarketOpenInvocationId `
         -InterlockSha256 $interlockSha `
         -FBindingSha256 $(if ($fBindingSha) { $fBindingSha } else { "" })
 
