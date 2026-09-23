@@ -42,6 +42,8 @@ from services.performance_publication_authority import (
     REASON_TRACKED_CODE_DIRTY,
     REASON_UNTRACKED_CODE,
     REASON_UNTRACKED_TEST,
+    _EXPLICIT_OPERATIONAL_FILES,
+    _PUBLICATION_CODE_RELATIVE,
     evaluate_git_publication_identity,
     inspect_git_identity,
     passing_git_identity,
@@ -60,6 +62,7 @@ FIVE_OPS = (
     "data/governance/symbol_hydration_quarantine.json",
     "data/results/exit_logic_refinement_validation.json",
 )
+CANONICAL_EXECUTION_APPROVAL = "data/governance/execution_approval_requests.json"
 HEAD = "ba40497ea6ed8ad6997df017cf098e690db5828a"
 LEDGER_SHA = "42868be678c4ed0bb75a3b527fa412d7e7c96b2061eb69b51f410bf8e061ec95"
 APPROVED_FINAL = "9227fb2c802261434877860d250df4a45575c141a6ec6605a955afd5b11a73d6"
@@ -496,3 +499,187 @@ def test_passing_identity_includes_new_fields():
     assert identity["untracked_worktree_safe"] is True
     assert identity["publication_code_matches_head"] is True
     assert identity["git_identity_valid"] is True
+
+
+def test_unstaged_execution_approval_requests_are_operational():
+    identity = _eval([f" M {CANONICAL_EXECUTION_APPROVAL}"])
+    assert identity["index_empty"] is True
+    assert identity["git_identity_valid"] is True
+    assert identity["failure_reason"] is None
+    assert identity["rejected_paths"] == []
+    assert identity["publication_code_matches_head"] is True
+    assert identity["tolerated_paths"] == [
+        {
+            "path": CANONICAL_EXECUTION_APPROVAL,
+            "classification": CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA,
+            "x": " ",
+            "y": "M",
+        }
+    ]
+
+
+def test_execution_approval_file_is_operational_not_publication_source():
+    assert CANONICAL_EXECUTION_APPROVAL in _EXPLICIT_OPERATIONAL_FILES
+    assert CANONICAL_EXECUTION_APPROVAL not in _PUBLICATION_CODE_RELATIVE
+    assert "data/governance" not in _EXPLICIT_OPERATIONAL_FILES
+    assert "data/governance/" not in _EXPLICIT_OPERATIONAL_FILES
+    identity = _eval([f" M {CANONICAL_EXECUTION_APPROVAL}"])
+    assert identity["publication_code_matches_head"] is True
+    assert identity["git_identity_valid"] is True
+
+
+def test_staged_execution_approval_still_fails_empty_index():
+    identity = _eval(
+        [f"M  {CANONICAL_EXECUTION_APPROVAL}"],
+        staged=[CANONICAL_EXECUTION_APPROVAL],
+    )
+    assert identity["index_empty"] is False
+    assert identity["failure_reason"] == REASON_INDEX_NOT_EMPTY
+    assert identity["git_identity_valid"] is False
+
+
+def test_delete_or_rename_execution_approval_fails_closed():
+    deleted = _eval([f" D {CANONICAL_EXECUTION_APPROVAL}"])
+    assert deleted["git_identity_valid"] is False
+    assert deleted["failure_reason"] == REASON_STATUS_CONFLICT
+    renamed = _eval(
+        [
+            "R  data/governance/execution_approval_requests.json -> "
+            "data/governance/execution_approval_requests_moved.json"
+        ]
+    )
+    assert renamed["git_identity_valid"] is False
+    assert renamed["failure_reason"] == REASON_STATUS_CONFLICT
+
+
+def test_execution_approval_lookalikes_are_rejected():
+    cases = (
+        "?? data/governance/execution_approval_requests.json.bak",
+        " M data/governance/execution_approval_requests.json.bak",
+        "?? data/governance/execution_approval_request.json",
+        "?? data/governance/execution_approval_requests.jsonl",
+        "?? data/governance/execution_approvals.json",
+        "?? data/governance/not_allowlisted.json",
+    )
+    for line in cases:
+        identity = _eval([line])
+        assert identity["git_identity_valid"] is False
+        assert identity["failure_reason"] == REASON_ARTIFACT_UNEXPLAINED
+        assert identity["tolerated_paths"] == []
+        assert identity["rejected_paths"][0]["path"].endswith(
+            (
+                ".bak",
+                "execution_approval_request.json",
+                "execution_approval_requests.jsonl",
+                "execution_approvals.json",
+                "not_allowlisted.json",
+            )
+        )
+
+
+def test_dirty_services_scripts_dashboard_and_tests_remain_rejected():
+    tracked = (
+        " M services/performance_publication_authority.py",
+        " M scripts/run_market_open.ps1",
+        " M dashboard/operator_modern.py",
+        " M tests/test_phase_198t_bn2h1_git_publication_gate.py",
+    )
+    for line in tracked:
+        identity = _eval([line])
+        assert identity["index_empty"] is True
+        assert identity["git_identity_valid"] is False
+        assert identity["rejected_paths"]
+    untracked_test = _eval(["?? tests/test_execution_approval_policy.py"])
+    assert untracked_test["failure_reason"] == REASON_UNTRACKED_TEST
+    assert untracked_test["git_identity_valid"] is False
+
+
+def test_mixed_approval_drift_and_source_or_test_remains_invalid():
+    with_source = _eval(
+        [
+            f" M {CANONICAL_EXECUTION_APPROVAL}",
+            " M services/performance_publication_authority.py",
+        ]
+    )
+    assert with_source["git_identity_valid"] is False
+    assert with_source["failure_reason"] == REASON_TRACKED_CODE_DIRTY
+    assert {row["path"] for row in with_source["tolerated_paths"]} == {CANONICAL_EXECUTION_APPROVAL}
+    with_test = _eval(
+        [
+            f" M {CANONICAL_EXECUTION_APPROVAL}",
+            " M tests/test_phase_198t_bn2h1_git_publication_gate.py",
+        ]
+    )
+    assert with_test["git_identity_valid"] is False
+    assert {row["path"] for row in with_test["tolerated_paths"]} == {CANONICAL_EXECUTION_APPROVAL}
+    assert with_test["rejected_paths"][0]["path"].startswith("tests/")
+
+
+def test_existing_accounting_ledger_snapshot_and_ops_classifications_unchanged():
+    porcelain = [f" M {path}" for path in FIVE_OPS]
+    porcelain += [
+        " M data/results/positions_snapshot.csv",
+        " M data/results/performance_accounting_events.jsonl",
+        " M data/results/performance_accounting_events.lock",
+        " M data/results/paper_order_events.jsonl",
+        " M data/results/paper_order_events.lock",
+    ]
+    identity = _eval(porcelain)
+    assert identity["git_identity_valid"] is True
+    assert identity["rejected_paths"] == []
+    by_path = {row["path"]: row["classification"] for row in identity["tolerated_paths"]}
+    for path in FIVE_OPS:
+        assert by_path[path] == CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA
+    assert by_path["data/results/positions_snapshot.csv"] == CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA
+    assert (
+        by_path["data/results/performance_accounting_events.jsonl"]
+        == CLASS_KNOWN_ACCOUNTING_LEDGER_OR_LOCK
+    )
+    assert (
+        by_path["data/results/performance_accounting_events.lock"]
+        == CLASS_KNOWN_ACCOUNTING_LEDGER_OR_LOCK
+    )
+    assert (
+        by_path["data/results/paper_order_events.jsonl"] == CLASS_KNOWN_PAPER_ORDER_LEDGER_OR_LOCK
+    )
+    assert by_path["data/results/paper_order_events.lock"] == CLASS_KNOWN_PAPER_ORDER_LEDGER_OR_LOCK
+
+
+def test_sf35b_approval_status_fixture_has_zero_rejected_paths():
+    porcelain = [
+        f" M {CANONICAL_EXECUTION_APPROVAL}",
+        " M data/governance/execution_gate_authority_matrix.json",
+        " M data/governance/execution_gate_decisions.json",
+        " M data/governance/execution_gate_evidence.json",
+        " M data/governance/symbol_hydration_quarantine.json",
+        " M data/results/exit_logic_refinement_validation.json",
+        "?? data/governance/independent_dispatch_bindings.json",
+        "?? data/governance/paper_sell_arm_audit.jsonl",
+        "?? data/governance/paper_sell_arm_authority.json",
+        "?? data/live/paper_entry_dispatch_contract.json",
+        "?? data/live/paper_arm_confirm.json",
+        " M data/results/positions_snapshot.csv",
+        " M data/results/paper_order_events.jsonl",
+        " M data/results/paper_order_events.lock",
+        " M data/results/performance_accounting_events.jsonl",
+        " M data/results/performance_accounting_events.lock",
+        "?? tmp/phase_note.txt",
+    ]
+    identity = _eval(porcelain)
+    assert identity["git_identity_valid"] is True
+    assert identity["rejected_paths"] == []
+    approval = next(
+        row for row in identity["tolerated_paths"] if row["path"] == CANONICAL_EXECUTION_APPROVAL
+    )
+    assert approval["classification"] == CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA
+    assert all(
+        row["path"] == CANONICAL_EXECUTION_APPROVAL
+        or row["classification"]
+        in {
+            CLASS_KNOWN_MUTABLE_OPERATIONAL_DATA,
+            CLASS_KNOWN_ACCOUNTING_LEDGER_OR_LOCK,
+            CLASS_KNOWN_PAPER_ORDER_LEDGER_OR_LOCK,
+            CLASS_KNOWN_TEMP_EVIDENCE,
+        }
+        for row in identity["tolerated_paths"]
+    )

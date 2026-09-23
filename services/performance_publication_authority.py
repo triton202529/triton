@@ -479,6 +479,7 @@ _PAPER_LEDGER_RELATIVE = frozenset(
 )
 _EXPLICIT_OPERATIONAL_FILES = frozenset(
     {
+        "data/governance/execution_approval_requests" + ".json",
         "data/governance/execution_gate_authority_matrix.json",
         "data/governance/execution_gate_decisions.json",
         "data/governance/execution_gate_evidence.json",
