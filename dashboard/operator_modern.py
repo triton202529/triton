@@ -466,6 +466,63 @@ def _history_dicts(summary: Mapping[str, Any]) -> List[Dict[str, Any]]:
         return []
 
 
+def _render_canonical_holdings() -> None:
+    """Current paper holdings from positions_snapshot.csv. No broker call and no refresh."""
+    from dashboard.portfolio_position_snapshot import (
+        CURRENT_HOLDINGS_SOURCE,
+        CURRENT_HOLDINGS_TITLE,
+        CURRENT_HOLDINGS_UNAVAILABLE,
+        load_portfolio_holdings,
+    )
+
+    loaded = load_portfolio_holdings(_root() / "data" / "results" / "positions_snapshot.csv")
+    st.markdown(f"#### {CURRENT_HOLDINGS_TITLE}")
+    st.caption(CURRENT_HOLDINGS_SOURCE)
+    if not loaded.get("ok"):
+        st.warning(str(loaded.get("message") or CURRENT_HOLDINGS_UNAVAILABLE))
+        return
+    st.caption(str(loaded.get("as_of_label") or ""))
+    actions = _load_lifecycle_actions()
+    rows = list(loaded.get("rows") or [])
+    market_values: List[Optional[float]] = []
+    total_mv = 0.0
+    for row in rows:
+        try:
+            mv = float(row.get("market_value") or row.get("value") or 0)
+        except (TypeError, ValueError):
+            mv = None
+        market_values.append(mv)
+        if mv is not None:
+            total_mv += mv
+    display = []
+    for row, mv in zip(rows, market_values):
+        symbol = str(row.get("symbol") or "")
+        weight = f"{(mv / total_mv * 100):.1f}%" if mv is not None and total_mv else "Unavailable"
+        pl = row.get("unrealized_pl") or row.get("unrealized_pnl")
+        item = {
+            "Symbol": symbol,
+            "Quantity": row.get("qty"),
+            "Average cost": money_text(row.get("avg_entry_price")),
+            "Current price": money_text(row.get("current_price")),
+            "Market value": money_text(mv),
+            "Gain / loss": signed_text(pl),
+            "Weight": weight,
+            "Lifecycle action": display_status(actions.get(symbol) or "Unavailable"),
+        }
+        if row.get("company_name"):
+            item["Company"] = row.get("company_name")
+        display.append(item)
+    render_operator_table(
+        display,
+        signed_columns=("Gain / loss",),
+        caption=(
+            f"{CURRENT_HOLDINGS_TITLE}. {CURRENT_HOLDINGS_SOURCE} "
+            f"{loaded.get('as_of_label') or ''} "
+            "Quantities and prices in this table come from the snapshot."
+        ),
+    )
+
+
 def _certified_holdings_table(holdings: Sequence[Mapping[str, Any]]) -> None:
     if not holdings:
         oui.render_empty_state("No holdings", "No certified position rows for this close.")
@@ -539,17 +596,19 @@ def render_portfolio_page() -> None:
     certified = _certified_totals()
     if certified and certified.get("available"):
         _portfolio_metrics(summary, [], certified=certified)
-        st.markdown("#### Holdings")
-        _certified_holdings_table(certified.get("holdings") or [])
-        _legacy_portfolio_history_section(summary)
     else:
         if not summary.get("available"):
             st.warning("Portfolio artifacts are unavailable or unreadable.")
         rows = normalize_history_rows(_history_dicts(summary))
         _portfolio_metrics(summary, rows[-2:] if len(rows) >= 2 else rows)
-        st.markdown("#### Holdings")
-        _holdings_table(summary)
-        _legacy_portfolio_history_section(summary)
+    _render_canonical_holdings()
+    if certified and certified.get("available"):
+        with st.expander("Certified close holdings", expanded=False):
+            st.caption(
+                "Latest certified accounting close. These rows are not the current paper holdings."
+            )
+            _certified_holdings_table(certified.get("holdings") or [])
+    _legacy_portfolio_history_section(summary)
     if summary.get("concentration_warnings"):
         with st.expander("Concentration warnings", expanded=True):
             st.write(summary["concentration_warnings"])
