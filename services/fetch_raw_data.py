@@ -9,6 +9,9 @@
 # - yfinance 'end' is treated as EXCLUSIVE → fetch end = (AS_OF_DATE + 1 day)
 # - A provider frame that lags the completed session, or is older than the local file,
 #   is diagnostic only. It must not replace, truncate, or create a raw file.
+# - A provider frame may append only validated rows strictly later than the local maximum.
+#   Omitting an older prefix, or disagreeing on overlap, is not permission to rewrite history.
+#   Every required XNYS session between the local maximum and the completed session is required.
 # - ALLOW_DATA_LAG_DAYS remains a diagnostic tolerance. It does not authorize a write.
 #
 # Hardening patch:
@@ -345,6 +348,135 @@ def _local_max(path: Path) -> Optional[str]:
     return str(dates.max())
 
 
+def _date_list(frame: Optional[pd.DataFrame]) -> List[str]:
+    dates = _dates_of(frame)
+    if dates.empty:
+        return []
+    return [str(day) for day in dates.tolist() if isinstance(day, str) and day and day != "NaT"]
+
+
+def _rows_by_date(frame: pd.DataFrame) -> Dict[str, pd.Series]:
+    rows: Dict[str, pd.Series] = {}
+    for idx, day in enumerate(_date_list(frame)):
+        rows[day] = frame.iloc[idx]
+    return rows
+
+
+def _same_cell(left: object, right: object) -> bool:
+    left_missing = pd.isna(left)
+    right_missing = pd.isna(right)
+    if bool(left_missing) and bool(right_missing):
+        return True
+    if bool(left_missing) or bool(right_missing):
+        return False
+    try:
+        return round(float(left), 6) == round(float(right), 6)
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
+def _overlap_conflicts(
+    existing: pd.DataFrame, frame: pd.DataFrame, shared_dates: Sequence[str]
+) -> List[str]:
+    """Dates whose provider OHLCV differs. Diagnostic only; local rows stay."""
+    local_rows = _rows_by_date(existing)
+    provider_rows = _rows_by_date(frame)
+    columns = [
+        col
+        for col in ("open", "high", "low", "close", "adj_close", "volume")
+        if col in existing.columns and col in frame.columns
+    ]
+    conflicts: List[str] = []
+    for day in shared_dates:
+        local = local_rows.get(day)
+        provider = provider_rows.get(day)
+        if local is None or provider is None:
+            continue
+        if any(not _same_cell(local[col], provider[col]) for col in columns):
+            conflicts.append(day)
+    return conflicts
+
+
+def _ordered_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["_sf40_ord"] = _dates_of(out).to_numpy()
+    out = out.sort_values("_sf40_ord", kind="mergesort").drop(columns=["_sf40_ord"])
+    return out.reset_index(drop=True)
+
+
+def _required_newer_sessions(local_max: str, asof: date) -> Optional[List[str]]:
+    """XNYS sessions strictly after local_max through the completed session."""
+    try:
+        import exchange_calendars as xc
+    except Exception:
+        return None
+    start = date.fromisoformat(local_max) + timedelta(days=1)
+    if start > asof:
+        return []
+    try:
+        labels = xc.get_calendar("XNYS").sessions_in_range(start.isoformat(), asof.isoformat())
+    except Exception:
+        return None
+    return [pd.Timestamp(item).date().isoformat() for item in labels]
+
+
+def _non_xnys_dates(days: Sequence[str]) -> Optional[List[str]]:
+    """Dates that are not XNYS sessions. None means the calendar could not be read."""
+    if not days:
+        return []
+    try:
+        import exchange_calendars as xc
+    except Exception:
+        return None
+    try:
+        labels = xc.get_calendar("XNYS").sessions_in_range(min(days), max(days))
+    except Exception:
+        return None
+    sessions = {pd.Timestamp(item).date().isoformat() for item in labels}
+    return sorted(day for day in days if day not in sessions)
+
+
+def _append_csv_bytes(existing_path: Path, merged: pd.DataFrame, newer_count: int) -> bytes:
+    """Keep the local CSV bytes and append only the new rows."""
+    raw = existing_path.read_bytes()
+    newline = b"\r\n" if raw.endswith(b"\r\n") else b"\n"
+    if raw and not raw.endswith((b"\n", b"\r")):
+        raw += newline
+    added = merged.iloc[-newer_count:].to_csv(
+        index=False, header=False, lineterminator=newline.decode("ascii")
+    )
+    return raw + added.encode("utf-8")
+
+
+def _merge_append(
+    existing: pd.DataFrame, frame: pd.DataFrame, newer_dates: Sequence[str]
+) -> Optional[pd.DataFrame]:
+    """Keep every local row and append validated provider rows after the local maximum."""
+    local_dates = _date_list(existing)
+    if local_dates != sorted(set(local_dates)):
+        return None
+    provider_rows = _rows_by_date(frame)
+    columns = list(existing.columns)
+    added: List[Dict[str, object]] = []
+    for day in newer_dates:
+        source = provider_rows.get(day)
+        if source is None:
+            return None
+        row: Dict[str, object] = {}
+        for col in columns:
+            if col == "date":
+                row[col] = day
+                continue
+            if col not in source.index:
+                return None
+            row[col] = source[col]
+        added.append(row)
+    merged = pd.concat([existing.copy(), pd.DataFrame(added, columns=columns)], ignore_index=True)
+    if _date_list(merged) != local_dates + list(newer_dates):
+        return None
+    return merged
+
+
 def _ohlc_key(row: pd.Series) -> Tuple[float, float, float, float]:
     return (
         round(float(row["open"]), 6),
@@ -455,22 +587,92 @@ def classify_provider_payload(
         decision["reason"] = "future_or_partial_bar"
         decision["operationally_eligible"] = bool(local_exact)
         return decision
-    if existing is not None:
-        existing_dates = set(_dates_of(existing).dropna().tolist())
-        staged_dates = set(_dates_of(frame).dropna().tolist())
-        if local_max and staged_max < local_max:
-            decision["action"] = "keep"
-            decision["reason"] = "provider_older_than_local"
-            decision["operationally_eligible"] = bool(local_exact)
+    target_rows = 0 if frame is None else _date_list(frame).count(target)
+    if existing is None:
+        if target_rows != 1:
+            decision["action"] = "skip"
+            decision["reason"] = MISSING_EXPECTED_SESSION_BAR
             return decision
-        if not existing_dates.issubset(staged_dates):
-            decision["action"] = "keep"
-            decision["reason"] = "provider_would_truncate"
-            decision["operationally_eligible"] = bool(local_exact)
+        non_session = _non_xnys_dates(_date_list(frame))
+        if non_session is None:
+            decision["action"] = "skip"
+            decision["reason"] = "calendar_unavailable"
             return decision
+        if non_session:
+            decision["action"] = "skip"
+            decision["reason"] = "non_session_bar"
+            decision["non_session_dates"] = non_session
+            return decision
+        decision["action"] = "promote"
+        decision["reason"] = "exact_session"
+        decision["operationally_eligible"] = True
+        decision["candidate_frame"] = _ordered_frame(frame)
+        return decision
+    local_dates = _date_list(existing)
+    staged_dates = _date_list(frame)
+    if not local_dates or not staged_dates or not local_max:
+        decision["reason"] = "bad_dates"
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    if staged_max < local_max:
+        decision["action"] = "keep"
+        decision["reason"] = "provider_older_than_local"
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    provider_min = min(staged_dates)
+    staged_set = set(staged_dates)
+    local_set = set(local_dates)
+    decision["provider_min"] = provider_min
+    decision["local_rows"] = len(local_dates)
+    decision["provider_rows"] = len(staged_dates)
+    decision["omitted_prefix_count"] = sum(1 for day in local_dates if day < provider_min)
+    decision["local_only_internal_dates"] = sorted(
+        day for day in local_dates if provider_min <= day <= local_max and day not in staged_set
+    )
+    decision["provider_only_internal_dates"] = sorted(
+        day for day in staged_dates if day <= local_max and day not in local_set
+    )
+    decision["overlap_conflicts"] = _overlap_conflicts(
+        existing, frame, sorted(local_set & staged_set)
+    )
+    required = _required_newer_sessions(local_max, asof)
+    if required is None:
+        decision["action"] = "keep"
+        decision["reason"] = "calendar_unavailable"
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    newer = sorted(day for day in staged_dates if day > local_max)
+    decision["required_newer_sessions"] = required
+    decision["appended_dates"] = []
+    missing = [day for day in required if day not in staged_set]
+    extra = [day for day in newer if day not in set(required)]
+    if not required and not newer:
+        decision["action"] = "keep"
+        decision["reason"] = "local_already_current" if local_exact else "unchanged"
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    if target_rows != 1 or missing:
+        decision["action"] = "keep"
+        decision["reason"] = "missing_required_session" if missing else MISSING_EXPECTED_SESSION_BAR
+        decision["missing_required_sessions"] = missing
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    if extra:
+        decision["action"] = "keep"
+        decision["reason"] = "unexpected_newer_session"
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    merged = _merge_append(existing, frame, required)
+    if merged is None:
+        decision["action"] = "keep"
+        decision["reason"] = "partial_bar"
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
     decision["action"] = "promote"
-    decision["reason"] = "exact_session"
+    decision["reason"] = "monotonic_append"
+    decision["appended_dates"] = required
     decision["operationally_eligible"] = True
+    decision["candidate_frame"] = merged
     return decision
 
 
@@ -524,9 +726,15 @@ def apply_provider_fetch(
         path = root / "data" / "raw" / f"{symbol}.csv"
         frame = frames.get(symbol)
         decision = classify_provider_payload(frame, symbol, asof, path)
+        candidate = decision.pop("candidate_frame", None)
         decisions.append(decision)
-        if decision["action"] == "promote" and frame is not None:
-            staged[symbol] = frame.to_csv(index=False).encode("utf-8")
+        if decision["action"] == "promote" and isinstance(candidate, pd.DataFrame):
+            if decision["reason"] == "monotonic_append":
+                staged[symbol] = _append_csv_bytes(
+                    path, candidate, len(decision.get("appended_dates") or [])
+                )
+            else:
+                staged[symbol] = candidate.to_csv(index=False, lineterminator="\n").encode("utf-8")
 
     tradables = [s for s in symbols if not s.startswith("^")]
     by_symbol = {str(d["symbol"]): d for d in decisions}
