@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -56,16 +57,45 @@ def allow_partial_lifecycle_writes() -> bool:
     )
 
 
-def load_universe_ticker_count() -> int:
-    if not TICKERS_FILE.is_file():
-        return 0
-    count = 0
-    for line in TICKERS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
-        s = line.strip()
-        if not s or s.startswith("#"):
+# Same identity rule as services.generate_signals.is_valid_ticker / TICKER_RE.
+_UNIVERSE_TICKER_RE = re.compile(r"^[A-Z0-9.\-\^]{1,15}$")
+_UNIVERSE_BANNED = frozenset(
+    {"STOCK", "DATA", "ALL", "COMBINED", "MERGED", "PORTFOLIO", "RESULTS", "PREDICTIONS"}
+)
+
+
+class DuplicateUniverseTicker(ValueError):
+    """Fallback parser refuses to count the same ticker identity twice."""
+
+
+def parse_universe_ticker_identities(path: Optional[Path] = None) -> List[str]:
+    """Decode the universe the same way the operational parsers do.
+
+    utf-8-sig strips a leading BOM. Blank lines and lines whose trimmed text
+    begins with '#' are ignored. Only unique valid ticker identities are
+    counted. A repeated identity raises DuplicateUniverseTicker.
+    """
+    target = Path(path) if path is not None else TICKERS_FILE
+    if not target.is_file():
+        return []
+    seen: List[str] = []
+    seen_set = set()
+    for line in target.read_text(encoding="utf-8-sig").splitlines():
+        token = line.strip().upper()
+        if not token or token.startswith("#"):
             continue
-        count += 1
-    return count
+        if token in _UNIVERSE_BANNED or "_" in token or not _UNIVERSE_TICKER_RE.match(token):
+            continue
+        if token in seen_set:
+            raise DuplicateUniverseTicker(f"DUPLICATE_TICKER:{token}")
+        seen_set.add(token)
+        seen.append(token)
+    return seen
+
+
+def load_universe_ticker_count(path: Optional[Path] = None) -> int:
+    """Unique valid universe identities. Diagnostics remain the preferred consumer."""
+    return len(parse_universe_ticker_identities(path))
 
 
 def _operational_universe_count() -> int:
