@@ -7,8 +7,9 @@
 # - Default fetch window is driven by "last completed NYSE session" (ET),
 #   same AS_OF used by preprocessing/training/signals/contracts.
 # - yfinance 'end' is treated as EXCLUSIVE → fetch end = (AS_OF_DATE + 1 day)
-# - AS_OF freshness allows a small calendar lag (ALLOW_DATA_LAG_DAYS): latest bar may
-#   trail AS_OF by up to that many days and still count toward asof_ok / min-asof-ok.
+# - A provider frame that lags the completed session, or is older than the local file,
+#   is diagnostic only. It must not replace, truncate, or create a raw file.
+# - ALLOW_DATA_LAG_DAYS remains a diagnostic tolerance. It does not authorize a write.
 #
 # Hardening patch:
 # - Retries with exponential backoff for flaky yfinance timeouts
@@ -20,12 +21,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import time
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta, timezone, date
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -46,8 +50,12 @@ SUMMARY_JSON = RESULTS_DIR / "raw_fetch_summary.json"
 
 DEFAULT_TICKERS_FILE = Path("data") / "config" / "tickers.txt"
 
-# Latest bar may trail calendar AS_OF (e.g. provider delay); still treat as OK within this window.
+# Diagnostic only. A lagging provider frame is not current evidence and is not written.
 ALLOW_DATA_LAG_DAYS = 2
+MIN_TRADABLE_COVERAGE = 0.90
+MISSING_EXPECTED_SESSION_BAR = "MISSING_EXPECTED_SESSION_BAR"
+INPUT_SKIPS_REL = "data/results/daily_refresh_input_skips.json"
+FETCH_RECEIPT_REL = "data/results/daily_refresh_fetch_receipt.json"
 
 # Accept common index tickers and BRK-B style
 TICKER_RE = re.compile(r"^[A-Z0-9.\-\^]{1,15}$")
@@ -244,7 +252,8 @@ def _existing_last_date(ticker: str) -> Optional[str]:
 
 def _download_one(
     ticker: str, start: str, end: str, timeout_s: int, verbose: bool
-) -> Tuple[bool, str, Optional[str], int]:
+) -> Tuple[bool, str, Optional[str], int, Optional[pd.DataFrame]]:
+    """Download and normalize one symbol. Do not write the production raw file."""
     try:
         df = yf.download(
             ticker,
@@ -258,7 +267,7 @@ def _download_one(
         )
 
         if df is None or df.empty:
-            return False, "EMPTY", None, 0
+            return False, "EMPTY", None, 0, None
 
         norm = _normalize_yf_df(df)
         if norm is None or norm.empty:
@@ -266,17 +275,14 @@ def _download_one(
             msg = (
                 f"EMPTY_AFTER_NORMALIZE cols_sample={cols}" if verbose else "EMPTY_AFTER_NORMALIZE"
             )
-            return False, msg, None, 0
-
-        out = RAW_DIR / f"{ticker}.csv"
-        norm.to_csv(out, index=False)
+            return False, msg, None, 0, None
 
         last = str(norm["date"].max()) if "date" in norm.columns else None
         msg = f"rows={len(norm)} max={last}" if verbose else "OK"
-        return True, msg, last, int(len(norm))
+        return True, msg, last, int(len(norm)), norm
 
     except Exception as e:
-        return False, f"ERROR {e}", None, 0
+        return False, f"ERROR {e}", None, 0, None
 
 
 def fetch_one_with_retries(
@@ -286,28 +292,314 @@ def fetch_one_with_retries(
     retries: int,
     timeout_s: int,
     verbose: bool,
-) -> Tuple[bool, str, Optional[str], int, str]:
+) -> Tuple[bool, str, Optional[str], int, str, Optional[pd.DataFrame]]:
     """
-    Returns: (ok, msg, last_date, rows, source)
+    Returns: (ok, msg, last_date, rows, source, frame)
     source: 'download' or 'existing'
+    The frame is staged in memory. Promotion is a separate, gated step.
     """
     last_err = ""
     for i in range(max(1, retries)):
-        ok, msg, last_date, rows = _download_one(ticker, start, end, timeout_s, verbose)
+        ok, msg, last_date, rows, frame = _download_one(ticker, start, end, timeout_s, verbose)
         if ok:
-            return True, msg, last_date, rows, "download"
+            return True, msg, last_date, rows, "download", frame
 
         last_err = msg
-        # backoff before retry
         if i < retries - 1:
             time.sleep(min(8.0, 1.5**i))
 
-    # download failed; fall back to existing raw file info (do NOT overwrite)
     existing = _existing_last_date(ticker)
     if existing:
-        return False, f"{last_err} | using existing last_date={existing}", existing, 0, "existing"
+        return (
+            False,
+            f"{last_err} | using existing last_date={existing}",
+            existing,
+            0,
+            "existing",
+            None,
+        )
 
-    return False, last_err, None, 0, "none"
+    return False, last_err, None, 0, "none", None
+
+
+def _dates_of(frame: Optional[pd.DataFrame]) -> pd.Series:
+    if frame is None or frame.empty or "date" not in frame.columns:
+        return pd.Series(dtype="object")
+    parsed = pd.to_datetime(frame["date"], errors="coerce")
+    return parsed.dt.strftime("%Y-%m-%d")
+
+
+def _local_frame(path: Path) -> Optional[pd.DataFrame]:
+    if not path.is_file() or path.stat().st_size <= 0:
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return None
+
+
+def _local_max(path: Path) -> Optional[str]:
+    dates = _dates_of(_local_frame(path))
+    if dates.empty or bool(dates.isna().all()):
+        return None
+    return str(dates.max())
+
+
+def _ohlc_key(row: pd.Series) -> Tuple[float, float, float, float]:
+    return (
+        round(float(row["open"]), 6),
+        round(float(row["high"]), 6),
+        round(float(row["low"]), 6),
+        round(float(row["close"]), 6),
+    )
+
+
+def _payload_problems(
+    frame: Optional[pd.DataFrame], symbol: str, asof: date, existing: Optional[pd.DataFrame]
+) -> List[str]:
+    if frame is None or frame.empty:
+        return ["empty"]
+    problems: List[str] = []
+    if "ticker" in frame.columns:
+        found = {str(v).strip().upper() for v in frame["ticker"].dropna().tolist()}
+        found.discard("")
+        if found and found != {symbol.upper()}:
+            problems.append("wrong_symbol")
+    dates = _dates_of(frame)
+    if dates.empty or bool(dates.isna().any()):
+        problems.append("bad_dates")
+        return problems
+    if bool(dates.duplicated().any()):
+        problems.append("duplicate_session")
+    if bool((dates > asof.isoformat()).any()):
+        problems.append("future_or_partial_bar")
+    for col in ("open", "high", "low", "close"):
+        if col not in frame.columns:
+            problems.append("malformed_ohlc")
+            return problems
+        values = pd.to_numeric(frame[col], errors="coerce")
+        if bool(values.isna().any()) or bool((values <= 0).any()):
+            problems.append("malformed_ohlc")
+            return problems
+    high = pd.to_numeric(frame["high"], errors="coerce")
+    low = pd.to_numeric(frame["low"], errors="coerce")
+    close = pd.to_numeric(frame["close"], errors="coerce")
+    if bool((high < low).any()) or bool((close > high).any()) or bool((close < low).any()):
+        problems.append("malformed_ohlc")
+        return problems
+    if "volume" not in frame.columns:
+        problems.append("partial_bar")
+    else:
+        volume = pd.to_numeric(frame["volume"], errors="coerce")
+        if bool(volume.isna().any()) or bool((volume < 0).any()):
+            problems.append("partial_bar")
+    if existing is not None and not existing.empty and MISSING_EXPECTED_SESSION_BAR not in problems:
+        existing_dates = _dates_of(existing)
+        staged_asof = frame.loc[dates == asof.isoformat()]
+        if not staged_asof.empty:
+            new_key = _ohlc_key(staged_asof.iloc[-1])
+            older = existing.loc[existing_dates < asof.isoformat()]
+            for _, old in older.iterrows():
+                try:
+                    if _ohlc_key(old) == new_key:
+                        problems.append("relabeled_older_row")
+                        break
+                except Exception:
+                    continue
+    return problems
+
+
+def classify_provider_payload(
+    frame: Optional[pd.DataFrame],
+    symbol: str,
+    asof: date,
+    existing_path: Path,
+) -> Dict[str, object]:
+    """Decide whether a staged provider frame may replace a raw file. Never writes."""
+    existing = _local_frame(existing_path)
+    local_max = _local_max(existing_path)
+    target = asof.isoformat()
+    problems = _payload_problems(frame, symbol, asof, existing)
+    staged_max = None if frame is None or frame.empty else str(_dates_of(frame).max())
+    decision: Dict[str, object] = {
+        "symbol": symbol.upper(),
+        "index": symbol.startswith("^"),
+        "local_max": local_max,
+        "provider_max": staged_max,
+        "problems": problems,
+        "action": "keep",
+        "reason": "unchanged",
+        "operationally_eligible": False,
+    }
+    local_exact = local_max == target
+    if problems:
+        if existing is None and ("empty" in problems or staged_max is None or staged_max < target):
+            decision["action"] = "skip"
+            decision["reason"] = MISSING_EXPECTED_SESSION_BAR
+        else:
+            decision["action"] = "keep" if existing is not None else "skip"
+            decision["reason"] = problems[0]
+            if decision["action"] == "skip":
+                decision["reason"] = MISSING_EXPECTED_SESSION_BAR
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    if staged_max is None or staged_max < target:
+        decision["action"] = "skip" if not local_exact else "keep"
+        decision["reason"] = (
+            "provider_older_than_local" if local_exact else MISSING_EXPECTED_SESSION_BAR
+        )
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    if staged_max > target:
+        decision["action"] = "keep" if existing is not None else "skip"
+        decision["reason"] = "future_or_partial_bar"
+        decision["operationally_eligible"] = bool(local_exact)
+        return decision
+    if existing is not None:
+        existing_dates = set(_dates_of(existing).dropna().tolist())
+        staged_dates = set(_dates_of(frame).dropna().tolist())
+        if local_max and staged_max < local_max:
+            decision["action"] = "keep"
+            decision["reason"] = "provider_older_than_local"
+            decision["operationally_eligible"] = bool(local_exact)
+            return decision
+        if not existing_dates.issubset(staged_dates):
+            decision["action"] = "keep"
+            decision["reason"] = "provider_would_truncate"
+            decision["operationally_eligible"] = bool(local_exact)
+            return decision
+    decision["action"] = "promote"
+    decision["reason"] = "exact_session"
+    decision["operationally_eligible"] = True
+    return decision
+
+
+def _sha256_bytes(blob: bytes) -> str:
+    return hashlib.sha256(blob).hexdigest()
+
+
+def _atomic_replace_bytes(dest: Path, blob: bytes, replace_impl) -> str:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.sf37.tmp")
+    with tmp.open("wb") as handle:
+        handle.write(blob)
+        handle.flush()
+        os.fsync(handle.fileno())
+    if _sha256_bytes(tmp.read_bytes()) != _sha256_bytes(blob) or tmp.stat().st_size != len(blob):
+        tmp.unlink(missing_ok=True)
+        raise OSError(f"staged hash mismatch for {dest.name}")
+    try:
+        replace_impl(tmp, dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    written = dest.read_bytes()
+    if _sha256_bytes(written) != _sha256_bytes(blob) or len(written) != len(blob):
+        raise OSError(f"promoted hash mismatch for {dest.name}")
+    return _sha256_bytes(written)
+
+
+def _write_json(path: Path, payload: Dict[str, object]) -> None:
+    blob = json.dumps(payload, indent=2).encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_replace_bytes(path, blob, os.replace)
+
+
+def apply_provider_fetch(
+    *,
+    root: Path,
+    tickers: Sequence[str],
+    asof: date,
+    frames: Dict[str, Optional[pd.DataFrame]],
+    replace_impl=None,
+    before_promote=None,
+) -> Dict[str, object]:
+    """Stage provider frames, then promote only an exact-session coverage-safe set."""
+    root = Path(root)
+    replace_impl = replace_impl or os.replace
+    symbols = [str(t).strip().upper() for t in tickers if str(t).strip()]
+    decisions: List[Dict[str, object]] = []
+    staged: Dict[str, bytes] = {}
+    for symbol in symbols:
+        path = root / "data" / "raw" / f"{symbol}.csv"
+        frame = frames.get(symbol)
+        decision = classify_provider_payload(frame, symbol, asof, path)
+        decisions.append(decision)
+        if decision["action"] == "promote" and frame is not None:
+            staged[symbol] = frame.to_csv(index=False).encode("utf-8")
+
+    tradables = [s for s in symbols if not s.startswith("^")]
+    by_symbol = {str(d["symbol"]): d for d in decisions}
+    valid = []
+    for symbol in tradables:
+        decision = by_symbol[symbol]
+        local_exact = decision.get("local_max") == asof.isoformat()
+        if decision["action"] == "promote" or local_exact:
+            valid.append(symbol)
+    denominator = len(tradables)
+    ratio = (len(valid) / denominator) if denominator else 0.0
+    skips = [
+        {
+            "symbol": str(d["symbol"]),
+            "session": asof.isoformat(),
+            "reason": MISSING_EXPECTED_SESSION_BAR,
+            "operationally_eligible": False,
+        }
+        for d in decisions
+        if d["reason"] == MISSING_EXPECTED_SESSION_BAR
+    ]
+    receipt: Dict[str, object] = {
+        "target_session": asof.isoformat(),
+        "tradable_coverage": {
+            "covered": len(valid),
+            "denominator": denominator,
+            "ratio": ratio,
+            "minimum": MIN_TRADABLE_COVERAGE,
+        },
+        "decisions": decisions,
+        "dated_skips": skips,
+        "promoted": [],
+        "production_raw_unchanged": True,
+        "passed": False,
+        "promotion_error": None,
+    }
+    skip_doc = {"target_session": asof.isoformat(), "skips": skips}
+    if ratio + 1e-12 < MIN_TRADABLE_COVERAGE:
+        receipt["failure"] = "coverage_below_minimum"
+        _write_json(root / INPUT_SKIPS_REL, skip_doc)
+        _write_json(root / FETCH_RECEIPT_REL, receipt)
+        return receipt
+    if before_promote is not None:
+        try:
+            before_promote()
+        except Exception as exc:
+            receipt["failure"] = "staged_before_promotion"
+            receipt["promotion_error"] = f"{type(exc).__name__}: {exc}"
+            receipt["durable_state"] = "no_promotion_attempted"
+            _write_json(root / INPUT_SKIPS_REL, skip_doc)
+            _write_json(root / FETCH_RECEIPT_REL, receipt)
+            return receipt
+    promoted: List[str] = []
+    for symbol, blob in staged.items():
+        dest = root / "data" / "raw" / f"{symbol}.csv"
+        try:
+            _atomic_replace_bytes(dest, blob, replace_impl)
+        except Exception as exc:
+            receipt["promoted"] = promoted
+            receipt["production_raw_unchanged"] = not promoted
+            receipt["promotion_error"] = f"{type(exc).__name__}: {exc}"
+            receipt["failure"] = "atomic_replacement_failed"
+            receipt["durable_state"] = "promotion_stopped_no_retry"
+            _write_json(root / INPUT_SKIPS_REL, skip_doc)
+            _write_json(root / FETCH_RECEIPT_REL, receipt)
+            return receipt
+        promoted.append(symbol)
+    receipt["promoted"] = promoted
+    receipt["production_raw_unchanged"] = not promoted
+    receipt["passed"] = True
+    _write_json(root / INPUT_SKIPS_REL, skip_doc)
+    _write_json(root / FETCH_RECEIPT_REL, receipt)
+    return receipt
 
 
 def main() -> int:
@@ -333,8 +625,12 @@ def main() -> int:
 
     ap.add_argument("--retries", type=int, default=3)
     ap.add_argument("--timeout", type=int, default=30, help="yfinance timeout seconds")
+    ap.add_argument(
+        "--repo-root", default=".", help="Repository root. Defaults to the working directory."
+    )
 
     args = ap.parse_args()
+    root = Path(args.repo_root).resolve()
 
     # AS_OF + end
     if args.asof:
@@ -370,9 +666,10 @@ def main() -> int:
     lagging_ok_count = 0
     lagging_exceeded_count = 0
     diag_rows: List[dict] = []
+    frames: Dict[str, Optional[pd.DataFrame]] = {}
 
     for t in tickers:
-        ok, msg, last_date, rows, source = fetch_one_with_retries(
+        ok, msg, last_date, rows, source, frame = fetch_one_with_retries(
             t,
             start=args.start,
             end=end,
@@ -380,6 +677,7 @@ def main() -> int:
             timeout_s=args.timeout,
             verbose=args.verbose,
         )
+        frames[t] = frame
 
         # 'ok' means a fresh download occurred; but ASOF coverage is based on last_date.
         if ok:
@@ -389,11 +687,11 @@ def main() -> int:
         lag_days = _asof_lag_days(asof, latest_dt)
         reached_strict = bool(latest_dt and latest_dt >= asof)
         reached = _asof_within_tolerance(asof, latest_dt, allow_lag)
-        if reached:
+        if reached_strict:
             asof_ok += 1
-            if lag_days is not None and lag_days > 0:
-                lagging_ok_count += 1
-        else:
+        if reached and lag_days is not None and lag_days > 0:
+            lagging_ok_count += 1
+        elif not reached:
             if lag_days is not None and lag_days > allow_lag:
                 lagging_exceeded_count += 1
             elif latest_dt is None:
@@ -401,7 +699,7 @@ def main() -> int:
 
         print(f"[fetch_raw] {t}: {msg}")
         if reached and lag_days is not None and lag_days > 0:
-            print(f"[fetch_raw] {t}: lag={lag_days} days (within tolerance)")
+            print(f"[fetch_raw] {t}: lag={lag_days} days (diagnostic only; not written)")
 
         diag_rows.append(
             {
@@ -422,12 +720,12 @@ def main() -> int:
             }
         )
 
-    try:
-        pd.DataFrame(diag_rows).to_csv(DIAG_PATH, index=False)
-        print(f"[fetch_raw] diagnostics: {DIAG_PATH}")
-    except Exception:
-        pass
+    print(
+        f"[fetch_raw] asof_ok={asof_ok}/{len(tickers)} lagging_ok_count={lagging_ok_count} "
+        f"lagging_exceeded_count={lagging_exceeded_count} download_ok={ok_count}/{len(tickers)}"
+    )
 
+    receipt = apply_provider_fetch(root=root, tickers=tickers, asof=asof, frames=frames)
     summary_payload = {
         "asof": asof.isoformat(),
         "allow_data_lag_days": allow_lag,
@@ -436,18 +734,24 @@ def main() -> int:
         "lagging_ok_count": lagging_ok_count,
         "lagging_exceeded_count": lagging_exceeded_count,
         "download_ok": ok_count,
+        "promotion_passed": bool(receipt["passed"]),
+        "failure": receipt.get("failure"),
     }
     try:
+        pd.DataFrame(diag_rows).to_csv(DIAG_PATH, index=False)
         SUMMARY_JSON.write_text(json.dumps(summary_payload, indent=2), encoding="utf-8")
-        print(f"[fetch_raw] summary: {SUMMARY_JSON}")
+        print(f"[fetch_raw] diagnostics: {DIAG_PATH}")
     except Exception:
         pass
-
     print(
-        f"[fetch_raw] asof_ok={asof_ok}/{len(tickers)} lagging_ok_count={lagging_ok_count} "
-        f"lagging_exceeded_count={lagging_exceeded_count} download_ok={ok_count}/{len(tickers)}"
+        f"[fetch_raw] coverage={receipt['tradable_coverage']['covered']}/"
+        f"{receipt['tradable_coverage']['denominator']} "
+        f"promoted={len(receipt['promoted'])} passed={receipt['passed']}"
     )
-
+    if receipt.get("failure") == "atomic_replacement_failed":
+        return 5
+    if not receipt["passed"]:
+        return 4
     if ok_count < args.min_ok:
         return 2
     if args.min_asof_ok and asof_ok < args.min_asof_ok:

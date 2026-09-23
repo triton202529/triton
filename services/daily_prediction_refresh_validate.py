@@ -28,6 +28,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_EXCLUSION_SPCX = "SPCX"
 INDEX_REFERENCE_SYMBOLS = ("^DJI", "^GSPC", "^IXIC", "^VIX")
+MIN_TRADABLE_COVERAGE = 0.90
+MISSING_EXPECTED_SESSION_BAR = "MISSING_EXPECTED_SESSION_BAR"
+INPUT_SKIPS_REL = "data/results/daily_refresh_input_skips.json"
 
 
 def _utc_now() -> datetime:
@@ -140,6 +143,39 @@ def _prediction_quality(path: Path) -> Dict[str, Any]:
     arr = preds.to_numpy(dtype=float)
     out["nonfinite"] = bool(preds.isna().any() or not np.isfinite(arr).all())
     return out
+
+
+def load_dated_input_skips(repo_root: Path, target: date) -> List[Dict[str, Any]]:
+    """Explicit target-session skips. A prediction file cannot clear one."""
+    path = repo_root / INPUT_SKIPS_REL
+    if not path.is_file():
+        return []
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if str(doc.get("target_session") or "") != target.isoformat():
+        return []
+    rows: List[Dict[str, Any]] = []
+    for row in doc.get("skips") or []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("reason") != MISSING_EXPECTED_SESSION_BAR:
+            continue
+        if str(row.get("session") or "") != target.isoformat():
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        rows.append(
+            {
+                "symbol": symbol,
+                "session": target.isoformat(),
+                "reason": MISSING_EXPECTED_SESSION_BAR,
+                "operationally_eligible": False,
+            }
+        )
+    return rows
 
 
 def required_symbol_sets(tickers: Sequence[str]) -> Dict[str, Any]:
@@ -370,7 +406,13 @@ def validate_refresh(
 
     target = target_session or last_completed_nyse_session()
     tickers_path = tickers_file or (repo_root / "data" / "config" / "tickers.txt")
-    sets = required_symbol_sets(_load_tickers(tickers_path))
+    full_sets = required_symbol_sets(_load_tickers(tickers_path))
+    dated_skips = load_dated_input_skips(repo_root, target)
+    skip_symbols = {row["symbol"] for row in dated_skips}
+    sets = dict(full_sets)
+    for key in ("raw_required", "processed_required", "prediction_required"):
+        sets[key] = [symbol for symbol in full_sets[key] if symbol not in skip_symbols]
+    sets["dated_input_skips"] = dated_skips
 
     if baseline is None and baseline_path is not None and Path(baseline_path).is_file():
         baseline = load_owner_evidence_json(Path(baseline_path))
@@ -462,9 +504,28 @@ def validate_refresh(
             if int(r.get("exit_code") or 0) != 0:
                 receipt_errors.append(f"stage_nonzero:{r.get('name')}")
 
+    tradables = [s for s in full_sets["canonical_symbols"] if not str(s).startswith("^")]
+    raw_ok = set(raw["ok_symbols"])
+    covered = [s for s in tradables if s in raw_ok]
+    coverage_ratio = (len(covered) / len(tradables)) if tradables else 0.0
+    coverage_ok = coverage_ratio + 1e-12 >= MIN_TRADABLE_COVERAGE
+    ineligible = []
+    for row in dated_skips:
+        pred_path = _layer_paths(repo_root, row["symbol"], "predictions")
+        ineligible.append(
+            {
+                "symbol": row["symbol"],
+                "session": row["session"],
+                "reason": row["reason"],
+                "prediction_present": pred_path.is_file(),
+                "operationally_eligible": False,
+            }
+        )
+
     passed = bool(
         not binding_errors
         and not receipt_errors
+        and coverage_ok
         and raw["passed"]
         and processed["passed"]
         and predictions["passed"]
@@ -493,6 +554,14 @@ def validate_refresh(
         "require_advancement": require_advancement,
         "binding_errors": binding_errors,
         "receipt_errors": receipt_errors,
+        "dated_skips": dated_skips,
+        "tradable_coverage": {
+            "covered": len(covered),
+            "denominator": len(tradables),
+            "ratio": coverage_ratio,
+            "minimum": MIN_TRADABLE_COVERAGE,
+        },
+        "skipped_symbols_remain_ineligible": ineligible,
         "passed": passed,
         "broker_called": False,
         "network_called": False,
@@ -502,6 +571,8 @@ def validate_refresh(
         reasons: List[str] = []
         reasons.extend(binding_errors)
         reasons.extend(receipt_errors)
+        if not coverage_ok:
+            reasons.append("coverage_below_minimum")
         if not raw["passed"]:
             reasons.append("raw_validation_failed")
         if not processed["passed"]:
@@ -516,6 +587,8 @@ def validate_refresh(
             result["first_failure"] = binding_errors[0]
         elif receipt_errors:
             result["first_failure"] = receipt_errors[0]
+        elif not coverage_ok:
+            result["first_failure"] = "coverage_below_minimum"
         elif raw.get("not_advanced_symbols"):
             result["first_failure"] = "raw_not_advanced"
         elif processed.get("not_advanced_symbols"):
