@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 # Allow importing from the parent directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from services.feature_generator import add_technical_indicators
+from services.feature_generator import add_technical_indicators, combine_ticker_frames
 
 # Paths
 FAILED_INPUT_FILE = "data/logs/failed_tickers_unique.txt"
@@ -73,7 +73,7 @@ def main():
         return
 
     print("✨ Adding features to retried data...")
-    full_df = pd.concat(all_data).dropna(subset=["close"])
+    full_df = combine_ticker_frames(all_data)
     spy_df = full_df[full_df["ticker"] == "SPY"]
 
     enhanced_frames = []
@@ -95,7 +95,7 @@ def main():
         print("❌ Feature generation failed for all. Nothing saved.")
         return
 
-    final_df = pd.concat(enhanced_frames).dropna()
+    final_df = combine_ticker_frames(enhanced_frames)
     final_df.to_parquet(PROCESSED_FILE, index=False)
     print(f"✅ Retrained data saved to: {PROCESSED_FILE}")
 
