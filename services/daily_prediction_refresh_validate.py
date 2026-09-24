@@ -4,10 +4,9 @@ daily_prediction_refresh_validate.py
 Validate daily prediction-refresh coverage and current-run output advancement.
 
 Contract (accepted):
-  raw required        = full canonical universe (66)
-  processed required  = full canonical universe (66)
-  prediction required = universe minus SPCX only (65), including ^ index refs
-  SPCX                = sole established insufficient-history exclusion
+  raw required        = full canonical universe
+  processed required  = full canonical universe
+  prediction required = every governed identity, including indexes and SPCX
 
 No broker, network, paper-arm, or execution side effects.
 """
@@ -26,7 +25,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 ROOT = Path(__file__).resolve().parents[1]
 
-EXPECTED_EXCLUSION_SPCX = "SPCX"
 INDEX_REFERENCE_SYMBOLS = ("^DJI", "^GSPC", "^IXIC", "^VIX")
 MIN_TRADABLE_COVERAGE = 0.90
 MISSING_EXPECTED_SESSION_BAR = "MISSING_EXPECTED_SESSION_BAR"
@@ -180,9 +178,9 @@ def load_dated_input_skips(repo_root: Path, target: date) -> List[Dict[str, Any]
 
 def required_symbol_sets(tickers: Sequence[str]) -> Dict[str, Any]:
     universe = [str(t).strip().upper() for t in tickers if str(t).strip()]
-    excluded = [EXPECTED_EXCLUSION_SPCX] if EXPECTED_EXCLUSION_SPCX in universe else []
+    excluded: List[str] = []
     index_refs = [t for t in universe if t.startswith("^")]
-    pred_required = [t for t in universe if t not in set(excluded)]
+    pred_required = list(universe)
     return {
         "canonical_symbols": universe,
         "canonical_symbol_count": len(universe),

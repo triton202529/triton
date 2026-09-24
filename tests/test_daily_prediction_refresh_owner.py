@@ -92,12 +92,10 @@ def _seed_repo(tmp: Path, *, target: date, include_index_preds: bool = True) -> 
     for t in tickers:
         _write_ohlcv(tmp / "data" / "raw" / f"{t}.csv", target)
         _write_processed(tmp / "data" / "processed" / f"{t}.parquet", target)
-        if t == "SPCX":
-            continue
         if t.startswith("^") and not include_index_preds:
             continue
         _write_pred(tmp / "data" / "predictions" / f"{t}_predictions.parquet", target)
-    pd.DataFrame([{"ticker": "SPCX", "reason": "Too few rows after lagging (have 14)"}]).to_csv(
+    pd.DataFrame([{"ticker": "S00", "reason": "unused"}]).to_csv(
         tmp / "data" / "results" / "skipped_tickers.csv", index=False
     )
     pd.DataFrame([{"ticker": "S01", "model": "rf"}]).to_csv(
@@ -120,12 +118,10 @@ def _advance_all(tmp: Path, target: date) -> None:
     for t in tickers:
         _write_ohlcv(tmp / "data" / "raw" / f"{t}.csv", target)
         _write_processed(tmp / "data" / "processed" / f"{t}.parquet", target)
-        if t == "SPCX":
-            continue
         _write_pred(
             tmp / "data" / "predictions" / f"{t}_predictions.parquet", target, predicted=1.03
         )
-    pd.DataFrame([{"ticker": "SPCX", "reason": "Too few rows after lagging (have 14)"}]).to_csv(
+    pd.DataFrame([{"ticker": "S00", "reason": "unused"}]).to_csv(
         tmp / "data" / "results" / "skipped_tickers.csv", index=False
     )
     pd.DataFrame([{"ticker": "S01", "model": "rf", "v": 2}]).to_csv(
@@ -175,7 +171,7 @@ def test_pre_repair_stale_same_session_accepted_without_advancement():
             require_advancement=False,
         )
         assert result["passed"] is True
-        assert result["predictions"]["required_count"] == 65
+        assert result["predictions"]["required_count"] == 66
 
 
 # --- Contract / repair tests ---
@@ -206,11 +202,11 @@ def test_symbol_contract_66_66_65_with_indices_required():
     sets = required_symbol_sets(_universe_66())
     assert sets["raw_required_count"] == 66
     assert sets["processed_required_count"] == 66
-    assert sets["prediction_required_count"] == 65
-    assert sets["expected_excluded_symbols"] == ["SPCX"]
+    assert sets["prediction_required_count"] == 66
+    assert sets["expected_excluded_symbols"] == []
     for idx in ("^DJI", "^GSPC", "^IXIC", "^VIX"):
         assert idx in sets["prediction_required"]
-    assert "SPCX" not in sets["prediction_required"]
+    assert "SPCX" in sets["prediction_required"]
 
 
 def test_count_defect_fixed_65_predictions_pass_after_advancement():
@@ -232,12 +228,12 @@ def test_count_defect_fixed_65_predictions_pass_after_advancement():
             require_advancement=True,
         )
         assert result["passed"] is True
-        assert result["predictions"]["required_count"] == 65
-        assert result["predictions"]["ok_count"] == 65
-        assert result["expected_excluded_symbols"] == ["SPCX"]
+        assert result["predictions"]["required_count"] == 66
+        assert result["predictions"]["ok_count"] == 66
+        assert result["expected_excluded_symbols"] == []
 
 
-def test_spcx_is_exclusion_not_missing_required():
+def test_missing_spcx_prediction_fails_required():
     from services.daily_prediction_refresh_validate import capture_baseline, validate_refresh
 
     target = date(2026, 8, 7)
@@ -246,6 +242,7 @@ def test_spcx_is_exclusion_not_missing_required():
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r2", run_started_at=started)
         _advance_all(root, target)
+        (root / "data" / "predictions" / "SPCX_predictions.parquet").unlink()
         result = validate_refresh(
             repo_root=root,
             target_session=target,
@@ -254,8 +251,10 @@ def test_spcx_is_exclusion_not_missing_required():
             baseline=baseline,
             stage_receipts=_receipts_ok(),
         )
-        assert "SPCX" not in result["predictions"]["missing_required_symbols"]
-        assert result["expected_excluded_symbols"] == ["SPCX"]
+        assert "SPCX" in result["predictions"]["missing_required_symbols"]
+        assert result["first_failure"] == "predictions_missing_required"
+        assert result["passed"] is False
+        assert result["expected_excluded_symbols"] == []
 
 
 @pytest.mark.parametrize("idx", ["^DJI", "^GSPC", "^IXIC", "^VIX"])
@@ -726,4 +725,4 @@ def test_bom_receipt_cli_passes_with_current_run_advancement():
         assert rc == 0
         doc = json.loads((root / "summary.json").read_text(encoding="utf-8"))
         assert doc["passed"] is True
-        assert doc["predictions"]["required_count"] == 65
+        assert doc["predictions"]["required_count"] == 66

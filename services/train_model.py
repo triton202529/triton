@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import time
@@ -136,6 +137,7 @@ def parse_args(argv=None):
         default=30,
         help="Minimum rows required per ticker parquet (pre-lag).",
     )
+    p.add_argument("--run-id", default="train", help="Stable run identity bound into predictions.")
     return p.parse_args(argv)
 
 
@@ -383,8 +385,24 @@ def _train(argv=None):
         _available_parquets_in(RESULTS_DIR)
     )
 
-    # ✅ Universe
-    universe = sorted(set(fundamentals_df["ticker"]).union(set(scores_df["ticker"])))
+    from pathlib import Path
+
+    from services.daily_prediction_refresh_validate import required_symbol_sets
+    from services.lifecycle_artifact_guard import parse_universe_ticker_identities
+    from services.market_calendar import last_completed_nyse_session
+
+    governed_path = Path(PROJECT_ROOT) / "data" / "config" / "tickers.txt"
+    processed_under_project = (
+        Path(PROCESSED_DIR).resolve() == (Path(PROJECT_ROOT) / "data" / "processed").resolve()
+    )
+    governed_batch = governed_path.is_file() and processed_under_project
+    if governed_batch:
+        governed = parse_universe_ticker_identities(governed_path)
+        required_symbols = list(required_symbol_sets(governed)["prediction_required"])
+        target_session = last_completed_nyse_session().isoformat()
+    else:
+        required_symbols = sorted(set(fundamentals_df["ticker"]).union(set(scores_df["ticker"])))
+        target_session = ""
 
     # ---------- Models ----------
     models = {
@@ -404,6 +422,7 @@ def _train(argv=None):
         )
 
     skipped_tickers: list[dict] = []
+    staged_predictions: dict[str, pd.DataFrame] = {}
     all_feature_importance = []
     all_model_comparison = []
 
@@ -413,7 +432,15 @@ def _train(argv=None):
         else pd.Series(dtype=float)
     )
 
-    def train_one_ticker(ticker: str, raw_df: pd.DataFrame, min_rows: int) -> bool:
+    model_identity = "+".join(models.keys())
+    run_id = str(args.run_id)
+
+    def train_one_ticker(
+        ticker: str,
+        raw_df: pd.DataFrame,
+        min_rows: int,
+        processed_sha256: str,
+    ) -> bool:
         try:
             df = raw_df.copy()
             if df.empty or len(df) < min_rows:
@@ -435,19 +462,19 @@ def _train(argv=None):
 
             fund_row = fundamentals_df[fundamentals_df["ticker"] == ticker]
             score_row = scores_df[scores_df["ticker"] == ticker]
-            if fund_row.empty or score_row.empty:
-                skipped_tickers.append(
-                    {"ticker": ticker, "reason": "Missing fundamentals or score"}
-                )
-                return False
-
             fund_cols = ["pe_ratio", "eps", "market_cap", "pb_ratio", "dividend_yield"]
             for col in fund_cols:
-                df[col] = fund_row.iloc[0][col] if col in fund_row.columns else np.nan
+                df[col] = (
+                    fund_row.iloc[0][col]
+                    if not fund_row.empty and col in fund_row.columns
+                    else np.nan
+                )
 
             df[fund_cols] = df[fund_cols].fillna(0.0)
             df["total_score"] = (
-                score_row.iloc[0]["total_score"] if "total_score" in score_row.columns else np.nan
+                score_row.iloc[0]["total_score"]
+                if not score_row.empty and "total_score" in score_row.columns
+                else 0.0
             )
 
             if "sma20" not in df.columns:
@@ -474,7 +501,10 @@ def _train(argv=None):
                 skipped_tickers.append(
                     {
                         "ticker": ticker,
-                        "reason": f"Too few rows after lagging (have {int(mask.sum())})",
+                        "reason": (
+                            f"Too few rows after lagging (have {int(mask.sum())}) "
+                            f"session={target_session}"
+                        ),
                     }
                 )
                 return False
@@ -512,10 +542,11 @@ def _train(argv=None):
 
             output_df = df_model[["date", "close", "predicted_close", "signal"]].copy()
             output_df["ticker"] = ticker
-            atomic_publish_parquet(
-                output_df,
-                os.path.join(PREDICTIONS_DIR, f"{ticker}_predictions.parquet"),
-            )
+            output_df["completed_session"] = target_session
+            output_df["processed_sha256"] = processed_sha256
+            output_df["model_identity"] = model_identity
+            output_df["run_id"] = run_id
+            staged_predictions[ticker] = output_df
 
             fi = getattr(rf_model, "feature_importances_", None)
             if fi is not None and len(fi) == len(feature_cols):
@@ -586,7 +617,7 @@ def _train(argv=None):
             return False
 
     trained = 0
-    for ticker in universe:
+    for ticker in required_symbols:
         t = str(ticker).strip().upper()
         if t in ("", "NAN", "NONE"):
             continue
@@ -601,8 +632,75 @@ def _train(argv=None):
             continue
 
         df_t = load_ticker_parquet(t)
-        ok = train_one_ticker(t, df_t, min_rows=args.min_rows)
+        if "ticker" in df_t.columns:
+            found = {str(v).strip().upper() for v in df_t["ticker"].dropna().tolist()}
+            found.discard("")
+            if found and found != {t}:
+                skipped_tickers.append({"ticker": t, "reason": "wrong_symbol"})
+                continue
+        dates = (
+            pd.to_datetime(df_t["date"], errors="coerce")
+            if "date" in df_t.columns
+            else pd.Series(dtype="datetime64[ns]")
+        )
+        if not dates.empty and bool(dates.duplicated().any()):
+            skipped_tickers.append({"ticker": t, "reason": "duplicate_session"})
+            continue
+        if governed_batch and not dates.empty and dates.max().date().isoformat() != target_session:
+            skipped_tickers.append({"ticker": t, "reason": "stale_processed_maximum"})
+            continue
+        source = os.path.join(PROCESSED_DIR, f"{t}.parquet")
+        if not os.path.exists(source):
+            source = os.path.join(RESULTS_DIR, f"{t}.parquet")
+        with open(source, "rb") as source_fh:
+            processed_sha = hashlib.sha256(source_fh.read()).hexdigest()
+        ok = train_one_ticker(t, df_t, args.min_rows, processed_sha)
         trained += int(ok)
+
+    missing_required = [symbol for symbol in required_symbols if symbol not in staged_predictions]
+    if governed_batch and missing_required:
+        for symbol in missing_required:
+            if not any(row.get("ticker") == symbol for row in skipped_tickers):
+                skipped_tickers.append({"ticker": symbol, "reason": "missing_required_prediction"})
+        print(f"Prediction batch incomplete: {missing_required}")
+        if skipped_tickers:
+            skipped_df = pd.DataFrame(skipped_tickers)
+            skipped_df["ticker"] = skipped_df["ticker"].astype(str).str.strip().str.upper()
+            atomic_publish_csv(skipped_df, SKIPPED_TICKERS_LOG)
+        return 4
+
+    staged_tmp: list[tuple[str, str]] = []
+    try:
+        for symbol, frame in staged_predictions.items():
+            target = os.path.join(PREDICTIONS_DIR, f"{symbol}_predictions.parquet")
+            abs_target = os.path.abspath(target)
+            os.makedirs(os.path.dirname(abs_target) or ".", exist_ok=True)
+            tmp = _unique_sibling_tmp(abs_target)
+            buf = io.BytesIO()
+            frame.to_parquet(buf, index=False)
+            with open(tmp, "wb") as fh:
+                fh.write(buf.getvalue())
+                fh.flush()
+                os.fsync(fh.fileno())
+            staged_tmp.append((tmp, abs_target))
+    except Exception as exc:
+        for tmp, _abs_target in staged_tmp:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+        print(f"Prediction staging failed; nothing published: {exc}")
+        return 5
+
+    replaced: list[str] = []
+    try:
+        for tmp, abs_target in staged_tmp:
+            os.replace(tmp, abs_target)
+            replaced.append(abs_target)
+    except Exception as exc:
+        print(f"Atomic prediction replacement failed once after {replaced}: {exc}")
+        return 5
 
     if all_feature_importance:
         atomic_publish_csv(pd.concat(all_feature_importance, ignore_index=True), FEATURES_OUT_PATH)
