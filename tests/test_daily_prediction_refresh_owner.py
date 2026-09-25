@@ -112,7 +112,47 @@ def _touch_rewrite_pred(path: Path, target: date) -> None:
     _write_pred(path, target, predicted=1.02)
 
 
-def _advance_all(tmp: Path, target: date) -> None:
+def _bind_training_receipt(tmp: Path, target: date, run_id: str) -> None:
+    import hashlib
+
+    tickers = _universe_66()
+    pred_hashes = {}
+    proc_hashes = {}
+    for ticker in tickers:
+        pred = tmp / "data" / "predictions" / f"{ticker}_predictions.parquet"
+        proc = tmp / "data" / "processed" / f"{ticker}.parquet"
+        proc_hash = hashlib.sha256(proc.read_bytes()).hexdigest()
+        proc_hashes[ticker] = proc_hash
+        frame = pd.read_parquet(pred)
+        frame["run_id"] = run_id
+        frame["completed_session"] = target.isoformat()
+        frame["processed_sha256"] = proc_hash
+        frame["model_identity"] = "RandomForest+GradientBoosting+LinearRegression"
+        frame.to_parquet(pred, index=False)
+        pred_hashes[ticker] = hashlib.sha256(pred.read_bytes()).hexdigest()
+    feature = tmp / "data" / "results" / "feature_importance.csv"
+    model = tmp / "data" / "results" / "model_comparison.csv"
+    tickers_path = tmp / "data" / "config" / "tickers.txt"
+    receipt = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "generated_at": "2026-09-24T00:00:00+00:00",
+        "completed_session": target.isoformat(),
+        "governed_universe_sha256": hashlib.sha256(tickers_path.read_bytes()).hexdigest(),
+        "required_count": len(tickers),
+        "produced_count": len(tickers),
+        "skipped_symbols": [],
+        "processed_input_hashes": proc_hashes,
+        "prediction_output_hashes": pred_hashes,
+        "feature_importance_sha256": hashlib.sha256(feature.read_bytes()).hexdigest(),
+        "model_comparison_sha256": hashlib.sha256(model.read_bytes()).hexdigest(),
+        "publication_status": "COMPLETE",
+    }
+    path = tmp / "data" / "results" / "training_receipt.json"
+    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _advance_all(tmp: Path, target: date, run_id: str) -> None:
     tickers = _universe_66()
     time.sleep(0.05)
     for t in tickers:
@@ -127,6 +167,10 @@ def _advance_all(tmp: Path, target: date) -> None:
     pd.DataFrame([{"ticker": "S01", "model": "rf", "v": 2}]).to_csv(
         tmp / "data" / "results" / "model_comparison.csv", index=False
     )
+    pd.DataFrame([{"feature": "x", "importance": 1.0, "v": 2}]).to_csv(
+        tmp / "data" / "results" / "feature_importance.csv", index=False
+    )
+    _bind_training_receipt(tmp, target, run_id)
 
 
 def _receipts_ok() -> list[dict]:
@@ -217,7 +261,7 @@ def test_count_defect_fixed_65_predictions_pass_after_advancement():
         root = _seed_repo(Path(td), target=target, include_index_preds=True)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r1", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r1")
         result = validate_refresh(
             repo_root=root,
             target_session=target,
@@ -241,7 +285,7 @@ def test_missing_spcx_prediction_fails_required():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r2", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r2")
         (root / "data" / "predictions" / "SPCX_predictions.parquet").unlink()
         result = validate_refresh(
             repo_root=root,
@@ -266,7 +310,7 @@ def test_missing_index_prediction_fails(idx: str):
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r3", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r3")
         (root / "data" / "predictions" / f"{idx}_predictions.parquet").unlink()
         result = validate_refresh(
             repo_root=root,
@@ -288,7 +332,7 @@ def test_missing_non_index_required_prediction_fails():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r4", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r4")
         (root / "data" / "predictions" / "S01_predictions.parquet").unlink()
         result = validate_refresh(
             repo_root=root,
@@ -310,7 +354,7 @@ def test_unexpected_extra_cannot_mask_missing_required():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r5", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r5")
         (root / "data" / "predictions" / "S01_predictions.parquet").unlink()
         _write_pred(root / "data" / "predictions" / "ZZZZ_predictions.parquet", target)
         result = validate_refresh(
@@ -334,7 +378,7 @@ def test_schema_empty_nonfinite_wrong_date_fail():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r6", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r6")
         _write_pred(
             root / "data" / "predictions" / "S01_predictions.parquet",
             target,
@@ -352,7 +396,7 @@ def test_schema_empty_nonfinite_wrong_date_fail():
         assert "S01" in r1["predictions"]["schema_invalid_symbols"]
 
         baseline2 = capture_baseline(repo_root=root, run_id="r6b", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r6b")
         _write_pred(root / "data" / "predictions" / "S02_predictions.parquet", target, empty=True)
         r2 = validate_refresh(
             repo_root=root,
@@ -365,7 +409,7 @@ def test_schema_empty_nonfinite_wrong_date_fail():
         assert "S02" in r2["predictions"]["empty_symbols"]
 
         baseline3 = capture_baseline(repo_root=root, run_id="r6c", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r6c")
         _write_pred(
             root / "data" / "predictions" / "S03_predictions.parquet",
             target,
@@ -382,7 +426,7 @@ def test_schema_empty_nonfinite_wrong_date_fail():
         assert "S03" in r3["predictions"]["nonfinite_symbols"]
 
         baseline4 = capture_baseline(repo_root=root, run_id="r6d", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r6d")
         _write_pred(root / "data" / "predictions" / "S04_predictions.parquet", date(2026, 7, 31))
         r4 = validate_refresh(
             repo_root=root,
@@ -470,7 +514,7 @@ def test_rewritten_same_session_distinguishable_from_baseline():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="r9", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "r9")
         result = validate_refresh(
             repo_root=root,
             target_session=target,
@@ -493,7 +537,7 @@ def test_old_summary_and_mismatched_run_id_rejected():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="runA", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "runB")
         bad = validate_refresh(
             repo_root=root,
             target_session=target,
@@ -657,7 +701,7 @@ def test_bom_cannot_bypass_run_id_or_stage_order():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="runA", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "runB")
 
         receipts_path = root / "receipts_bom.json"
         _write_receipt_bytes(receipts_path, _receipts_ok(), with_bom=True)
@@ -701,7 +745,7 @@ def test_bom_receipt_cli_passes_with_current_run_advancement():
         root = _seed_repo(Path(td), target=target)
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         baseline = capture_baseline(repo_root=root, run_id="runBom", run_started_at=started)
-        _advance_all(root, target)
+        _advance_all(root, target, "runBom")
         (root / "baseline.json").write_text(json.dumps(baseline), encoding="utf-8")
         _write_receipt_bytes(root / "receipts.json", _receipts_ok(), with_bom=True)
         rc = main(

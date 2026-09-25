@@ -405,7 +405,7 @@ def test_11_daily_refresh_validation_without_operational_signal_csvs(tmp_path):
     assert not (root / "data" / "results" / "signals.csv").exists()
     started = "2026-08-07T12:00:00Z"
     baseline = capture_baseline(repo_root=root, run_id="r198e", run_started_at=started)
-    _advance_all(root, target)
+    _advance_all(root, target, "r198e")
     result = validate_refresh(
         repo_root=root,
         target_session=target,

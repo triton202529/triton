@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 import time
 import io
 import argparse
+from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
@@ -138,6 +140,14 @@ def parse_args(argv=None):
         help="Minimum rows required per ticker parquet (pre-lag).",
     )
     p.add_argument("--run-id", default="train", help="Stable run identity bound into predictions.")
+    p.add_argument(
+        "--completed-session", default="", help="Completed session passed by DailyRefresh."
+    )
+    p.add_argument(
+        "--pipeline",
+        action="store_true",
+        help="Scheduled DailyRefresh invocation. Rejects a generic run id.",
+    )
     return p.parse_args(argv)
 
 
@@ -161,6 +171,13 @@ def main(argv=None):
 
 def _train(argv=None):
     args = parse_args(argv)
+    if args.pipeline and (
+        not str(args.run_id).strip()
+        or str(args.run_id).strip() == "train"
+        or not str(args.completed_session).strip()
+    ):
+        print("pipeline run identity rejected")
+        return 4
     print(
         "🧠 Starting multi-model training (lagged features), feature importance, model comparison, Trade Rationale 2.0…"
     )
@@ -399,7 +416,10 @@ def _train(argv=None):
     if governed_batch:
         governed = parse_universe_ticker_identities(governed_path)
         required_symbols = list(required_symbol_sets(governed)["prediction_required"])
-        target_session = last_completed_nyse_session().isoformat()
+        if args.pipeline:
+            target_session = str(args.completed_session).strip()
+        else:
+            target_session = last_completed_nyse_session().isoformat()
     else:
         required_symbols = sorted(set(fundamentals_df["ticker"]).union(set(scores_df["ticker"])))
         target_session = ""
@@ -617,6 +637,7 @@ def _train(argv=None):
             return False
 
     trained = 0
+    processed_hashes: dict[str, str] = {}
     for ticker in required_symbols:
         t = str(ticker).strip().upper()
         if t in ("", "NAN", "NONE"):
@@ -655,6 +676,8 @@ def _train(argv=None):
         with open(source, "rb") as source_fh:
             processed_sha = hashlib.sha256(source_fh.read()).hexdigest()
         ok = train_one_ticker(t, df_t, args.min_rows, processed_sha)
+        if ok:
+            processed_hashes[t] = processed_sha
         trained += int(ok)
 
     missing_required = [symbol for symbol in required_symbols if symbol not in staged_predictions]
@@ -702,24 +725,70 @@ def _train(argv=None):
         print(f"Atomic prediction replacement failed once after {replaced}: {exc}")
         return 5
 
-    if all_feature_importance:
+    try:
+        if not all_feature_importance:
+            print("feature importance missing")
+            return 6
         atomic_publish_csv(pd.concat(all_feature_importance, ignore_index=True), FEATURES_OUT_PATH)
-        print(f"\n📊 Feature importance saved to: {FEATURES_OUT_PATH}")
-
-    if all_model_comparison:
+        if not all_model_comparison:
+            print("model comparison missing")
+            return 6
         mc_df = pd.concat(all_model_comparison, ignore_index=True)
         mc_df["date"] = pd.to_datetime(mc_df["date"], errors="coerce")
         atomic_publish_csv(mc_df, MODEL_COMPARISON_PATH)
-        print(f"📈 Model comparison saved to: {MODEL_COMPARISON_PATH}")
-    else:
-        print("⚠️ No model comparison rows were generated.")
+    except Exception as exc:
+        print(f"Diagnostic publication failed; no training receipt: {exc}")
+        return 6
 
     if skipped_tickers:
         skipped_df = pd.DataFrame(skipped_tickers)
         skipped_df["ticker"] = skipped_df["ticker"].astype(str).str.strip().str.upper()
         skipped_df = skipped_df[~skipped_df["ticker"].isin(["", "NAN", "NONE"])]
-        atomic_publish_csv(skipped_df, SKIPPED_TICKERS_LOG)
-        print(f"📄 Skipped tickers log saved to: {SKIPPED_TICKERS_LOG}")
+    else:
+        skipped_df = pd.DataFrame(columns=["ticker", "reason"])
+    atomic_publish_csv(skipped_df, SKIPPED_TICKERS_LOG)
+
+    prediction_hashes = {}
+    for path in replaced:
+        symbol = os.path.basename(path)[: -len("_predictions.parquet")]
+        with open(path, "rb") as pred_fh:
+            prediction_hashes[symbol] = hashlib.sha256(pred_fh.read()).hexdigest()
+    universe_bytes = governed_path.read_bytes() if governed_path.is_file() else b""
+    with open(FEATURES_OUT_PATH, "rb") as feat_fh:
+        feature_hash = hashlib.sha256(feat_fh.read()).hexdigest()
+    with open(MODEL_COMPARISON_PATH, "rb") as model_fh:
+        model_hash = hashlib.sha256(model_fh.read()).hexdigest()
+    receipt = {
+        "schema_version": 1,
+        "run_id": str(args.run_id),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "completed_session": target_session,
+        "governed_universe_sha256": hashlib.sha256(universe_bytes).hexdigest(),
+        "required_count": len(required_symbols),
+        "produced_count": len(prediction_hashes),
+        "skipped_symbols": (
+            [] if governed_batch else sorted(skipped_df["ticker"].astype(str).tolist())
+        ),
+        "processed_input_hashes": processed_hashes,
+        "prediction_output_hashes": prediction_hashes,
+        "feature_importance_sha256": feature_hash,
+        "model_comparison_sha256": model_hash,
+        "publication_status": "COMPLETE",
+    }
+    receipt_path = os.path.join(RESULTS_DIR, "training_receipt.json")
+    try:
+        abs_receipt = os.path.abspath(receipt_path)
+        os.makedirs(os.path.dirname(abs_receipt) or ".", exist_ok=True)
+        tmp = _unique_sibling_tmp(abs_receipt)
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(receipt, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, abs_receipt)
+    except Exception as exc:
+        print(f"Training receipt publication failed: {exc}")
+        return 6
 
     print(f"\n🏁 Done. Trained {trained} tickers.")
 

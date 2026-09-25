@@ -231,6 +231,7 @@ def capture_baseline(
         "data/results/skipped_tickers.csv",
         "data/results/model_comparison.csv",
         "data/results/feature_importance.csv",
+        "data/results/training_receipt.json",
     ):
         ident = _file_identity(repo_root / rel)
         artifacts[rel] = ident or {"exists": False}
@@ -387,6 +388,95 @@ def assess_required_layer(
     }
 
 
+def _assess_training_receipt(
+    *,
+    repo_root: Path,
+    run_id: str,
+    target: date,
+    required_symbols: Sequence[str],
+    baseline_artifacts: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Bind the training receipt to this run. Byte identity, not mtime, decides freshness."""
+    rel = "data/results/training_receipt.json"
+    path = repo_root / rel
+    pre = baseline_artifacts.get(rel) or {"exists": False}
+    post = _file_identity(path)
+    errors: List[str] = []
+    if not post or not post.get("exists"):
+        errors.append("missing_receipt")
+    elif pre.get("exists") and post.get("sha256") == pre.get("sha256"):
+        errors.append("stale_receipt")
+    receipt: Dict[str, Any] = {}
+    if path.is_file():
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(parsed, dict):
+                errors.append("malformed_receipt")
+            else:
+                receipt = parsed
+        except Exception:
+            errors.append("malformed_receipt")
+    if receipt:
+        if receipt.get("schema_version") != 1:
+            errors.append("schema")
+        if str(receipt.get("run_id") or "") != str(run_id) or str(receipt.get("run_id") or "") in {
+            "",
+            "train",
+        }:
+            errors.append("run_id")
+        if str(receipt.get("completed_session") or "") != target.isoformat():
+            errors.append("session")
+        if receipt.get("publication_status") != "COMPLETE":
+            errors.append("status")
+        if receipt.get("skipped_symbols") != []:
+            errors.append("skips")
+        if int(receipt.get("required_count") or -1) != len(required_symbols):
+            errors.append("required_count")
+        if int(receipt.get("produced_count") or -1) != len(required_symbols):
+            errors.append("produced_count")
+
+        def file_sha(file_path: Path) -> str | None:
+            if not file_path.is_file():
+                return None
+            return hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+        if receipt.get("feature_importance_sha256") != file_sha(
+            repo_root / "data/results/feature_importance.csv"
+        ):
+            errors.append("feature_importance")
+        if receipt.get("model_comparison_sha256") != file_sha(
+            repo_root / "data/results/model_comparison.csv"
+        ):
+            errors.append("model_comparison")
+        pred_hashes = receipt.get("prediction_output_hashes") or {}
+        proc_hashes = receipt.get("processed_input_hashes") or {}
+        import pandas as pd
+
+        for symbol in required_symbols:
+            pred = repo_root / "data" / "predictions" / f"{symbol}_predictions.parquet"
+            proc = repo_root / "data" / "processed" / f"{symbol}.parquet"
+            if pred_hashes.get(symbol) != file_sha(pred):
+                errors.append("prediction_hash")
+            if proc_hashes.get(symbol) != file_sha(proc):
+                errors.append("processed_hash")
+            if not pred.is_file():
+                continue
+            frame = pd.read_parquet(pred)
+            if "run_id" not in frame.columns or set(frame["run_id"].astype(str)) != {str(run_id)}:
+                errors.append("prediction_run_id")
+            expected_proc = str(proc_hashes.get(symbol) or "")
+            if "processed_sha256" not in frame.columns or set(
+                frame["processed_sha256"].astype(str)
+            ) != {expected_proc}:
+                errors.append("prediction_processed_hash")
+    return {
+        "passed": not errors,
+        "errors": errors,
+        "pre_sha256": pre.get("sha256"),
+        "post_sha256": None if not post else post.get("sha256"),
+    }
+
+
 def validate_refresh(
     *,
     repo_root: Path,
@@ -474,15 +564,14 @@ def validate_refresh(
     train_diag_advanced = True
     train_diag_details: Dict[str, Any] = {}
     if require_advancement:
-        for rel in ("data/results/skipped_tickers.csv", "data/results/model_comparison.csv"):
-            train_diag_details[rel] = _advanced_vs_baseline(
-                repo_root=repo_root,
-                rel=rel,
-                baseline_artifacts=baseline_artifacts,
-                run_started_at=started_dt,
-            )
-            if not train_diag_details[rel].get("advanced"):
-                train_diag_advanced = False
+        train_diag_details = _assess_training_receipt(
+            repo_root=repo_root,
+            run_id=rid,
+            target=target,
+            required_symbols=sets["prediction_required"],
+            baseline_artifacts=baseline_artifacts,
+        )
+        train_diag_advanced = bool(train_diag_details.get("passed"))
 
     receipts = list(stage_receipts or [])
     receipt_errors: List[str] = []

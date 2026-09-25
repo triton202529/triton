@@ -133,7 +133,16 @@ try {
     Run-PyStep -Name "fetch_raw_data" -PyArgs @("-m", "services.fetch_raw_data", "--verbose", "--min-ok", "10")
     Run-PyStep -Name "stale_data_gate" -PyArgs @("-m", "services.stale_data_gate")
     Run-PyStep -Name "preprocess" -PyArgs @("-m", "services.preprocess")
-    Run-PyStep -Name "train_model" -PyArgs @("-m", "services.train_model", "--min-rows", "30")
+    $completedSession = (
+        & $py -c "from services.market_calendar import last_completed_nyse_session; print(last_completed_nyse_session().isoformat())"
+    ).Trim()
+    Run-PyStep -Name "train_model" -PyArgs @(
+        "-m", "services.train_model",
+        "--min-rows", "30",
+        "--pipeline",
+        "--run-id", $runId,
+        "--completed-session", $completedSession
+    )
     Run-PyStep -Name "daily_prediction_refresh_validate" -PyArgs @(
         "-m", "services.daily_prediction_refresh_validate",
         "--repo-root", $repoRoot,
