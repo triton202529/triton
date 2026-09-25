@@ -232,6 +232,7 @@ def capture_baseline(
         "data/results/model_comparison.csv",
         "data/results/feature_importance.csv",
         "data/results/training_receipt.json",
+        "data/results/daily_refresh_fetch_receipt.json",
     ):
         ident = _file_identity(repo_root / rel)
         artifacts[rel] = ident or {"exists": False}
@@ -477,6 +478,246 @@ def _assess_training_receipt(
     }
 
 
+def _raw_exact_session_errors(path: Path, symbol: str, target: date) -> List[str]:
+    import pandas as pd
+
+    errors: List[str] = []
+    try:
+        frame = pd.read_csv(path)
+    except Exception:
+        return ["malformed_ohlcv"]
+    required = ["open", "high", "low", "close", "volume", "date"]
+    if any(column not in frame.columns for column in required):
+        return ["malformed_ohlcv"]
+    numeric = frame[["open", "high", "low", "close", "volume"]].apply(
+        pd.to_numeric, errors="coerce"
+    )
+    if bool(numeric.isna().any().any()):
+        errors.append("malformed_ohlcv")
+    if "ticker" in frame.columns:
+        found = {str(value).strip().upper() for value in frame["ticker"].dropna()}
+        found.discard("")
+        if found and found != {symbol.upper()}:
+            errors.append("wrong_symbol")
+    dates = pd.to_datetime(frame["date"], errors="coerce")
+    if bool(dates.isna().any()):
+        errors.append("malformed_ohlcv")
+        return errors
+    session_rows = int((dates.dt.date == target).sum())
+    if session_rows != 1:
+        errors.append("missing_or_duplicate_session_row")
+    if bool((dates.dt.date > target).any()):
+        errors.append("future_row")
+    if dates.empty or dates.max().date() != target:
+        errors.append("stale_session")
+    return errors
+
+
+FETCH_RECEIPT_REL = "data/results/daily_refresh_fetch_receipt.json"
+_FETCH_BINDING_FIELDS = (
+    "run_id",
+    "artifact_path",
+    "artifact_sha256",
+    "artifact_size_bytes",
+    "target_session",
+    "artifact_written_at_utc",
+    "baseline_captured_at_utc",
+    "started_at",
+    "ended_at",
+    "artifact_after_baseline",
+    "status",
+)
+
+
+def _stable_file_bytes(path: Path) -> bytes:
+    """Read one byte sequence. Caller hashes and parses these exact bytes."""
+    with path.open("rb") as handle:
+        return handle.read()
+
+
+def _reject_fetch_binding(raw: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    raw["already_current"] = {"accepted": [], "rejected": {"receipt": reason}}
+    return raw
+
+
+def _bound_fetch_receipt(
+    *,
+    repo_root: Path,
+    target: date,
+    run_id: str,
+    stage_receipts: Sequence[Dict[str, Any]],
+    baseline: Dict[str, Any],
+    run_started_at: datetime,
+) -> tuple[Dict[str, str], Dict[str, Any] | str]:
+    """Return (rejected, receipt) or ({}, receipt). A string reason is a binding failure."""
+    fetch_stages = [row for row in stage_receipts if str(row.get("name") or "") == "fetch_raw_data"]
+    if len(fetch_stages) != 1:
+        return {"receipt": "missing_fetch_stage_binding"}, {}
+    stage = fetch_stages[0]
+    missing = [field for field in _FETCH_BINDING_FIELDS if field not in stage]
+    if missing or stage.get("artifact_after_baseline") is not True:
+        return {"receipt": "missing_binding_field"}, {}
+    if str(stage.get("run_id") or "") != str(run_id):
+        return {"receipt": "wrong_run_id"}, {}
+    outcome = str(stage.get("outcome") or "")
+    status = str(stage.get("status") or "")
+    if int(stage.get("exit_code") or 0) != 0 or outcome != "ok" or status != "COMPLETE":
+        return {"receipt": "fetch_stage_failed"}, {}
+    artifact_path = str(stage.get("artifact_path") or "").replace("\\", "/")
+    if artifact_path != FETCH_RECEIPT_REL:
+        return {"receipt": "wrong_artifact_path"}, {}
+    path = (repo_root / FETCH_RECEIPT_REL).resolve()
+    results_root = (repo_root / "data" / "results").resolve()
+    if not path.is_relative_to(results_root) or not path.is_file():
+        return {"receipt": "missing_fetch_receipt"}, {}
+    blob = _stable_file_bytes(path)
+    digest = hashlib.sha256(blob).hexdigest()
+    if digest != str(stage.get("artifact_sha256") or "") or len(blob) != int(
+        stage.get("artifact_size_bytes") or -1
+    ):
+        return {"receipt": "forged_fetch_artifact"}, {}
+    try:
+        written = _parse_iso_dt(str(stage.get("artifact_written_at_utc")))
+        baseline_at = _parse_iso_dt(str(stage.get("baseline_captured_at_utc")))
+        started = _parse_iso_dt(str(stage.get("started_at")))
+        ended = _parse_iso_dt(str(stage.get("ended_at")))
+    except Exception:
+        return {"receipt": "malformed_binding_time"}, {}
+    captured = str(baseline.get("captured_at_utc") or "")
+    if captured and captured != str(stage.get("baseline_captured_at_utc")):
+        return {"receipt": "baseline_time_mismatch"}, {}
+    if str(stage.get("target_session") or "") != target.isoformat():
+        return {"receipt": "wrong_session"}, {}
+    if written <= baseline_at or written < started or written > ended or started < run_started_at:
+        return {"receipt": "artifact_predates_baseline"}, {}
+    try:
+        parsed = json.loads(blob.decode("utf-8-sig"))
+    except Exception:
+        return {"receipt": "malformed_fetch_receipt"}, {}
+    if not isinstance(parsed, dict):
+        return {"receipt": "malformed_fetch_receipt"}, {}
+    session = str(parsed.get("target_session") or parsed.get("completed_session") or "")
+    if session != target.isoformat():
+        return {"receipt": "wrong_session"}, {}
+    coverage = parsed.get("tradable_coverage") or {}
+    ratio = float(coverage.get("ratio") or 0.0)
+    if parsed.get("passed") is not True or ratio + 1e-12 < MIN_TRADABLE_COVERAGE:
+        return {"receipt": "coverage_below_minimum"}, {}
+    return {}, parsed
+
+
+def _apply_already_current_raw(
+    *,
+    raw: Dict[str, Any],
+    repo_root: Path,
+    target: date,
+    run_id: str,
+    baseline_artifacts: Dict[str, Any],
+    stage_receipts: Sequence[Dict[str, Any]],
+    baseline: Dict[str, Any],
+    run_started_at: datetime,
+) -> Dict[str, Any]:
+    """Accept unchanged raw files only when this run's stage receipt binds the fetch artifact."""
+    rejected, receipt = _bound_fetch_receipt(
+        repo_root=repo_root,
+        target=target,
+        run_id=run_id,
+        stage_receipts=stage_receipts,
+        baseline=baseline,
+        run_started_at=run_started_at,
+    )
+    if rejected:
+        return _reject_fetch_binding(raw, str(rejected["receipt"]))
+    accepted: List[str] = []
+    decisions = {
+        str(row.get("symbol") or "").upper(): row
+        for row in receipt.get("decisions") or []
+        if isinstance(row, dict)
+    }
+    promoted = {str(symbol).upper() for symbol in receipt.get("promoted") or []}
+    ok = list(raw.get("ok_symbols") or [])
+    not_advanced = list(raw.get("not_advanced_symbols") or [])
+    advancement = dict(raw.get("advancement") or {})
+
+    def post_sha(symbol: str) -> str | None:
+        row = advancement.get(symbol) or {}
+        post = row.get("post") or {}
+        return post.get("sha256")
+
+    def pre_sha(symbol: str) -> str | None:
+        rel = f"data/raw/{symbol}.csv"
+        pre = baseline_artifacts.get(rel) or {}
+        return pre.get("sha256")
+
+    still_blocked: List[str] = []
+    for symbol in not_advanced:
+        reason = str((advancement.get(symbol) or {}).get("reason") or "")
+        if reason != "unchanged_from_baseline":
+            still_blocked.append(symbol)
+            continue
+        if pre_sha(symbol) != post_sha(symbol) or not post_sha(symbol):
+            rejected[symbol] = "hash_not_baseline"
+            still_blocked.append(symbol)
+            continue
+        decision = decisions.get(symbol) or {}
+        if decision.get("action") != "keep" or decision.get("reason") != "local_already_current":
+            rejected[symbol] = str(decision.get("reason") or "not_already_current")
+            still_blocked.append(symbol)
+            continue
+        if str(decision.get("local_max") or "") != target.isoformat():
+            rejected[symbol] = "stale_local_max"
+            still_blocked.append(symbol)
+            continue
+        bound = decision.get("raw_sha256")
+        if bound is not None and str(bound) != str(post_sha(symbol)):
+            rejected[symbol] = "forged_raw_hash"
+            still_blocked.append(symbol)
+            continue
+        structure = _raw_exact_session_errors(
+            repo_root / "data" / "raw" / f"{symbol}.csv", symbol, target
+        )
+        if structure:
+            rejected[symbol] = structure[0]
+            still_blocked.append(symbol)
+            continue
+        accepted.append(symbol)
+        ok.append(symbol)
+        advancement[symbol] = {**(advancement.get(symbol) or {}), "current_without_rewrite": True}
+
+    changed_blocked: List[str] = []
+    kept_ok: List[str] = []
+    for symbol in ok:
+        if symbol in accepted:
+            kept_ok.append(symbol)
+            continue
+        before = pre_sha(symbol)
+        after = post_sha(symbol)
+        if before and after and before != after and symbol not in promoted:
+            rejected[symbol] = "changed_without_promotion"
+            changed_blocked.append(symbol)
+            continue
+        kept_ok.append(symbol)
+
+    not_advanced = still_blocked + changed_blocked
+    required = set(raw.get("required_symbols") or [])
+    raw["ok_symbols"] = kept_ok
+    raw["ok_count"] = len(kept_ok)
+    raw["not_advanced_symbols"] = not_advanced
+    raw["advancement"] = advancement
+    raw["already_current"] = {"accepted": accepted, "rejected": rejected}
+    raw["passed"] = (
+        set(kept_ok) == required
+        and not raw.get("missing_required_symbols")
+        and not raw.get("stale_symbols")
+        and not raw.get("schema_invalid_symbols")
+        and not raw.get("empty_symbols")
+        and not raw.get("nonfinite_symbols")
+        and not not_advanced
+        and not raw.get("unexpected_symbols")
+    )
+    return raw
+
+
 def validate_refresh(
     *,
     repo_root: Path,
@@ -539,6 +780,17 @@ def validate_refresh(
         run_started_at=started_dt,
         require_advancement=require_advancement,
     )
+    if require_advancement:
+        raw = _apply_already_current_raw(
+            raw=raw,
+            repo_root=repo_root,
+            target=target,
+            run_id=rid,
+            baseline_artifacts=baseline_artifacts,
+            stage_receipts=list(stage_receipts or []),
+            baseline=baseline,
+            run_started_at=started_dt,
+        )
     processed = assess_required_layer(
         repo_root=repo_root,
         layer="processed",
