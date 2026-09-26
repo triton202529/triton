@@ -22,6 +22,7 @@
 [CmdletBinding()]
 param()
 
+if ($MyInvocation.InvocationName -ne '.') {
 $ErrorActionPreference = "Stop"
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -50,6 +51,7 @@ $baselinePath = Join-Path $resultsDir ("daily_prediction_refresh_baseline_" + $r
 $receiptsPath = Join-Path $resultsDir ("daily_prediction_refresh_stage_receipts_" + $runId + ".json")
 
 $script:StageReceipts = @()
+}
 
 function Log([string]$msg) {
     $line = "$(Get-Date -Format s)  $msg"
@@ -58,17 +60,44 @@ function Log([string]$msg) {
 }
 
 function Write-StageReceipts {
-    $payload = @($script:StageReceipts)
-    $json = ($payload | ConvertTo-Json -Depth 8)
+    param([string] $Destination = $receiptsPath)
+    if ([string]::IsNullOrWhiteSpace($Destination)) { throw "STAGE_RECEIPT_DESTINATION_EMPTY" }
+    $dest = [System.IO.Path]::GetFullPath($Destination)
+    $parent = [System.IO.Path]::GetDirectoryName($dest)
+    if ([string]::IsNullOrWhiteSpace($parent)) { throw "STAGE_RECEIPT_PARENT_MISSING" }
+    [void][System.IO.Directory]::CreateDirectory($parent)
+    $payload = foreach ($row in @($script:StageReceipts)) { $row }
+    $json = @($payload) | ConvertTo-Json -Depth 8
     if ([string]::IsNullOrWhiteSpace($json)) { $json = "[]" }
     elseif (-not $json.TrimStart().StartsWith("[")) { $json = "[`r`n" + $json + "`r`n]" }
-    $tmp = $receiptsPath + ".tmp"
+    $text = $json + "`r`n"
+    $tmp = Join-Path $parent ("." + [System.IO.Path]::GetFileName($dest) + "." + [guid]::NewGuid().ToString("N") + ".tmp")
     $utf8 = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($tmp, $json + "`r`n", $utf8)
-    if (Test-Path -LiteralPath $receiptsPath) {
-        [System.IO.File]::Replace($tmp, $receiptsPath, $null)
-    } else {
-        [System.IO.File]::Move($tmp, $receiptsPath)
+    $stream = New-Object System.IO.FileStream($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try {
+        $writer = New-Object System.IO.StreamWriter($stream, $utf8)
+        try {
+            $writer.Write($text)
+            $writer.Flush()
+            $stream.Flush($true)
+        } finally {
+            $writer.Dispose()
+            $stream = $null
+        }
+        if ([System.IO.File]::Exists($dest)) {
+            try {
+                [System.IO.File]::Replace($tmp, $dest, [NullString]::Value)
+            } catch {
+                if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+                throw
+            }
+        } else {
+            [System.IO.File]::Move($tmp, $dest)
+        }
+    } catch {
+        if ($null -ne $stream) { $stream.Dispose() }
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        throw
     }
 }
 
@@ -176,6 +205,7 @@ function Run-PyStep {
     }
 }
 
+if ($MyInvocation.InvocationName -ne '.') {
 $exitCode = 0
 try {
     Log "=== TRITON Daily Prediction Refresh START ==="
@@ -248,3 +278,4 @@ catch {
 
 Log ("FinishedAt=" + (Get-Date -Format s) + " exit=" + $exitCode)
 exit $exitCode
+}
