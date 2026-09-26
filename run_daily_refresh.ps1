@@ -101,73 +101,162 @@ function Write-StageReceipts {
     }
 }
 
-function Read-StableBytes([string]$Path) {
-    $first = [System.IO.File]::ReadAllBytes($Path)
+function Get-Sha256Hex {
+    param([byte[]] $Bytes)
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $hash1 = ([BitConverter]::ToString($sha.ComputeHash($first))).Replace("-", "").ToLowerInvariant() }
-    finally { $sha.Dispose() }
-    $written = [System.IO.File]::GetLastWriteTimeUtc($Path)
-    $second = [System.IO.File]::ReadAllBytes($Path)
-    $sha2 = [System.Security.Cryptography.SHA256]::Create()
-    try { $hash2 = ([BitConverter]::ToString($sha2.ComputeHash($second))).Replace("-", "").ToLowerInvariant() }
-    finally { $sha2.Dispose() }
-    if ($hash1 -ne $hash2 -or $first.Length -ne $second.Length) {
-        throw "FETCH_ARTIFACT_UNSTABLE"
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
     }
-    return @{ Bytes = $first; Sha256 = $hash1; WrittenUtc = $written }
+}
+
+function Get-ShortFailure {
+    param([string] $Message)
+    $flat = ([string]$Message -replace "\s+", " ").Trim()
+    if ($flat.Length -gt 160) { return $flat.Substring(0, 160) }
+    return $flat
+}
+
+function Test-JsonNumber {
+    param($Value)
+    return (
+        $Value -is [byte] -or
+        $Value -is [int] -or
+        $Value -is [long] -or
+        $Value -is [double] -or
+        $Value -is [decimal] -or
+        $Value -is [single]
+    )
+}
+
+function Read-JsonObjectBytes {
+    param(
+        [byte[]] $Bytes,
+        [string] $Failure = "FETCH_ARTIFACT_JSON_PARSE"
+    )
+    $text = [System.Text.Encoding]::UTF8.GetString($Bytes)
+    if ($text.Length -gt 0 -and [int][char]$text[0] -eq 0xFEFF) {
+        $text = $text.Substring(1)
+    }
+    try {
+        return ConvertFrom-Json -InputObject $text
+    } catch {
+        throw ($Failure + ": " + (Get-ShortFailure $_.Exception.Message))
+    }
 }
 
 function Bind-FetchArtifact {
     $fetchPath = Join-Path $resultsDir "daily_refresh_fetch_receipt.json"
     if (-not (Test-Path -LiteralPath $fetchPath -PathType Leaf)) { throw "FETCH_ARTIFACT_MISSING" }
-    $stable = Read-StableBytes -Path $fetchPath
-    $text = [System.Text.Encoding]::UTF8.GetString($stable.Bytes)
-    if ($text.StartsWith([char]0xFEFF)) { $text = $text.Substring(1) }
-    try { $receipt = $text | ConvertFrom-Json } catch { throw "FETCH_ARTIFACT_MALFORMED" }
-    if ($null -eq $receipt.passed -or [bool]$receipt.passed -ne $true) { throw "FETCH_ARTIFACT_FAILED" }
-    $ratio = 0.0
-    if ($null -ne $receipt.tradable_coverage -and $null -ne $receipt.tradable_coverage.ratio) {
-        $ratio = [double]$receipt.tradable_coverage.ratio
+    $script:FetchBindingPublishAttempts = 0
+    $first = [System.IO.File]::ReadAllBytes($fetchPath)
+    $hash1 = Get-Sha256Hex -Bytes $first
+    if ($null -ne $script:FetchBindingAfterRead) { & $script:FetchBindingAfterRead $fetchPath }
+    $second = [System.IO.File]::ReadAllBytes($fetchPath)
+    $hash2 = Get-Sha256Hex -Bytes $second
+    if ($hash1 -ne $hash2 -or $first.Length -ne $second.Length) { throw "FETCH_ARTIFACT_CHANGED" }
+    $written = [System.IO.File]::GetLastWriteTimeUtc($fetchPath)
+    $receipt = Read-JsonObjectBytes -Bytes $first
+    if ($receipt -isnot [System.Management.Automation.PSCustomObject]) { throw "FETCH_ARTIFACT_NOT_OBJECT" }
+    $passedProp = $receipt.PSObject.Properties["passed"]
+    if ($null -eq $passedProp) { throw "FETCH_ARTIFACT_PASSED_MISSING" }
+    if ($passedProp.Value -isnot [bool]) { throw "FETCH_ARTIFACT_PASSED_NOT_BOOLEAN" }
+    if ($passedProp.Value -ne $true) { throw "FETCH_ARTIFACT_FAILED" }
+    $coverageProp = $receipt.PSObject.Properties["tradable_coverage"]
+    if ($null -eq $coverageProp -or $coverageProp.Value -isnot [System.Management.Automation.PSCustomObject]) {
+        throw "FETCH_ARTIFACT_COVERAGE_SHAPE"
+    }
+    $coverage = $coverageProp.Value
+    foreach ($name in @("ratio", "covered", "denominator")) {
+        $prop = $coverage.PSObject.Properties[$name]
+        if ($null -eq $prop -or -not (Test-JsonNumber $prop.Value)) { throw "FETCH_ARTIFACT_COVERAGE_SHAPE" }
+    }
+    $denominator = [double]$coverage.denominator
+    $covered = [double]$coverage.covered
+    $ratio = [double]$coverage.ratio
+    if ($denominator -le 0 -or [math]::Abs(($covered / $denominator) - $ratio) -gt 0.0000001) {
+        throw "FETCH_ARTIFACT_COVERAGE_SHAPE"
     }
     if ($ratio + 0.000000000001 -lt 0.90) { throw "FETCH_ARTIFACT_COVERAGE" }
-    $session = [string]$receipt.target_session
-    if (-not $session) { $session = [string]$receipt.completed_session }
+    $decisionProp = $receipt.PSObject.Properties["decisions"]
+    if ($null -eq $decisionProp -or $null -eq $decisionProp.Value) { throw "FETCH_ARTIFACT_DECISIONS_SHAPE" }
+    $decisions = @($decisionProp.Value)
+    if ($decisions.Count -lt 1) { throw "FETCH_ARTIFACT_DECISIONS_SHAPE" }
+    foreach ($row in $decisions) {
+        if ($row -isnot [System.Management.Automation.PSCustomObject]) { throw "FETCH_ARTIFACT_DECISIONS_SHAPE" }
+        $symbolProp = $row.PSObject.Properties["symbol"]
+        if ($null -eq $symbolProp -or [string]::IsNullOrWhiteSpace([string]$symbolProp.Value)) {
+            throw "FETCH_ARTIFACT_DECISIONS_SHAPE"
+        }
+    }
+    $sessionProp = $receipt.PSObject.Properties["target_session"]
+    if ($null -eq $sessionProp -or [string]::IsNullOrWhiteSpace([string]$sessionProp.Value)) {
+        $sessionProp = $receipt.PSObject.Properties["completed_session"]
+    }
+    if ($null -eq $sessionProp -or [string]::IsNullOrWhiteSpace([string]$sessionProp.Value)) {
+        throw "FETCH_ARTIFACT_SESSION_MISSING"
+    }
+    $session = [string]$sessionProp.Value
     $activeSession = (
         & $py -c "from services.market_calendar import last_completed_nyse_session; print(last_completed_nyse_session().isoformat())"
-    ).Trim()
-    if (-not $session -or $session -ne $activeSession) { throw "FETCH_ARTIFACT_WRONG_SESSION" }
-    $baseline = Get-Content -LiteralPath $baselinePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $captured = [string]$baseline.captured_at_utc
-    if (-not $captured) { throw "BASELINE_CAPTURE_TIME_MISSING" }
+    )
+    if ($null -eq $activeSession) { throw "FETCH_ARTIFACT_SESSION_UNAVAILABLE" }
+    $activeSession = $activeSession.Trim()
+    if (-not $activeSession) { throw "FETCH_ARTIFACT_SESSION_UNAVAILABLE" }
+    if ($session -ne $activeSession) { throw "FETCH_ARTIFACT_WRONG_SESSION" }
+    if (-not (Test-Path -LiteralPath $baselinePath -PathType Leaf)) { throw "FETCH_ARTIFACT_BASELINE_MISSING" }
+    $baselineBytes = [System.IO.File]::ReadAllBytes($baselinePath)
+    $baseline = Read-JsonObjectBytes -Bytes $baselineBytes -Failure "FETCH_ARTIFACT_BASELINE_JSON"
+    $baselineText = [System.Text.Encoding]::UTF8.GetString($baselineBytes)
+    $capturedMatch = [regex]::Match($baselineText, '"captured_at_utc"\s*:\s*"([^"]+)"')
+    if (-not $capturedMatch.Success) { throw "BASELINE_CAPTURE_TIME_MISSING" }
+    $captured = $capturedMatch.Groups[1].Value
     $capturedAt = [datetime]::Parse($captured).ToUniversalTime()
     $prior = $null
-    if ($null -ne $baseline.artifacts) {
+    if ($null -ne $baseline.PSObject.Properties["artifacts"]) {
         $prior = $baseline.artifacts.'data/results/daily_refresh_fetch_receipt.json'
     }
-    if ($null -ne $prior -and $prior.exists -eq $true -and [string]$prior.sha256 -eq $stable.Sha256) {
+    if ($null -ne $prior -and $prior.exists -eq $true -and [string]$prior.sha256 -eq $hash1) {
         throw "FETCH_ARTIFACT_UNCHANGED_BEFORE_BASELINE"
     }
-    if ($stable.WrittenUtc -le $capturedAt) { throw "FETCH_ARTIFACT_PREDATED_BASELINE" }
-    $fetch = $script:StageReceipts[-1]
-    $script:StageReceipts[-1] = [ordered]@{
+    if ($written.Year -lt 2000) { throw "FETCH_ARTIFACT_PROVENANCE_MISSING" }
+    if ($written -le $capturedAt) { throw "FETCH_ARTIFACT_PREDATED_BASELINE" }
+    if ($null -eq $script:StageReceipts -or @($script:StageReceipts).Count -lt 1) {
+        throw "FETCH_ARTIFACT_STAGE_MISSING"
+    }
+    $fetch = @($script:StageReceipts)[-1]
+    $started = [datetime]::Parse([string]$fetch.started_at).ToUniversalTime()
+    $ended = [datetime]::Parse([string]$fetch.ended_at).ToUniversalTime()
+    if ($written -lt $started -or $written -gt $ended) { throw "FETCH_ARTIFACT_PROVENANCE_WINDOW" }
+    $bound = [ordered]@{
         name                     = "fetch_raw_data"
         run_id                   = $runId
         exit_code                = 0
         outcome                  = "ok"
         status                   = "COMPLETE"
         artifact_path            = "data/results/daily_refresh_fetch_receipt.json"
-        artifact_sha256          = $stable.Sha256
-        artifact_size_bytes      = [int]$stable.Bytes.Length
+        artifact_sha256          = $hash1
+        artifact_size_bytes      = [int]$first.Length
         target_session           = $session
-        artifact_written_at_utc  = $stable.WrittenUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        artifact_written_at_utc  = $written.ToString("yyyy-MM-ddTHH:mm:ssZ")
         baseline_captured_at_utc = $captured
         started_at               = [string]$fetch.started_at
         ended_at                 = [string]$fetch.ended_at
         artifact_after_baseline  = $true
     }
-    Write-StageReceipts
+    $previous = @($script:StageReceipts)
+    $updated = @($script:StageReceipts)
+    $updated[-1] = $bound
+    $script:StageReceipts = $updated
+    $script:FetchBindingPublishAttempts = 1
+    try {
+        Write-StageReceipts
+    } catch {
+        $script:StageReceipts = $previous
+        throw
+    }
 }
-
 function Run-PyStep {
     param(
         [Parameter(Mandatory = $true)] [string] $Name,
