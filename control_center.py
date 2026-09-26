@@ -8,14 +8,34 @@ st.set_page_config(page_title="TRITON Control Center", layout="wide")
 # File path
 SIGNALS_FILE = "data/results/signals_with_rationale.csv"
 
+
+def ensure_confidence(df: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee a confidence column so filters and dedupe cannot KeyError."""
+    df = df.copy()
+    if "confidence" in df.columns:
+        return df
+    if {"predicted_close", "close"}.issubset(df.columns):
+        close = pd.to_numeric(df["close"], errors="coerce").replace(0, pd.NA)
+        predicted = pd.to_numeric(df["predicted_close"], errors="coerce")
+        df["confidence"] = ((predicted - close).abs() / close).fillna(0).clip(0, 1)
+    else:
+        df["confidence"] = 0.0
+    return df
+
+
+def prepare_signals(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize signal rows from signals_with_rationale.csv for the Control Center."""
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+    df = ensure_confidence(df)
+    subset = [c for c in ["date", "ticker", "signal", "confidence"] if c in df.columns]
+    return df.drop_duplicates(subset=subset, keep="last")
+
 @st.cache_data
 def load_signals():
     if os.path.exists(SIGNALS_FILE):
         df = pd.read_csv(SIGNALS_FILE, parse_dates=["date"])
-        df["date"] = pd.to_datetime(df["date"]).dt.date
-        # ✅ Drop duplicates to prevent clutter
-        df = df.drop_duplicates(subset=["date", "ticker", "signal", "confidence"], keep="last")
-        return df
+        return prepare_signals(df)
     else:
         return pd.DataFrame()
 
