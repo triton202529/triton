@@ -22,6 +22,9 @@
 [CmdletBinding()]
 param()
 
+$script:DailyRefreshScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+. (Join-Path $script:DailyRefreshScriptRoot "scripts\loop_lock_utils.ps1")
+
 if ($MyInvocation.InvocationName -ne '.') {
 $ErrorActionPreference = "Stop"
 
@@ -44,7 +47,7 @@ New-Item -ItemType Directory -Force -Path $logsDir, $resultsDir | Out-Null
 
 $runStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $runId = "daily_prediction_refresh_" + $runStamp
-$runStartedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$runStartedAt = ConvertTo-UtcRoundTripText (Get-Date)
 $logPath = Join-Path $logsDir ("daily_refresh_" + $runStamp + ".log")
 $summaryPath = Join-Path $resultsDir "daily_prediction_refresh_summary.json"
 $baselinePath = Join-Path $resultsDir ("daily_prediction_refresh_baseline_" + $runId + ".json")
@@ -146,6 +149,80 @@ function Read-JsonObjectBytes {
     }
 }
 
+function ConvertTo-UtcRoundTripText {
+    param([datetime]$Value)
+    $utc = [datetime]::SpecifyKind($Value.ToUniversalTime(), [datetimekind]::Utc)
+    $text = $utc.ToString("o")
+    if ($text.EndsWith(".0000000Z")) {
+        return $utc.ToString("yyyy-MM-ddTHH:mm:ss'Z'")
+    }
+    return $text
+}
+
+function ConvertFrom-UtcRoundTripText {
+    param([string]$Text)
+    $styles = [System.Globalization.DateTimeStyles]::RoundtripKind
+    $parsed = [datetime]::Parse(
+        $Text,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        $styles
+    )
+    return [datetime]::SpecifyKind($parsed.ToUniversalTime(), [datetimekind]::Utc)
+}
+
+function Enter-DailyRefreshMutationLock {
+    param([Parameter(Mandatory = $true)][string]$LiveDir)
+    New-Item -ItemType Directory -Force -Path $LiveDir | Out-Null
+    $own = Join-Path $LiveDir "daily_refresh.lock"
+    $other = Join-Path $LiveDir "data_freshness_refresh.lock"
+    Clear-OrphanLoopLock -LockFile $own -ScriptName "run_daily_refresh.ps1" | Out-Null
+    if (Test-Path -LiteralPath $own) { return $false }
+    Clear-OrphanLoopLock -LockFile $other -ScriptName "run_data_freshness_refresh.ps1" | Out-Null
+    if (Test-Path -LiteralPath $other) { return $false }
+    try {
+        $stream = New-Object System.IO.FileStream(
+            $own,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $stream.Dispose()
+    } catch {
+        return $false
+    }
+    Update-LoopLockMetadata -LockFile $own -Source "daily_refresh" -Cycle 1
+    return $true
+}
+
+function Exit-DailyRefreshMutationLock {
+    param([Parameter(Mandatory = $true)][string]$LiveDir)
+    $own = Join-Path $LiveDir "daily_refresh.lock"
+    if (-not (Test-Path -LiteralPath $own)) { return }
+    try {
+        $content = Get-Content -LiteralPath $own -Raw -ErrorAction Stop
+    } catch {
+        return
+    }
+    if ($content -match 'pid=(\d+)' -and [int]$Matches[1] -eq $PID) {
+        Remove-Item -LiteralPath $own -Force
+    }
+}
+
+function Invoke-LockedDailyRefreshWindow {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiveDir,
+        [Parameter(Mandatory = $true)][scriptblock]$Body
+    )
+    if (-not (Enter-DailyRefreshMutationLock -LiveDir $LiveDir)) {
+        throw "DAILY_REFRESH_LOCK_REFUSED"
+    }
+    try {
+        & $Body
+    } finally {
+        Exit-DailyRefreshMutationLock -LiveDir $LiveDir
+    }
+}
+
 function Bind-FetchArtifact {
     $fetchPath = Join-Path $resultsDir "daily_refresh_fetch_receipt.json"
     if (-not (Test-Path -LiteralPath $fetchPath -PathType Leaf)) { throw "FETCH_ARTIFACT_MISSING" }
@@ -156,7 +233,8 @@ function Bind-FetchArtifact {
     $second = [System.IO.File]::ReadAllBytes($fetchPath)
     $hash2 = Get-Sha256Hex -Bytes $second
     if ($hash1 -ne $hash2 -or $first.Length -ne $second.Length) { throw "FETCH_ARTIFACT_CHANGED" }
-    $written = [System.IO.File]::GetLastWriteTimeUtc($fetchPath)
+    $script:FetchBindingReadAt = [datetime]::SpecifyKind((Get-Date).ToUniversalTime(), [datetimekind]::Utc)
+    $written = [datetime]::SpecifyKind([System.IO.File]::GetLastWriteTimeUtc($fetchPath), [datetimekind]::Utc)
     $receipt = Read-JsonObjectBytes -Bytes $first
     if ($receipt -isnot [System.Management.Automation.PSCustomObject]) { throw "FETCH_ARTIFACT_NOT_OBJECT" }
     $passedProp = $receipt.PSObject.Properties["passed"]
@@ -212,7 +290,7 @@ function Bind-FetchArtifact {
     $capturedMatch = [regex]::Match($baselineText, '"captured_at_utc"\s*:\s*"([^"]+)"')
     if (-not $capturedMatch.Success) { throw "BASELINE_CAPTURE_TIME_MISSING" }
     $captured = $capturedMatch.Groups[1].Value
-    $capturedAt = [datetime]::Parse($captured).ToUniversalTime()
+    $capturedAt = ConvertFrom-UtcRoundTripText $captured
     $prior = $null
     if ($null -ne $baseline.PSObject.Properties["artifacts"]) {
         $prior = $baseline.artifacts.'data/results/daily_refresh_fetch_receipt.json'
@@ -226,9 +304,11 @@ function Bind-FetchArtifact {
         throw "FETCH_ARTIFACT_STAGE_MISSING"
     }
     $fetch = @($script:StageReceipts)[-1]
-    $started = [datetime]::Parse([string]$fetch.started_at).ToUniversalTime()
-    $ended = [datetime]::Parse([string]$fetch.ended_at).ToUniversalTime()
-    if ($written -lt $started -or $written -gt $ended) { throw "FETCH_ARTIFACT_PROVENANCE_WINDOW" }
+    $started = ConvertFrom-UtcRoundTripText ([string]$fetch.started_at)
+    $ended = ConvertFrom-UtcRoundTripText ([string]$fetch.ended_at)
+    if ($written -lt $started -or $written -gt $ended -or $written -gt $script:FetchBindingReadAt) {
+        throw "FETCH_ARTIFACT_PROVENANCE_WINDOW"
+    }
     $bound = [ordered]@{
         name                     = "fetch_raw_data"
         run_id                   = $runId
@@ -239,7 +319,7 @@ function Bind-FetchArtifact {
         artifact_sha256          = $hash1
         artifact_size_bytes      = [int]$first.Length
         target_session           = $session
-        artifact_written_at_utc  = $written.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        artifact_written_at_utc  = (ConvertTo-UtcRoundTripText $written)
         baseline_captured_at_utc = $captured
         started_at               = [string]$fetch.started_at
         ended_at                 = [string]$fetch.ended_at
@@ -262,7 +342,7 @@ function Run-PyStep {
         [Parameter(Mandatory = $true)] [string] $Name,
         [Parameter(Mandatory = $true)] [string[]] $PyArgs
     )
-    $started = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $started = ConvertTo-UtcRoundTripText (Get-Date)
     Log (">> " + $Name)
     Log ("CMD: " + $py + " " + ($PyArgs -join " "))
     $prevEap = $ErrorActionPreference
@@ -278,7 +358,7 @@ function Run-PyStep {
         $ErrorActionPreference = $prevEap
     }
     if ($null -eq $code) { $code = 1 }
-    $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $ended = ConvertTo-UtcRoundTripText (Get-Date)
     Log ("EXIT: " + $Name + " code=" + $code)
     $script:StageReceipts += [ordered]@{
         name       = $Name
@@ -295,8 +375,10 @@ function Run-PyStep {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
+$liveDir = Join-Path $repoRoot "data\live"
 $exitCode = 0
 try {
+    Invoke-LockedDailyRefreshWindow -LiveDir $liveDir -Body {
     Log "=== TRITON Daily Prediction Refresh START ==="
     Log ("repo_root=" + $repoRoot)
     Log ("python=" + $py)
@@ -353,6 +435,7 @@ try {
 
     Log "=== TRITON Daily Prediction Refresh OK ==="
     $exitCode = 0
+    }
 }
 catch {
     $msg = [string]$_.Exception.Message

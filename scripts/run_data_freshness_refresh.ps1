@@ -30,6 +30,13 @@ if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
 
 New-Item -ItemType Directory -Force -Path $liveDir, $resultsDir, $logDir | Out-Null
 
+$dailyLock = Join-Path $liveDir "daily_refresh.lock"
+Clear-OrphanLoopLock -LockFile $dailyLock -ScriptName "run_daily_refresh.ps1" | Out-Null
+if (Test-Path -LiteralPath $dailyLock) {
+    Write-Host "[DATA_FRESHNESS] blocked: daily refresh owns the writer lock"
+    exit 0
+}
+
 $scriptName = "run_data_freshness_refresh.ps1"
 Clear-OrphanLoopLock -LockFile $lockFile -ScriptName $scriptName | Out-Null
 
@@ -93,6 +100,11 @@ try {
     Log-Line "=== TRITON DATA FRESHNESS REFRESH START ==="
     Log-Line "RepoRoot=$RepoRoot"
 
+    if ((Test-Path -LiteralPath $dailyLock) -and (Test-LoopProcessRunning -ScriptName "run_daily_refresh.ps1")) {
+        Log-Line "[DATA_FRESHNESS] blocked: daily refresh acquired the writer lock"
+        $exitCode = 0
+    } else {
+
     if (Test-ContinuousLoopActive -RecentMinutes 20) {
         $lightOnly = $true
         Log-Line "[MODE] light_only=true (continuous loop recently active)"
@@ -151,6 +163,7 @@ try {
 
     Log-Line "=== TRITON DATA FRESHNESS REFRESH COMPLETE ==="
     $exitCode = 0
+    }
 }
 catch {
     $msg = $_.Exception.Message
