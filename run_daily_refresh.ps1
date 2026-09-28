@@ -25,6 +25,17 @@ param()
 $script:DailyRefreshScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $script:DailyRefreshScriptRoot "scripts\loop_lock_utils.ps1")
 
+function ConvertTo-UtcRoundTripText {
+    param([datetime]$Value)
+    $utc = [datetime]::SpecifyKind($Value.ToUniversalTime(), [datetimekind]::Utc)
+    $text = $utc.ToString("o")
+    if ($text.EndsWith(".0000000Z")) {
+        return $utc.ToString("yyyy-MM-ddTHH:mm:ss'Z'")
+    }
+    return $text
+}
+
+
 if ($MyInvocation.InvocationName -ne '.') {
 $ErrorActionPreference = "Stop"
 
@@ -147,16 +158,6 @@ function Read-JsonObjectBytes {
     } catch {
         throw ($Failure + ": " + (Get-ShortFailure $_.Exception.Message))
     }
-}
-
-function ConvertTo-UtcRoundTripText {
-    param([datetime]$Value)
-    $utc = [datetime]::SpecifyKind($Value.ToUniversalTime(), [datetimekind]::Utc)
-    $text = $utc.ToString("o")
-    if ($text.EndsWith(".0000000Z")) {
-        return $utc.ToString("yyyy-MM-ddTHH:mm:ss'Z'")
-    }
-    return $text
 }
 
 function ConvertFrom-UtcRoundTripText {
