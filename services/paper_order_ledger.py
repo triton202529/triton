@@ -28,6 +28,7 @@ EVENT_ORDER_STATUS_RECONCILED = "ORDER_STATUS_RECONCILED"
 EVENT_ORDER_TERMINAL_RECONCILED = "ORDER_TERMINAL_RECONCILED"
 
 SOURCE_PREPLAN_SELL = "preplan_authorized_sell"
+SOURCE_PLACEMENT = "place_live_orders"
 SOURCE_RECENT_ORDERS = "recent_orders_snapshot"
 SOURCE_LEGACY_AUDIT = "paper_execution_audit"
 SOURCE_FPLAN = "fplan_management"
@@ -407,7 +408,13 @@ def append_events(
                 fh.flush()
                 os.fsync(fh.fileno())
             appended = len(to_write)
-    return {"ok": True, "appended": appended, "skipped_duplicate": skipped, "path": str(path)}
+    return {
+        "ok": True,
+        "appended": appended,
+        "skipped_duplicate": skipped,
+        "path": str(path),
+        "written_events": to_write,
+    }
 
 
 def reduce_events(events: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -747,6 +754,109 @@ def _row_from_recent(row: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _placement_side(side: Any) -> Optional[str]:
+    text = str(side or "").strip().upper().replace(" ", "_")
+    if text in {"BUY", "BUY_TO_OPEN"}:
+        return "BUY"
+    if text in {"SELL", "SELL_TO_CLOSE"}:
+        return "SELL"
+    return None
+
+
+def _placement_identity_exists(
+    root: Optional[Path],
+    broker_order_id: Optional[str],
+    client_order_id: Optional[str],
+) -> bool:
+    """True when either alias is already a reduced ledger identity."""
+    broker = str(broker_order_id or "").strip()
+    client = str(client_order_id or "").strip()
+    if not broker and not client:
+        return False
+    for row in reduce_ledger(root=root):
+        row_broker = str(row.get("broker_order_id") or "").strip()
+        row_client = str(row.get("client_order_id") or "").strip()
+        row_key = str(row.get("logical_key") or "").strip()
+        if broker and (row_broker == broker or row_key == f"broker:{broker}"):
+            return True
+        if client and (row_client == client or row_key == f"client:{client}"):
+            return True
+    return False
+
+
+def record_placement_submission(
+    *,
+    symbol: Any,
+    side: Any,
+    qty: Any = None,
+    client_order_id: Optional[str] = None,
+    broker_order_id: Optional[str] = None,
+    mode: str = "paper",
+    event_timestamp: Optional[str] = None,
+    limit_price: Any = None,
+    root: Optional[Path] = None,
+    source_artifact: str = "place_live_orders.submit",
+) -> Dict[str, Any]:
+    """Record one paper submission identity. Existing broker or client alias writes nothing.
+
+    The pre-plan authorized SELL writer is a separate function and is not called here.
+    """
+    if str(mode).lower() != "paper":
+        return {"ok": True, "appended": 0, "skipped_duplicate": 0, "reason": "not_paper"}
+    side_n = _placement_side(side)
+    if side_n is None:
+        return {"ok": False, "appended": 0, "skipped_duplicate": 0, "reason": "side_unsupported"}
+    broker = str(broker_order_id or "").strip() or None
+    client = str(client_order_id or "").strip() or None
+    if not broker and not client:
+        return {
+            "ok": False,
+            "appended": 0,
+            "skipped_duplicate": 0,
+            "reason": "missing_order_identity",
+        }
+    if _placement_identity_exists(root, broker, client):
+        return {
+            "ok": True,
+            "appended": 0,
+            "skipped_duplicate": 1,
+            "reason": "identity_exists",
+        }
+    event = build_event(
+        event_type=EVENT_ACTION_SUBMITTED,
+        event_timestamp=event_timestamp,
+        mode="paper",
+        source_pipeline=SOURCE_PLACEMENT,
+        symbol=canonical_symbol(symbol),
+        side=side_n,
+        selected_qty=money(qty),
+        submitted_reference_price=money(limit_price),
+        action_disposition="submitted",
+        client_order_id=client,
+        broker_order_id=broker,
+        broker_submission_status="SUBMITTED",
+        terminal_status_proven=False,
+        source_artifact=source_artifact,
+    )
+    result = append_events([event], root=root)
+    result["reason"] = "submitted"
+    return result
+
+
+def safe_record_placement_submission(**kwargs: Any) -> Dict[str, Any]:
+    """Never raise into the generic submit loop after the broker has accepted an order."""
+    try:
+        return record_placement_submission(**kwargs)
+    except PaperOrderLedgerError as exc:
+        return {
+            "ok": False,
+            "appended": 0,
+            "skipped_duplicate": 0,
+            "reason": exc.reason,
+            "details": exc.details,
+        }
+
+
 def load_recent_order_rows(path: Path) -> List[Dict[str, Any]]:
     if not path.is_file():
         return []
@@ -823,9 +933,16 @@ def reconcile_from_recent_orders(
             )
         )
     if not events:
-        return {"ok": True, "appended": 0, "matched": 0}
+        return {"ok": True, "appended": 0, "matched": 0, "accounting": {"appended": 0}}
     result = append_events(events, root=root_p)
     result["matched"] = len(events)
+    written = list(result.get("written_events") or [])
+    if written:
+        from services.performance_accounting import record_proven_terminal_fills
+
+        result["accounting"] = record_proven_terminal_fills(written, root=root_p)
+    else:
+        result["accounting"] = {"ok": True, "appended": 0, "skipped_duplicate": 0}
     return result
 
 

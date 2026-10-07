@@ -2938,6 +2938,19 @@ def main() -> None:
                     "sl_stop": "",
                 },
             )
+            if str(mode).lower() == "paper":
+                from services.paper_order_ledger import safe_record_placement_submission
+
+                safe_record_placement_submission(
+                    symbol=p.symbol,
+                    side=p.side,
+                    qty=p.qty,
+                    client_order_id=p.client_order_id,
+                    broker_order_id=oid,
+                    mode=mode,
+                    limit_price=p.limit_price,
+                    event_timestamp=utc_now_iso(),
+                )
             _emit_execution_intelligence(p, action="submit", status=status, order_id=oid)
             _PLACE_DIAG_ROWS.append(
                 make_row(

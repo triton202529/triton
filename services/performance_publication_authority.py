@@ -30,6 +30,7 @@ DEFAULT_AUTHORITY_TTL_SECONDS = 120.0
 REQUIRED_BRANCH = "main"
 COMMAND_CUTOVER = "publish-cutover"
 COMMAND_SESSION_CLOSE = "publish-session-close"
+COMMAND_FORWARD_OPENING_BASIS = "publish-forward-opening-basis"
 EMPTY_LEDGER_SHA256 = hashlib.sha256(b"").hexdigest()
 
 _ISSUED: Dict[str, "PublicationAuthority"] = {}
@@ -215,7 +216,7 @@ def mint_publication_authority(
 ) -> PublicationAuthority:
     if publication_mode not in {"create", "append"}:
         raise PublicationAuthorityError("publication_mode_invalid", {"mode": publication_mode})
-    if command not in {COMMAND_CUTOVER, COMMAND_SESSION_CLOSE}:
+    if command not in {COMMAND_CUTOVER, COMMAND_SESSION_CLOSE, COMMAND_FORWARD_OPENING_BASIS}:
         raise PublicationAuthorityError("publication_command_invalid", {"command": command})
     issued = now or datetime.now(timezone.utc)
     if issued.tzinfo is None:

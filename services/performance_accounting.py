@@ -47,6 +47,7 @@ PROPOSED_CUTOVER_EQUITY = Decimal("92358.02")
 PROPOSED_CUTOVER_CASH = Decimal("65663.61")
 
 EVENT_CUTOVER = "ACCOUNTING_CUTOVER"
+EVENT_FORWARD_OPENING_BASIS = "FORWARD_OPENING_BASIS"
 EVENT_SESSION_CLOSE = "SESSION_CLOSE"
 EVENT_POSITION_SNAPSHOT = "POSITION_SNAPSHOT"
 EVENT_FILL_BUY = "FILL_BUY"
@@ -92,6 +93,24 @@ ADJUSTMENT_EVIDENCE_CATEGORIES = frozenset(
 )
 UNAVAILABLE = "UNAVAILABLE"
 GROSS_PROVISIONAL = "GROSS_PROVISIONAL"
+LABEL_BASIS_UNAVAILABLE = "Realized P&L unavailable — basis not proven"
+LABEL_FORWARD_OPENING = "Realized against forward opening basis"
+LABEL_FILL_HISTORY = "Realized against fill history"
+LABEL_HISTORICAL_CUTOVER = "Realized against historical cutover"
+LABEL_OPENING_EVENT = "Forward opening basis — not a historical fill"
+FORWARD_OPENING_EVIDENCE_KIND = "operator_approved_opening_statement"
+_FORWARD_OPENING_FORBIDDEN = frozenset(
+    {
+        "broker_order_id",
+        "client_order_id",
+        "price",
+        "avg_entry_price",
+        "filled_qty",
+        "filled_avg_price",
+        "unrealized_pl",
+        "cost_basis",
+    }
+)
 
 _PROCESS_LOCK = threading.RLock()
 
@@ -308,6 +327,8 @@ def _is_planning(raw: Mapping[str, Any]) -> bool:
 def logical_key_for(event_type: str, body: Mapping[str, Any], timestamp: str) -> str:
     if event_type == EVENT_CUTOVER:
         return f"cutover:{body.get('as_of_utc')}"
+    if event_type == EVENT_FORWARD_OPENING_BASIS:
+        return f"forward_opening_basis:{canonical_symbol(body.get('symbol'))}"
     if event_type == EVENT_SESSION_CLOSE:
         return f"session_close:{body.get('session_date')}"
     if event_type == EVENT_POSITION_SNAPSHOT:
@@ -490,6 +511,8 @@ def validate_event(event: Mapping[str, Any]) -> None:
         for flag in ("not_a_deposit", "not_a_withdrawal", "not_profit_or_loss", "not_a_return"):
             if body.get(flag) is not True:
                 raise PerformanceAccountingError("cutover_flag_missing", {"flag": flag})
+    if event_type == EVENT_FORWARD_OPENING_BASIS:
+        _validate_forward_opening_basis(event)
     if event_type == EVENT_SESSION_CLOSE:
         if str(body.get("close_kind") or "") not in CERTIFIED_CLOSE_KINDS:
             raise PerformanceAccountingError("session_close_kind_invalid", {"body": body})
@@ -869,16 +892,151 @@ def publish_ledger_atomic(
     }
 
 
-def _pos(qty: Decimal, basis: Decimal) -> Dict[str, Any]:
+def _pos(
+    qty: Decimal,
+    basis: Decimal,
+    *,
+    basis_origin: Optional[str] = None,
+) -> Dict[str, Any]:
     qty = q_qty(qty)
     basis = q_money(basis)
     avg = q_money(basis / qty) if qty > 0 else Decimal("0")
-    return {
+    row = {
         "qty": qty,
         "remaining_basis": basis,
         "average_entry": avg,
         "basis_proven": True,
     }
+    if basis_origin:
+        row["basis_origin"] = basis_origin
+    return row
+
+
+def _sale_reporting_label(origin: Optional[str]) -> str:
+    if origin == "FORWARD_OPENING_BASIS":
+        return LABEL_FORWARD_OPENING
+    if origin == "HISTORICAL_CUTOVER":
+        return LABEL_HISTORICAL_CUTOVER
+    return LABEL_FILL_HISTORY
+
+
+def _validate_forward_opening_basis(event: Mapping[str, Any]) -> None:
+    body = event.get("body") or {}
+    if str(body.get("evidence_kind") or "") != FORWARD_OPENING_EVIDENCE_KIND:
+        raise PerformanceAccountingError(
+            "forward_opening_evidence_rejected",
+            {"evidence_kind": body.get("evidence_kind")},
+        )
+    digest = str(body.get("evidence_sha256") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise PerformanceAccountingError("forward_opening_evidence_sha256_required")
+    if not str(body.get("evidence_ref") or "").strip():
+        raise PerformanceAccountingError("forward_opening_evidence_ref_required")
+    if not str(body.get("symbol") or "").strip():
+        raise PerformanceAccountingError("forward_opening_symbol_required")
+    for flag in ("not_a_fill", "not_historical_realized_pl", "not_profit_or_loss", "not_a_return"):
+        if body.get(flag) is not True:
+            raise PerformanceAccountingError("forward_opening_flag_missing", {"flag": flag})
+    forbidden = sorted(key for key in _FORWARD_OPENING_FORBIDDEN if key in body)
+    if forbidden:
+        raise PerformanceAccountingError("forward_opening_fill_like_payload", {"fields": forbidden})
+    try:
+        qty = D(body.get("qty"))
+        opening_basis = D(body.get("opening_basis"))
+    except PerformanceAccountingError as exc:
+        raise PerformanceAccountingError("forward_opening_qty_or_basis_invalid") from exc
+    if qty <= 0 or opening_basis <= 0:
+        raise PerformanceAccountingError("forward_opening_qty_or_basis_invalid")
+    as_of = utc_iso(body.get("as_of_utc"))
+    if as_of != utc_iso(event.get("event_timestamp")):
+        raise PerformanceAccountingError("forward_opening_timestamp_mismatch")
+
+
+def _reject_backdated_forward_openings(events: Sequence[Mapping[str, Any]]) -> None:
+    openings = [event for event in events if event.get("event_type") == EVENT_FORWARD_OPENING_BASIS]
+    others = [event for event in events if event.get("event_type") != EVENT_FORWARD_OPENING_BASIS]
+    for opening in openings:
+        as_of = utc_iso((opening.get("body") or {}).get("as_of_utc"))
+        blockers = [
+            event.get("event_id")
+            for event in others
+            if str(event.get("event_timestamp") or "") >= as_of
+        ]
+        if blockers:
+            raise PerformanceAccountingError(
+                "forward_opening_backdated",
+                {"as_of_utc": as_of, "event_ids": blockers},
+            )
+
+
+def build_forward_opening_basis(
+    *,
+    symbol: Any,
+    qty: Any,
+    opening_basis: Any,
+    as_of_utc: Any,
+    evidence_sha256: str,
+    evidence_ref: str,
+) -> Dict[str, Any]:
+    """Build one forward opening. Does not append and does not read a position snapshot."""
+    as_of = utc_iso(as_of_utc)
+    return build_event(
+        EVENT_FORWARD_OPENING_BASIS,
+        event_timestamp=as_of,
+        source=FORWARD_OPENING_EVIDENCE_KIND,
+        body={
+            "symbol": canonical_symbol(symbol),
+            "qty": format(q_qty(D(qty)), "f"),
+            "opening_basis": format(q_money(D(opening_basis)), "f"),
+            "as_of_utc": as_of,
+            "evidence_kind": FORWARD_OPENING_EVIDENCE_KIND,
+            "evidence_sha256": str(evidence_sha256).strip().lower(),
+            "evidence_ref": str(evidence_ref).strip(),
+            "not_a_fill": True,
+            "not_historical_realized_pl": True,
+            "not_profit_or_loss": True,
+            "not_a_return": True,
+            "reporting_label": LABEL_OPENING_EVENT,
+        },
+    )
+
+
+def append_forward_opening_basis(
+    event: Mapping[str, Any],
+    *,
+    root: Optional[Path] = None,
+    events_path: Optional[Path] = None,
+    lock_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Append one approved opening after validating it against the current ledger."""
+    if event.get("event_type") != EVENT_FORWARD_OPENING_BASIS:
+        raise PerformanceAccountingError("forward_opening_type_required")
+    validate_event(event)
+    paths = accounting_paths(root, events_path=events_path, lock_path=lock_path)
+    existing = load_events(paths.events_path) if paths.events_path.is_file() else []
+    key = str(event["logical_key"])
+    for prior in existing:
+        if str(prior.get("logical_key")) != key:
+            continue
+        if _dump(prior) == _dump(event):
+            return {
+                "ok": True,
+                "appended": 0,
+                "skipped_duplicate": 1,
+                "path": str(paths.events_path),
+            }
+        raise PerformanceAccountingError(
+            "duplicate_logical_key_conflict",
+            {"logical_key": key, "event_id": event.get("event_id")},
+        )
+    _reject_backdated_forward_openings(list(existing) + [dict(event)])
+    reduce_events(list(existing) + [dict(event)])
+    return append_events(
+        [event],
+        root=root,
+        events_path=events_path,
+        lock_path=lock_path,
+    )
 
 
 def _match_sale_for_fee(
@@ -905,6 +1063,8 @@ def reduce_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     positions: Dict[str, Dict[str, Any]] = {}
     closes: List[Dict[str, Any]] = []
     sales: List[Dict[str, Any]] = []
+    forward_openings: List[Dict[str, Any]] = []
+    opened_symbols: set[str] = set()
     pending_fees: List[Dict[str, Any]] = []
     external_flows: List[Dict[str, Any]] = []
     investment_income: List[Dict[str, Any]] = []
@@ -943,15 +1103,55 @@ def reduce_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
             }
             for row in body.get("positions") or []:
                 symbol = canonical_symbol(row.get("symbol"))
-                positions[symbol] = _pos(D(row["qty"]), D(row["cost_basis"]))
+                positions[symbol] = _pos(
+                    D(row["qty"]),
+                    D(row["cost_basis"]),
+                    basis_origin="HISTORICAL_CUTOVER",
+                )
+            continue
+        if et == EVENT_FORWARD_OPENING_BASIS:
+            symbol = canonical_symbol(body.get("symbol"))
+            if symbol in opened_symbols:
+                raise PerformanceAccountingError(
+                    "duplicate_forward_opening",
+                    {"symbol": symbol},
+                )
+            current = positions.get(symbol)
+            if current is not None and current["qty"] > 0:
+                raise PerformanceAccountingError(
+                    "forward_opening_position_exists",
+                    {"symbol": symbol, "qty": format(current["qty"], "f")},
+                )
+            qty = D(body["qty"])
+            opening_basis = D(body["opening_basis"])
+            positions[symbol] = _pos(
+                qty,
+                opening_basis,
+                basis_origin="FORWARD_OPENING_BASIS",
+            )
+            opened_symbols.add(symbol)
+            forward_openings.append(
+                {
+                    "event_id": ev["event_id"],
+                    "symbol": symbol,
+                    "qty": format(q_qty(qty), "f"),
+                    "opening_basis": format(q_money(opening_basis), "f"),
+                    "as_of_utc": utc_iso(body.get("as_of_utc")),
+                    "basis_origin": "FORWARD_OPENING_BASIS",
+                    "reporting_label": LABEL_OPENING_EVENT,
+                }
+            )
             continue
         if et == EVENT_FILL_BUY:
             symbol = canonical_symbol(body["symbol"])
             qty = D(body["qty"])
             price = D(body["price"])
             add = q_money(qty * price)
-            cur = positions.get(symbol) or _pos(Decimal("0"), Decimal("0"))
-            positions[symbol] = _pos(cur["qty"] + qty, cur["remaining_basis"] + add)
+            current = positions.get(symbol)
+            base_qty = current["qty"] if current is not None else Decimal("0")
+            base_basis = current["remaining_basis"] if current is not None else Decimal("0")
+            origin = "MOVING_WEIGHTED_AVERAGE" if base_qty > 0 else "FILL_BUY"
+            positions[symbol] = _pos(base_qty + qty, base_basis + add, basis_origin=origin)
             continue
         if et == EVENT_FILL_SELL:
             symbol = canonical_symbol(body["symbol"])
@@ -979,6 +1179,8 @@ def reduce_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
                 "fees_status": "PENDING",
                 "fee_reconciliation_complete": False,
                 "applied": False,
+                "basis_origin": UNAVAILABLE,
+                "reporting_label": LABEL_BASIS_UNAVAILABLE,
             }
             if cur is None or not cur.get("basis_proven") or cur["qty"] <= 0:
                 sales.append(sale)
@@ -990,16 +1192,23 @@ def reduce_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
                 )
             consumed = q_money(qty * cur["average_entry"])
             remaining_qty = q_qty(cur["qty"] - qty)
+            origin = str(cur.get("basis_origin") or "FILL_BUY")
             if remaining_qty <= 0:
                 positions[symbol] = _pos(Decimal("0"), Decimal("0"))
             else:
-                positions[symbol] = _pos(remaining_qty, cur["remaining_basis"] - consumed)
+                positions[symbol] = _pos(
+                    remaining_qty,
+                    cur["remaining_basis"] - consumed,
+                    basis_origin=origin,
+                )
             sale.update(
                 {
                     "basis_consumed": format(consumed, "f"),
                     "gross_realized_pl": format(q_money(proceeds - consumed), "f"),
                     "gross_realized_pl_label": GROSS_PROVISIONAL,
                     "applied": True,
+                    "basis_origin": origin,
+                    "reporting_label": _sale_reporting_label(origin),
                 }
             )
             sales.append(sale)
@@ -1199,6 +1408,7 @@ def reduce_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "open_position_count": len(open_positions),
         "session_closes": closes,
         "sales": sales,
+        "forward_openings": forward_openings,
         "pending_fees": pending_fees,
         "external_flows": external_flows,
         "investment_income": investment_income,
@@ -1381,6 +1591,7 @@ FORMULAS = {
     "cost_basis_method": COST_BASIS_METHOD,
     "buy_average": "new_avg = (remaining_basis + qty*price) / (qty_old + qty)",
     "sell_basis_consumed": "qty * existing_average_entry",
+    "forward_opening_basis": "explicit approved opening quantity and basis after existing ledger events; not a fill; not historical realized P&L",
     "realized_pl": "NET = proceeds - basis_consumed - sum(distinct attributed fees); UNAVAILABLE until required fee reconciliation is complete and basis is proven",
     "gross_realized_pl": "proceeds - basis_consumed; labeled GROSS_PROVISIONAL until fee reconciliation completes; never treated as net",
     "fees": "each broker activity_id is a distinct fee; REG/TAF/CAT/COMMISSION/OTHER sum on one sale; same event_id is idempotent; conflicting activity_id fails closed",
@@ -1515,6 +1726,128 @@ def build_proposed_cutover_event(
     )
 
 
+def stable_fill_identity(
+    *,
+    broker_order_id: Any,
+    broker_fill_id: Any = None,
+    filled_timestamp: Any = None,
+    filled_qty: Any = None,
+) -> str:
+    """fill:{broker_order_id}:{broker_fill_id} or fill:{broker_order_id}:{filled_timestamp}:{filled_qty}."""
+    order_id = str(broker_order_id or "").strip()
+    if not order_id:
+        raise PerformanceAccountingError("fill_missing_broker_order_id")
+    explicit = str(broker_fill_id or "").strip()
+    if explicit:
+        return f"fill:{order_id}:{explicit}"
+    if filled_timestamp in (None, "") or filled_qty in (None, ""):
+        raise PerformanceAccountingError(
+            "fill_identity_unresolvable",
+            {"broker_order_id": order_id},
+        )
+    stamp = utc_iso(filled_timestamp)
+    qty_text = format(q_qty(D(filled_qty)), "f")
+    return f"fill:{order_id}:{stamp}:{qty_text}"
+
+
+def _fill_event_from_terminal(event: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    if str(event.get("event_type") or "") != "ORDER_TERMINAL_RECONCILED":
+        return None
+    if event.get("terminal_status_proven") is not True:
+        return None
+    if str(event.get("broker_terminal_status") or "").upper() != "FILLED":
+        return None
+    side = str(event.get("side") or "").upper()
+    if "BUY" in side:
+        fill_type = EVENT_FILL_BUY
+    elif "SELL" in side:
+        fill_type = EVENT_FILL_SELL
+    else:
+        return None
+    order_id = str(event.get("broker_order_id") or "").strip()
+    extra = event.get("extra") if isinstance(event.get("extra"), Mapping) else {}
+    explicit = str(event.get("broker_fill_id") or extra.get("broker_fill_id") or "").strip()
+    qty = event.get("filled_qty")
+    price = event.get("average_fill_price")
+    filled_timestamp = event.get("filled_timestamp")
+    if not order_id or qty in (None, "") or price in (None, "") or D(qty) <= 0 or D(price) <= 0:
+        raise PerformanceAccountingError(
+            "fill_missing_qty_or_price",
+            {"broker_order_id": order_id},
+        )
+    identity = stable_fill_identity(
+        broker_order_id=order_id,
+        broker_fill_id=explicit or None,
+        filled_timestamp=filled_timestamp,
+        filled_qty=qty,
+    )
+    fill_token = identity.split(":", 2)[2]
+    body = {
+        "symbol": event.get("symbol"),
+        "qty": format(q_qty(D(qty)), "f"),
+        "price": format(q_money(D(price)), "f"),
+        "broker_order_id": order_id,
+        "broker_fill_id": fill_token,
+    }
+    if event.get("client_order_id"):
+        body["client_order_id"] = event.get("client_order_id")
+    return build_event(
+        fill_type,
+        event_timestamp=filled_timestamp,
+        source="paper_order_ledger",
+        body=body,
+    )
+
+
+def record_proven_terminal_fills(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    root: Optional[Path] = None,
+    events_path: Optional[Path] = None,
+    lock_path: Optional[Path] = None,
+    fee_activity_id: Any = None,
+    fee_amount: Any = None,
+    fee_component: str = "OTHER",
+) -> Dict[str, Any]:
+    """Append FILL_BUY/FILL_SELL for proven terminal FILLED events. Never invents P&L or fees.
+
+    A fee is emitted only when both fee_activity_id and fee_amount are supplied.
+    Amount without an activity id fails closed and writes nothing.
+    """
+    if fee_amount not in (None, "") and not str(fee_activity_id or "").strip():
+        raise PerformanceAccountingError("fee_activity_id_required")
+    built: List[Dict[str, Any]] = []
+    for event in events:
+        fill = _fill_event_from_terminal(event)
+        if fill is not None:
+            built.append(fill)
+    if str(fee_activity_id or "").strip() and fee_amount not in (None, ""):
+        if not built:
+            raise PerformanceAccountingError("fee_requires_proven_fill")
+        sample = built[0]
+        built.append(
+            build_event(
+                EVENT_FEE,
+                event_timestamp=sample["event_timestamp"],
+                source="broker_activities",
+                body={
+                    "amount": fee_amount,
+                    "activity_id": str(fee_activity_id).strip(),
+                    "fee_component": fee_component,
+                    "symbol": (sample.get("body") or {}).get("symbol"),
+                },
+            )
+        )
+    if not built:
+        return {"ok": True, "appended": 0, "skipped_duplicate": 0, "reason": "no_proven_fills"}
+    return append_events(
+        built,
+        root=root,
+        events_path=events_path,
+        lock_path=lock_path,
+    )
+
+
 INTEGRATION_MAP = {
     "do_not_change": [
         "services.decide_paper_entry_cycle_action",
@@ -1524,9 +1857,9 @@ INTEGRATION_MAP = {
     ],
     "future_passive_capture": [
         {
-            "hook": "after paper_order_ledger terminal FILLED reduce",
-            "events": ["FILL_BUY", "FILL_SELL", "PRICE_MARKS"],
-            "note": "Observe proven fills only. Planning rows stay rejected.",
+            "hook": "paper_order_ledger.reconcile_from_recent_orders newly appended FILLED",
+            "events": ["FILL_BUY", "FILL_SELL"],
+            "note": "record_proven_terminal_fills observes proven terminal fills only. Planning rows stay rejected. PRICE_MARKS stay unwired.",
         },
         {
             "hook": "after data-freshness session-close snapshot, idle + lock absent",
@@ -1544,7 +1877,7 @@ INTEGRATION_MAP = {
             "note": "Same America/New_York session date. Never fill missing dates.",
         },
     ],
-    "runtime_integration": "not_in_this_phase",
+    "runtime_integration": "record_proven_terminal_fills",
 }
 
 
