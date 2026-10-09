@@ -488,6 +488,7 @@ _EXPLICIT_OPERATIONAL_FILES = frozenset(
         "data/governance/paper_sell_arm_authority.json",
         "data/governance/independent_dispatch_bindings.json",
         "data/governance/paper_sell_arm_audit.jsonl",
+        "data/governance/basis_unproven_hold_audit.jsonl",
         "data/governance/paper_sell_arm_consumption.json",
         "data/governance/paper_sell_arm_dispatch.lock",
         "data/governance/paper_sell_arm_dispatch_intent.json",

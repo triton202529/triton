@@ -186,6 +186,13 @@ class AlpacaBroker:
         return r.json()
 
     def _post(self, path: str, payload: Dict[str, Any]) -> Any:
+        if path == "/v2/orders":
+            from services.basis_unproven_hold import enforce_basis_unproven_hold_on_order_post
+
+            enforce_basis_unproven_hold_on_order_post(
+                payload,
+                source="broker_alpaca._post",
+            )
         if path == "/v2/orders" and not _broker_order_authorized.get():
             raise BrokerAuthorizationRequired(
                 "BROKER FINAL CHECK: POST /v2/orders blocked — execution authorization "

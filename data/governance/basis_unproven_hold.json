@@ -1,0 +1,36 @@
+{
+  "approval_identity": "Akim Wallace — Authorized Paper Trading Operator",
+  "blocked_actions": ["BUY", "ADD", "TRIM", "EXIT", "SELL", "ORDER_SUBMISSION"],
+  "bound_partial_statement_sha256": "1f9cd8ee8fb0f76a4c40ffd65aa3f5bf798993b9889c663cb4245ca84b9607ed",
+  "bound_statement_status_at_binding": "PENDING_FRESH_OPERATOR_APPROVAL",
+  "created_at_utc": "2026-10-09T01:45:00Z",
+  "operator_overrides": [],
+  "policy_id": "basis-unproven-hold-voo-xlk-20261008",
+  "position_disposition": "MAY_REMAIN_HELD",
+  "release_conditions": [
+    {
+      "condition_id": "PUBLISHED_FORWARD_OPENING_BASIS",
+      "per_symbol": true,
+      "requires_accounting_event_type": "FORWARD_OPENING_BASIS"
+    },
+    {
+      "condition_id": "EXPLICIT_OPERATOR_OVERRIDE",
+      "per_symbol": true,
+      "requires_separate_authorization": true
+    }
+  ],
+  "schema": "BASIS-UNPROVEN-HOLD-1",
+  "status": "ACTIVE",
+  "symbols": [
+    {
+      "classification": "BASIS_UNPROVEN_HOLD",
+      "position_disposition": "MAY_REMAIN_HELD",
+      "symbol": "VOO"
+    },
+    {
+      "classification": "BASIS_UNPROVEN_HOLD",
+      "position_disposition": "MAY_REMAIN_HELD",
+      "symbol": "XLK"
+    }
+  ]
+}
