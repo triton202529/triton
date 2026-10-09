@@ -10,13 +10,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import subprocess
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 SCHEMA = "BASIS-UNPROVEN-HOLD-1"
 HOLD_SYMBOLS = frozenset({"VOO", "XLK"})
-BOUND_STATEMENT_SHA256 = "1f9cd8ee8fb0f76a4c40ffd65aa3f5bf798993b9889c663cb4245ca84b9607ed"
 APPROVAL_IDENTITY = "Akim Wallace — Authorized Paper Trading Operator"
 REPORTING_LABEL = "Basis-unproven hold — order submission blocked"
 CLASSIFICATION = "BASIS_UNPROVEN_HOLD"
@@ -41,6 +42,7 @@ _audit_path: ContextVar[Optional[str]] = ContextVar("basis_unproven_hold_audit_p
 _events_path: ContextVar[Optional[str]] = ContextVar(
     "basis_unproven_hold_events_path", default=None
 )
+_STATEMENT_HASH = re.compile(r"[0-9a-f]{64}")
 
 
 class BasisUnprovenHoldBlocked(RuntimeError):
@@ -91,6 +93,24 @@ def _symbol(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
+def _valid_statement_hash(document: Mapping[str, Any]) -> Optional[str]:
+    bound = str(document.get("bound_partial_statement_sha256") or "").strip().lower()
+    if _STATEMENT_HASH.fullmatch(bound):
+        return bound
+    return None
+
+
+def _committed_policy_bytes() -> Optional[bytes]:
+    try:
+        return subprocess.check_output(
+            ["git", "show", f"HEAD:{POLICY_RELATIVE}"],
+            cwd=repo_root(),
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def _load_policy() -> Dict[str, Any]:
     path = policy_path()
     if not path.is_file():
@@ -118,20 +138,44 @@ def _load_policy() -> Dict[str, Any]:
             "policy_sha256": None,
         }
     digest = _sha256_bytes(raw)
+    bound = _valid_statement_hash(document)
     structure = _policy_structure(document)
     if structure == "malformed":
         return {
             "ok": False,
             "reason": "basis_unproven_hold_policy_malformed",
             "policy_sha256": digest,
+            "bound_statement_sha256": bound,
+        }
+    if structure == "invalid_hash":
+        return {
+            "ok": False,
+            "reason": "basis_unproven_hold_policy_invalid_hash",
+            "policy_sha256": digest,
+            "bound_statement_sha256": None,
         }
     if structure == "mismatched":
         return {
             "ok": False,
             "reason": "basis_unproven_hold_policy_mismatched",
             "policy_sha256": digest,
+            "bound_statement_sha256": bound,
         }
-    return {"ok": True, "document": document, "policy_sha256": digest}
+    if not _policy_path.get():
+        committed = _committed_policy_bytes()
+        if committed is None or committed != raw:
+            return {
+                "ok": False,
+                "reason": "basis_unproven_hold_policy_mismatched",
+                "policy_sha256": digest,
+                "bound_statement_sha256": bound,
+            }
+    return {
+        "ok": True,
+        "document": document,
+        "policy_sha256": digest,
+        "bound_statement_sha256": bound,
+    }
 
 
 def _policy_structure(document: Mapping[str, Any]) -> str:
@@ -143,6 +187,8 @@ def _policy_structure(document: Mapping[str, Any]) -> str:
         return "malformed"
     if any(not isinstance(row, dict) for row in overrides):
         return "malformed"
+    if _valid_statement_hash(document) is None:
+        return "invalid_hash"
     if not _policy_matches_constants(document):
         return "mismatched"
     return "ok"
@@ -156,9 +202,6 @@ def _policy_matches_constants(document: Mapping[str, Any]) -> bool:
     if document.get("approval_identity") != APPROVAL_IDENTITY:
         return False
     if not str(document.get("created_at_utc") or "").strip():
-        return False
-    bound = str(document.get("bound_partial_statement_sha256") or "").strip().lower()
-    if bound != BOUND_STATEMENT_SHA256:
         return False
     rows = document.get("symbols")
     found = set()
@@ -218,6 +261,7 @@ def _record(
     side: str,
     source: str,
     policy_sha256: Optional[str],
+    bound_statement_sha256: Optional[str],
     client_order_id: Optional[str],
 ) -> Dict[str, Any]:
     return {
@@ -228,7 +272,7 @@ def _record(
         "side": side or None,
         "source": source,
         "policy_sha256": policy_sha256,
-        "bound_statement_sha256": BOUND_STATEMENT_SHA256,
+        "bound_statement_sha256": bound_statement_sha256,
         "client_order_id": client_order_id,
         "broker_called": False,
     }
@@ -252,6 +296,7 @@ def _block(
     side: str,
     source: str,
     policy_sha256: Optional[str],
+    bound_statement_sha256: Optional[str],
     client_order_id: Optional[str],
 ) -> None:
     record = _record(
@@ -260,6 +305,7 @@ def _block(
         side=side,
         source=source,
         policy_sha256=policy_sha256,
+        bound_statement_sha256=bound_statement_sha256,
         client_order_id=client_order_id,
     )
     try:
@@ -271,6 +317,7 @@ def _block(
             side=side,
             source=source,
             policy_sha256=policy_sha256,
+            bound_statement_sha256=bound_statement_sha256,
             client_order_id=client_order_id,
         )
     raise BasisUnprovenHoldBlocked(record)
@@ -296,6 +343,7 @@ def enforce_basis_unproven_hold_on_order_post(
             side=side,
             source=source,
             policy_sha256=loaded.get("policy_sha256"),
+            bound_statement_sha256=loaded.get("bound_statement_sha256"),
             client_order_id=client,
         )
     loaded = _load_policy()
@@ -306,6 +354,7 @@ def enforce_basis_unproven_hold_on_order_post(
             side=side,
             source=source,
             policy_sha256=loaded.get("policy_sha256"),
+            bound_statement_sha256=loaded.get("bound_statement_sha256"),
             client_order_id=client,
         )
     document = loaded["document"]
@@ -317,5 +366,6 @@ def enforce_basis_unproven_hold_on_order_post(
         side=side,
         source=source,
         policy_sha256=loaded.get("policy_sha256"),
+        bound_statement_sha256=loaded.get("bound_statement_sha256"),
         client_order_id=client,
     )

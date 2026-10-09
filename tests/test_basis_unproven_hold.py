@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
+import services.basis_unproven_hold as hold_mod
 from services.basis_unproven_hold import (
     APPROVAL_IDENTITY,
     AUDIT_RELATIVE,
-    BOUND_STATEMENT_SHA256,
     HOLD_SYMBOLS,
     POLICY_RELATIVE,
     REPORTING_LABEL,
@@ -46,6 +46,8 @@ PROD_POLICY = ROOT / POLICY_RELATIVE
 PROD_ACCOUNTING = ROOT / "data/results/performance_accounting_events.jsonl"
 PROD_ORDERS = ROOT / "data/results/paper_order_events.jsonl"
 PROD_ARM = ROOT / "data/governance/paper_sell_arm_authority.json"
+OCT9_STATEMENT = "22a1a6f94d724ef57a06606e4ec80ca60137b0170695f6928d1456870a286cfe"
+OCT8_STATEMENT = "1f9cd8ee8fb0f76a4c40ffd65aa3f5bf798993b9889c663cb4245ca84b9607ed"
 BASELINED = ("AAPL", "AMD", "GOOGL", "INTC", "META", "QQQ")
 ROUTE_NAMES = (
     "submit_order_buy",
@@ -234,7 +236,9 @@ def test_production_policy_binds_the_pending_statement():
     assert document["status"] == "ACTIVE"
     assert document["approval_identity"] == APPROVAL_IDENTITY
     assert document["created_at_utc"] == "2026-10-09T01:45:00Z"
-    assert document["bound_partial_statement_sha256"] == BOUND_STATEMENT_SHA256
+    assert document["bound_partial_statement_sha256"] == OCT9_STATEMENT
+    assert document["supersedes_partial_statement_sha256"] == OCT8_STATEMENT
+    assert not hasattr(hold_mod, "BOUND_STATEMENT_SHA256")
     assert document["bound_statement_status_at_binding"] == "PENDING_FRESH_OPERATOR_APPROVAL"
     assert {row["symbol"] for row in document["symbols"]} == set(HOLD_SYMBOLS)
     assert all(row["classification"] == "BASIS_UNPROVEN_HOLD" for row in document["symbols"])
@@ -259,7 +263,10 @@ def test_every_hold_order_route_stops_before_broker_post(
     assert session.posts == []
     audit_lines = _isolate_hold["audit"].read_text(encoding="utf-8").splitlines()
     assert len(audit_lines) == 1
-    assert json.loads(audit_lines[0])["broker_called"] is False
+    record = json.loads(audit_lines[0])
+    assert record["broker_called"] is False
+    assert record["bound_statement_sha256"] == OCT9_STATEMENT
+    assert record["policy_sha256"] == _sha(_isolate_hold["policy"])
 
 
 @pytest.mark.parametrize("symbol", BASELINED)
@@ -323,17 +330,70 @@ def test_malformed_policy_blocks_hold_symbols_only(_isolate_hold):
     assert len(session.posts) == 1
 
 
-def test_mismatched_statement_hash_blocks_hold_symbols_only(_isolate_hold):
+def test_invalid_statement_hash_blocks_hold_symbols_only(_isolate_hold):
     document = json.loads(_isolate_hold["policy"].read_text(encoding="utf-8"))
-    document["bound_partial_statement_sha256"] = "0" * 64
+    document["bound_partial_statement_sha256"] = "not-a-statement-hash"
     _isolate_hold["policy"].write_text(json.dumps(document), encoding="utf-8")
     broker, session = _broker()
     with broker_order_auth_context():
         with pytest.raises(BasisUnprovenHoldBlocked) as caught:
             broker._post("/v2/orders", {"symbol": "VOO", "side": "sell"})
-        assert caught.value.reason == "basis_unproven_hold_policy_mismatched"
+        assert caught.value.reason == "basis_unproven_hold_policy_invalid_hash"
+        assert caught.value.record["bound_statement_sha256"] is None
         broker._post("/v2/orders", {"symbol": "META", "side": "buy"})
     assert len(session.posts) == 1
+
+
+def test_production_head_mismatch_fails_closed(monkeypatch):
+    token = _policy_path.set(None)
+    try:
+        monkeypatch.setattr(
+            hold_mod,
+            "_committed_policy_bytes",
+            lambda: PROD_POLICY.read_bytes().replace(
+                OCT9_STATEMENT.encode("ascii"),
+                b"a" * 64,
+            ),
+        )
+        broker, session = _broker()
+        with broker_order_auth_context():
+            with pytest.raises(BasisUnprovenHoldBlocked) as caught:
+                broker._post("/v2/orders", {"symbol": "VOO", "side": "buy"})
+            assert caught.value.reason == "basis_unproven_hold_policy_mismatched"
+            assert caught.value.record["bound_statement_sha256"] == OCT9_STATEMENT
+            broker._post("/v2/orders", {"symbol": "AAPL", "side": "buy"})
+        assert len(session.posts) == 1
+    finally:
+        _policy_path.reset(token)
+
+
+def test_production_head_git_failure_fails_closed(monkeypatch):
+    token = _policy_path.set(None)
+    try:
+        monkeypatch.setattr(hold_mod, "_committed_policy_bytes", lambda: None)
+        broker, session = _broker()
+        with broker_order_auth_context():
+            with pytest.raises(BasisUnprovenHoldBlocked) as caught:
+                broker._post("/v2/orders", {"symbol": "XLK", "side": "sell"})
+            assert caught.value.reason == "basis_unproven_hold_policy_mismatched"
+        assert session.posts == []
+    finally:
+        _policy_path.reset(token)
+
+
+def test_matching_head_bytes_do_not_release_hold_symbols(monkeypatch):
+    token = _policy_path.set(None)
+    try:
+        monkeypatch.setattr(hold_mod, "_committed_policy_bytes", lambda: PROD_POLICY.read_bytes())
+        broker, session = _broker()
+        with broker_order_auth_context():
+            with pytest.raises(BasisUnprovenHoldBlocked) as caught:
+                broker._post("/v2/orders", {"symbol": "VOO", "side": "sell"})
+            assert caught.value.reason == "basis_unproven_hold"
+            assert caught.value.record["bound_statement_sha256"] == OCT9_STATEMENT
+        assert session.posts == []
+    finally:
+        _policy_path.reset(token)
 
 
 def test_removing_a_symbol_from_the_file_does_not_release_it(_isolate_hold):
@@ -397,7 +457,7 @@ def test_published_opening_releases_only_that_symbol(monkeypatch, _isolate_hold)
         qty="2",
         opening_basis="1422.780000",
         as_of_utc="2026-10-09T02:00:00Z",
-        evidence_sha256=BOUND_STATEMENT_SHA256,
+        evidence_sha256=OCT9_STATEMENT,
         evidence_ref="fixture-ledger-only",
     )
     _isolate_hold["events"].write_text(json.dumps(event) + "\n", encoding="utf-8")

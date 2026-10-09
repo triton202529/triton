@@ -1,7 +1,7 @@
 {
   "approval_identity": "Akim Wallace — Authorized Paper Trading Operator",
   "blocked_actions": ["BUY", "ADD", "TRIM", "EXIT", "SELL", "ORDER_SUBMISSION"],
-  "bound_partial_statement_sha256": "1f9cd8ee8fb0f76a4c40ffd65aa3f5bf798993b9889c663cb4245ca84b9607ed",
+  "bound_partial_statement_sha256": "22a1a6f94d724ef57a06606e4ec80ca60137b0170695f6928d1456870a286cfe",
   "bound_statement_status_at_binding": "PENDING_FRESH_OPERATOR_APPROVAL",
   "created_at_utc": "2026-10-09T01:45:00Z",
   "operator_overrides": [],
@@ -21,6 +21,7 @@
   ],
   "schema": "BASIS-UNPROVEN-HOLD-1",
   "status": "ACTIVE",
+  "supersedes_partial_statement_sha256": "1f9cd8ee8fb0f76a4c40ffd65aa3f5bf798993b9889c663cb4245ca84b9607ed",
   "symbols": [
     {
       "classification": "BASIS_UNPROVEN_HOLD",
