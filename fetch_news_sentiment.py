@@ -3,9 +3,13 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from textblob import TextBlob
 from newsapi import NewsApiClient
+from dotenv import load_dotenv
 
 # === Configuration ===
-API_KEY = "36536909146a411683bc7ccecab398b7"  # Replace with your own if needed
+load_dotenv()
+API_KEY = os.getenv("NEWS_API_KEY")
+if not API_KEY:
+    raise SystemExit("NEWS_API_KEY is not set. Add it to the environment or a local .env file.")
 TICKERS = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "META", "NVDA", "JPM", "XOM"]
 OUTPUT_PATH = "data/results/news_sentiment.csv"
 
