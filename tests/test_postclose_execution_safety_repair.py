@@ -7,16 +7,38 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 ORDER_LEDGER = ROOT / "data" / "results" / "paper_order_events.jsonl"
 ACCOUNTING_LEDGER = ROOT / "data" / "results" / "performance_accounting_events.jsonl"
 HOLD_AUDIT = ROOT / "data" / "governance" / "basis_unproven_hold_audit.jsonl"
+# Historical pins from before the October 14 BITO fill. Do not retarget them
+# to the current ledger. The live guard compares each file with itself.
 ORDER_LEDGER_SHA = "f471049c339a3fc4569487f6654aa98e353c7e1bb76c8fff82194538f32ec7cf"
 ACCOUNTING_LEDGER_SHA = "be24282f6ed8ab5ac9622639f8ee3c1cd75e05bf8c30c4c46d161ea10dd2c535"
+PRODUCTION_GUARD_PATHS = (ORDER_LEDGER, ACCOUNTING_LEDGER, HOLD_AUDIT)
 
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _production_snapshot() -> dict:
+    snapshot = {}
+    for path in PRODUCTION_GUARD_PATHS:
+        data = path.read_bytes()
+        snapshot[str(path)] = (hashlib.sha256(data).hexdigest(), len(data))
+    return snapshot
+
+
+@pytest.fixture(scope="module", autouse=True)
+def production_ledgers_and_hold_audit_stable():
+    before = _production_snapshot()
+    assert before[str(HOLD_AUDIT)][1] == 0
+    yield before
+    assert _production_snapshot() == before
+    assert HOLD_AUDIT.stat().st_size == 0
 
 
 def _binding() -> dict:
@@ -44,10 +66,13 @@ def _prepare_results(tmp_path: Path) -> tuple[Path, bytes]:
     return results, prior.read_bytes()
 
 
-def test_production_ledgers_and_hold_audit_remain_unchanged():
-    assert _sha(ORDER_LEDGER) == ORDER_LEDGER_SHA
-    assert _sha(ACCOUNTING_LEDGER) == ACCOUNTING_LEDGER_SHA
-    assert HOLD_AUDIT.stat().st_size == 0
+def test_production_ledgers_and_hold_audit_remain_unchanged(
+    production_ledgers_and_hold_audit_stable,
+):
+    before = production_ledgers_and_hold_audit_stable
+    assert before[str(HOLD_AUDIT)][1] == 0
+    assert HOLD_AUDIT.read_bytes() == b""
+    assert _production_snapshot() == before
 
 
 def test_packet_generation_excludes_voo_and_xlk(tmp_path: Path, monkeypatch):

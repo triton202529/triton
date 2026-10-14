@@ -498,7 +498,10 @@ def _render_canonical_holdings() -> None:
         return
     st.caption(str(loaded.get("as_of_label") or ""))
     actions = _load_lifecycle_actions()
+    from services.portfolio_effective_action import resolve_portfolio_effective_actions
+
     rows = list(loaded.get("rows") or [])
+    decisions = resolve_portfolio_effective_actions(rows, actions, root=_root())
     market_values: List[Optional[float]] = []
     total_mv = 0.0
     for row in rows:
@@ -514,6 +517,7 @@ def _render_canonical_holdings() -> None:
         symbol = str(row.get("symbol") or "")
         weight = f"{(mv / total_mv * 100):.1f}%" if mv is not None and total_mv else "Unavailable"
         pl = row.get("unrealized_pl") or row.get("unrealized_pnl")
+        decision = decisions.get(symbol.upper()) or {}
         item = {
             "Symbol": symbol,
             "Quantity": row.get("qty"),
@@ -522,7 +526,12 @@ def _render_canonical_holdings() -> None:
             "Market value": money_text(mv),
             "Gain / loss": signed_text(pl),
             "Weight": weight,
-            "Lifecycle action": display_status(actions.get(symbol) or "Unavailable"),
+            "Effective action": display_status(decision.get("effective_action") or "Unavailable"),
+            "Operator status": decision.get("operator_status") or "—",
+            "Reason": decision.get("reason") or "—",
+            "Lifecycle action": display_status(
+                decision.get("lifecycle_action") or actions.get(symbol) or "Unavailable"
+            ),
         }
         if row.get("company_name"):
             item["Company"] = row.get("company_name")
