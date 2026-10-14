@@ -29,7 +29,7 @@ PROTECTED = {
     "scripts/run_continuous_loop.ps1": "5784c0dd2ec623c94b35fb58cdd112db1f4373465e45261018e30c407c323375",
     "services/market_calendar.py": "cf7a85a39f80f5bff5296aaaa32628f11f9e34e61d043319f3e3123fd7119b86",
     "services/paper_runtime_session_gate.py": "4332eeb6e5ff65d11988213b4b04107e89dd5f1ba44277e782dacaf0a5ae3417",
-    "services/operator_console_status.py": "fec16eb2bb75d9f211f1bd6c2bad1eb4be614fa8ce5ecfe0a92e108f7a1f36b0",
+    "services/operator_console_status.py": "519e3501a5b3f15db4e405df6bb2e09eedf70c2167df92991b9a2d3a3a3e8c9f",
     "services/operator_runtime_controller.py": "da619123049f722e9f8574ac9fc110dbb802bc35b4b8fd6d76461ab31845f067",
     "services/paper_arm_status.py": "a5cc15593c8cdc35d3ed6d133fdedf1d70b248e289e7ecdd2252fcc1126ef525",
     "services/paper_session_arm_policy.py": "561eed1a805e69fefc75467dd5be948d4f677f874c18c94db76d1d4a4b32436d",
