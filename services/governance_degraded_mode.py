@@ -11,7 +11,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -324,6 +324,63 @@ def enrich_execution_readiness(
         _atomic_write_json(audit, results_dir / "governance_degraded_mode_audit.json")
     out["governance_degraded_mode_audit_timestamp"] = audit.get("generated_at")
     return out
+
+
+def describe_active_entry_blocker(
+    readiness_doc: Optional[Mapping[str, Any]] = None,
+    decision: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Name the runtime entry gate. Certification status is not an order gate."""
+    readiness = dict(readiness_doc or {})
+    decision_doc = dict(decision or {})
+    details = decision_doc.get("details") if isinstance(decision_doc.get("details"), dict) else {}
+    checks = details.get("checks") if isinstance(details.get("checks"), dict) else {}
+    failed = [str(item) for item in (readiness.get("failed_checks") or [])]
+    if not failed:
+        failed = [str(item) for item in (checks.get("readiness_failed_checks") or [])]
+    mode = str(readiness.get("governance_mode") or checks.get("governance_mode") or "")
+    gate_reason = str(decision_doc.get("gate_reason") or "")
+    failed_check = str(details.get("failed_check") or "")
+    operational = ("watchdog", "data_freshness", "broker", "lifecycle", "signals")
+
+    def _result(label: str, gate: str, *, active: bool = True) -> Dict[str, Any]:
+        return {
+            "active": active,
+            "label": label,
+            "gate": gate,
+            "source": (
+                "execution_readiness"
+                if gate in operational or gate == "governance"
+                else "paper_entry_decision"
+            ),
+            "certification_is_runtime_gate": False,
+            "detail": (
+                f"Runtime entry gate: {label}. "
+                "The legacy certification banner is not this order gate."
+            ),
+        }
+
+    for name in operational:
+        if name in failed:
+            label = "watchdog" if name == "watchdog" else name.replace("_", " ")
+            return _result(label, name)
+    orange = mode == GOVERNANCE_MODE_ORANGE_DEGRADED and failed == ["governance"]
+    if orange or "ORANGE governance" in gate_reason:
+        return _result("ORANGE governance", "governance")
+    if "governance" in failed:
+        return _result("governance", "governance")
+    if failed_check == "capacity" or "MAX_POSITIONS" in gate_reason:
+        return _result("capacity", "capacity")
+    if gate_reason and failed_check not in ("", "execution_readiness"):
+        return _result(gate_reason, failed_check or "entry_gate")
+    status = str(
+        checks.get("execution_readiness_status") or readiness.get("readiness_status") or ""
+    )
+    if status and status != "READY":
+        return _result(f"execution readiness {status}", "execution_readiness")
+    if gate_reason:
+        return _result(gate_reason, failed_check or "entry_gate")
+    return _result("none", "none", active=False)
 
 
 def classify_paper_entry_readiness_outcome(

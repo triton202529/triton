@@ -153,6 +153,14 @@ def _freshness_view(status: Mapping[str, Any]) -> Dict[str, Any]:
     return dict(freshness_for_render(status, isolated=isolation_active(_repo_root())))
 
 
+def _entry_blocker_label(status: Mapping[str, Any]) -> str:
+    governance = status.get("governance") or {}
+    blocker = governance.get("active_entry_blocker") or {}
+    if not blocker.get("active"):
+        return "None"
+    return str(blocker.get("label") or "Unknown gate")
+
+
 def render_status_bar(status: Mapping[str, Any]) -> None:
     """Safety states — blocked/unknown never styled healthy."""
     live = status.get("live_execution") or {}
@@ -168,6 +176,7 @@ def render_status_bar(status: Mapping[str, Any]) -> None:
     sell_auth = _sell_authority_state()
     market = _market_session_card()
     fresh = _freshness_view(status)
+    entry_blocker = _entry_blocker_label(status)
     live_value = "Blocked" if live.get("blocked") else "Not blocked"
     pipeline = oui.present_pipeline_heartbeat_label(
         freshness_class=freshness.get("class"),
@@ -256,6 +265,12 @@ def render_status_bar(status: Mapping[str, Any]) -> None:
                 "value": fresh["value"],
                 "tone": fresh["tone"],
                 "note": fresh.get("note"),
+            },
+            {
+                "label": "Entry blocker",
+                "value": entry_blocker,
+                "tone": "warn" if entry_blocker != "None" else "ok",
+                "note": "Runtime entry gate. Certification banner is not this gate.",
             },
         ]
     )

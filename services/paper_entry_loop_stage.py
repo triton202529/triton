@@ -50,6 +50,8 @@ ALLOC_SUMMARY = RESULTS / "portfolio_allocation_summary.json"
 LIFECYCLE_EFFECTIVE = RESULTS / "signal_lifecycle_effective.csv"
 AUDIT_JSON = RESULTS / "paper_entry_loop_stage_audit.json"
 LAST_MARKET_DECISION_JSON = RESULTS / "paper_entry_loop_stage_last_market_decision.json"
+CYCLE_RECEIPTS_NAME = "paper_cycle_receipts.jsonl"
+CYCLE_RECEIPT_SCHEMA = "POSTCLOSE-CYCLE-RECEIPT-1"
 DISPATCH_CONTRACT_PATH = LIVE / "paper_entry_dispatch_contract.json"
 DISPATCH_CONTRACT_TTL_MINUTES = 15
 EXEC_TRADES_CFG = CONFIG / "execute_trades.json"
@@ -807,10 +809,101 @@ def _flatten_audit_fields(
     )
 
 
+def build_cycle_receipt(audit: Dict[str, Any]) -> Dict[str, Any]:
+    """Compact immutable evidence for one runtime cycle. Does not include broker payloads."""
+    details = audit.get("details") if isinstance(audit.get("details"), dict) else {}
+    checks = details.get("checks") if isinstance(details.get("checks"), dict) else {}
+    candidates = []
+    for row in details.get("candidates") or []:
+        if not isinstance(row, dict):
+            continue
+        candidates.append(
+            {
+                "ticker": row.get("ticker"),
+                "allocation_action": row.get("allocation_action"),
+                "eligible_for_auto_entry": bool(row.get("eligible_for_auto_entry")),
+                "block_reasons": row.get("block_reasons") or "",
+            }
+        )
+    exit_gate = checks.get("exit_before_entry")
+    if not isinstance(exit_gate, dict):
+        exit_gate = {}
+    submitted = bool(audit.get("broker_orders_submitted"))
+    attempted = bool(audit.get("executed"))
+    reason = None if submitted else audit.get("gate_reason")
+    return {
+        "schema_version": CYCLE_RECEIPT_SCHEMA,
+        "invocation_id": checks.get("market_open_invocation_id_resolved"),
+        "timestamp": audit.get("timestamp"),
+        "signal_candidates": list(audit.get("eligible_entry_symbols") or []),
+        "allocation_candidates": candidates,
+        "exit_gate": {
+            "decision": exit_gate.get("decision"),
+            "reason": exit_gate.get("reason"),
+            "packet_status": exit_gate.get("packet_status"),
+            "pending_sell_symbols": list(exit_gate.get("pending_sell_symbols") or []),
+        },
+        "final_gate_result": {
+            "gate_pass": bool(audit.get("gate_pass")),
+            "gate_reason": audit.get("gate_reason"),
+            "failed_check": details.get("failed_check"),
+            "final_gate_classification": checks.get("final_gate_classification")
+            or audit.get("final_gate_classification"),
+            "safe_block": bool(audit.get("safe_block")),
+            "execution_readiness_status": checks.get("execution_readiness_status"),
+            "readiness_failed_checks": list(checks.get("readiness_failed_checks") or []),
+            "governance_mode": checks.get("governance_mode"),
+        },
+        "no_order_reason": reason,
+        "order_attempted": attempted,
+        "order_submitted": submitted,
+    }
+
+
+def append_cycle_receipt(
+    audit: Dict[str, Any], *, results_root: Optional[Path] = None
+) -> Dict[str, Any]:
+    """Append one receipt per invocation. A prior line is never rewritten.
+
+    A missing or blank invocation id is rejected before any file is created.
+    """
+    receipt = build_cycle_receipt(audit)
+    path = Path(results_root or RESULTS) / CYCLE_RECEIPTS_NAME
+    invocation_id = str(receipt.get("invocation_id") or "").strip()
+    if not invocation_id:
+        receipt["appended"] = False
+        receipt["reason"] = "invocation_id_missing"
+        receipt["path"] = str(path)
+        return receipt
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        existing = path.read_text(encoding="utf-8")
+        for line in existing.splitlines():
+            if not line.strip():
+                continue
+            try:
+                prior = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(prior.get("invocation_id") or "").strip() == invocation_id:
+                receipt["appended"] = False
+                receipt["path"] = str(path)
+                return receipt
+    line = json.dumps(receipt, sort_keys=True, default=str) + "\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+        handle.flush()
+        os.fsync(handle.fileno())
+    receipt["appended"] = True
+    receipt["path"] = str(path)
+    return receipt
+
+
 def _write_stage_audit(audit: Dict[str, Any], *, market_open: bool) -> None:
     _atomic_write_json(AUDIT_JSON, audit)
     if market_open:
         _atomic_write_json(LAST_MARKET_DECISION_JSON, audit)
+    append_cycle_receipt(audit)
 
 
 def _dispatch_contract_checksum(doc: Dict[str, Any]) -> str:

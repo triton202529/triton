@@ -14,7 +14,7 @@ import re
 import subprocess
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 SCHEMA = "BASIS-UNPROVEN-HOLD-1"
 HOLD_SYMBOLS = frozenset({"VOO", "XLK"})
@@ -321,6 +321,37 @@ def _block(
             client_order_id=client_order_id,
         )
     raise BasisUnprovenHoldBlocked(record)
+
+
+def evaluate_basis_unproven_hold_for_packet() -> Dict[str, Any]:
+    """Read-only hold decision for packet generation and arming.
+
+    Uses the same policy load and release rules as the broker boundary.
+    Does not append the hold audit, authorize an order, or call a broker.
+    Policy validation failure fails closed: every hold symbol stays blocked.
+    """
+    loaded = _load_policy()
+    if not loaded.get("ok"):
+        return {
+            "ok": False,
+            "reason": str(loaded.get("reason") or "basis_unproven_hold_policy_unreadable"),
+            "blocked_symbols": sorted(HOLD_SYMBOLS),
+            "policy_sha256": loaded.get("policy_sha256"),
+            "bound_statement_sha256": loaded.get("bound_statement_sha256"),
+        }
+    document = loaded["document"]
+    blocked: List[str] = []
+    for symbol in sorted(HOLD_SYMBOLS):
+        if _override_releases(document, symbol) or _published_opening_releases(symbol):
+            continue
+        blocked.append(symbol)
+    return {
+        "ok": True,
+        "reason": "ok",
+        "blocked_symbols": blocked,
+        "policy_sha256": loaded.get("policy_sha256"),
+        "bound_statement_sha256": loaded.get("bound_statement_sha256"),
+    }
 
 
 def enforce_basis_unproven_hold_on_order_post(

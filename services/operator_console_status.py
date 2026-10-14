@@ -63,6 +63,7 @@ PAPER_ARM_CONFIRM = LIVE / "paper_arm_confirm.json"
 WATCHDOG_STATUS = RESULTS / "watchdog_status.json"
 WATCHDOG_ALERTS = RESULTS / "watchdog_alerts.json"
 EXECUTION_READINESS = RESULTS / "execution_readiness.json"
+LAST_ENTRY_DECISION = RESULTS / "paper_entry_loop_stage_last_market_decision.json"
 GOVERNANCE_AUTH = RESULTS / "governance_authorization.json"
 HEARTBEAT = RESULTS / "heartbeat.json"
 RUNTIME_AUTOSTART_931 = RESULTS / "runtime_autostart_931.json"
@@ -1279,14 +1280,35 @@ def _build_attention(snapshot_parts: Dict[str, Any]) -> List[AttentionItem]:
             )
         )
 
+    blocker = gov.get("active_entry_blocker") or {}
+    if blocker.get("active") and not expected_stop:
+        items.append(
+            AttentionItem(
+                "HIGH",
+                f"Entry blocked: {blocker.get('label')}",
+                str(blocker.get("detail") or ""),
+                str(EXECUTION_READINESS),
+                "Use this runtime entry gate. Do not treat the legacy certification banner as the order gate.",
+                bucket=(
+                    BUCKET_ACTION_NOW
+                    if market_open is True or phase == SESSION_PRE_MARKET
+                    else BUCKET_INFO
+                ),
+                classification_code="ACTIVE_ENTRY_BLOCKER",
+            )
+        )
+
     if gov.get("execution_readiness_ready") is False and (
         market_open is True or phase in (SESSION_MARKET_OPEN, SESSION_PRE_MARKET)
     ):
+        readiness_detail = "execution_readiness.json does not indicate a ready posture."
+        if blocker.get("active"):
+            readiness_detail = f"Active entry blocker: {blocker.get('label')}. {readiness_detail}"
         items.append(
             AttentionItem(
                 "MEDIUM",
                 "Execution readiness not ready",
-                "execution_readiness.json does not indicate a ready posture.",
+                readiness_detail,
                 str(EXECUTION_READINESS),
                 "Review readiness details on Risk & Alerts / Diagnostics before activation.",
                 bucket=BUCKET_BEFORE_OPEN if phase == SESSION_PRE_MARKET else BUCKET_ACTION_NOW,
@@ -1553,6 +1575,16 @@ def build_operator_status(
         gov_blocked = False
     readiness_status = str(readiness.get("readiness_status") or readiness.get("status") or "")
     exec_ready = readiness_status.upper() in ("READY", "PASS", "GREEN", "AUTHORIZED")
+    from services.governance_degraded_mode import describe_active_entry_blocker
+
+    last_decision = (
+        _read_json(paths["execution_readiness"].parent / LAST_ENTRY_DECISION.name)
+        if paths.get("execution_readiness")
+        else {}
+    )
+    if not isinstance(last_decision, dict) or last_decision.get("__malformed__"):
+        last_decision = {}
+    active_entry_blocker = describe_active_entry_blocker(readiness, last_decision)
     if readiness and "readiness_status" not in readiness and "status" not in readiness:
         exec_ready = None  # unknown shape
 
@@ -1728,6 +1760,7 @@ def build_operator_status(
             "blocked": gov_blocked,
             "execution_readiness_status": readiness_status or "UNKNOWN",
             "execution_readiness_ready": exec_ready,
+            "active_entry_blocker": active_entry_blocker,
             "evidence_paths": {
                 "governance": str(paths["governance_authorization"]),
                 "readiness": str(paths["execution_readiness"]),

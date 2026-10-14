@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from services.basis_unproven_hold import evaluate_basis_unproven_hold_for_packet
 from services.manage_positions_cycle_binding import (
     BLOCKER_MISSING_SELL_AUTHORITY,
     BLOCKER_NONE,
@@ -695,6 +696,29 @@ def _validate_cycle_binding(
     return {"ok": True, "reason": "ok", "binding": binding, "exit_code": F2_OK}
 
 
+def exclude_basis_unproven_hold_rows(
+    classified: Sequence[Dict[str, Any]],
+    *,
+    blocked_symbols: Sequence[str],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Return a new classification list. Does not mutate the input rows or a packet file."""
+    blocked = {str(symbol or "").upper() for symbol in blocked_symbols}
+    kept: List[Dict[str, Any]] = []
+    excluded: List[Dict[str, Any]] = []
+    for rec in classified:
+        symbol = str(rec.get("symbol") or "").upper()
+        if rec.get("classification") == CLASS_AUTHORITY_READY and symbol in blocked:
+            copied = dict(rec)
+            copied["classification"] = "EXCLUDED_BASIS_UNPROVEN_HOLD"
+            copied["selected_for_execution"] = False
+            copied["remaining_blocker"] = "BASIS_UNPROVEN_HOLD"
+            kept.append(copied)
+            excluded.append(copied)
+            continue
+        kept.append(dict(rec))
+    return kept, excluded
+
+
 def generate_from_manage_artifacts(
     *,
     results_root: Path,
@@ -749,6 +773,30 @@ def generate_from_manage_artifacts(
             rec["dispatch_classification"] = dispatch_kind
             return rec
         classified = classify_plan_rows(rows, binding)
+        hold = evaluate_basis_unproven_hold_for_packet()
+        if not hold.get("ok"):
+            return {
+                "ok": False,
+                "reason": str(hold.get("reason") or "basis_unproven_hold_policy_unreadable"),
+                "wrote": False,
+                "packet": None,
+                "path": str(dest),
+                "previous_preserved": existed,
+                "broker": 0,
+                "network": 0,
+                "exit_code": F2_GENERATION_FAILURE,
+                "packet_status": "HOLD_POLICY_UNAVAILABLE",
+                "classifications": classified,
+                "invocation_id": binding.get("invocation_id"),
+                "hold_policy": {
+                    "ok": False,
+                    "reason": hold.get("reason"),
+                    "blocked_symbols": list(hold.get("blocked_symbols") or []),
+                },
+            }
+        classified, excluded_hold = exclude_basis_unproven_hold_rows(
+            classified, blocked_symbols=list(hold.get("blocked_symbols") or [])
+        )
         if any(c.get("classification") == CLASS_OUTCOME_UNKNOWN for c in classified):
             return {
                 "ok": False,
@@ -819,6 +867,13 @@ def generate_from_manage_artifacts(
                 "excluded_entry_only_reason": (
                     "recognized_non_sell_row" if excluded_entry_only else None
                 ),
+                "excluded_basis_unproven_hold_symbols": [
+                    str(c.get("symbol") or "") for c in excluded_hold
+                ],
+                "excluded_basis_unproven_hold_reason": (
+                    "basis_unproven_hold" if excluded_hold else None
+                ),
+                "hold_policy_sha256": hold.get("policy_sha256"),
                 "arm_eligibility": (CLASS_AUTHORITY_READY if actions else "EMPTY"),
                 "remaining_blocker": binding.get("remaining_blocker"),
                 "packet_status": (

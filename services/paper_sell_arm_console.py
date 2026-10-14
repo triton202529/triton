@@ -77,6 +77,13 @@ FAIL_CLOSED_MESSAGES = {
     "batch_mismatch": "Current reviewed batch does not match the confirmation challenge.",
     "confirmation_phrase_mismatch": "Confirmation phrase does not match CONFIRM PAPER SELLS.",
     "duplicate_click": "An OPEN challenge already exists for this reviewed batch.",
+    "basis_unproven_hold_policy_unavailable": (
+        "Basis-unproven hold policy could not be validated. No sell packet is offered."
+    ),
+    "basis_unproven_hold_symbol_in_packet": (
+        "Reviewed packet includes a basis-unproven hold symbol. "
+        "It is not offered for arming. A replacement must be newly generated."
+    ),
     "authority_already_created": "Paper SELL authority already exists for this challenge.",
     "configuration_blocked": "Paper SELL arming is blocked by a non-production configuration setting.",
     "unknown_exception": "Paper SELL arming failed closed. No orders were submitted.",
@@ -295,6 +302,28 @@ def action_summaries(packet: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
         )
     return rows
+
+
+def hold_arm_denial(packet: Dict[str, Any]) -> Optional[str]:
+    """Refuse Ready-to-Arm when the hold policy fails or a blocked symbol is included.
+
+    Does not rewrite the packet. A hold symbol requires a newly generated packet.
+    """
+    from services.basis_unproven_hold import evaluate_basis_unproven_hold_for_packet
+
+    hold = evaluate_basis_unproven_hold_for_packet()
+    if not hold.get("ok"):
+        return "basis_unproven_hold_policy_unavailable"
+    blocked = {str(symbol).upper() for symbol in (hold.get("blocked_symbols") or [])}
+    symbols = []
+    for row in packet.get("approval_ready_actions") or []:
+        if isinstance(row, dict):
+            symbols.append(str(row.get("symbol") or "").upper())
+    for symbol in packet.get("approval_ready_symbols") or []:
+        symbols.append(str(symbol or "").upper())
+    if blocked.intersection(symbol for symbol in symbols if symbol):
+        return "basis_unproven_hold_symbol_in_packet"
+    return None
 
 
 def _sell_only_nonempty(packet: Dict[str, Any]) -> Tuple[bool, str]:
@@ -576,6 +605,8 @@ def build_presentation(
             deny_arm = sell_reason
         elif not mode_ok:
             deny_arm = mode_reason
+        else:
+            deny_arm = hold_arm_denial(packet)
         slice_fields = _empty_slice_fields()
         if deny_arm is None and packet is not None:
             slice_fields, slice_deny = _slice_presentation_fields(packet, results_root=results_root)
