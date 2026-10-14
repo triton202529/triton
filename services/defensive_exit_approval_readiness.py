@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -27,6 +28,7 @@ from services.manage_positions_cycle_binding import (
     CLASS_AUTHORITY_READY,
     CLASS_BLOCKED_OTHER_GATE,
     CLASS_INVALID,
+    CLASS_NOT_SELECTED,
     CLASS_OUTCOME_UNKNOWN,
     DECISION_BLOCK,
     DECISION_CANDIDATE_AWARE,
@@ -719,6 +721,285 @@ def exclude_basis_unproven_hold_rows(
     return kept, excluded
 
 
+def _evaluated_position_book(
+    rows: Sequence[Dict[str, Any]],
+) -> Dict[str, Dict[str, float]]:
+    """Current evaluated quantity and price only. Missing prices are not guessed."""
+    book: Dict[str, Dict[str, float]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper().strip()
+        if not symbol or symbol in book:
+            continue
+        qty = _f(row.get("current_position_qty"))
+        price = _f(row.get("current_price"))
+        if qty is None or price is None or qty <= 0.0 or price <= 0.0:
+            continue
+        book[symbol] = {
+            "qty": qty,
+            "price": price,
+            "market_value": qty * price,
+        }
+    return book
+
+
+def _weights_after(
+    book: Dict[str, Dict[str, float]],
+    sales: Dict[str, float],
+) -> Dict[str, float]:
+    market_values = {
+        symbol: max(0.0, float(pos["market_value"]) - float(sales.get(symbol) or 0.0))
+        for symbol, pos in book.items()
+    }
+    total = sum(market_values.values())
+    weights: Dict[str, float] = {}
+    for symbol, market_value in market_values.items():
+        if market_value <= 1e-9 or total <= 1e-9:
+            weights[symbol] = 0.0
+        else:
+            weights[symbol] = market_value / total * 100.0
+    return weights
+
+
+def _ready_sale_notionals(
+    classified: Sequence[Dict[str, Any]],
+    book: Dict[str, Dict[str, float]],
+) -> Dict[str, float]:
+    sales: Dict[str, float] = {}
+    for rec in classified:
+        if rec.get("classification") != CLASS_AUTHORITY_READY:
+            continue
+        symbol = str(rec.get("symbol") or "").upper().strip()
+        if symbol not in book:
+            continue
+        qty = _f(rec.get("qty")) or 0.0
+        if qty <= 0.0:
+            continue
+        sales[symbol] = min(book[symbol]["market_value"], qty * book[symbol]["price"])
+    return sales
+
+
+def _concentration_trim_qtys(
+    book: Dict[str, Dict[str, float]],
+    offenders: Sequence[str],
+    *,
+    cap: float,
+) -> Optional[Dict[str, int]]:
+    """Whole-share trims inside the existing sell cap that reduce every offender."""
+    from services.paper_sell_arm_cap_slice import _whole_share_qty
+
+    if cap <= 0.0 or not offenders:
+        return None
+    before_total = sum(pos["market_value"] for pos in book.values())
+    offender_mv = sum(book[symbol]["market_value"] for symbol in offenders)
+    if offender_mv <= 0.0 or before_total - offender_mv <= 1e-9:
+        return None
+    wholes = {symbol: _whole_share_qty(book[symbol]["qty"]) for symbol in offenders}
+    if any(qty < 1 for qty in wholes.values()):
+        return None
+    fraction = min(1.0, float(cap) / offender_mv)
+    qtys: Dict[str, int] = {}
+    for symbol in offenders:
+        price = book[symbol]["price"]
+        target = fraction * book[symbol]["market_value"]
+        qtys[symbol] = min(wholes[symbol], int(math.floor((target + 1e-12) / price)))
+
+    def _notional(qmap: Dict[str, int]) -> float:
+        return sum(qmap[symbol] * book[symbol]["price"] for symbol in qmap)
+
+    for symbol in sorted(offenders, key=lambda name: book[name]["market_value"], reverse=True):
+        if qtys[symbol] >= 1:
+            continue
+        if _notional(qtys) + book[symbol]["price"] <= float(cap) + 0.02:
+            qtys[symbol] = 1
+    if any(qtys[symbol] < 1 for symbol in offenders):
+        return None
+    if _notional(qtys) > float(cap) + 0.02:
+        return None
+
+    def _after(qmap: Dict[str, int]) -> Dict[str, float]:
+        return _weights_after(
+            book,
+            {symbol: qmap.get(symbol, 0) * book[symbol]["price"] for symbol in book},
+        )
+
+    before = _weights_after(book, {})
+    for _ in range(100000):
+        after = _after(qtys)
+        stuck = [
+            symbol for symbol in offenders if round(after[symbol], 2) >= round(before[symbol], 2)
+        ]
+        if not stuck:
+            break
+        moved = False
+        for symbol in sorted(stuck, key=lambda name: before[name], reverse=True):
+            if qtys[symbol] >= wholes[symbol]:
+                continue
+            if _notional(qtys) + book[symbol]["price"] > float(cap) + 0.02:
+                continue
+            qtys[symbol] += 1
+            moved = True
+            break
+        if not moved:
+            return None
+    else:
+        return None
+    after = _after(qtys)
+    for symbol in offenders:
+        if after[symbol] > before[symbol] + 1e-6:
+            return None
+        if round(after[symbol], 2) >= round(before[symbol], 2):
+            return None
+    return qtys
+
+
+def _is_lifecycle_hold(rec: Optional[Dict[str, Any]]) -> bool:
+    """Ordinary unselected HOLD. Submitted, unknown, and ready sells are not holds."""
+    if not isinstance(rec, dict):
+        return False
+    classification = str(rec.get("classification") or "")
+    if classification in {
+        CLASS_AUTHORITY_READY,
+        CLASS_ALREADY_SUBMITTED,
+        CLASS_OUTCOME_UNKNOWN,
+        CLASS_INVALID,
+        CLASS_BLOCKED_OTHER_GATE,
+        "EXCLUDED_BASIS_UNPROVEN_HOLD",
+        "DEFERRED_CONCENTRATION_PRECEDENCE",
+    }:
+        return False
+    action = str(rec.get("action") or rec.get("final_action") or "").upper().strip()
+    reason = str(rec.get("reason_code") or "").upper().strip()
+    return classification == CLASS_NOT_SELECTED and (
+        action in {"", "NONE", "HOLD"} or reason in {"NO_ACTION_HOLD", "HOLD"}
+    )
+
+
+def apply_concentration_exit_precedence(
+    classified: Sequence[Dict[str, Any]],
+    rows: Sequence[Dict[str, Any]],
+    *,
+    blocked_symbols: Sequence[str],
+    cap: float = APPROVAL_CLI_CAP,
+) -> Dict[str, Any]:
+    """Promote a live concentration HOLD to a capped TRIM, or refuse an unsafe packet.
+
+    Uses only the evaluated position quantity and price already on the plan rows.
+    Does not write a packet, authority, receipt, or ledger.
+    """
+    from services.risk_watchdog import DEFAULT_CONCENTRATION_PCT
+
+    threshold = float(DEFAULT_CONCENTRATION_PCT)
+    book = _evaluated_position_book(rows)
+    if not book:
+        return {"status": "not_applicable", "reason": "positions_not_evaluated"}
+    before = _weights_after(book, {})
+    offenders = sorted(
+        (symbol for symbol, weight in before.items() if weight > threshold + 1e-9),
+        key=lambda symbol: before[symbol],
+        reverse=True,
+    )
+    if not offenders:
+        return {"status": "not_applicable", "reason": "no_concentration_breach"}
+    blocked = {str(symbol or "").upper().strip() for symbol in blocked_symbols}
+    ready_sales = _ready_sale_notionals(classified, book)
+    projected = _weights_after(book, ready_sales)
+    worsens = any(projected[symbol] > before[symbol] + 1e-6 for symbol in offenders)
+    by_symbol = {str(rec.get("symbol") or "").upper().strip(): rec for rec in classified}
+    blocked_offenders = [symbol for symbol in offenders if symbol in blocked]
+    tradable = [symbol for symbol in offenders if symbol not in blocked]
+    unsold = [
+        symbol
+        for symbol in tradable
+        if float(ready_sales.get(symbol) or 0.0) <= 0.0
+        and _is_lifecycle_hold(by_symbol.get(symbol))
+    ]
+    if blocked_offenders and (worsens or ready_sales):
+        return {
+            "status": "unavailable",
+            "reason": "concentration_exit_unavailable",
+            "detail": "active concentration offender is excluded by basis-unproven hold",
+        }
+    if not worsens and not unsold:
+        return {"status": "not_applicable", "reason": "existing_sells_do_not_worsen"}
+    trim_targets = list(tradable) if worsens else list(unsold)
+    qtys = _concentration_trim_qtys(book, trim_targets, cap=float(cap)) if trim_targets else None
+    if not qtys:
+        if worsens or ready_sales:
+            return {
+                "status": "unavailable",
+                "reason": "concentration_exit_unavailable",
+                "detail": "no permitted trim reduces the active concentration breach",
+            }
+        return {
+            "status": "not_applicable",
+            "reason": "no_measurable_concentration_trim",
+        }
+    after = _weights_after(
+        book,
+        {symbol: qtys[symbol] * book[symbol]["price"] for symbol in qtys},
+    )
+    trim_symbols = set(qtys)
+    updated: List[Dict[str, Any]] = []
+    evidence_rows: List[Dict[str, Any]] = []
+    for rec in classified:
+        symbol = str(rec.get("symbol") or "").upper().strip()
+        if symbol in trim_symbols:
+            continue
+        if rec.get("classification") == CLASS_AUTHORITY_READY:
+            deferred = dict(rec)
+            deferred["classification"] = "DEFERRED_CONCENTRATION_PRECEDENCE"
+            deferred["selected_for_execution"] = False
+            deferred["remaining_blocker"] = "CONCENTRATION_WEIGHT_GUARD"
+            deferred["reason_code"] = "CONCENTRATION_WEIGHT_GUARD"
+            updated.append(deferred)
+        else:
+            updated.append(dict(rec))
+    for symbol in sorted(trim_symbols, key=lambda name: before[name], reverse=True):
+        qty = qtys[symbol]
+        price = book[symbol]["price"]
+        promoted = dict(by_symbol.get(symbol) or {"symbol": symbol})
+        promoted.update(
+            {
+                "symbol": symbol,
+                "action": "TRIM",
+                "qty": qty,
+                "classification": CLASS_AUTHORITY_READY,
+                "selected_for_execution": True,
+                "reason_code": "CONCENTRATION_EXIT_PRECEDENCE",
+                "remaining_blocker": BLOCKER_MISSING_SELL_AUTHORITY,
+                "concentration_trim": True,
+                "concentration_threshold_pct": threshold,
+                "concentration_before_weight_pct": round(before[symbol], 2),
+                "concentration_after_weight_pct": round(after[symbol], 2),
+            }
+        )
+        updated.append(promoted)
+        evidence_rows.append(
+            {
+                "symbol": symbol,
+                "action": "TRIM",
+                "qty": qty,
+                "est_price": price,
+                "est_notional": round(qty * price, 2),
+                "held_qty": book[symbol]["qty"],
+                "threshold_pct": threshold,
+                "before_weight_pct": round(before[symbol], 2),
+                "after_weight_pct": round(after[symbol], 2),
+            }
+        )
+    return {
+        "status": "applied",
+        "reason": "concentration_exit_precedence",
+        "classified": updated,
+        "evidence": {
+            "concentration_threshold_pct": threshold,
+            "concentration_trims": evidence_rows,
+        },
+    }
+
+
 def generate_from_manage_artifacts(
     *,
     results_root: Path,
@@ -817,6 +1098,31 @@ def generate_from_manage_artifacts(
         excluded_entry_only, fatal_invalid = _partition_invalid_classifications(classified)
         if fatal_invalid:
             raise ValueError("invalid_selected_sell_row")
+        precedence = apply_concentration_exit_precedence(
+            classified,
+            rows,
+            blocked_symbols=list(hold.get("blocked_symbols") or []),
+        )
+        concentration_evidence = None
+        if precedence["status"] == "unavailable":
+            return {
+                "ok": False,
+                "reason": "concentration_exit_unavailable",
+                "wrote": False,
+                "packet": None,
+                "path": str(dest),
+                "previous_preserved": existed,
+                "broker": 0,
+                "network": 0,
+                "exit_code": F2_OTHER_GATE,
+                "packet_status": "CONCENTRATION_EXIT_UNAVAILABLE",
+                "classifications": classified,
+                "invocation_id": binding.get("invocation_id"),
+            }
+        if precedence["status"] == "applied":
+            classified = precedence["classified"]
+            ready = [c for c in classified if c.get("classification") == CLASS_AUTHORITY_READY]
+            concentration_evidence = precedence["evidence"]
         actions = []
         for rec in ready:
             row = next(
@@ -825,15 +1131,15 @@ def generate_from_manage_artifacts(
             )
             if _contradictory_buy_side(row):
                 raise ValueError("contradictory_side_action")
-            item, err = _normalize_action_row(
-                {
-                    "symbol": rec["symbol"],
-                    "action": rec["action"],
-                    "qty": rec.get("qty") or row.get("qty"),
-                    "est_price": row.get("current_price") or row.get("limit_price"),
-                    "est_notional": row.get("planned_notional"),
-                }
-            )
+            payload = {
+                "symbol": rec["symbol"],
+                "action": rec["action"],
+                "qty": rec.get("qty") or row.get("qty"),
+                "est_price": row.get("current_price") or row.get("limit_price"),
+            }
+            if not rec.get("concentration_trim"):
+                payload["est_notional"] = row.get("planned_notional")
+            item, err = _normalize_action_row(payload)
             if err:
                 raise ValueError(err)
             actions.append(item)
@@ -874,6 +1180,7 @@ def generate_from_manage_artifacts(
                     "basis_unproven_hold" if excluded_hold else None
                 ),
                 "hold_policy_sha256": hold.get("policy_sha256"),
+                **(concentration_evidence or {}),
                 "arm_eligibility": (CLASS_AUTHORITY_READY if actions else "EMPTY"),
                 "remaining_blocker": binding.get("remaining_blocker"),
                 "packet_status": (
