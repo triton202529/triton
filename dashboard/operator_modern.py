@@ -607,6 +607,111 @@ def _legacy_portfolio_history_section(summary: Mapping[str, Any]) -> None:
         )
 
 
+def _render_manual_portfolio_exits() -> None:
+    """Exit opens a review only. Confirm is the first write and the only submit."""
+    from dashboard.portfolio_position_snapshot import load_portfolio_holdings
+    from services.manual_portfolio_exit import (
+        REASON,
+        UNAVAILABLE_HOLD,
+        build_manual_exit_review,
+        confirm_manual_paper_exit,
+        provisional_gain_loss_text,
+        review_with_quantity,
+    )
+
+    def _open_exit(opened: Dict[str, Any]) -> None:
+        st.session_state["manual_exit_review"] = opened
+        st.session_state.pop(f"manual_exit_qty_{opened.get('symbol')}", None)
+
+    def _sell_all(key: str, qty: str) -> None:
+        st.session_state[key] = float(qty or 0)
+
+    def _cancel_exit() -> None:
+        st.session_state.pop("manual_exit_review", None)
+        st.session_state.pop("manual_exit_receipt", None)
+
+    loaded = load_portfolio_holdings(_root() / "data" / "results" / "positions_snapshot.csv")
+    rows = list(loaded.get("rows") or []) if loaded.get("ok") else []
+    if not rows:
+        return
+    st.markdown("#### Manual paper exit")
+    st.caption("Paper only. Exit opens a review and does not submit an order.")
+    for row in rows:
+        symbol = str(row.get("symbol") or "").upper().strip()
+        if not symbol:
+            continue
+        review = build_manual_exit_review(row)
+        label, note, button = st.columns([2, 4, 2])
+        label.write(symbol)
+        if not review.get("eligible"):
+            note.caption(UNAVAILABLE_HOLD)
+            button.button("Exit", disabled=True, key=f"manual_exit_disabled_{symbol}")
+            continue
+        note.caption(review.get("position_qty") or "")
+        button.button(
+            "Exit",
+            key=f"manual_exit_open_{symbol}",
+            on_click=_open_exit,
+            args=(review,),
+        )
+    active = st.session_state.get("manual_exit_review")
+    if not isinstance(active, dict) or not active.get("eligible"):
+        return
+    symbol = str(active.get("symbol") or "")
+    qty_key = f"manual_exit_qty_{symbol}"
+    if qty_key not in st.session_state:
+        st.session_state[qty_key] = float(active.get("position_qty") or 0)
+    st.markdown(f"**{symbol}**")
+    st.caption(REASON)
+    left, right = st.columns(2)
+    with left:
+        st.number_input("Quantity", key=qty_key, min_value=0.0, format="%.9f")
+        st.button(
+            "Sell all",
+            key=f"manual_exit_all_{symbol}",
+            on_click=_sell_all,
+            args=(qty_key, str(active.get("position_qty") or "0")),
+        )
+    with right:
+        priced = review_with_quantity(active, st.session_state.get(qty_key))
+        st.write(f"Position quantity {priced.get('position_qty')}")
+        st.write(f"Estimated price {priced.get('estimated_price')}")
+        st.write(f"Estimated notional {priced.get('estimated_notional') or 'Unavailable'}")
+        st.write(provisional_gain_loss_text(priced))
+    cancel, confirm = st.columns(2)
+    cancel.button("Cancel", key=f"manual_exit_cancel_{symbol}", on_click=_cancel_exit)
+    if confirm.button("Confirm paper exit", key=f"manual_exit_confirm_{symbol}"):
+        from services.broker_alpaca import AlpacaBroker
+        from services.manual_portfolio_exit import read_live_execution_permitted
+
+        final = review_with_quantity(active, st.session_state.get(qty_key))
+        live = read_live_execution_permitted(
+            _root() / "data" / "results" / "execution_readiness.json"
+        )
+        try:
+            broker = AlpacaBroker(mode="paper")
+        except Exception as exc:
+            st.session_state["manual_exit_receipt"] = {
+                "status": "blocked",
+                "submitted": False,
+                "broker_status": "not_submitted",
+                "reason": type(exc).__name__,
+            }
+        else:
+            st.session_state["manual_exit_receipt"] = confirm_manual_paper_exit(
+                final,
+                broker=broker,
+                store_root=_root() / "data" / "governance" / "manual_portfolio_exit",
+                live_execution_permitted=live,
+            )
+    receipt = st.session_state.get("manual_exit_receipt")
+    if isinstance(receipt, dict):
+        st.write(f"Request status {receipt.get('status')}")
+        st.write(f"Broker outcome {receipt.get('broker_status')}")
+        if receipt.get("broker_order_id"):
+            st.caption(f"Broker order {receipt.get('broker_order_id')}")
+
+
 def render_portfolio_page() -> None:
     from services.operator_console_status import build_portfolio_summary
 
@@ -626,6 +731,7 @@ def render_portfolio_page() -> None:
         rows = normalize_history_rows(_history_dicts(summary))
         _portfolio_metrics(summary, rows[-2:] if len(rows) >= 2 else rows)
     _render_canonical_holdings()
+    _render_manual_portfolio_exits()
     if certified and certified.get("available"):
         with st.expander("Certified close holdings", expanded=False):
             st.caption(
