@@ -41,9 +41,9 @@ from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
 
 # ---- risk_control import ----
 try:
-    from risk_control import risk_check  # noqa: F401
+    from risk_control import risk_allows, risk_check  # noqa: F401
 except ImportError:
-    from scripts.risk_control import risk_check  # type: ignore  # noqa: F401
+    from scripts.risk_control import risk_allows, risk_check  # type: ignore  # noqa: F401
 
 DEFAULT_SIGNALS = Path("data/predictions/signals.csv")
 DEFAULT_LOG = Path("data/results/executed_trades.csv")
@@ -454,13 +454,16 @@ def main():
                 logs.append([timestamp, yahoo_symbol, "HOLD", 0, None, "SKIPPED", "No action"])
                 continue
 
-            # Risk check
+            # risk_check returns (allowed, reason). The tuple itself is truthy
+            # even when allowed is False, so interpret it before trading.
+            # Use the Alpaca symbol (BRK.B) rather than the Yahoo form (BRK-B).
             try:
-                ok = risk_check(yahoo_symbol, side_text, client)
+                result = risk_check(alpaca_symbol, side_text, client)
             except TypeError:
-                ok = risk_check(yahoo_symbol, side_text)  # type: ignore
+                result = risk_check(yahoo_symbol, side_text)  # type: ignore
+            ok, reason = risk_allows(result)
             if not ok:
-                print(f"⚠️ Trade blocked by risk control: {disp} {side_text}")
+                print(f"⚠️ Trade blocked by risk control: {disp} {side_text} — {reason}")
                 logs.append(
                     [
                         timestamp,
@@ -469,7 +472,7 @@ def main():
                         0,
                         None,
                         "BLOCKED",
-                        "Blocked by risk control",
+                        reason or "Blocked by risk control",
                     ]
                 )
                 continue
