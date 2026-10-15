@@ -5,9 +5,11 @@ Phase 197Q-FIX — Strict runtime loop process detection (watchdog vs continuous
 
 from __future__ import annotations
 
+import contextvars
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,6 +21,12 @@ CONTINUOUS_LOCK = LIVE / "continuous_loop.lock"
 
 WATCHDOG_SCRIPT = "run_watchdog_loop.ps1"
 CONTINUOUS_SCRIPT = "run_continuous_loop.ps1"
+_KNOWN_LOOP_SCRIPTS = (WATCHDOG_SCRIPT, CONTINUOUS_SCRIPT)
+_SCAN_SCOPE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "triton_process_scan_scope",
+    default=None,
+)
+_SCAN_MEMO: Dict[Tuple[str, str], Any] = {}
 
 RUNTIME_PROCESS_CONFIRMED = "RUNTIME_PROCESS_CONFIRMED"
 RUNTIME_PROCESS_STOPPED_LOCK_ABSENT = "RUNTIME_PROCESS_STOPPED_LOCK_ABSENT"
@@ -66,7 +74,7 @@ def _command_invokes_loop_script(command_line: str, script_name: str) -> bool:
     return False
 
 
-def _find_loop_processes(script_name: str) -> Tuple[List[int], str, List[str]]:
+def _scan_loop_processes(script_name: str) -> Tuple[List[int], str, List[str]]:
     """
     Return (pids, method, warnings) for active loop script processes.
     Excludes the detection subprocess itself (self-match on query text).
@@ -106,6 +114,104 @@ def _find_loop_processes(script_name: str) -> Tuple[List[int], str, List[str]]:
     except (subprocess.SubprocessError, OSError) as exc:
         warnings.append(f"process_scan_failed={exc}")
         return [], "failed", warnings
+
+
+class _ProcessScanScope:
+    """One dashboard rerun. Runtime callers never open this."""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+        self._reset: Optional[contextvars.Token[Optional[str]]] = None
+
+    def close(self) -> None:
+        if self._reset is not None:
+            _SCAN_SCOPE.reset(self._reset)
+            self._reset = None
+        _SCAN_MEMO.clear()
+
+
+def open_process_scan_scope(token: Optional[str] = None) -> _ProcessScanScope:
+    """Share loop-process scans for one dashboard render. The next render scans again."""
+    _SCAN_MEMO.clear()
+    scope = _ProcessScanScope(token or str(time.time_ns()))
+    scope._reset = _SCAN_SCOPE.set(scope.token)
+    return scope
+
+
+def _scan_known_loop_processes() -> Dict[str, Tuple[List[int], str, List[str]]]:
+    """One command-line query for both loop scripts. Same match rule as a single scan."""
+    method = "win32_process_commandline_file_invocation"
+    found: Dict[str, List[int]] = {name: [] for name in _KNOWN_LOOP_SCRIPTS}
+    warnings: List[str] = []
+    if sys.platform != "win32":
+        warnings.append("non_windows_platform_process_detection_unavailable")
+        return {name: ([], "unavailable", list(warnings)) for name in _KNOWN_LOOP_SCRIPTS}
+    clauses = []
+    for script_name in _KNOWN_LOOP_SCRIPTS:
+        escaped = script_name.replace("'", "''")
+        clauses.append(
+            f"$pat = [regex]::Escape('{escaped}'); "
+            "$rx = '(?:-File\\s+[\"'']?[^\\s\"'']*[/\\\\])?' + $pat + '(?:\\s|$|\"|'')'; "
+            f"if ($_.CommandLine -match $rx) {{ Write-Output ('{escaped}' + \"`t\" + $_.ProcessId) }}"
+        )
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name = 'powershell.exe' OR Name = 'pwsh.exe'\" "
+        "| Where-Object { "
+        "$_.ProcessId -ne $PID "
+        "-and $_.CommandLine "
+        "-and ($_.CommandLine -notmatch 'Get-CimInstance Win32_Process') "
+        "-and ($_.CommandLine -notmatch 'Where-Object') "
+        "} "
+        "| ForEach-Object { " + " ".join(clauses) + " }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        warnings.append(f"process_scan_failed={exc}")
+        return {name: ([], "failed", list(warnings)) for name in _KNOWN_LOOP_SCRIPTS}
+    if result.stderr and result.stderr.strip():
+        warnings.append(f"powershell_stderr={result.stderr.strip()[:200]}")
+    for line in (result.stdout or "").splitlines():
+        script_name, separator, pid_text = line.partition("\t")
+        if separator != "\t" or script_name not in found or not pid_text.strip().isdigit():
+            continue
+        found[script_name].append(int(pid_text.strip()))
+    return {name: (pids, method, list(warnings)) for name, pids in found.items()}
+
+
+def _find_loop_processes(script_name: str) -> Tuple[List[int], str, List[str]]:
+    """Scan once per dashboard render. Outside that render, every call scans again."""
+    token = _SCAN_SCOPE.get()
+    if token is None:
+        return _scan_loop_processes(script_name)
+    key = (token, script_name)
+    cached = _SCAN_MEMO.get(key)
+    if cached is not None:
+        return cached
+    filled_key = (token, "__filled__")
+    if script_name in _KNOWN_LOOP_SCRIPTS and filled_key not in _SCAN_MEMO:
+        try:
+            found = _scan_known_loop_processes()
+        except (subprocess.SubprocessError, OSError):
+            found = None
+        if found is not None and all(item[1] != "failed" for item in found.values()):
+            for name, value in found.items():
+                _SCAN_MEMO[(token, name)] = value
+            _SCAN_MEMO[filled_key] = True
+        else:
+            _SCAN_MEMO[filled_key] = False
+    cached = _SCAN_MEMO.get(key)
+    if cached is not None:
+        return cached
+    scanned = _scan_loop_processes(script_name)
+    _SCAN_MEMO[key] = scanned
+    return scanned
 
 
 def classify_runtime_process_lock_state(

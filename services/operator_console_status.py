@@ -1813,7 +1813,11 @@ def build_operator_status(
     return out
 
 
-def build_portfolio_summary(*, root: Optional[Path] = None) -> Dict[str, Any]:
+def build_portfolio_summary(
+    *,
+    root: Optional[Path] = None,
+    include_history: bool = True,
+) -> Dict[str, Any]:
     """Read-only portfolio summary from trusted artifacts."""
     root = Path(root) if root is not None else ROOT
     results = root / "data" / "results"
@@ -1843,7 +1847,7 @@ def build_portfolio_summary(*, root: Optional[Path] = None) -> Dict[str, Any]:
     mtime = _file_mtime(history) or _file_mtime(positions)
     out["last_refresh_time"] = mtime.isoformat() if mtime else None
 
-    if history.is_file():
+    if include_history and history.is_file():
         try:
             import pandas as pd
 

@@ -24642,9 +24642,14 @@ def sidebar_controls() -> Tuple[str, str, str]:
 
         if st.button("Refresh data", key="refresh"):
             try:
-                st.cache_data.clear()
+                from dashboard.operator_read_cache import clear_dashboard_read_cache
+
+                clear_dashboard_read_cache()
             except Exception:
-                pass
+                try:
+                    st.cache_data.clear()
+                except Exception:
+                    pass
             st.session_state.pop("contract_results", None)
             st.session_state.pop("contract_summary", None)
             st.session_state.pop("pipeline_health", None)
@@ -24880,6 +24885,16 @@ def _render_cc_orders_broker_order_evidence() -> None:
 
 
 def main() -> None:
+    from services.runtime_process_detector import open_process_scan_scope
+
+    scope = open_process_scan_scope()
+    try:
+        _render_dashboard()
+    finally:
+        scope.close()
+
+
+def _render_dashboard() -> None:
     from dashboard.operator_console import OPERATOR_RENDERERS, render_diagnostics_page
 
     mode, section_or_page, legacy_page = sidebar_controls()

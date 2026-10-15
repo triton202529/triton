@@ -137,13 +137,13 @@ def _market_session_card() -> Dict[str, Any]:
 
 
 def _certified_totals():
-    from dashboard.performance_presentation import try_certified_page_totals
+    from dashboard.operator_read_cache import load_cached_certified_totals
     from dashboard.preview_data import expected_accounting_ledger_sha256, isolation_active
 
     expected = None
     if isolation_active(_repo_root()):
         expected = expected_accounting_ledger_sha256(_repo_root())
-    return try_certified_page_totals(root=_root(), expected_sha256=expected)
+    return load_cached_certified_totals(_root(), expected)
 
 
 def _freshness_view(status: Mapping[str, Any]) -> Dict[str, Any]:
@@ -468,20 +468,54 @@ def render_overview_page() -> None:
 
 
 def _history_dicts(summary: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    root = _root()
-    path = root / "data" / "results" / "portfolio_history.csv"
+    path = _root() / "data" / "results" / "portfolio_history.csv"
     if not path.is_file():
         return []
     try:
-        import pandas as pd
+        from dashboard.operator_read_cache import read_csv_records, source_stamp
 
-        df = pd.read_csv(path)
-        return df.to_dict("records")
+        stamp = source_stamp(path)
+        return list(read_csv_records(str(path.resolve()), stamp[0], stamp[1]))
     except Exception:
-        return []
+        try:
+            import pandas as pd
+
+            return pd.read_csv(path).to_dict("records")
+        except Exception:
+            return []
 
 
-def _render_canonical_holdings() -> None:
+def load_portfolio_page_data(
+    root: Path,
+    blocked_symbols: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Read current holdings once and evaluate the basis hold once.
+
+    Does not read activity, reports, portfolio history, the order ledger,
+    or the parquet ledger. The hold result is not cached across renders.
+    """
+    from dashboard.portfolio_position_snapshot import load_portfolio_holdings
+    from services.manual_portfolio_exit import blocked_manual_exit_symbols
+
+    loaded = load_portfolio_holdings(root / "data" / "results" / "positions_snapshot.csv")
+    rows = list(loaded.get("rows") or []) if loaded.get("ok") else []
+    if blocked_symbols is None and rows:
+        blocked = sorted(blocked_manual_exit_symbols())
+    elif blocked_symbols is None:
+        blocked = []
+    else:
+        blocked = [
+            str(symbol or "").upper().strip()
+            for symbol in blocked_symbols
+            if str(symbol or "").strip()
+        ]
+    return {"loaded": loaded, "rows": rows, "blocked_symbols": blocked}
+
+
+def _render_canonical_holdings(
+    loaded: Optional[Mapping[str, Any]] = None,
+    blocked_symbols: Optional[Sequence[str]] = None,
+) -> None:
     """Current paper holdings from positions_snapshot.csv. No broker call and no refresh."""
     from dashboard.portfolio_position_snapshot import (
         CURRENT_HOLDINGS_SOURCE,
@@ -490,7 +524,8 @@ def _render_canonical_holdings() -> None:
         load_portfolio_holdings,
     )
 
-    loaded = load_portfolio_holdings(_root() / "data" / "results" / "positions_snapshot.csv")
+    if loaded is None:
+        loaded = load_portfolio_holdings(_root() / "data" / "results" / "positions_snapshot.csv")
     st.markdown(f"#### {CURRENT_HOLDINGS_TITLE}")
     st.caption(CURRENT_HOLDINGS_SOURCE)
     if not loaded.get("ok"):
@@ -501,7 +536,12 @@ def _render_canonical_holdings() -> None:
     from services.portfolio_effective_action import resolve_portfolio_effective_actions
 
     rows = list(loaded.get("rows") or [])
-    decisions = resolve_portfolio_effective_actions(rows, actions, root=_root())
+    decisions = resolve_portfolio_effective_actions(
+        rows,
+        actions,
+        root=_root(),
+        blocked_symbols=blocked_symbols,
+    )
     market_values: List[Optional[float]] = []
     total_mv = 0.0
     for row in rows:
@@ -607,7 +647,10 @@ def _legacy_portfolio_history_section(summary: Mapping[str, Any]) -> None:
         )
 
 
-def _render_manual_portfolio_exits() -> None:
+def _render_manual_portfolio_exits(
+    rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    blocked_symbols: Optional[Sequence[str]] = None,
+) -> None:
     """Exit opens a review only. Confirm is the first write and the only submit."""
     from dashboard.portfolio_position_snapshot import load_portfolio_holdings
     from services.manual_portfolio_exit import (
@@ -630,17 +673,22 @@ def _render_manual_portfolio_exits() -> None:
         st.session_state.pop("manual_exit_review", None)
         st.session_state.pop("manual_exit_receipt", None)
 
-    loaded = load_portfolio_holdings(_root() / "data" / "results" / "positions_snapshot.csv")
-    rows = list(loaded.get("rows") or []) if loaded.get("ok") else []
+    if rows is None:
+        loaded = load_portfolio_holdings(_root() / "data" / "results" / "positions_snapshot.csv")
+        rows = list(loaded.get("rows") or []) if loaded.get("ok") else []
     if not rows:
         return
+    if blocked_symbols is None:
+        from services.manual_portfolio_exit import blocked_manual_exit_symbols
+
+        blocked_symbols = sorted(blocked_manual_exit_symbols())
     st.markdown("#### Manual paper exit")
     st.caption("Paper only. Exit opens a review and does not submit an order.")
     for row in rows:
         symbol = str(row.get("symbol") or "").upper().strip()
         if not symbol:
             continue
-        review = build_manual_exit_review(row)
+        review = build_manual_exit_review(row, blocked_symbols=blocked_symbols)
         label, note, button = st.columns([2, 4, 2])
         label.write(symbol)
         if not review.get("eligible"):
@@ -721,8 +769,12 @@ def render_portfolio_page() -> None:
         "Portfolio",
         "Current totals from the latest certified accounting close.",
     )
-    summary = build_portfolio_summary(root=_root())
+    page_data = load_portfolio_page_data(_root())
     certified = _certified_totals()
+    summary = build_portfolio_summary(
+        root=_root(),
+        include_history=not bool(certified and certified.get("available")),
+    )
     if certified and certified.get("available"):
         _portfolio_metrics(summary, [], certified=certified)
     else:
@@ -730,8 +782,14 @@ def render_portfolio_page() -> None:
             st.warning("Portfolio artifacts are unavailable or unreadable.")
         rows = normalize_history_rows(_history_dicts(summary))
         _portfolio_metrics(summary, rows[-2:] if len(rows) >= 2 else rows)
-    _render_canonical_holdings()
-    _render_manual_portfolio_exits()
+    _render_canonical_holdings(
+        loaded=page_data["loaded"],
+        blocked_symbols=page_data["blocked_symbols"],
+    )
+    _render_manual_portfolio_exits(
+        rows=page_data["rows"],
+        blocked_symbols=page_data["blocked_symbols"],
+    )
     if certified and certified.get("available"):
         with st.expander("Certified close holdings", expanded=False):
             st.caption(
