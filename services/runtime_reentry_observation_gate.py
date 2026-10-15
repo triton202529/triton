@@ -120,7 +120,7 @@ def detect_runtime_loop_status() -> Dict[str, Any]:
     """Read process and lock status for continuous/watchdog loops."""
     from services.runtime_process_detector import detect_runtime_loop_processes
 
-    detected = detect_runtime_loop_processes()
+    detected = detect_runtime_loop_processes(fresh=True)
     return {
         "continuous_loop_running": bool(detected.get("continuous_loop_running")),
         "watchdog_loop_running": bool(detected.get("watchdog_loop_running")),

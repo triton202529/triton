@@ -185,6 +185,19 @@ def _scan_known_loop_processes() -> Dict[str, Tuple[List[int], str, List[str]]]:
     return {name: (pids, method, list(warnings)) for name, pids in found.items()}
 
 
+def scan_loop_processes_for_control() -> Dict[str, Tuple[List[int], str, List[str]]]:
+    """Uncached scan for decisions that launch, confirm, or stop a loop.
+
+    Dashboard display lookups keep the per-render memo. This scan does not read
+    or update that memo, so a process created after the display scan is visible
+    to the next controller poll in the same render.
+    """
+    found = _scan_known_loop_processes()
+    if any(item[1] == "failed" for item in found.values()):
+        return {name: _scan_loop_processes(name) for name in _KNOWN_LOOP_SCRIPTS}
+    return found
+
+
 def _find_loop_processes(script_name: str) -> Tuple[List[int], str, List[str]]:
     """Scan once per dashboard render. Outside that render, every call scans again."""
     token = _SCAN_SCOPE.get()
@@ -234,13 +247,22 @@ def classify_runtime_process_lock_state(
     return RUNTIME_PROCESS_INCONSISTENT
 
 
-def detect_runtime_loop_processes() -> Dict[str, Any]:
-    """Detect watchdog and continuous loop processes with diagnostics."""
+def detect_runtime_loop_processes(*, fresh: bool = False) -> Dict[str, Any]:
+    """Detect watchdog and continuous loop processes with diagnostics.
+
+    fresh=False keeps the dashboard render memo. fresh=True is the controller
+    boundary: Start, Stop, and Restart polls must not inherit that memo.
+    """
     from services.phase_195h_operational_readiness_freeze import _parse_lock
     from services.runtime_lock_classifier import audit_runtime_locks
 
-    wd_pids, wd_method, wd_warnings = _find_loop_processes(WATCHDOG_SCRIPT)
-    cl_pids, cl_method, cl_warnings = _find_loop_processes(CONTINUOUS_SCRIPT)
+    if fresh:
+        found = scan_loop_processes_for_control()
+        wd_pids, wd_method, wd_warnings = found[WATCHDOG_SCRIPT]
+        cl_pids, cl_method, cl_warnings = found[CONTINUOUS_SCRIPT]
+    else:
+        wd_pids, wd_method, wd_warnings = _find_loop_processes(WATCHDOG_SCRIPT)
+        cl_pids, cl_method, cl_warnings = _find_loop_processes(CONTINUOUS_SCRIPT)
 
     watchdog_running = len(wd_pids) > 0
     continuous_running = len(cl_pids) > 0

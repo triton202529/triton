@@ -281,7 +281,7 @@ def classify_runtime_loops(
     elif root == ROOT:
         from services.runtime_process_detector import detect_runtime_loop_processes
 
-        det = detect_runtime_loop_processes()
+        det = detect_runtime_loop_processes(fresh=True)
         snap = {
             "continuous_pids": list(det.get("detected_continuous_process_ids") or []),
             "watchdog_pids": list(det.get("detected_watchdog_process_ids") or []),

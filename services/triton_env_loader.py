@@ -365,7 +365,7 @@ def _readiness_paper_supervisor_active() -> Tuple[bool, str]:
     try:
         from services.runtime_process_detector import detect_runtime_loop_processes
 
-        procs = detect_runtime_loop_processes()
+        procs = detect_runtime_loop_processes(fresh=True)
         if not procs.get("continuous_loop_running"):
             return False, "continuous_loop_not_running"
         readiness_path = ROOT / "data" / "results" / "execution_readiness.json"
