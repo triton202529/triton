@@ -473,6 +473,35 @@ def write_connection(db_path: Path) -> Generator[sqlite3.Connection, None, None]
         conn.close()
 
 
+def close_manual_exit_sqlite(db_path: Path) -> Dict[str, Any]:
+    """Checkpoint the manual-exit database and remove its WAL sidecars.
+
+    The live paper-sell database is out of scope. Sidecars are removed only
+    after the checkpoint connection has closed.
+    """
+    db_path = Path(db_path)
+    if db_path.name != "manual_portfolio_exit.sqlite3":
+        raise PaperSellArmStoreError(
+            "sqlite_sidecar_close_scope_refused",
+            {"name": db_path.name},
+        )
+    if not db_path.is_file():
+        return {"ok": True, "removed": [], "reason": "database_absent"}
+    with write_connection(db_path) as conn:
+        row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        busy = int(row[0]) if row else 1
+    if busy != 0:
+        return {"ok": False, "removed": [], "reason": "sqlite_checkpoint_busy", "busy": busy}
+    removed: List[str] = []
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(str(db_path) + suffix)
+        if not sidecar.exists():
+            continue
+        sidecar.unlink()
+        removed.append(sidecar.name)
+    return {"ok": True, "removed": removed}
+
+
 def health_check(db_path: Path) -> Tuple[bool, str, Dict[str, Any]]:
     details: Dict[str, Any] = {"db_path_kind": "local_fixed_disk"}
     try:
@@ -1143,6 +1172,57 @@ def count_current_unused_exact_batch_authorities(
         conn.close()
 
 
+def _consume_linked_challenge(
+    conn: sqlite3.Connection,
+    *,
+    challenge_id: str,
+    authority_id: str,
+    dispatch_id: str,
+    now_iso: str,
+) -> None:
+    """Consume an OPEN challenge in the same transaction as its authority.
+
+    A challenge already CONSUMED by this authority is left unchanged so the
+    generic issue path can dispatch later. Any other state rolls back.
+    """
+    if not challenge_id:
+        raise PaperSellArmStoreError("sqlite_challenge_not_found")
+    challenge = conn.execute(
+        "SELECT state, consuming_authority_id FROM sell_challenges WHERE challenge_id=?",
+        (challenge_id,),
+    ).fetchone()
+    if challenge is None:
+        raise PaperSellArmStoreError("sqlite_challenge_not_found", {"challenge_id": challenge_id})
+    state = str(challenge["state"] or "")
+    bound = str(challenge["consuming_authority_id"] or "")
+    if state == "OPEN":
+        conn.execute(
+            """
+            UPDATE sell_challenges
+            SET state='CONSUMED', consumed_at=?, consuming_authority_id=?
+            WHERE challenge_id=? AND state='OPEN'
+            """,
+            (now_iso, authority_id, challenge_id),
+        )
+        if conn.execute("SELECT changes()").fetchone()[0] != 1:
+            raise PaperSellArmStoreError("sqlite_challenge_consume_race")
+        _audit(
+            conn,
+            "challenge_consumed_with_authority",
+            challenge_id=challenge_id,
+            authority_id=authority_id,
+            dispatch_id=dispatch_id,
+            payload={"state": "CONSUMED"},
+        )
+        return
+    if state == "CONSUMED" and bound in {"", authority_id}:
+        return
+    raise PaperSellArmStoreError(
+        "sqlite_challenge_not_consumable_with_authority",
+        {"state": state, "consuming_authority_id": bound},
+    )
+
+
 def consume_authority_insert_dispatch(
     db_path: Path,
     *,
@@ -1230,6 +1310,13 @@ def consume_authority_insert_dispatch(
                     now_iso,
                     STORE_SCHEMA_VERSION,
                 ),
+            )
+            _consume_linked_challenge(
+                conn,
+                challenge_id=str(row["challenge_id"] or ""),
+                authority_id=authority_id,
+                dispatch_id=dispatch_id,
+                now_iso=now_iso,
             )
             _audit(
                 conn,

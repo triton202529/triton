@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -20,14 +21,17 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 
 from services.paper_sell_arm_authority import APPROVAL_CLI_CAP
 from services.paper_sell_arm_runtime_enforcement import (
+    DURABLE_PERMIT_NAME,
     PaperSellDispatchPermit,
     _ACTIVE_PERMIT,
     _write_durable_permit,
 )
 from services.paper_sell_arm_store import (
     STORE_SCHEMA_VERSION,
+    PaperSellArmStoreError,
     batch_hash_from_scope,
     canonical_json,
+    close_manual_exit_sqlite,
     consume_authority_insert_dispatch,
     write_connection,
 )
@@ -37,6 +41,10 @@ UNAVAILABLE_HOLD = "Basis-unproven hold"
 GROSS_LABEL = "Gross provisional gain/loss"
 SCHEMA = "MANUAL-PORTFOLIO-EXIT-REQUEST-1"
 PAPER_HOST = "paper-api.alpaca.markets"
+STORE_DB_NAME = "manual_portfolio_exit.sqlite3"
+DISPATCH_TERMINAL_DIR = "dispatch_terminal"
+TERMINAL_RECONCILIATION = "terminal_reconciled"
+DISPATCH_TERMINAL_SCHEMA = "MANUAL-EXIT-DISPATCH-TERMINAL-1"
 
 
 def _decimal(value: Any) -> Optional[Decimal]:
@@ -330,7 +338,11 @@ def note_proven_terminal_receipts(
     *,
     root: Path,
 ) -> Dict[str, Any]:
-    """Set the receipt broker status only after terminal reconciliation is proven."""
+    """Align every durable manual-exit record after a proven terminal event.
+
+    This does not call the broker. An OPEN challenge or a conflicting identity
+    is refused with no writes.
+    """
     store = Path(root) / "data" / "governance" / "manual_portfolio_exit"
     request_dir = store / "requests"
     if not request_dir.is_dir():
@@ -348,12 +360,9 @@ def note_proven_terminal_receipts(
             continue
         if client_id and not client_id.startswith("manual-"):
             continue
-        for path in request_dir.glob("*.json"):
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if not isinstance(payload, dict):
+        for path in sorted(request_dir.glob("*.json")):
+            payload = _load_json(path)
+            if payload is None:
                 continue
             saved_client = str(payload.get("client_order_id") or "")
             if not saved_client.startswith("manual-") and not client_id.startswith("manual-"):
@@ -362,15 +371,22 @@ def note_proven_terminal_receipts(
             client_match = client_id and saved_client == client_id
             if not broker_match and not client_match:
                 continue
-            if str(payload.get("broker_status") or "").lower() == broker_status:
-                continue
-            payload["broker_status"] = broker_status
-            payload["reconciliation_state"] = "terminal_reconciled"
-            if payload.get("status") == "repair_needed":
-                payload["status"] = "submitted"
-            payload.pop("idempotent_replay", None)
-            _save_receipt(store, payload)
-            updated += 1
+            outcome = _align_proven_receipt(
+                store,
+                payload,
+                event,
+                broker_status=broker_status,
+                broker_id=broker_id or str(payload.get("broker_order_id") or ""),
+            )
+            if outcome.get("refused"):
+                return {
+                    "ok": False,
+                    "updated": updated,
+                    "reason": outcome.get("reason") or "manual_exit_terminal_mismatch",
+                }
+            updated += int(outcome.get("updated") or 0)
+    if updated:
+        _release_manual_exit_store(store)
     return {"ok": True, "updated": updated}
 
 
@@ -390,6 +406,485 @@ def _terminal_broker_text(event: Mapping[str, Any]) -> Optional[str]:
         "EXPIRED": "expired",
         "REPLACED": "replaced",
     }.get(normalized)
+
+
+def _same_qty(left: Any, right: Any) -> bool:
+    first = _decimal(left)
+    second = _decimal(right)
+    if first is None or second is None:
+        return str(left) == str(right)
+    return first == second
+
+
+def _load_json(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _release_manual_exit_store(store_root: Path) -> Dict[str, Any]:
+    db_path = Path(store_root) / STORE_DB_NAME
+    if not db_path.is_file():
+        return {"ok": True, "removed": [], "reason": "database_absent"}
+    try:
+        return close_manual_exit_sqlite(db_path)
+    except (PaperSellArmStoreError, OSError) as exc:
+        reason = getattr(exc, "reason", None) or type(exc).__name__
+        return {"ok": False, "removed": [], "reason": reason}
+
+
+def _immutable_connection(db_path: Path) -> sqlite3.Connection:
+    uri = Path(db_path).resolve().as_posix()
+    conn = sqlite3.connect(f"file:{uri}?mode=ro&immutable=1", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _terminal_sqlite_snapshot(
+    db_path: Path, *, dispatch_id: str, authority_id: str
+) -> Dict[str, Any]:
+    try:
+        conn = _immutable_connection(db_path)
+    except sqlite3.Error as exc:
+        return {"refused": True, "reason": "manual_exit_sqlite_unreadable", "error": str(exc)}
+    try:
+        dispatch = conn.execute(
+            "SELECT authority_id, broker_ref, intent_json FROM sell_dispatches WHERE dispatch_id=?",
+            (dispatch_id,),
+        ).fetchone()
+        authority = conn.execute(
+            "SELECT state, challenge_id, payload_json FROM sell_authorities WHERE authority_id=?",
+            (authority_id,),
+        ).fetchone()
+        if dispatch is None or authority is None:
+            return {"refused": True, "reason": "manual_exit_terminal_incomplete"}
+        if str(dispatch["authority_id"]) != authority_id:
+            return {"refused": True, "reason": "manual_exit_terminal_mismatch"}
+        if str(authority["state"]) != "CONSUMED":
+            return {"refused": True, "reason": "manual_exit_terminal_incomplete"}
+        challenge = conn.execute(
+            "SELECT state, consuming_authority_id FROM sell_challenges WHERE challenge_id=?",
+            (authority["challenge_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    if challenge is None:
+        return {"refused": True, "reason": "manual_exit_terminal_incomplete"}
+    try:
+        intent = json.loads(str(dispatch["intent_json"] or "{}"))
+        payload = json.loads(str(authority["payload_json"] or "{}"))
+    except json.JSONDecodeError:
+        return {"refused": True, "reason": "manual_exit_sqlite_unreadable"}
+    if not isinstance(intent, dict):
+        intent = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "refused": False,
+        "broker_ref": str(dispatch["broker_ref"] or ""),
+        "challenge_state": str(challenge["state"] or ""),
+        "consuming_authority_id": str(challenge["consuming_authority_id"] or ""),
+        "intent_broker_status": str(intent.get("broker_status") or ""),
+        "intent_reconciliation_state": str(intent.get("reconciliation_state") or ""),
+        "authority_broker_status": str(payload.get("broker_status") or ""),
+        "authority_reconciliation_state": str(payload.get("reconciliation_state") or ""),
+        "intent": intent,
+        "authority_payload": payload,
+    }
+
+
+def _write_terminal_sqlite(
+    db_path: Path,
+    *,
+    dispatch_id: str,
+    authority_id: str,
+    broker_order_id: str,
+    broker_status: str,
+) -> None:
+    with write_connection(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            dispatch = conn.execute(
+                "SELECT authority_id, broker_ref, intent_json FROM sell_dispatches WHERE dispatch_id=?",
+                (dispatch_id,),
+            ).fetchone()
+            authority = conn.execute(
+                "SELECT state, challenge_id, payload_json FROM sell_authorities WHERE authority_id=?",
+                (authority_id,),
+            ).fetchone()
+            if dispatch is None or authority is None:
+                raise PaperSellArmStoreError("sqlite_terminal_row_missing")
+            if str(dispatch["authority_id"]) != authority_id:
+                raise PaperSellArmStoreError("sqlite_dispatch_authority_mismatch")
+            current_ref = str(dispatch["broker_ref"] or "")
+            if current_ref and current_ref != broker_order_id:
+                raise PaperSellArmStoreError("sqlite_broker_ref_mismatch")
+            if str(authority["state"]) != "CONSUMED":
+                raise PaperSellArmStoreError("sqlite_authority_not_consumed")
+            challenge = conn.execute(
+                "SELECT state, consuming_authority_id FROM sell_challenges WHERE challenge_id=?",
+                (authority["challenge_id"],),
+            ).fetchone()
+            if challenge is None or str(challenge["state"]) != "CONSUMED":
+                raise PaperSellArmStoreError("sqlite_challenge_not_consumed")
+            bound = str(challenge["consuming_authority_id"] or "")
+            if bound not in {"", authority_id}:
+                raise PaperSellArmStoreError("sqlite_challenge_authority_mismatch")
+            intent = json.loads(str(dispatch["intent_json"] or "{}"))
+            payload = json.loads(str(authority["payload_json"] or "{}"))
+            if not isinstance(intent, dict):
+                intent = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            intent["broker_status"] = broker_status
+            intent["reconciliation_state"] = TERMINAL_RECONCILIATION
+            intent["broker_order_id"] = broker_order_id
+            payload["broker_status"] = broker_status
+            payload["reconciliation_state"] = TERMINAL_RECONCILIATION
+            payload["broker_order_id"] = broker_order_id
+            conn.execute(
+                "UPDATE sell_dispatches SET broker_ref=?, intent_json=? WHERE dispatch_id=?",
+                (broker_order_id, canonical_json(intent), dispatch_id),
+            )
+            conn.execute(
+                "UPDATE sell_authorities SET payload_json=? WHERE authority_id=?",
+                (canonical_json(payload), authority_id),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+
+def _terminal_evidence(
+    *,
+    payload: Mapping[str, Any],
+    broker_id: str,
+    broker_status: str,
+) -> Dict[str, Any]:
+    return {
+        "schema": DISPATCH_TERMINAL_SCHEMA,
+        "dispatch_id": payload.get("dispatch_id"),
+        "authority_id": payload.get("authority_id"),
+        "request_id": payload.get("request_id"),
+        "broker_order_id": broker_id,
+        "client_order_id": payload.get("client_order_id"),
+        "symbol": payload.get("symbol"),
+        "selected_qty": payload.get("selected_qty"),
+        "broker_status": broker_status,
+        "reconciliation_state": TERMINAL_RECONCILIATION,
+        "close_gate_evidence": True,
+    }
+
+
+def _retire_matching_permit(
+    store: Path,
+    *,
+    dispatch_id: str,
+    request_id: str,
+    broker_id: str,
+    broker_status: str,
+) -> None:
+    path = store / DURABLE_PERMIT_NAME
+    if not path.is_file():
+        return
+    current = _load_json(path)
+    if current is None:
+        return
+    if str(current.get("dispatch_intent_id") or "") != dispatch_id:
+        return
+    retired = {
+        "schema_version": current.get("schema_version"),
+        "status": "NON_AUTHORITATIVE",
+        "json_role": "NON_AUTHORITATIVE",
+        "close_gate_evidence": False,
+        "authorizes_submission": False,
+        "replay_forbidden": True,
+        "dispatch_intent_id": dispatch_id,
+        "idempotency_key": request_id,
+        "broker_order_id": broker_id,
+        "broker_status": broker_status,
+        "reconciliation_state": TERMINAL_RECONCILIATION,
+    }
+    path.write_text(json.dumps(retired, sort_keys=True), encoding="utf-8")
+
+
+def _permit_is_retired(store: Path, dispatch_id: str) -> bool:
+    path = store / DURABLE_PERMIT_NAME
+    if not path.is_file():
+        return True
+    current = _load_json(path)
+    if current is None:
+        return False
+    if str(current.get("dispatch_intent_id") or "") != dispatch_id:
+        return True
+    return (
+        current.get("status") == "NON_AUTHORITATIVE"
+        and current.get("json_role") == "NON_AUTHORITATIVE"
+        and current.get("close_gate_evidence") is False
+        and current.get("authorizes_submission") is False
+        and "permit_token" not in current
+    )
+
+
+def _align_proven_receipt(
+    store: Path,
+    payload: Dict[str, Any],
+    event: Mapping[str, Any],
+    *,
+    broker_status: str,
+    broker_id: str,
+) -> Dict[str, Any]:
+    if not broker_id:
+        return {"refused": True, "reason": "manual_exit_terminal_incomplete", "updated": 0}
+    identity_path = _identity_path(store, broker_id)
+    identity = _load_json(identity_path) if identity_path.is_file() else None
+    if identity is not None:
+        if str(identity.get("broker_order_id") or "") != broker_id:
+            return {"refused": True, "reason": "manual_exit_terminal_mismatch", "updated": 0}
+        if str(identity.get("symbol") or "") != str(payload.get("symbol") or ""):
+            return {"refused": True, "reason": "manual_exit_terminal_mismatch", "updated": 0}
+        if not _same_qty(identity.get("selected_qty"), payload.get("selected_qty")):
+            return {"refused": True, "reason": "manual_exit_terminal_mismatch", "updated": 0}
+    event_symbol = str(event.get("symbol") or "").upper().strip()
+    if event_symbol and event_symbol != str(payload.get("symbol") or "").upper().strip():
+        return {"refused": True, "reason": "manual_exit_terminal_mismatch", "updated": 0}
+    if event.get("filled_qty") not in (None, "") and not _same_qty(
+        event.get("filled_qty"), payload.get("selected_qty")
+    ):
+        return {"refused": True, "reason": "manual_exit_terminal_mismatch", "updated": 0}
+    dispatch_id = str(payload.get("dispatch_id") or "")
+    authority_id = str(payload.get("authority_id") or "")
+    if not dispatch_id or not authority_id:
+        return {"refused": True, "reason": "manual_exit_terminal_incomplete", "updated": 0}
+    db_path = store / STORE_DB_NAME
+    if not db_path.is_file():
+        return {"refused": True, "reason": "manual_exit_terminal_incomplete", "updated": 0}
+    snapshot = _terminal_sqlite_snapshot(
+        db_path, dispatch_id=dispatch_id, authority_id=authority_id
+    )
+    if snapshot.get("refused"):
+        return {"refused": True, "reason": snapshot.get("reason"), "updated": 0}
+    if snapshot["broker_ref"] and snapshot["broker_ref"] != broker_id:
+        return {"refused": True, "reason": "manual_exit_terminal_mismatch", "updated": 0}
+    if snapshot["challenge_state"] != "CONSUMED":
+        return {"refused": True, "reason": "manual_exit_challenge_not_consumed", "updated": 0}
+    if snapshot["consuming_authority_id"] not in {"", authority_id}:
+        return {"refused": True, "reason": "manual_exit_terminal_mismatch", "updated": 0}
+    evidence_path = store / DISPATCH_TERMINAL_DIR / f"{dispatch_id}.json"
+    evidence = _load_json(evidence_path) if evidence_path.is_file() else None
+    already = (
+        str(payload.get("broker_status") or "").lower() == broker_status
+        and payload.get("reconciliation_state") == TERMINAL_RECONCILIATION
+        and identity is not None
+        and str(identity.get("broker_status") or "").lower() == broker_status
+        and identity.get("reconciliation_state") == TERMINAL_RECONCILIATION
+        and snapshot["intent_broker_status"] == broker_status
+        and snapshot["intent_reconciliation_state"] == TERMINAL_RECONCILIATION
+        and snapshot["authority_broker_status"] == broker_status
+        and snapshot["authority_reconciliation_state"] == TERMINAL_RECONCILIATION
+        and evidence is not None
+        and evidence.get("broker_status") == broker_status
+        and evidence.get("reconciliation_state") == TERMINAL_RECONCILIATION
+        and _permit_is_retired(store, dispatch_id)
+    )
+    if already:
+        return {"refused": False, "updated": 0}
+    receipt = dict(payload)
+    receipt["broker_status"] = broker_status
+    receipt["reconciliation_state"] = TERMINAL_RECONCILIATION
+    if receipt.get("status") == "repair_needed":
+        receipt["status"] = "submitted"
+    receipt.pop("idempotent_replay", None)
+    saved_identity = dict(identity or receipt)
+    saved_identity.update(
+        {
+            "broker_order_id": broker_id,
+            "broker_status": broker_status,
+            "reconciliation_state": TERMINAL_RECONCILIATION,
+            "symbol": receipt.get("symbol"),
+            "selected_qty": receipt.get("selected_qty"),
+            "request_id": receipt.get("request_id"),
+            "client_order_id": receipt.get("client_order_id"),
+            "authority_id": authority_id,
+            "dispatch_id": dispatch_id,
+        }
+    )
+    evidence_doc = _terminal_evidence(
+        payload=receipt, broker_id=broker_id, broker_status=broker_status
+    )
+    try:
+        _write_terminal_sqlite(
+            db_path,
+            dispatch_id=dispatch_id,
+            authority_id=authority_id,
+            broker_order_id=broker_id,
+            broker_status=broker_status,
+        )
+    except PaperSellArmStoreError as exc:
+        return {"refused": True, "reason": exc.reason, "updated": 0}
+    _save_receipt(store, receipt)
+    _save_order_identity(store, saved_identity)
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(json.dumps(evidence_doc, sort_keys=True), encoding="utf-8")
+    _retire_matching_permit(
+        store,
+        dispatch_id=dispatch_id,
+        request_id=str(receipt.get("request_id") or ""),
+        broker_id=broker_id,
+        broker_status=broker_status,
+    )
+    return {"refused": False, "updated": 1}
+
+
+def _gate_failure(failures: list, path: str, reason: str) -> None:
+    failures.append({"path": path, "reason": reason})
+
+
+def _permit_blocks_close(store: Path, failures: list) -> None:
+    path = store / DURABLE_PERMIT_NAME
+    if not path.is_file():
+        return
+    payload = _load_json(path)
+    if payload is None:
+        _gate_failure(failures, DURABLE_PERMIT_NAME, "mutable_pre_submit_permit")
+        return
+    retired = (
+        payload.get("status") == "NON_AUTHORITATIVE"
+        and payload.get("json_role") == "NON_AUTHORITATIVE"
+        and payload.get("close_gate_evidence") is False
+        and payload.get("authorizes_submission") is False
+        and "permit_token" not in payload
+        and payload.get("status") != "PERMIT_ISSUED_PRE_SUBMIT"
+    )
+    if not retired:
+        _gate_failure(failures, DURABLE_PERMIT_NAME, "mutable_pre_submit_permit")
+
+
+def _rows_agree(receipt: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
+    keys = (
+        "broker_order_id",
+        "broker_status",
+        "reconciliation_state",
+        "symbol",
+        "selected_qty",
+        "dispatch_id",
+        "authority_id",
+    )
+    for key in keys:
+        if key == "selected_qty":
+            if not _same_qty(receipt.get(key), other.get(key)):
+                return False
+            continue
+        if str(receipt.get(key) or "") != str(other.get(key) or ""):
+            return False
+    return True
+
+
+def evaluate_manual_exit_close_gate(store_root: Path) -> Dict[str, Any]:
+    """Fail closed unless this store is verified manual-exit evidence.
+
+    Not wired into the certified-close publisher. A permit export is tolerated
+    only when it is explicitly non-authoritative. WAL sidecars, stale statuses,
+    and unrelated children fail.
+    """
+    store = Path(store_root)
+    failures: list = []
+    if not store.is_dir():
+        return {
+            "ok": False,
+            "reason": "manual_exit_store_absent",
+            "failures": [{"path": "", "reason": "manual_exit_store_absent"}],
+            "verified_broker_order_ids": [],
+        }
+    allowed_dirs = {"requests", "order_identities", DISPATCH_TERMINAL_DIR}
+    for path in sorted(store.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(store).as_posix()
+        if rel.endswith(".sqlite3-wal") or rel.endswith(".sqlite3-shm"):
+            _gate_failure(failures, rel, "sqlite_sidecar_unexplained")
+            continue
+        if rel in {STORE_DB_NAME, DURABLE_PERMIT_NAME}:
+            continue
+        parts = rel.split("/")
+        if len(parts) == 2 and parts[0] in allowed_dirs and parts[1].endswith(".json"):
+            continue
+        _gate_failure(failures, rel, "unrelated_child")
+    _permit_blocks_close(store, failures)
+    db_path = store / STORE_DB_NAME
+    if not db_path.is_file():
+        _gate_failure(failures, STORE_DB_NAME, "incomplete_terminal_evidence")
+    verified: list = []
+    request_dir = store / "requests"
+    requests = sorted(request_dir.glob("*.json")) if request_dir.is_dir() else []
+    if not requests:
+        _gate_failure(failures, "requests", "incomplete_terminal_evidence")
+    for path in requests:
+        receipt = _load_json(path)
+        rel = path.relative_to(store).as_posix()
+        if receipt is None:
+            _gate_failure(failures, rel, "incomplete_terminal_evidence")
+            continue
+        broker_id = str(receipt.get("broker_order_id") or "")
+        dispatch_id = str(receipt.get("dispatch_id") or "")
+        authority_id = str(receipt.get("authority_id") or "")
+        broker_status = str(receipt.get("broker_status") or "").lower()
+        if (
+            not broker_id
+            or not dispatch_id
+            or not authority_id
+            or receipt.get("reconciliation_state") != TERMINAL_RECONCILIATION
+            or broker_status not in {"filled", "canceled", "rejected", "expired", "replaced"}
+        ):
+            _gate_failure(failures, rel, "incomplete_terminal_evidence")
+            continue
+        identity_path = _identity_path(store, broker_id)
+        identity = _load_json(identity_path) if identity_path.is_file() else None
+        evidence_path = store / DISPATCH_TERMINAL_DIR / f"{dispatch_id}.json"
+        evidence = _load_json(evidence_path) if evidence_path.is_file() else None
+        if identity is None or evidence is None or not _rows_agree(receipt, identity):
+            _gate_failure(failures, rel, "stale_or_mismatched_state")
+            continue
+        if not _rows_agree(receipt, evidence):
+            _gate_failure(
+                failures,
+                evidence_path.relative_to(store).as_posix(),
+                "stale_or_mismatched_state",
+            )
+            continue
+        if not db_path.is_file():
+            continue
+        snapshot = _terminal_sqlite_snapshot(
+            db_path, dispatch_id=dispatch_id, authority_id=authority_id
+        )
+        if snapshot.get("refused") or snapshot.get("challenge_state") != "CONSUMED":
+            _gate_failure(failures, STORE_DB_NAME, "stale_or_mismatched_state")
+            continue
+        if snapshot.get("consuming_authority_id") not in {"", authority_id}:
+            _gate_failure(failures, STORE_DB_NAME, "stale_or_mismatched_state")
+            continue
+        if (
+            snapshot.get("broker_ref") != broker_id
+            or snapshot.get("intent_broker_status") != broker_status
+            or snapshot.get("intent_reconciliation_state") != TERMINAL_RECONCILIATION
+            or snapshot.get("authority_broker_status") != broker_status
+            or snapshot.get("authority_reconciliation_state") != TERMINAL_RECONCILIATION
+        ):
+            _gate_failure(failures, STORE_DB_NAME, "stale_or_mismatched_state")
+            continue
+        verified.append(broker_id)
+    ok = not failures and bool(verified)
+    return {
+        "ok": ok,
+        "reason": "manual_exit_store_consistent" if ok else failures[0]["reason"],
+        "failures": failures,
+        "verified_broker_order_ids": verified,
+    }
 
 
 def _paper_broker_ok(broker: Any) -> bool:
@@ -637,6 +1132,7 @@ def confirm_manual_paper_exit(
         )
     existing = _request_path(store_root, request_id)
     if existing.is_file():
+        _release_manual_exit_store(store_root)
         return _read_receipt(existing)
     if (
         symbol in blocked_manual_exit_symbols(blocked_symbols)
@@ -712,6 +1208,7 @@ def confirm_manual_paper_exit(
         )
     replay = _claim(store_root, request_id)
     if replay is not None:
+        _release_manual_exit_store(store_root)
         return replay
     moment = now or datetime.now(timezone.utc)
     client_order_id = f"manual-{symbol}-{request_id[:24]}"
@@ -746,10 +1243,11 @@ def confirm_manual_paper_exit(
                 broker_status=type(exc).__name__,
             )
             _save_receipt(store_root, receipt)
+            _release_manual_exit_store(store_root)
             return receipt
     finally:
         _ACTIVE_PERMIT.set(None)
-    return _record_accepted_manual_order(
+    recorded = _record_accepted_manual_order(
         store_root=store_root,
         ledger_root=books,
         request_id=request_id,
@@ -761,3 +1259,5 @@ def confirm_manual_paper_exit(
         client_order_id=client_order_id,
         order=order or {},
     )
+    _release_manual_exit_store(store_root)
+    return recorded
