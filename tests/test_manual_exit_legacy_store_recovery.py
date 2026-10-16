@@ -13,8 +13,6 @@ import pytest
 
 import services.manual_exit_legacy_store_recovery as recovery
 from services.manual_exit_legacy_store_recovery import (
-    EXECUTOR_ENABLED,
-    WRITE_MODE_ENABLED,
     dry_run_october15_16_manual_exit_store_recovery,
     execute_legacy_store_recovery,
     execute_october15_16_manual_exit_store_recovery,
@@ -296,21 +294,25 @@ def _plant(root: Path) -> None:
     accounting.write_text("".join(json.dumps(row) + "\n" for row in fills), encoding="utf-8")
     hold = root / "data" / "governance" / "basis_unproven_hold.json"
     hold.write_text('{"symbols":["VOO","XLK"]}', encoding="utf-8")
+    (root / "data" / "governance" / "basis_unproven_hold_audit.jsonl").write_bytes(b"")
+    parquet = root / "data" / "ledger" / "ledger.parquet"
+    parquet.parent.mkdir(parents=True, exist_ok=True)
+    parquet.write_bytes(b"parquet-sentinel")
 
 
-def _manifest(root: Path, nonce: str = NONCE) -> None:
-    hashes = recovery.baseline_hashes(root)
-    assert hashes["ok"] is True
-    payload = dict(hashes["hashes"])
+def _manifest(root: Path, nonce: str = NONCE, **overrides: str) -> None:
+    pins = recovery.manifest_pins(root)
+    assert pins["ok"] is True
+    payload = dict(pins["pins"])
     payload["nonce"] = nonce
+    payload.update(overrides)
     path = root / recovery.MANIFEST_RELATIVE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
-def _enable(monkeypatch) -> None:
-    monkeypatch.setattr(recovery, "EXECUTOR_ENABLED", True)
-    monkeypatch.setattr(recovery, "WRITE_MODE_ENABLED", True)
+def _committed(monkeypatch) -> None:
+    monkeypatch.setattr(recovery, "_executor_source_committed", lambda: True)
 
 
 def _guard(monkeypatch) -> None:
@@ -331,7 +333,7 @@ def _guard(monkeypatch) -> None:
 
 
 def _execute(root: Path, monkeypatch, token: str = NONCE):
-    _enable(monkeypatch)
+    _committed(monkeypatch)
     _guard(monkeypatch)
     return execute_october15_16_manual_exit_store_recovery(
         authorization_token=token,
@@ -339,27 +341,41 @@ def _execute(root: Path, monkeypatch, token: str = NONCE):
     )
 
 
-def test_flags_stay_disabled_and_cli_execute_refuses(tmp_path):
+def test_default_denial_has_no_enable_switch(tmp_path, monkeypatch):
     source = inspect.getsource(recovery)
-    assert "EXECUTOR_ENABLED = False" in source
-    assert "WRITE_MODE_ENABLED = False" in source
-    assert EXECUTOR_ENABLED is False
-    assert WRITE_MODE_ENABLED is False
+    assert "EXECUTOR_ENABLED" not in source
+    assert "WRITE_MODE_ENABLED" not in source
+    assert "os.environ" not in source
     for banned in (
         "append_events",
         "submit_order",
         "record_proven_terminal_fills",
         "safe_publish_session_close",
-        "basis_unproven_hold",
+        "import services.basis_unproven_hold",
     ):
         assert banned not in source
-    assert execute_legacy_store_recovery()["reason"] == "executor_not_enabled"
+    monkeypatch.setenv("TRITON_MANUAL_EXIT_RECOVERY", "1")
+    _committed(monkeypatch)
+    root = tmp_path / "repo"
+    _plant(root)
+    before = _tree(root)
+    report = execute_october15_16_manual_exit_store_recovery(
+        authorization_token=NONCE,
+        root=root,
+    )
+    assert report["reason"] == "authorization_missing"
+    assert report["wrote"] is False
+    assert _tree(root) == before
+    assert not (root / recovery.MANIFEST_RELATIVE).exists()
+    assert execute_legacy_store_recovery()["reason"] == "writes_disabled"
     assert recovery.main(["--execute"]) == 2
+    assert recovery.main(["--write"]) == 2
 
 
 def test_dry_run_reports_the_plan_and_writes_nothing(tmp_path):
     root = tmp_path / "repo"
     _plant(root)
+    _manifest(root)
     before = _tree(root)
     report = dry_run_october15_16_manual_exit_store_recovery(root=root)
     assert report["ok"] is True
@@ -368,25 +384,57 @@ def test_dry_run_reports_the_plan_and_writes_nothing(tmp_path):
     assert report["ledger_appended"] is False
     assert report["changes"] == recovery._planned_changes()
     assert _tree(root) == before
+    assert (root / recovery.MANIFEST_RELATIVE).is_file()
     actions = {item["action"] for item in report["changes"]}
     assert "consume_challenge" in actions
     assert "replace_non_authoritative" in actions
     assert "remove" in actions
 
 
-def test_disabled_execute_does_not_consume_the_manifest(tmp_path):
+def test_uncommitted_executor_refuses_without_consuming_the_manifest(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     _plant(root)
     _manifest(root)
     before = _tree(root)
+    monkeypatch.setattr(recovery, "_executor_source_committed", lambda: False)
     report = execute_october15_16_manual_exit_store_recovery(
         authorization_token=NONCE,
         root=root,
     )
-    assert report["reason"] == "executor_not_enabled"
+    assert report["reason"] == "executor_not_committed"
     assert report["wrote"] is False
     assert (root / recovery.MANIFEST_RELATIVE).is_file()
     assert _tree(root) == before
+
+
+def test_token_mismatch_and_changed_head_leave_the_manifest(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    _plant(root)
+    _manifest(root)
+    before = _tree(root)
+    mismatch = _execute(root, monkeypatch, token="other-token")
+    assert mismatch["reason"] == "authorization_mismatch"
+    assert mismatch["wrote"] is False
+    assert (root / recovery.MANIFEST_RELATIVE).is_file()
+    assert _tree(root) == before
+    monkeypatch.setattr(
+        recovery,
+        "_repository_head",
+        lambda: "abb9c3d24a9637102660f81cbda5931df77bad88",
+    )
+    changed = _execute(root, monkeypatch)
+    assert changed["reason"] == "head_mismatch"
+    assert changed["wrote"] is False
+    assert (root / recovery.MANIFEST_RELATIVE).is_file()
+    assert _tree(root) == before
+    manifest_path = root / recovery.MANIFEST_RELATIVE
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["execution_commit"] = "abb9c3d24a9637102660f81cbda5931df77bad88"
+    manifest_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    ancestor = _execute(root, monkeypatch)
+    assert ancestor["reason"] == "execution_commit_not_descendant"
+    assert ancestor["wrote"] is False
+    assert manifest_path.is_file()
 
 
 def test_success_aligns_the_three_rows_once(tmp_path, monkeypatch):

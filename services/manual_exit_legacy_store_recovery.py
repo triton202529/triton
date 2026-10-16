@@ -1,9 +1,8 @@
 """One-time alignment for the October 15 and 16 manual-exit store.
 
-Disabled unless both module flags are true. Dry-run reads a root and writes
-nothing. A future execute call also needs an explicit root, a one-time
-manifest, and the audited pre-repair bytes. This module does not call the
-broker, append ledgers, or publish a close.
+Writes stay denied unless a caller supplies an existing one-time manifest and
+its invocation token. No environment variable or command-line flag can enable
+them. Dry-run reads a root and neither creates nor consumes a manifest.
 """
 
 from __future__ import annotations
@@ -29,12 +28,15 @@ from services.paper_sell_arm_runtime_enforcement import DURABLE_PERMIT_NAME
 from services.paper_sell_arm_store import canonical_json
 from services.performance_publication_authority import inspect_runtime_state
 
-WRITE_MODE_ENABLED = False
-EXECUTOR_ENABLED = False
+EXECUTOR_BASELINE_COMMIT = "34628820eef67b87c67948ca5b9dc09291808cf3"
+EXECUTOR_SOURCE = "services/manual_exit_legacy_store_recovery.py"
 
 STORE_RELATIVE = Path("data/governance/manual_portfolio_exit")
 PAPER_LEDGER_RELATIVE = Path("data/results/paper_order_events.jsonl")
 ACCOUNTING_LEDGER_RELATIVE = Path("data/results/performance_accounting_events.jsonl")
+PARQUET_RELATIVE = Path("data/ledger/ledger.parquet")
+HOLD_POLICY_RELATIVE = Path("data/governance/basis_unproven_hold.json")
+HOLD_AUDIT_RELATIVE = Path("data/governance/basis_unproven_hold_audit.jsonl")
 MANIFEST_RELATIVE = Path("data/governance/october15_16_manual_exit_store.authorization")
 GOOGL_BROKER_ORDER_ID = "924938e3-813d-4007-9384-b36fb639cd66"
 TERMINAL_STATUS = "filled"
@@ -124,6 +126,9 @@ _POST_REPAIR_FILES = frozenset(
 _HASH_FIELDS = (
     "paper_order_events_sha256",
     "performance_accounting_events_sha256",
+    "ledger_parquet_sha256",
+    "hold_policy_sha256",
+    "hold_audit_sha256",
     "manual_portfolio_exit_sqlite3_sha256",
     "manual_portfolio_exit_sqlite3_wal_sha256",
     "manual_portfolio_exit_sqlite3_shm_sha256",
@@ -134,10 +139,20 @@ _HASH_FIELDS = (
     "identity_oct16_400_sha256",
     "identity_oct16_19_sha256",
 )
-_MANIFEST_FIELDS = _HASH_FIELDS + ("nonce",)
+_PIN_FIELDS = (
+    "executor_baseline_commit",
+    "execution_commit",
+    "approved_targets_sha256",
+    "permitted_changes_sha256",
+    "post_repair_files_sha256",
+)
+MANIFEST_FIELDS = _PIN_FIELDS + _HASH_FIELDS + ("nonce",)
 _HASH_PATHS = {
     "paper_order_events_sha256": PAPER_LEDGER_RELATIVE,
     "performance_accounting_events_sha256": ACCOUNTING_LEDGER_RELATIVE,
+    "ledger_parquet_sha256": PARQUET_RELATIVE,
+    "hold_policy_sha256": HOLD_POLICY_RELATIVE,
+    "hold_audit_sha256": HOLD_AUDIT_RELATIVE,
     "manual_portfolio_exit_sqlite3_sha256": STORE_RELATIVE / STORE_DB_NAME,
     "manual_portfolio_exit_sqlite3_wal_sha256": STORE_RELATIVE / (STORE_DB_NAME + "-wal"),
     "manual_portfolio_exit_sqlite3_shm_sha256": STORE_RELATIVE / (STORE_DB_NAME + "-shm"),
@@ -158,6 +173,156 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _full_sha(value: str) -> bool:
+    return len(value) == 40 and all(character in "0123456789abcdef" for character in value)
+
+
+def _repository_head() -> str:
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def _is_descendant(ancestor: str, descendant: str) -> Optional[bool]:
+    """True when descendant is ancestor or a later commit on its history."""
+    import subprocess
+
+    if not _full_sha(ancestor) or not _full_sha(descendant):
+        return False
+    try:
+        completed = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    return None
+
+
+def _executor_source_committed() -> bool:
+    """True only when this module's worktree bytes match the committed blob."""
+    import subprocess
+
+    try:
+        difference = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD", "--", EXECUTOR_SOURCE],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        tracked = subprocess.run(
+            ["git", "cat-file", "-e", f"HEAD:{EXECUTOR_SOURCE}"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return difference.returncode == 0 and tracked.returncode == 0
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _approved_targets_document() -> list[Dict[str, str]]:
+    rows = []
+    for target in TARGETS:
+        rows.append(
+            {
+                "authority_id": target["authority_id"],
+                "broker_order_id": target["broker_order_id"],
+                "challenge_id": target["challenge_id"],
+                "client_order_id": target["client_order_id"],
+                "dispatch_id": target["dispatch_id"],
+                "quantity": format(target["qty"], "f"),
+                "request_id": target["request_id"],
+                "symbol": "BITO",
+            }
+        )
+    return rows
+
+
+def _approved_targets_sha256() -> str:
+    return _sha256_text(canonical_json(_approved_targets_document()))
+
+
+def _permitted_changes_sha256() -> str:
+    return _sha256_text(canonical_json(_planned_changes()))
+
+
+def _post_repair_files_sha256() -> str:
+    return _sha256_text(canonical_json(sorted(_POST_REPAIR_FILES)))
+
+
+def manifest_pins(root: Path) -> Dict[str, Any]:
+    """Return the manifest body without a nonce. Does not write a manifest."""
+    hashes = baseline_hashes(root)
+    if not hashes.get("ok"):
+        return hashes
+    head = _repository_head()
+    if not _full_sha(head):
+        return _fail("head_unreadable", dry_run=True)
+    pins = dict(hashes["hashes"])
+    pins.update(
+        {
+            "executor_baseline_commit": EXECUTOR_BASELINE_COMMIT,
+            "execution_commit": head,
+            "approved_targets_sha256": _approved_targets_sha256(),
+            "permitted_changes_sha256": _permitted_changes_sha256(),
+            "post_repair_files_sha256": _post_repair_files_sha256(),
+        }
+    )
+    return {"ok": True, "wrote": False, "pins": pins}
+
+
+def execution_commit_for_manifest() -> Dict[str, Any]:
+    """Identify the commit a future manifest may pin. Does not write a manifest."""
+    if not _executor_source_committed():
+        return _fail("executor_not_committed", dry_run=True)
+    head = _repository_head()
+    if not _full_sha(head):
+        return _fail("head_unreadable", dry_run=True)
+    descended = _is_descendant(EXECUTOR_BASELINE_COMMIT, head)
+    if descended is None:
+        return _fail("commit_ancestry_unreadable", dry_run=True)
+    if not descended:
+        return _fail("execution_commit_not_descendant", dry_run=True)
+    return {
+        "ok": True,
+        "wrote": False,
+        "dry_run": True,
+        "broker_called": False,
+        "executor_baseline_commit": EXECUTOR_BASELINE_COMMIT,
+        "execution_commit": head,
+    }
+
+
 def _fail(reason: str, *, dry_run: bool, **details: Any) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "ok": False,
@@ -165,8 +330,6 @@ def _fail(reason: str, *, dry_run: bool, **details: Any) -> Dict[str, Any]:
         "dry_run": dry_run,
         "reason": reason,
         "broker_called": False,
-        "executor_enabled": EXECUTOR_ENABLED,
-        "write_mode_enabled": WRITE_MODE_ENABLED,
     }
     if details:
         payload["details"] = details
@@ -697,8 +860,6 @@ def _assess(root: Path) -> Dict[str, Any]:
         "dry_run": True,
         "reason": "dry_run",
         "broker_called": False,
-        "executor_enabled": EXECUTOR_ENABLED,
-        "write_mode_enabled": WRITE_MODE_ENABLED,
         "changes": _planned_changes(),
         "baseline_hashes": hashes["hashes"],
         "ledger_appended": False,
@@ -752,17 +913,35 @@ def _authorize(root: Path, token: str, hashes: Mapping[str, str]) -> Dict[str, A
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return _fail("authorization_unreadable", dry_run=False, error=type(exc).__name__)
-    if not isinstance(manifest, dict) or set(manifest) != set(_MANIFEST_FIELDS):
+    if not isinstance(manifest, dict) or set(manifest) != set(MANIFEST_FIELDS):
         return _fail("manifest_rejected", dry_run=False, fields=["shape"])
     if any(
         not isinstance(manifest.get(field), str) or manifest.get(field) == ""
-        for field in _MANIFEST_FIELDS
+        for field in MANIFEST_FIELDS
     ):
         return _fail("manifest_rejected", dry_run=False, fields=["shape"])
     nonce = str(manifest.get("nonce") or "")
     if not hmac.compare_digest(str(token or ""), nonce):
         return _fail("authorization_mismatch", dry_run=False)
-    mismatched = [field for field in _HASH_FIELDS if manifest.get(field) != hashes.get(field)]
+    if manifest.get("executor_baseline_commit") != EXECUTOR_BASELINE_COMMIT:
+        return _fail("manifest_rejected", dry_run=False, fields=["executor_baseline_commit"])
+    head = _repository_head()
+    if not _full_sha(head):
+        return _fail("head_unreadable", dry_run=False)
+    if manifest.get("execution_commit") != head:
+        return _fail("head_mismatch", dry_run=False)
+    descended = _is_descendant(EXECUTOR_BASELINE_COMMIT, head)
+    if descended is None:
+        return _fail("commit_ancestry_unreadable", dry_run=False)
+    if not descended:
+        return _fail("execution_commit_not_descendant", dry_run=False)
+    expected_pins = {
+        "approved_targets_sha256": _approved_targets_sha256(),
+        "permitted_changes_sha256": _permitted_changes_sha256(),
+        "post_repair_files_sha256": _post_repair_files_sha256(),
+    }
+    mismatched = [field for field, wanted in expected_pins.items() if manifest.get(field) != wanted]
+    mismatched.extend(field for field in _HASH_FIELDS if manifest.get(field) != hashes.get(field))
     if mismatched:
         return _fail("baseline_hash_mismatch", dry_run=False, fields=sorted(mismatched))
     return {"ok": True}
@@ -957,23 +1136,32 @@ def _consume_manifest(root: Path) -> Dict[str, Any]:
     return {"ok": True}
 
 
+def _commit_gate() -> Optional[Dict[str, Any]]:
+    if not _executor_source_committed():
+        return _fail("executor_not_committed", dry_run=False)
+    if not _full_sha(_repository_head()):
+        return _fail("head_unreadable", dry_run=False)
+    return None
+
+
 def execute_october15_16_manual_exit_store_recovery(
     *,
     authorization_token: str,
     root: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Align the three audited BITO rows when flags, manifest, and bytes match.
+    """Align the three audited BITO rows for one matching manifest.
 
-    The flags stay false in source. This does not default to the production
-    root, create a manifest, or consume a manifest before the post-check passes.
+    This does not default to the production root, create a manifest, or consume
+    a manifest before the post-check passes.
     """
-    if EXECUTOR_ENABLED is not True or WRITE_MODE_ENABLED is not True:
-        return _fail("executor_not_enabled", dry_run=False)
     if root is None:
         return _fail("root_required", dry_run=False)
     root_p = Path(root)
     if not root_p.is_dir():
         return _fail("root_missing", dry_run=False)
+    gate = _commit_gate()
+    if gate is not None:
+        return gate
     assessed = _assess(root_p)
     if not assessed.get("ok"):
         assessed["dry_run"] = False
@@ -984,8 +1172,14 @@ def execute_october15_16_manual_exit_store_recovery(
     runtime = _runtime_obstacles(root_p)
     if not runtime.get("ok"):
         return runtime
-    paper_before = (root_p / PAPER_LEDGER_RELATIVE).read_bytes()
-    accounting_before = (root_p / ACCOUNTING_LEDGER_RELATIVE).read_bytes()
+    protected = (
+        PAPER_LEDGER_RELATIVE,
+        ACCOUNTING_LEDGER_RELATIVE,
+        PARQUET_RELATIVE,
+        HOLD_POLICY_RELATIVE,
+        HOLD_AUDIT_RELATIVE,
+    )
+    protected_before = {relative: (root_p / relative).read_bytes() for relative in protected}
     store = _store(root_p)
     saved = _snapshot(store)
     try:
@@ -996,12 +1190,16 @@ def execute_october15_16_manual_exit_store_recovery(
     except (OSError, sqlite3.Error, RuntimeError, json.JSONDecodeError) as exc:
         _restore(store, saved)
         return _fail("recovery_not_applied", dry_run=False, error=type(exc).__name__)
-    paper_after = (root_p / PAPER_LEDGER_RELATIVE).read_bytes()
-    accounting_after = (root_p / ACCOUNTING_LEDGER_RELATIVE).read_bytes()
-    gate = evaluate_manual_exit_close_gate(store)
-    if paper_after != paper_before or accounting_after != accounting_before or not gate.get("ok"):
+    protected_after = {relative: (root_p / relative).read_bytes() for relative in protected}
+    close_gate = evaluate_manual_exit_close_gate(store)
+    children = _child_set(store)
+    if (
+        protected_after != protected_before
+        or children != _POST_REPAIR_FILES
+        or not close_gate.get("ok")
+    ):
         _restore(store, saved)
-        return _fail("recovery_not_verified", dry_run=False, gate=gate.get("reason"))
+        return _fail("recovery_not_verified", dry_run=False, gate=close_gate.get("reason"))
     consumed = _consume_manifest(root_p)
     if not consumed.get("ok"):
         return consumed
@@ -1011,8 +1209,6 @@ def execute_october15_16_manual_exit_store_recovery(
         "dry_run": False,
         "reason": "recovered",
         "broker_called": False,
-        "executor_enabled": True,
-        "write_mode_enabled": True,
         "manifest_consumed": True,
         "exclusive_access": True,
         "ledger_appended": False,
@@ -1026,9 +1222,9 @@ def execute_october15_16_manual_exit_store_recovery(
 
 
 def execute_legacy_store_recovery(**_ignored: Any) -> Dict[str, Any]:
-    """Refuse every write. The module flags stay false."""
+    """Refuse every command-line write. A manifest is not created."""
     del _ignored
-    return _fail("executor_not_enabled", dry_run=False)
+    return _fail("writes_disabled", dry_run=False)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
