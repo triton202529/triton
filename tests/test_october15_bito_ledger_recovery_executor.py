@@ -36,6 +36,7 @@ from services.manual_exit_ledger_recovery import (
 from services.paper_order_ledger import (
     EVENT_ACTION_SUBMITTED as PAPER_ACTION_SUBMITTED,
     append_events,
+    as_utc_iso,
     load_events,
     manual_exit_submission_event,
 )
@@ -577,6 +578,82 @@ def test_snapshot_identity_mismatch_writes_nothing(tmp_path, monkeypatch, overri
     assert report["wrote"] is False
     assert report["reason"] in {"target_mismatch", "snapshot_row_missing", "not_recovery_target"}
     assert paths["orders"].exists() is False
+    assert _dispatch_row(tmp_path, TARGET_DISPATCH_ID)["broker_ref"] is None
+
+
+_OBSERVED_TIMESTAMPS = {
+    "created_at": "2026-10-15T16:14:33.48799Z",
+    "submitted_at": "2026-10-15T16:14:33.495871Z",
+    "filled_at": "2026-10-15T16:14:33.914668Z",
+    "updated_at": "2026-10-15T16:14:33.916512Z",
+}
+
+
+def test_observed_truncated_timestamps_preserve_approved_event_ids(tmp_path, monkeypatch):
+    paths = _prepare(tmp_path, snapshot=False)
+    _write_snapshot(paths["recent"], _target_row(**_OBSERVED_TIMESTAMPS))
+    report = _call(tmp_path, monkeypatch)
+    assert report["ok"] is True
+    assert report["wrote"] is True
+    assert report["reason"] == "recovered"
+    orders = load_events(paths["orders"])
+    terminal = orders[-1]
+    assert [event["event_id"] for event in orders] == [
+        EXPECTED_ACTION_SUBMITTED_EVENT_ID,
+        EXPECTED_TERMINAL_EVENT_ID,
+    ]
+    assert terminal["event_type"] == "ORDER_TERMINAL_RECONCILED"
+    assert terminal["event_id"] == EXPECTED_TERMINAL_EVENT_ID
+    assert terminal["filled_timestamp"] == as_utc_iso(TARGET_FILLED_AT)
+    accounting = [
+        json.loads(line) for line in paths["accounting"].read_text(encoding="utf-8").splitlines()
+    ]
+    assert accounting[-1]["event_type"] == "FILL_SELL"
+    assert accounting[-1]["event_id"] == EXPECTED_FILL_SELL_EVENT_ID
+    assert report["event_ids"] == {
+        PAPER_ACTION_SUBMITTED: EXPECTED_ACTION_SUBMITTED_EVENT_ID,
+        "ORDER_TERMINAL_RECONCILED": EXPECTED_TERMINAL_EVENT_ID,
+        "FILL_SELL": EXPECTED_FILL_SELL_EVENT_ID,
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"created_at": "2026-10-15T16:14:33.487990Z"},
+        {"submitted_at": "2026-10-15T16:14:33.4958710Z"},
+        {"filled_at": "2026-10-15T16:14:33.9146680Z"},
+        {"updated_at": "2026-10-15T16:14:33.9165120Z"},
+        {"created_at": "2026-10-15T16:14:33.48798992Z"},
+        {"submitted_at": "2026-10-15T16:14:33.495870609Z"},
+        {"filled_at": "2026-10-15T16:14:33.914668051Z"},
+        {"updated_at": "2026-10-15T16:14:33.916512203Z"},
+        {"filled_at": "2026-10-15T16:14:33.914669Z"},
+        {"filled_at": "2026-10-15T16:14:33.914667Z"},
+        {"created_at": "2026-10-15T16:14:33.487991Z"},
+        {"submitted_at": "2026-10-15T16:14:33.495872Z"},
+        {"filled_at": "2026-10-15T16:14:33.9146685Z"},
+        {"filled_at": "2026-10-15T16:14:33.9146681Z"},
+        {"updated_at": "2026-10-15T16:14:33.916513Z"},
+        {"filled_at": "2026-10-16T16:14:33.914668Z"},
+        {"filled_at": "2026-10-15T16:14:34.914668Z"},
+        {"filled_at": "2026-10-15T16:14:33.914668-04:00"},
+        {"filled_at": "2026-10-15T12:14:33.914668-04:00"},
+        {"id": "other-order"},
+        {"id": GOOGL_BROKER_ORDER_ID},
+    ],
+)
+def test_timestamp_precision_mismatch_writes_nothing(tmp_path, monkeypatch, overrides):
+    paths = _prepare(tmp_path, snapshot=False)
+    row = _target_row(**_OBSERVED_TIMESTAMPS)
+    row.update(overrides)
+    _write_snapshot(paths["recent"], row)
+    report = _call(tmp_path, monkeypatch)
+    assert report["ok"] is False
+    assert report["wrote"] is False
+    assert report["reason"] in {"target_mismatch", "snapshot_row_missing", "not_recovery_target"}
+    assert paths["orders"].exists() is False
+    assert paths["accounting"].exists() is False
     assert _dispatch_row(tmp_path, TARGET_DISPATCH_ID)["broker_ref"] is None
 
 

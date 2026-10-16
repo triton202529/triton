@@ -54,6 +54,12 @@ TARGET_FILLED_AT = "2026-10-15T16:14:33.914668051Z"
 TARGET_FILL_TIMESTAMP = "2026-10-15T16:14:33.914668+00:00"
 TARGET_UPDATED_AT = "2026-10-15T16:14:33.916512203Z"
 TARGET_STATUS = "filled"
+_PERSISTED_SNAPSHOT_TIMESTAMPS = {
+    "created_at": "2026-10-15T16:14:33.48799Z",
+    "submitted_at": "2026-10-15T16:14:33.495871Z",
+    "filled_at": "2026-10-15T16:14:33.914668Z",
+    "updated_at": "2026-10-15T16:14:33.916512Z",
+}
 GOOGL_BROKER_ORDER_ID = "924938e3-813d-4007-9384-b36fb639cd66"
 EXPECTED_ACTION_SUBMITTED_EVENT_ID = (
     "3a979aa39b42013e02bb3c431c10d788c57277daa9dcd18ac220cc3b94a489d4"
@@ -137,18 +143,26 @@ def _load_target_row(path: Path, broker_order_id: str) -> Dict[str, Any]:
 
 
 def _timestamp_mismatches(row: Mapping[str, Any]) -> Dict[str, str]:
-    expected = {
+    """Compare snapshot timestamps with the approved full broker stamps.
+
+    The one allowed exception is the exact four-field persisted tuple for the
+    fixed BITO order. Another fractional rendering is a mismatch.
+    """
+    approved = {
         "created_at": TARGET_CREATED_AT,
         "submitted_at": TARGET_SUBMITTED_AT,
         "filled_at": TARGET_FILLED_AT,
         "updated_at": TARGET_UPDATED_AT,
     }
-    mismatches = {}
-    for field, wanted in expected.items():
-        found = str(row.get(field) or "")
-        if found != wanted:
-            mismatches[field] = found
-    return mismatches
+    found = {field: str(row.get(field) or "") for field in approved}
+    if found == approved:
+        return {}
+    if (
+        str(row.get("id") or "").strip() == TARGET_BROKER_ORDER_ID
+        and found == _PERSISTED_SNAPSHOT_TIMESTAMPS
+    ):
+        return {}
+    return {field: value for field, value in found.items() if value != approved[field]}
 
 
 def _identity_mismatches(row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -647,7 +661,12 @@ def _built_target_events(row: Mapping[str, Any]) -> Dict[str, Any]:
         dispatch_id=TARGET_DISPATCH_ID,
         event_timestamp=TARGET_SUBMITTED_AT,
     )
-    normalized = _row_from_recent(row)
+    bound = dict(row)
+    bound["created_at"] = TARGET_CREATED_AT
+    bound["submitted_at"] = TARGET_SUBMITTED_AT
+    bound["filled_at"] = TARGET_FILLED_AT
+    bound["updated_at"] = TARGET_UPDATED_AT
+    normalized = _row_from_recent(bound)
     terminal = status_reconciliation_event(
         rec=normalized,
         match={
