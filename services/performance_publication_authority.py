@@ -432,6 +432,9 @@ CLASS_UNTRACKED_CODE_OR_CONFIG = "UNTRACKED_CODE_OR_CONFIG"
 CLASS_UNTRACKED_TEST = "UNTRACKED_TEST"
 CLASS_UNEXPLAINED = "UNEXPLAINED"
 CLASS_OTHER_NONEXECUTABLE_ARTIFACT = "OTHER_NONEXECUTABLE_ARTIFACT"
+CLASS_VERIFIED_MANUAL_EXIT_STORE = "VERIFIED_MANUAL_EXIT_STORE"
+
+MANUAL_EXIT_STORE_RELATIVE = "data/governance/manual_portfolio_exit"
 
 REASON_INDEX_NOT_EMPTY = "git_index_not_empty"
 REASON_TRACKED_CODE_DIRTY = "git_tracked_code_dirty"
@@ -679,6 +682,32 @@ def _conflict_or_structural(entry: Mapping[str, str]) -> Optional[str]:
     return None
 
 
+def _manual_exit_store_publication_decision(
+    root: Path,
+    rel: str,
+    *,
+    verify_filesystem: bool,
+) -> Optional[str]:
+    """Return how the exact manual-exit directory should affect publication.
+
+    None means this path is not that directory. The check is read-only: it
+    calls evaluate_manual_exit_close_gate and does not repair or rewrite the
+    store. Any other path, including a parent directory, stays on the old
+    classifier.
+    """
+    norm = _posix_rel(rel).rstrip("/")
+    if norm != MANUAL_EXIT_STORE_RELATIVE:
+        return None
+    if not verify_filesystem:
+        return "rejected"
+    from services.manual_portfolio_exit import evaluate_manual_exit_close_gate
+
+    gate = evaluate_manual_exit_close_gate(Path(root) / MANUAL_EXIT_STORE_RELATIVE)
+    if gate.get("ok") is True and gate.get("reason") == "manual_exit_store_consistent":
+        return "verified"
+    return "rejected"
+
+
 def evaluate_git_publication_identity(
     *,
     root: Path,
@@ -742,6 +771,18 @@ def evaluate_git_publication_identity(
             rejected.append({**row, "reason": structural})
             if failure_reason is None:
                 failure_reason = structural
+            continue
+        store_decision = _manual_exit_store_publication_decision(
+            Path(root), rel, verify_filesystem=verify_filesystem
+        )
+        if store_decision == "verified":
+            tolerated.append({**row, "classification": CLASS_VERIFIED_MANUAL_EXIT_STORE})
+            continue
+        if store_decision == "rejected":
+            untracked_safe = False
+            rejected.append({**row, "reason": REASON_ARTIFACT_UNEXPLAINED})
+            if failure_reason is None:
+                failure_reason = REASON_ARTIFACT_UNEXPLAINED
             continue
         if rel in _PUBLICATION_CODE_RELATIVE:
             publication_matches = False

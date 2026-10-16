@@ -788,9 +788,10 @@ def _rows_agree(receipt: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
 def evaluate_manual_exit_close_gate(store_root: Path) -> Dict[str, Any]:
     """Fail closed unless this store is verified manual-exit evidence.
 
-    Not wired into the certified-close publisher. A permit export is tolerated
-    only when it is explicitly non-authoritative. WAL sidecars, stale statuses,
-    and unrelated children fail.
+    The certified-close publisher calls this as a read-only check for the
+    exact manual-exit directory. A permit export is tolerated only when it is
+    explicitly non-authoritative. WAL sidecars, stale statuses, and unrelated
+    children fail. This function does not repair or rewrite the store.
     """
     store = Path(store_root)
     failures: list = []
