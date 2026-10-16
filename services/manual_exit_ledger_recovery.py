@@ -1,14 +1,16 @@
 """October 15 BITO manual-exit ledger recovery.
 
-The dry-run proposes three events and writes nothing. The one-time executor
-is implemented and left disabled: EXECUTOR_ENABLED stays false, and this
-module does not create an authorization token.
+The dry-run proposes three events and writes nothing. Persistent write flags
+stay false. One future invocation can proceed only when its invocation token
+matches a one-time local manifest; that manifest is removed only after the
+write succeeds.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import hmac
 import json
 import sqlite3
@@ -37,6 +39,7 @@ from services.performance_accounting import (
 
 WRITE_MODE_ENABLED = False
 EXECUTOR_ENABLED = False
+APPROVED_HEAD = "be0d54ebe9c68512389af6e533c153e88147d0d0"
 TARGET_BROKER_ORDER_ID = "507112c1-8984-4450-8c67-f9d1bca5a8ab"
 TARGET_CLIENT_ORDER_ID = "manual-BITO-0f628c831b6e31d43583ceb6"
 TARGET_REQUEST_ID = "0f628c831b6e31d43583ceb610e13db1ed32c1bd727ad32e5856d5e6e0a2215f"
@@ -57,9 +60,27 @@ EXPECTED_ACTION_SUBMITTED_EVENT_ID = (
 )
 EXPECTED_TERMINAL_EVENT_ID = "fe597bdac633f99aff0142b2862d33ebf8b419f5b20c9293d571bab023a83528"
 EXPECTED_FILL_SELL_EVENT_ID = "074134fa1bdbfc863192763a87803f2c2f7b3d204428906214f3504088a1d6ab"
-LOCAL_AUTHORIZATION_TOKEN = "OCT15-BITO-507112c1-LEDGER-RECOVERY"
 AUTHORIZATION_RELATIVE = Path(
     "data/governance/manual_portfolio_exit/october15_bito_recovery.authorization"
+)
+_MANIFEST_FIELDS = (
+    "executor_baseline_commit",
+    "execution_commit",
+    "broker_order_id",
+    "client_order_id",
+    "request_id",
+    "authority_id",
+    "dispatch_id",
+    "symbol",
+    "quantity",
+    "fill_price",
+    "fill_timestamp",
+    "action_submitted_event_id",
+    "order_terminal_reconciled_event_id",
+    "fill_sell_event_id",
+    "paper_order_events_sha256",
+    "performance_accounting_events_sha256",
+    "nonce",
 )
 _STORE_RELATIVE = Path("data/governance/manual_portfolio_exit")
 _RUNTIME_LOCKS = (
@@ -189,16 +210,199 @@ def _incomplete(reason: str, **details: Any) -> Dict[str, Any]:
     return payload
 
 
-def _authorization_text(root: Path) -> Optional[str]:
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _ledger_hashes(root: Path) -> Dict[str, str]:
+    order_path = ledger_path(root)
+    accounting_path = root / EVENTS_RELATIVE
+    order_bytes = order_path.read_bytes() if order_path.is_file() else b""
+    accounting_bytes = accounting_path.read_bytes() if accounting_path.is_file() else b""
+    return {
+        "paper_order_events_sha256": _sha256_bytes(order_bytes),
+        "performance_accounting_events_sha256": _sha256_bytes(accounting_bytes),
+    }
+
+
+def _repository_head() -> str:
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(_repo_root()),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def _full_sha(value: str) -> bool:
+    return len(value) == 40 and all(character in "0123456789abcdef" for character in value)
+
+
+def _is_descendant(ancestor: str, descendant: str) -> Optional[bool]:
+    """True when descendant is ancestor or a later commit on its history."""
+    import subprocess
+
+    if not _full_sha(ancestor) or not _full_sha(descendant):
+        return False
+    try:
+        completed = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+            cwd=str(_repo_root()),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    return None
+
+
+def _executor_source_committed() -> bool:
+    """True only when this module's worktree bytes match the committed blob."""
+    import subprocess
+
+    relative = "services/manual_exit_ledger_recovery.py"
+    try:
+        difference = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD", "--", relative],
+            cwd=str(_repo_root()),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        tracked = subprocess.run(
+            ["git", "cat-file", "-e", f"HEAD:{relative}"],
+            cwd=str(_repo_root()),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return difference.returncode == 0 and tracked.returncode == 0
+
+
+def execution_commit_for_manifest() -> Dict[str, Any]:
+    """Identify the commit a future manifest may pin. Does not write a manifest."""
+    if not _executor_source_committed():
+        return _refuse("executor_not_committed")
+    head = _repository_head()
+    if not _full_sha(head):
+        return _refuse("head_unreadable")
+    descended = _is_descendant(APPROVED_HEAD, head)
+    if descended is None:
+        return _refuse("commit_ancestry_unreadable")
+    if not descended:
+        return _refuse("execution_commit_not_descendant")
+    return {
+        "ok": True,
+        "wrote": False,
+        "executor_baseline_commit": APPROVED_HEAD,
+        "execution_commit": head,
+    }
+
+
+def _load_manifest(root: Path) -> Dict[str, Any]:
     path = root / AUTHORIZATION_RELATIVE
     if not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8")
-    if text.endswith("\r\n"):
-        text = text[:-2]
-    elif text.endswith("\n"):
-        text = text[:-1]
-    return text
+        return _refuse("authorization_missing")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return _refuse("authorization_unreadable", error=type(exc).__name__)
+    if not isinstance(payload, dict) or set(payload) != set(_MANIFEST_FIELDS):
+        return _refuse("manifest_rejected", fields=["shape"])
+    if any(
+        not isinstance(payload.get(field), str) or payload.get(field) == ""
+        for field in _MANIFEST_FIELDS
+    ):
+        return _refuse("manifest_rejected", fields=["shape"])
+    return {"ok": True, "manifest": payload}
+
+
+def _manifest_field_mismatches(manifest: Mapping[str, Any]) -> list[str]:
+    expected = {
+        "executor_baseline_commit": APPROVED_HEAD,
+        "broker_order_id": TARGET_BROKER_ORDER_ID,
+        "client_order_id": TARGET_CLIENT_ORDER_ID,
+        "request_id": TARGET_REQUEST_ID,
+        "authority_id": TARGET_AUTHORITY_ID,
+        "dispatch_id": TARGET_DISPATCH_ID,
+        "symbol": TARGET_SYMBOL,
+        "quantity": format(TARGET_QTY, "f"),
+        "fill_price": format(TARGET_FILL_PRICE, "f"),
+        "fill_timestamp": TARGET_FILL_TIMESTAMP,
+        "action_submitted_event_id": EXPECTED_ACTION_SUBMITTED_EVENT_ID,
+        "order_terminal_reconciled_event_id": EXPECTED_TERMINAL_EVENT_ID,
+        "fill_sell_event_id": EXPECTED_FILL_SELL_EVENT_ID,
+    }
+    return [field for field, wanted in expected.items() if manifest.get(field) != wanted]
+
+
+def _authorize_manifest(root: Path, invocation_token: str) -> Dict[str, Any]:
+    """Validate the one-time manifest. Does not create, rewrite, or remove it."""
+    loaded = _load_manifest(root)
+    if not loaded.get("ok"):
+        return loaded
+    manifest = loaded["manifest"]
+    nonce = str(manifest.get("nonce") or "")
+    supplied = str(invocation_token or "")
+    if not hmac.compare_digest(supplied, nonce):
+        return _refuse("authorization_mismatch")
+    mismatches = _manifest_field_mismatches(manifest)
+    if "broker_order_id" in mismatches:
+        return _refuse("not_recovery_target", broker_order_id=manifest.get("broker_order_id"))
+    if mismatches:
+        return _refuse("manifest_rejected", fields=sorted(mismatches))
+    execution_commit = str(manifest.get("execution_commit") or "")
+    if not _full_sha(execution_commit):
+        return _refuse("manifest_rejected", fields=["execution_commit"])
+    try:
+        actual_head = _repository_head()
+    except (OSError, RuntimeError) as exc:
+        return _refuse("head_unreadable", error=type(exc).__name__)
+    if actual_head != execution_commit:
+        return _refuse("head_mismatch")
+    descended = _is_descendant(APPROVED_HEAD, execution_commit)
+    if descended is None:
+        return _refuse("commit_ancestry_unreadable")
+    if not descended:
+        return _refuse("execution_commit_not_descendant")
+    actual_hashes = _ledger_hashes(root)
+    hash_fields = [
+        field for field, actual in actual_hashes.items() if manifest.get(field) != actual
+    ]
+    if hash_fields:
+        return _refuse("ledger_hash_mismatch", fields=sorted(hash_fields))
+    return {"ok": True}
+
+
+def _consume_manifest(root: Path) -> Dict[str, Any]:
+    path = root / AUTHORIZATION_RELATIVE
+    try:
+        path.unlink()
+    except OSError as exc:
+        return _incomplete("manifest_not_consumed", error=type(exc).__name__)
+    if path.exists():
+        return _incomplete("manifest_not_consumed")
+    return {"ok": True}
 
 
 def _lock_held(path: Path) -> bool:
@@ -634,29 +838,20 @@ def execute_october15_bito_ledger_recovery(
     root: Optional[Path] = None,
     recent_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Append the three October 15 BITO events only when the executor is enabled.
+    """Append the three October 15 BITO events for one matching manifest.
 
-    The default gate is closed. This function does not call the broker, create
-    an authorization token, create an authority, or write ledger.parquet.
+    Persistent flags stay false. This function does not call the broker, create
+    a manifest, create an authority, or write ledger.parquet. The manifest is
+    removed only after every permitted write succeeds.
     """
-    if not EXECUTOR_ENABLED:
-        return _refuse("executor_not_enabled")
     if root is None:
         return _refuse("root_required")
     root_p = Path(root)
     if not root_p.is_dir():
         return _refuse("root_missing")
-    try:
-        presented = _authorization_text(root_p)
-    except OSError as exc:
-        return _refuse("authorization_unreadable", error=type(exc).__name__)
-    if presented is None or presented == "":
-        return _refuse("authorization_missing")
-    supplied_token = str(authorization_token or "")
-    if not hmac.compare_digest(presented, LOCAL_AUTHORIZATION_TOKEN) or not hmac.compare_digest(
-        supplied_token, LOCAL_AUTHORIZATION_TOKEN
-    ):
-        return _refuse("authorization_mismatch")
+    authorized = _authorize_manifest(root_p, authorization_token)
+    if not authorized.get("ok"):
+        return authorized
     identity = _supplied_identity_refusal(
         broker_order_id=broker_order_id,
         client_order_id=client_order_id,
@@ -770,12 +965,16 @@ def execute_october15_bito_ledger_recovery(
     bound = _set_dispatch_broker_ref(root_p)
     if not bound.get("ok"):
         return bound
+    consumed = _consume_manifest(root_p)
+    if not consumed.get("ok"):
+        return consumed
     return {
         "ok": True,
         "wrote": True,
         "dry_run": False,
         "reason": "recovered",
-        "executor_enabled": True,
+        "executor_enabled": False,
+        "manifest_consumed": True,
         "broker_order_id": TARGET_BROKER_ORDER_ID,
         "event_ids": {
             EVENT_ACTION_SUBMITTED: EXPECTED_ACTION_SUBMITTED_EVENT_ID,

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import requests
 
+import services.manual_exit_ledger_recovery as recovery
 from services.manual_exit_ledger_recovery import (
     AUTHORIZATION_RELATIVE,
     EVENT_ACTION_SUBMITTED,
@@ -20,7 +21,6 @@ from services.manual_exit_ledger_recovery import (
     EXPECTED_FILL_SELL_EVENT_ID,
     EXPECTED_TERMINAL_EVENT_ID,
     GOOGL_BROKER_ORDER_ID,
-    LOCAL_AUTHORIZATION_TOKEN,
     TARGET_AUTHORITY_ID,
     TARGET_BROKER_ORDER_ID,
     TARGET_CLIENT_ORDER_ID,
@@ -54,6 +54,7 @@ PRODUCTION_AUTHORIZATION = ROOT / AUTHORIZATION_RELATIVE
 DECOY_REQUEST_ID = "a" * 64
 DECOY_DISPATCH_ID = "sell-dispatch-decoy"
 PRIOR_BROKER_ORDER_ID = "prior-order-keep"
+NONCE = "nonce-7f3c9a1e-one-time"
 
 
 def _fingerprint(path: Path) -> tuple[str, int]:
@@ -93,8 +94,37 @@ def _guard_external_calls(monkeypatch):
     )
 
 
-def _enable(monkeypatch):
-    monkeypatch.setattr("services.manual_exit_ledger_recovery.EXECUTOR_ENABLED", True)
+def _sha256(path: Path) -> str:
+    data = path.read_bytes() if path.is_file() else b""
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_manifest(root: Path, nonce: str = NONCE, **overrides) -> None:
+    payload = {
+        "executor_baseline_commit": recovery.APPROVED_HEAD,
+        "execution_commit": recovery.APPROVED_HEAD,
+        "broker_order_id": recovery.TARGET_BROKER_ORDER_ID,
+        "client_order_id": recovery.TARGET_CLIENT_ORDER_ID,
+        "request_id": recovery.TARGET_REQUEST_ID,
+        "authority_id": recovery.TARGET_AUTHORITY_ID,
+        "dispatch_id": recovery.TARGET_DISPATCH_ID,
+        "symbol": recovery.TARGET_SYMBOL,
+        "quantity": format(recovery.TARGET_QTY, "f"),
+        "fill_price": format(recovery.TARGET_FILL_PRICE, "f"),
+        "fill_timestamp": recovery.TARGET_FILL_TIMESTAMP,
+        "action_submitted_event_id": recovery.EXPECTED_ACTION_SUBMITTED_EVENT_ID,
+        "order_terminal_reconciled_event_id": recovery.EXPECTED_TERMINAL_EVENT_ID,
+        "fill_sell_event_id": recovery.EXPECTED_FILL_SELL_EVENT_ID,
+        "paper_order_events_sha256": _sha256(
+            root / "data" / "results" / "paper_order_events.jsonl"
+        ),
+        "performance_accounting_events_sha256": _sha256(
+            root / "data" / "results" / "performance_accounting_events.jsonl"
+        ),
+        "nonce": nonce,
+    }
+    payload.update(overrides)
+    _write_json(root / AUTHORIZATION_RELATIVE, payload)
 
 
 def _target_row(**overrides) -> dict:
@@ -291,10 +321,7 @@ def _prepare(root: Path, *, snapshot=True, receipt=True, dispatch=True, authoriz
     )
     if dispatch:
         _seed_dispatch(root)
-    if authorization:
-        token_path = root / AUTHORIZATION_RELATIVE
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        token_path.write_text(LOCAL_AUTHORIZATION_TOKEN + "\n", encoding="utf-8")
+    del authorization
     return {
         "parquet": parquet,
         "hold": hold,
@@ -306,9 +333,29 @@ def _prepare(root: Path, *, snapshot=True, receipt=True, dispatch=True, authoriz
     }
 
 
-def _call(root: Path, monkeypatch, **overrides):
+def _call(
+    root: Path,
+    monkeypatch,
+    *,
+    authorize=True,
+    head=None,
+    execution_commit=None,
+    manifest_overrides=None,
+    **overrides,
+):
     _guard_external_calls(monkeypatch)
-    _enable(monkeypatch)
+    pinned = recovery.APPROVED_HEAD if execution_commit is None else execution_commit
+    monkeypatch.setattr(
+        "services.manual_exit_ledger_recovery._repository_head",
+        lambda: pinned if head is None else head,
+    )
+    nonce = NONCE
+    fields = dict(manifest_overrides or {})
+    if manifest_overrides and manifest_overrides.get("nonce"):
+        nonce = str(manifest_overrides["nonce"])
+    fields.setdefault("execution_commit", pinned)
+    if authorize:
+        _write_manifest(root, nonce=nonce, **fields)
     arguments = {
         "broker_order_id": TARGET_BROKER_ORDER_ID,
         "client_order_id": TARGET_CLIENT_ORDER_ID,
@@ -319,7 +366,7 @@ def _call(root: Path, monkeypatch, **overrides):
         "quantity": "450",
         "fill_price": "11.01",
         "fill_timestamp": TARGET_FILL_TIMESTAMP,
-        "authorization_token": LOCAL_AUTHORIZATION_TOKEN,
+        "authorization_token": nonce,
         "root": root,
     }
     arguments.update(overrides)
@@ -451,12 +498,16 @@ def test_simulated_execution_appends_only_the_three_target_events(tmp_path, monk
     assert _audit_count(tmp_path) == before["audits"]
     assert paths["parquet"].read_bytes() == before["parquet"]
     assert paths["hold"].read_bytes() == before["hold"]
+    assert report["manifest_consumed"] is True
+    assert not (tmp_path / AUTHORIZATION_RELATIVE).exists()
+    assert recovery.EXECUTOR_ENABLED is False
 
 
 def test_rerun_does_not_append_again(tmp_path, monkeypatch):
     paths = _prepare(tmp_path)
     first = _call(tmp_path, monkeypatch)
     assert first["wrote"] is True
+    assert not (tmp_path / AUTHORIZATION_RELATIVE).exists()
     order_bytes = paths["orders"].read_bytes()
     accounting_bytes = paths["accounting"].read_bytes()
     receipt_bytes = paths["receipt"].read_bytes()
@@ -464,6 +515,7 @@ def test_rerun_does_not_append_again(tmp_path, monkeypatch):
     assert second["ok"] is False
     assert second["wrote"] is False
     assert second["reason"] == "target_event_exists"
+    assert (tmp_path / AUTHORIZATION_RELATIVE).is_file()
     assert paths["orders"].read_bytes() == order_bytes
     assert paths["accounting"].read_bytes() == accounting_bytes
     assert paths["receipt"].read_bytes() == receipt_bytes
@@ -498,6 +550,7 @@ def test_identity_mismatch_writes_nothing(tmp_path, monkeypatch, field, value, r
     assert paths["orders"].exists() is False
     assert paths["accounting"].exists() is False
     assert paths["receipt"].read_bytes() == receipt_before
+    assert (tmp_path / AUTHORIZATION_RELATIVE).is_file()
     assert _dispatch_row(tmp_path, TARGET_DISPATCH_ID)["broker_ref"] is None
 
 
@@ -542,7 +595,7 @@ def test_missing_evidence_writes_nothing(tmp_path, monkeypatch, gap):
     if gap == "snapshot_row":
         _write_snapshot(paths["recent"], _target_row(id="missing-target"))
     receipt_before = paths["receipt"].read_bytes() if paths["receipt"].is_file() else None
-    report = _call(tmp_path, monkeypatch)
+    report = _call(tmp_path, monkeypatch, authorize=gap != "authorization")
     assert report["ok"] is False
     assert report["wrote"] is False
     expected = {
@@ -655,31 +708,94 @@ def test_event_identity_mismatch_writes_nothing(tmp_path, monkeypatch):
     assert paths["accounting"].exists() is False
 
 
-def test_disabled_executor_does_not_write_or_create_a_token(tmp_path, monkeypatch):
-    paths = _prepare(tmp_path, authorization=False)
-    _guard_external_calls(monkeypatch)
-    report = execute_october15_bito_ledger_recovery(
-        broker_order_id=TARGET_BROKER_ORDER_ID,
-        client_order_id=TARGET_CLIENT_ORDER_ID,
-        request_id=TARGET_REQUEST_ID,
-        authority_id=TARGET_AUTHORITY_ID,
-        dispatch_id=TARGET_DISPATCH_ID,
-        symbol="BITO",
-        quantity="450",
-        fill_price="11.01",
-        fill_timestamp=TARGET_FILL_TIMESTAMP,
-        authorization_token=LOCAL_AUTHORIZATION_TOKEN,
-        root=tmp_path,
-    )
-    assert report["reason"] == "executor_not_enabled"
+def test_default_denial_without_manifest(tmp_path, monkeypatch):
+    paths = _prepare(tmp_path)
+    monkeypatch.setattr("services.manual_exit_ledger_recovery.EXECUTOR_ENABLED", True)
+    report = _call(tmp_path, monkeypatch, authorize=False, authorization_token=NONCE)
+    assert report["reason"] == "authorization_missing"
     assert report["wrote"] is False
-    assert report["executor_enabled"] is False
+    assert recovery.WRITE_MODE_ENABLED is False
     assert paths["orders"].exists() is False
     assert not (tmp_path / AUTHORIZATION_RELATIVE).exists()
     assert not PRODUCTION_AUTHORIZATION.exists()
     assert (
         json.loads(paths["receipt"].read_text(encoding="utf-8"))["broker_status"] == "pending_new"
     )
+
+
+def test_missing_invocation_token_keeps_manifest(tmp_path, monkeypatch):
+    paths = _prepare(tmp_path)
+    report = _call(tmp_path, monkeypatch, authorization_token="")
+    assert report["reason"] == "authorization_mismatch"
+    assert report["wrote"] is False
+    assert paths["orders"].exists() is False
+    saved = json.loads((tmp_path / AUTHORIZATION_RELATIVE).read_text(encoding="utf-8"))
+    assert saved["nonce"] == NONCE
+
+
+def test_changed_head_keeps_manifest(tmp_path, monkeypatch):
+    paths = _prepare(tmp_path)
+    report = _call(tmp_path, monkeypatch, head="a" * 40)
+    assert report["reason"] == "head_mismatch"
+    assert report["wrote"] is False
+    assert paths["orders"].exists() is False
+    assert (tmp_path / AUTHORIZATION_RELATIVE).is_file()
+    assert (
+        json.loads(paths["receipt"].read_text(encoding="utf-8"))["broker_status"] == "pending_new"
+    )
+
+
+def test_changed_ledger_hash_keeps_manifest(tmp_path, monkeypatch):
+    paths = _prepare(tmp_path)
+    report = _call(
+        tmp_path,
+        monkeypatch,
+        manifest_overrides={"paper_order_events_sha256": "0" * 64},
+    )
+    assert report["reason"] == "ledger_hash_mismatch"
+    assert report["wrote"] is False
+    assert paths["orders"].exists() is False
+    saved = json.loads((tmp_path / AUTHORIZATION_RELATIVE).read_text(encoding="utf-8"))
+    assert saved["paper_order_events_sha256"] == "0" * 64
+    assert _dispatch_row(tmp_path, TARGET_DISPATCH_ID)["broker_ref"] is None
+
+
+def test_changed_manifest_identity_keeps_manifest(tmp_path, monkeypatch):
+    paths = _prepare(tmp_path)
+    report = _call(tmp_path, monkeypatch, manifest_overrides={"symbol": "GOOGL"})
+    assert report["reason"] == "manifest_rejected"
+    assert report["wrote"] is False
+    assert paths["orders"].exists() is False
+    saved = json.loads((tmp_path / AUTHORIZATION_RELATIVE).read_text(encoding="utf-8"))
+    assert saved["symbol"] == "GOOGL"
+    assert json.loads(paths["receipt"].read_text(encoding="utf-8"))["symbol"] == "BITO"
+
+
+def test_execution_commit_must_descend_from_baseline(tmp_path, monkeypatch):
+    import subprocess
+
+    parent = subprocess.check_output(
+        ["git", "rev-parse", f"{recovery.APPROVED_HEAD}^"],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    paths = _prepare(tmp_path)
+    report = _call(tmp_path, monkeypatch, execution_commit=parent, head=parent)
+    assert report["reason"] == "execution_commit_not_descendant"
+    assert report["wrote"] is False
+    assert paths["orders"].exists() is False
+    saved = json.loads((tmp_path / AUTHORIZATION_RELATIVE).read_text(encoding="utf-8"))
+    assert saved["executor_baseline_commit"] == recovery.APPROVED_HEAD
+    assert saved["execution_commit"] == parent
+    assert _dispatch_row(tmp_path, TARGET_DISPATCH_ID)["broker_ref"] is None
+
+
+def test_manifest_pin_refuses_until_executor_source_is_committed():
+    report = recovery.execution_commit_for_manifest()
+    assert report["ok"] is False
+    assert report["wrote"] is False
+    assert report["reason"] == "executor_not_committed"
+    assert not PRODUCTION_AUTHORIZATION.exists()
 
 
 def test_executor_source_has_no_broker_or_parquet_writer():
@@ -696,3 +812,6 @@ def test_executor_source_has_no_broker_or_parquet_writer():
         assert banned not in text
     assert "EXECUTOR_ENABLED = False" in text
     assert "WRITE_MODE_ENABLED = False" in text
+    assert "os.environ" not in text
+    assert "getenv" not in text
+    assert recovery.APPROVED_HEAD in text
