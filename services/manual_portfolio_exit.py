@@ -263,7 +263,133 @@ def _claim(store_root: Path, request_id: str) -> Optional[Dict[str, Any]]:
 
 def _save_receipt(store_root: Path, receipt: Dict[str, Any]) -> None:
     path = _request_path(store_root, str(receipt["request_id"]))
-    path.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {key: value for key, value in receipt.items() if key != "idempotent_replay"}
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _identity_path(store_root: Path, broker_order_id: str) -> Path:
+    return store_root / "order_identities" / f"{broker_order_id}.json"
+
+
+def _save_order_identity(store_root: Path, identity: Mapping[str, Any]) -> None:
+    broker_order_id = str(identity.get("broker_order_id") or "").strip()
+    if not broker_order_id:
+        return
+    path = _identity_path(store_root, broker_order_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dict(identity), sort_keys=True), encoding="utf-8")
+
+
+def persist_manual_submission_identity(
+    *,
+    store_root: Path,
+    ledger_root: Path,
+    symbol: str,
+    qty: Decimal,
+    authority_id: str,
+    dispatch_id: str,
+    broker_order_id: str,
+    client_order_id: str,
+    event_timestamp: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Record the broker reference and ACTION_SUBMITTED. Does not call the broker."""
+    from services.paper_order_ledger import record_manual_exit_submission
+    from services.paper_sell_arm_store import PaperSellArmStoreError, record_dispatch_outcome
+
+    try:
+        record_dispatch_outcome(
+            store_root / "manual_portfolio_exit.sqlite3",
+            dispatch_id=dispatch_id,
+            outcome_state="SUBMITTED",
+            broker_ref=broker_order_id,
+            result_class="SUBMITTED",
+            reconciliation_required=False,
+        )
+    except PaperSellArmStoreError as exc:
+        return {"ok": False, "reason": exc.reason}
+    recorded = record_manual_exit_submission(
+        symbol=symbol,
+        qty=qty,
+        client_order_id=client_order_id,
+        broker_order_id=broker_order_id,
+        authority_id=authority_id,
+        dispatch_id=dispatch_id,
+        event_timestamp=event_timestamp,
+        root=ledger_root,
+    )
+    if not recorded.get("ok"):
+        return {"ok": False, "reason": recorded.get("reason") or "submission_event_not_recorded"}
+    if recorded.get("appended", 0) == 0 and recorded.get("reason") != "identity_exists":
+        return {"ok": False, "reason": recorded.get("reason") or "submission_event_not_recorded"}
+    return {"ok": True, "ledger": recorded}
+
+
+def note_proven_terminal_receipts(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    root: Path,
+) -> Dict[str, Any]:
+    """Set the receipt broker status only after terminal reconciliation is proven."""
+    store = Path(root) / "data" / "governance" / "manual_portfolio_exit"
+    request_dir = store / "requests"
+    if not request_dir.is_dir():
+        return {"ok": True, "updated": 0, "reason": "manual_store_absent"}
+    updated = 0
+    for event in events:
+        if str(event.get("event_type") or "") != "ORDER_TERMINAL_RECONCILED":
+            continue
+        if event.get("terminal_status_proven") is not True:
+            continue
+        broker_status = _terminal_broker_text(event)
+        broker_id = str(event.get("broker_order_id") or "").strip()
+        client_id = str(event.get("client_order_id") or "").strip()
+        if not broker_status or not (broker_id or client_id):
+            continue
+        if client_id and not client_id.startswith("manual-"):
+            continue
+        for path in request_dir.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            saved_client = str(payload.get("client_order_id") or "")
+            if not saved_client.startswith("manual-") and not client_id.startswith("manual-"):
+                continue
+            broker_match = broker_id and str(payload.get("broker_order_id") or "") == broker_id
+            client_match = client_id and saved_client == client_id
+            if not broker_match and not client_match:
+                continue
+            if str(payload.get("broker_status") or "").lower() == broker_status:
+                continue
+            payload["broker_status"] = broker_status
+            payload["reconciliation_state"] = "terminal_reconciled"
+            if payload.get("status") == "repair_needed":
+                payload["status"] = "submitted"
+            payload.pop("idempotent_replay", None)
+            _save_receipt(store, payload)
+            updated += 1
+    return {"ok": True, "updated": updated}
+
+
+def _terminal_broker_text(event: Mapping[str, Any]) -> Optional[str]:
+    extra = event.get("extra") if isinstance(event.get("extra"), Mapping) else {}
+    raw = str((extra or {}).get("raw_broker_status") or "").strip().lower()
+    if raw == "cancelled":
+        raw = "canceled"
+    if raw in {"filled", "canceled", "rejected", "expired", "replaced"}:
+        return raw
+    normalized = str(event.get("broker_terminal_status") or "").strip().upper()
+    return {
+        "FILLED": "filled",
+        "CANCELLED": "canceled",
+        "CANCELED": "canceled",
+        "REJECTED": "rejected",
+        "EXPIRED": "expired",
+        "REPLACED": "replaced",
+    }.get(normalized)
 
 
 def _paper_broker_ok(broker: Any) -> bool:
@@ -394,6 +520,76 @@ def _install_permit(
     return permit
 
 
+def _record_accepted_manual_order(
+    *,
+    store_root: Path,
+    ledger_root: Path,
+    request_id: str,
+    symbol: str,
+    selected_text: str,
+    selected: Decimal,
+    authority_id: str,
+    dispatch_id: str,
+    client_order_id: str,
+    order: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Persist the accepted order locally. Never submits another broker order."""
+    broker_order_id = str(order.get("id") or "").strip()
+    broker_status = str(order.get("status") or "accepted")
+    saved_client = str(order.get("client_order_id") or client_order_id)
+    repair = _result(
+        status="repair_needed",
+        request_id=request_id,
+        symbol=symbol,
+        selected_qty=selected_text,
+        reason="local_submission_record_failed",
+        submitted=True,
+        broker_status=broker_status,
+        broker_order_id=broker_order_id,
+    )
+    repair["reconciliation_state"] = "unreconciled"
+    repair["client_order_id"] = saved_client
+    repair["authority_id"] = authority_id
+    repair["dispatch_id"] = dispatch_id
+    _save_receipt(store_root, repair)
+    _save_order_identity(store_root, repair)
+    if not broker_order_id:
+        return repair
+    try:
+        persisted = persist_manual_submission_identity(
+            store_root=store_root,
+            ledger_root=ledger_root,
+            symbol=symbol,
+            qty=selected,
+            authority_id=authority_id,
+            dispatch_id=dispatch_id,
+            broker_order_id=broker_order_id,
+            client_order_id=saved_client,
+            event_timestamp=str(order.get("submitted_at") or order.get("created_at") or "") or None,
+        )
+    except Exception:
+        return repair
+    if not persisted.get("ok"):
+        return repair
+    submitted = _result(
+        status="submitted",
+        request_id=request_id,
+        symbol=symbol,
+        selected_qty=selected_text,
+        reason=REASON,
+        submitted=True,
+        broker_status=broker_status,
+        broker_order_id=broker_order_id,
+    )
+    submitted["reconciliation_state"] = "submission_recorded"
+    submitted["client_order_id"] = saved_client
+    submitted["authority_id"] = authority_id
+    submitted["dispatch_id"] = dispatch_id
+    _save_receipt(store_root, submitted)
+    _save_order_identity(store_root, submitted)
+    return submitted
+
+
 def confirm_manual_paper_exit(
     review: Mapping[str, Any],
     *,
@@ -403,6 +599,7 @@ def confirm_manual_paper_exit(
     supplied_authority: Optional[Mapping[str, Any]] = None,
     now: Optional[datetime] = None,
     blocked_symbols: Optional[Sequence[str]] = None,
+    ledger_root: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Confirm one reviewed paper exit. A replay of the same request does not submit again."""
     symbol = str(review.get("symbol") or "").upper().strip()
@@ -518,8 +715,12 @@ def confirm_manual_paper_exit(
         return replay
     moment = now or datetime.now(timezone.utc)
     client_order_id = f"manual-{symbol}-{request_id[:24]}"
+    authority_id = f"manual-auth-{request_id[:24]}"
+    books = Path(ledger_root) if ledger_root is not None else Path(__file__).resolve().parents[1]
+    order: Optional[Mapping[str, Any]] = None
+    dispatch_id = ""
     try:
-        _install_permit(
+        permit = _install_permit(
             store_root,
             symbol=symbol,
             qty=selected,
@@ -527,33 +728,36 @@ def confirm_manual_paper_exit(
             request_id=request_id,
             now=moment,
         )
+        dispatch_id = str(permit.dispatch_intent_id)
         order = broker.submit_order(
             symbol=symbol,
             qty=_qty_text(selected),
             side="sell",
             client_order_id=client_order_id,
         )
-        broker_status = str((order or {}).get("status") or "accepted")
-        receipt = _result(
-            status="submitted",
-            request_id=request_id,
-            symbol=symbol,
-            selected_qty=selected_text,
-            reason=REASON,
-            submitted=True,
-            broker_status=broker_status,
-            broker_order_id=str((order or {}).get("id") or ""),
-        )
     except Exception as exc:
-        receipt = _result(
-            status="rejected",
-            request_id=request_id,
-            symbol=symbol,
-            selected_qty=selected_text,
-            reason="broker_submit_rejected",
-            broker_status=type(exc).__name__,
-        )
+        if order is None:
+            receipt = _result(
+                status="rejected",
+                request_id=request_id,
+                symbol=symbol,
+                selected_qty=selected_text,
+                reason="broker_submit_rejected",
+                broker_status=type(exc).__name__,
+            )
+            _save_receipt(store_root, receipt)
+            return receipt
     finally:
         _ACTIVE_PERMIT.set(None)
-    _save_receipt(store_root, receipt)
-    return receipt
+    return _record_accepted_manual_order(
+        store_root=store_root,
+        ledger_root=books,
+        request_id=request_id,
+        symbol=symbol,
+        selected_text=selected_text,
+        selected=selected,
+        authority_id=authority_id,
+        dispatch_id=dispatch_id,
+        client_order_id=client_order_id,
+        order=order or {},
+    )

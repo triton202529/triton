@@ -751,6 +751,7 @@ def _row_from_recent(row: Mapping[str, Any]) -> Dict[str, Any]:
         "submitted_at": row.get("submitted_at") or row.get("created_at"),
         "filled_at": row.get("filled_at"),
         "snapshot_ts": row.get("snapshot_ts"),
+        "raw_status": str(row.get("status") or row.get("order_status") or "").strip() or None,
     }
 
 
@@ -843,6 +844,121 @@ def record_placement_submission(
     return result
 
 
+def manual_exit_submission_event(
+    *,
+    symbol: Any,
+    qty: Any,
+    client_order_id: Optional[str],
+    broker_order_id: Optional[str],
+    authority_id: Optional[str],
+    dispatch_id: Optional[str],
+    event_timestamp: Optional[str] = None,
+    source_artifact: str = "manual_portfolio_exit.confirm",
+) -> Dict[str, Any]:
+    """ACTION_SUBMITTED identity for one manual exit. Does not write."""
+    return build_event(
+        event_type=EVENT_ACTION_SUBMITTED,
+        event_timestamp=event_timestamp,
+        mode="paper",
+        source_pipeline="manual_portfolio_exit",
+        authority_id=str(authority_id or "") or None,
+        dispatch_id=str(dispatch_id or "") or None,
+        symbol=canonical_symbol(symbol),
+        side="SELL",
+        selected_qty=money(qty),
+        action_disposition="submitted",
+        client_order_id=str(client_order_id or "").strip() or None,
+        broker_order_id=str(broker_order_id or "").strip() or None,
+        broker_submission_status="SUBMITTED",
+        terminal_status_proven=False,
+        source_artifact=source_artifact,
+    )
+
+
+def record_manual_exit_submission(
+    *,
+    symbol: Any,
+    qty: Any,
+    client_order_id: Optional[str],
+    broker_order_id: Optional[str],
+    authority_id: Optional[str],
+    dispatch_id: Optional[str],
+    event_timestamp: Optional[str] = None,
+    root: Optional[Path] = None,
+    source_artifact: str = "manual_portfolio_exit.confirm",
+) -> Dict[str, Any]:
+    """Append one manual ACTION_SUBMITTED through the existing ledger writer.
+
+    A broker id or client id that is already reduced writes nothing.
+    """
+    broker = str(broker_order_id or "").strip() or None
+    client = str(client_order_id or "").strip() or None
+    if not broker and not client:
+        return {
+            "ok": False,
+            "appended": 0,
+            "skipped_duplicate": 0,
+            "reason": "missing_order_identity",
+        }
+    if _placement_identity_exists(root, broker, client):
+        return {
+            "ok": True,
+            "appended": 0,
+            "skipped_duplicate": 1,
+            "reason": "identity_exists",
+        }
+    event = manual_exit_submission_event(
+        symbol=symbol,
+        qty=qty,
+        client_order_id=client,
+        broker_order_id=broker,
+        authority_id=authority_id,
+        dispatch_id=dispatch_id,
+        event_timestamp=event_timestamp,
+        source_artifact=source_artifact,
+    )
+    result = append_events([event], root=root)
+    result["reason"] = "submitted"
+    result["event"] = event
+    return result
+
+
+def status_reconciliation_event(
+    *,
+    rec: Mapping[str, Any],
+    match: Mapping[str, Any],
+    method: str,
+    snapshot_ts: Optional[str] = None,
+    source_artifact: str,
+) -> Dict[str, Any]:
+    """One status or terminal event the snapshot reconciler would append."""
+    status = rec.get("status")
+    proven = status in TERMINAL_STATUSES
+    event_type = EVENT_ORDER_TERMINAL_RECONCILED if proven else EVENT_ORDER_STATUS_RECONCILED
+    return build_event(
+        event_type=event_type,
+        event_timestamp=snapshot_ts or rec.get("snapshot_ts") or utc_now(),
+        trading_date=match.get("trading_date"),
+        source_pipeline=SOURCE_RECENT_ORDERS,
+        authority_id=match.get("authority_id"),
+        dispatch_id=match.get("dispatch_id"),
+        action_ordinal=match.get("action_ordinal"),
+        symbol=rec.get("symbol") or match.get("symbol"),
+        side=match.get("side") or rec.get("side"),
+        selected_qty=rec.get("qty") or match.get("selected_qty"),
+        client_order_id=rec.get("client_order_id") or match.get("client_order_id"),
+        broker_order_id=rec.get("id") or match.get("broker_order_id"),
+        broker_submission_status=None if proven else status,
+        broker_terminal_status=status if proven else None,
+        filled_qty=rec.get("filled_qty"),
+        average_fill_price=rec.get("average_fill_price"),
+        filled_timestamp=rec.get("filled_at"),
+        terminal_status_proven=proven,
+        source_artifact=source_artifact,
+        extra={"correlation": method, "raw_broker_status": rec.get("raw_status")},
+    )
+
+
 def safe_record_placement_submission(**kwargs: Any) -> Dict[str, Any]:
     """Never raise into the generic submit loop after the broker has accepted an order."""
     try:
@@ -866,6 +982,16 @@ def load_recent_order_rows(path: Path) -> List[Dict[str, Any]]:
         return [_row_from_recent(r) for r in csv.DictReader(fh)]
 
 
+def _sync_manual_receipts(events: Sequence[Mapping[str, Any]], root: Path) -> Dict[str, Any]:
+    """Update manual receipts only after a proven terminal reconciliation event exists."""
+    try:
+        from services.manual_portfolio_exit import note_proven_terminal_receipts
+
+        return note_proven_terminal_receipts(events, root=root)
+    except Exception as exc:
+        return {"ok": False, "updated": 0, "reason": type(exc).__name__}
+
+
 def reconcile_from_recent_orders(
     *,
     root: Optional[Path] = None,
@@ -884,6 +1010,7 @@ def reconcile_from_recent_orders(
     by_broker = {r["broker_order_id"]: r for r in existing if r.get("broker_order_id")}
     by_client = {r["client_order_id"]: r for r in existing if r.get("client_order_id")}
     events: List[Dict[str, Any]] = []
+    already_proven: List[Dict[str, Any]] = []
     for rec in load_recent_order_rows(csv_path):
         if rec.get("side") and rec["side"] not in {"SELL", "SELL_TO_CLOSE", "BUY", "BUY_TO_OPEN"}:
             continue
@@ -902,38 +1029,35 @@ def reconcile_from_recent_orders(
             continue
         current_term = match.get("terminal_status")
         if current_term == status and match.get("filled_qty") == rec.get("filled_qty"):
+            if status in TERMINAL_STATUSES:
+                already_proven.append(
+                    {
+                        "event_type": EVENT_ORDER_TERMINAL_RECONCILED,
+                        "terminal_status_proven": True,
+                        "broker_terminal_status": status,
+                        "broker_order_id": rec.get("id") or match.get("broker_order_id"),
+                        "client_order_id": rec.get("client_order_id")
+                        or match.get("client_order_id"),
+                        "extra": {"raw_broker_status": rec.get("raw_status")},
+                    }
+                )
             continue
         if current_term in TERMINAL_STATUSES and status not in TERMINAL_STATUSES:
             if PROGRESS_RANK.get(status, 0) < PROGRESS_RANK.get(str(current_term), 0):
                 continue
-        proven = status in TERMINAL_STATUSES
-        et = EVENT_ORDER_TERMINAL_RECONCILED if proven else EVENT_ORDER_STATUS_RECONCILED
         events.append(
-            build_event(
-                event_type=et,
-                event_timestamp=snapshot_ts or rec.get("snapshot_ts") or utc_now(),
-                trading_date=match.get("trading_date"),
-                source_pipeline=SOURCE_RECENT_ORDERS,
-                authority_id=match.get("authority_id"),
-                dispatch_id=match.get("dispatch_id"),
-                action_ordinal=match.get("action_ordinal"),
-                symbol=rec.get("symbol") or match.get("symbol"),
-                side=match.get("side") or rec.get("side"),
-                selected_qty=rec.get("qty") or match.get("selected_qty"),
-                client_order_id=rec.get("client_order_id") or match.get("client_order_id"),
-                broker_order_id=rec.get("id") or match.get("broker_order_id"),
-                broker_submission_status=None if proven else status,
-                broker_terminal_status=status if proven else None,
-                filled_qty=rec.get("filled_qty"),
-                average_fill_price=rec.get("average_fill_price"),
-                filled_timestamp=rec.get("filled_at"),
-                terminal_status_proven=proven,
+            status_reconciliation_event(
+                rec=rec,
+                match=match,
+                method=method or "",
+                snapshot_ts=snapshot_ts,
                 source_artifact=str(csv_path),
-                extra={"correlation": method},
             )
         )
     if not events:
-        return {"ok": True, "appended": 0, "matched": 0, "accounting": {"appended": 0}}
+        result = {"ok": True, "appended": 0, "matched": 0, "accounting": {"appended": 0}}
+        result["manual_receipts"] = _sync_manual_receipts(already_proven, root_p)
+        return result
     result = append_events(events, root=root_p)
     result["matched"] = len(events)
     written = list(result.get("written_events") or [])
@@ -943,6 +1067,7 @@ def reconcile_from_recent_orders(
         result["accounting"] = record_proven_terminal_fills(written, root=root_p)
     else:
         result["accounting"] = {"ok": True, "appended": 0, "skipped_duplicate": 0}
+    result["manual_receipts"] = _sync_manual_receipts(written + already_proven, root_p)
     return result
 
 

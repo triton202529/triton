@@ -104,6 +104,7 @@ def _confirm(review, broker, store, **kwargs):
         review,
         broker=broker,
         store_root=store,
+        ledger_root=kwargs.pop("ledger_root", store),
         live_execution_permitted=False,
         blocked_symbols=kwargs.pop("blocked_symbols", []),
         **kwargs,
