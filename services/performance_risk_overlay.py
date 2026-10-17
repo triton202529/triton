@@ -314,6 +314,10 @@ def build_overlay(df: pd.DataFrame) -> Tuple[pd.DataFrame, dict]:
             has_win_rate=has_winrate,
             drag_trim_from_decay=drag_trim_from_decay,
         )
+        # Lifetime loss on a flat book is a caution, not an exit or entry ban.
+        open_qty = _to_float(r.get("open_qty")) if "open_qty" in df.columns else None
+        if open_qty is not None and open_qty <= 0 and flag != "OK":
+            flag = "OK"
 
         rows.append(
             {

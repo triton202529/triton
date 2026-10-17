@@ -499,6 +499,10 @@ def decide_action(
             return cfg.default_action_when_unknown, "unknown_signal_long"
 
         if signal == "BUY":
+            # Confidence floor is the configured add criterion. The RF residual
+            # remains non-authoritative and cannot grant or deny ADD.
+            if math.isfinite(c) and c >= logic.add_confidence_min:
+                return "ADD", "long_strong_buy_to_add"
             return "HOLD", "long_weak_buy_to_hold"
 
         if signal == "SELL":

@@ -417,7 +417,7 @@ def test_current_buy_with_proven_edge_and_risk_ok_may_be_eligible(monkeypatch, t
 
 
 def test_uso_rule_c_and_hd_slv_independent_of_edge():
-    uso, _ = _decide_action(
+    uso, uso_reason = _decide_action(
         is_held=False,
         risk_components=["BLOCK_NEW_BUY"],
         edge_score=0.91,
@@ -428,7 +428,8 @@ def test_uso_rule_c_and_hd_slv_independent_of_edge():
         confidence=0.80,
         delta_pct=0.0,
     )
-    assert uso == "BLOCK"
+    assert uso == "OPEN_NEW"
+    assert uso_reason.startswith("soft_caution:historical_loss;")
     hd, _ = _decide_action(
         is_held=True,
         risk_components=["FORCE_EXIT", "BLOCK_NEW_BUY"],
@@ -529,9 +530,8 @@ def test_proven_edge_join_feeds_allocation_build(tmp_path: Path):
     actions = {r["ticker"]: r["recommended_action"] for _, r in df.iterrows()}
     assert actions["BITO"] == "ADD"
     assert actions["AAPL"] == "OPEN_NEW"
-    assert actions["USO"] == "BLOCK"
+    assert actions["USO"] == "WATCH"
     assert actions["HD"] == "EXIT"
     assert summary["add_candidates"] >= 1
     assert summary["open_new_candidates"] >= 1
-    assert summary["blocked_candidates"] >= 1
     assert summary["exit_candidates"] >= 1

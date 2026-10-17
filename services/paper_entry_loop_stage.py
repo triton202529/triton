@@ -362,19 +362,20 @@ def _file_age_minutes(path: Path) -> Optional[float]:
     return (datetime.now(timezone.utc) - mtime).total_seconds() / 60.0
 
 
-def _load_settled_paper_cash() -> Optional[float]:
-    """Current settled paper cash only. Never includes pending SELL proceeds."""
-    for name in ("account_snapshot.json", "equity_snapshot.json", "paper_account_snapshot.json"):
-        doc = _load_json(RESULTS / name)
-        for key in ("settled_cash", "cash", "cash_available", "buying_power"):
-            raw = doc.get(key)
-            try:
-                if raw is None or str(raw).strip() in ("", "nan", "None"):
-                    continue
-                return float(raw)
-            except (TypeError, ValueError):
-                continue
-    return None
+def _load_settled_paper_cash(
+    account_reader: Optional[Any] = None,
+    *,
+    now: Optional[datetime] = None,
+) -> Tuple[Optional[float], Dict[str, Any]]:
+    """Settled paper cash. Missing evidence is never returned as zero."""
+    from services.entry_allocation_policy import read_paper_account_readonly, resolve_settled_cash
+
+    reader = account_reader if account_reader is not None else read_paper_account_readonly
+    return resolve_settled_cash(
+        results_dir=RESULTS,
+        now=now or datetime.now(timezone.utc),
+        account_reader=reader,
+    )
 
 
 def _find_execute_trades_running() -> Tuple[bool, List[str]]:
@@ -530,6 +531,27 @@ def _allocation_sym_col(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _held_buy_clears_add_floor(
+    *,
+    action: str,
+    sym: str,
+    held: Set[str],
+    row: Dict[str, Any],
+) -> bool:
+    """Held BUY may be an ADD when confidence clears the configured floor."""
+    if action != "ADD" or sym not in held:
+        return False
+    if _norm(row.get("signal")) != "BUY":
+        return False
+    try:
+        confidence = float(row.get("confidence"))
+    except (TypeError, ValueError):
+        return False
+    from services.signal_lifecycle import load_lifecycle_logic_config
+
+    return confidence >= float(load_lifecycle_logic_config().add_confidence_min)
+
+
 def _evaluate_allocation_entry_row(
     *,
     sym: str,
@@ -551,9 +573,10 @@ def _evaluate_allocation_entry_row(
         return False, ["MISSING_TICKER"], risk_flag
     if action == "BLOCK":
         blocked_reasons.append("ALLOCATION_BLOCK")
-    if "BLOCK_NEW_BUY" in risk_set:
+    # Historical loss flags block a new buy only while the symbol is held.
+    if sym in held and "BLOCK_NEW_BUY" in risk_set:
         blocked_reasons.append("RISK_OVERLAY_BLOCK")
-    if "FORCE_EXIT" in risk_set:
+    if sym in held and "FORCE_EXIT" in risk_set:
         blocked_reasons.append("FORCE_EXIT")
     if action == "OPEN_NEW" and sym in held:
         blocked_reasons.append("ALREADY_HELD")
@@ -566,7 +589,8 @@ def _evaluate_allocation_entry_row(
     elif not lifecycle_stance:
         blocked_reasons.append(REASON_LIFECYCLE_STANCE_MISSING)
     elif lifecycle_stance not in ENTRY_LIFECYCLE_STANCES:
-        blocked_reasons.append(REASON_LIFECYCLE_STANCE_NOT_ENTRY)
+        if not _held_buy_clears_add_floor(action=action, sym=sym, held=held, row=row):
+            blocked_reasons.append(REASON_LIFECYCLE_STANCE_NOT_ENTRY)
     if (sym, "BUY") in open_buy:
         blocked_reasons.append("OPEN_BUY_ORDER")
     if at_cap and action == "OPEN_NEW":
@@ -984,7 +1008,8 @@ def _risk_blocked_in_selection(symbols: List[str]) -> List[str]:
         flag = flags.get(sym, "OK")
         risk_set = {p for p in (_norm(x) for x in str(flag).split("|")) if p and p != "OK"}
         if "BLOCK_NEW_BUY" in risk_set or "FORCE_EXIT" in risk_set:
-            blocked.append(sym)
+            if not POSITIONS.is_file() or sym in _load_held_symbols():
+                blocked.append(sym)
     return blocked
 
 
@@ -1327,8 +1352,19 @@ def evaluate_paper_entry_gates(
     )
 
     dep_ctx = context_from_interlock(interlock)
-    cash = _load_settled_paper_cash()
+    cash, cash_meta = _load_settled_paper_cash()
     details["checks"]["settled_paper_cash"] = cash
+    details["checks"]["settled_cash_source"] = cash_meta.get("source")
+    details["checks"]["settled_cash_broker_called"] = cash_meta.get("broker_called")
+    if cash is None:
+        for cand in candidates:
+            if not cand.get("eligible_for_auto_entry"):
+                continue
+            cand["eligible_for_auto_entry"] = False
+            cand["disposition"] = "hard_block"
+            prior = str(cand.get("block_reasons") or "")
+            cand["block_reasons"] = "|".join(x for x in (prior, "settled_cash_unproven") if x)
+        eligible = []
     details["checks"]["pending_sell_proceeds_credited"] = 0
     if dep_ctx.get("pending_sells") or dep_ctx.get("scope") == "GLOBAL_SAFETY_BLOCK":
         allowed, dep_decisions = filter_entry_candidates(
@@ -1353,6 +1389,49 @@ def evaluate_paper_entry_gates(
         if handoff_reload.get("eligible_entry_symbols"):
             handoff_reload["eligible_entry_symbols"] = sorted(allowed_syms)
         details["checks"]["entry_rows_eligible_after_pending_sell_filter"] = len(eligible)
+
+    if cash is not None and eligible:
+        from services.entry_allocation_policy import entry_limits, select_bounded_entries
+
+        limits = entry_limits(CONFIG)
+        slots = max(0, int(limits["max_positions"]) - len(_load_held_symbols()))
+        ranked_input = []
+        for cand in eligible:
+            action = str(cand.get("allocation_action") or "OPEN_NEW")
+            ranked_input.append(
+                {
+                    "symbol": str(cand.get("ticker") or "").upper(),
+                    "score": cand.get("allocation_score") or 0,
+                    "disposition": "ADD" if action == "ADD" else "OPEN_NEW",
+                    "reason": action,
+                }
+            )
+        ranked = select_bounded_entries(
+            ranked_input,
+            cash=cash,
+            max_new=int(limits["max_new"]),
+            max_adds=int(limits["max_adds"]),
+            max_notional=float(limits["max_notional"]),
+            open_slots=slots,
+        )
+        by_symbol = {str(row.get("symbol") or ""): row for row in ranked}
+        kept = []
+        for cand in eligible:
+            sym = str(cand.get("ticker") or "").upper()
+            decision = by_symbol.get(sym) or {}
+            cand["disposition"] = decision.get("disposition")
+            if decision.get("disposition") in ("OPEN_NEW", "ADD"):
+                kept.append(cand)
+                continue
+            cand["eligible_for_auto_entry"] = False
+            extra = str(decision.get("reason") or "eligible")
+            prior = str(cand.get("block_reasons") or "")
+            cand["block_reasons"] = "|".join(part for part in (prior, extra) if part)
+        eligible = kept
+        handoff_reload["eligible_entry_symbols"] = sorted(
+            str(cand.get("ticker") or "").upper() for cand in eligible
+        )
+        details["checks"]["ranked_entry_dispositions"] = ranked
 
     details["checks"]["entry_rows_eligible"] = len(eligible)
     if not candidates:

@@ -1498,8 +1498,46 @@ def load_independent_block_new_buy_symbols(
         parts = {p.strip() for p in raw.split("|") if p.strip()}
         if "BLOCK_NEW_BUY" in parts or "FORCE_EXIT" in parts:
             blocked.add(sym)
+    held_positive = _positive_position_symbols(RESULTS / "positions_snapshot.csv")
+    if held_positive is not None:
+        blocked = {sym for sym in blocked if sym in held_positive}
+        info["position_aware"] = True
     info["count"] = len(blocked)
     return blocked, info
+
+
+def _positive_position_symbols(path: Path) -> Optional[Set[str]]:
+    """Held symbols with quantity above zero. None when the snapshot is absent."""
+    if not path.is_file():
+        return None
+    try:
+        frame = pd.read_csv(path, low_memory=False)
+    except Exception:
+        return None
+    if frame is None or frame.empty:
+        return set()
+    sym_col = (
+        "symbol" if "symbol" in frame.columns else "ticker" if "ticker" in frame.columns else None
+    )
+    if sym_col is None:
+        return None
+    qty_col = (
+        "qty" if "qty" in frame.columns else "quantity" if "quantity" in frame.columns else None
+    )
+    held: Set[str] = set()
+    for _, row in frame.iterrows():
+        sym = _norm_sym(row.get(sym_col))
+        if not sym:
+            continue
+        if qty_col is None:
+            held.add(sym)
+            continue
+        try:
+            if float(row.get(qty_col) or 0) > 0:
+                held.add(sym)
+        except (TypeError, ValueError):
+            continue
+    return held
 
 
 def _row_is_paper_buy_add(row: Any) -> bool:

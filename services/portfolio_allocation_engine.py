@@ -18,13 +18,16 @@ self-contained row capturing current position state, signal/edge quality,
 risk posture, performance health, an `allocation_score`, and a
 `recommended_action` derived from the precedence rules:
 
-    A. EXIT       if risk_flag contains FORCE_EXIT
-    B. TRIM       if risk_flag contains TRIM_PRIORITY
-    C. BLOCK      if risk_flag contains BLOCK_NEW_BUY
+    A. EXIT       if a positive position carries FORCE_EXIT
+    B. TRIM       if a positive position carries TRIM_PRIORITY
+    C. BLOCK      if a positive position carries BLOCK_NEW_BUY
     D. ADD        if currently held
                   AND effective_stance in {ADD, HOLD}
                   AND proven current-session edge_score is strong
-                  AND risk_flag is OK
+                  AND no held risk block
+                  OR a held BUY clears the configured add-confidence floor
+    Flat historical loss is a soft caution and a sizing input. It does not
+    emit EXIT or BLOCK_NEW_BUY.
     E. OPEN_NEW   if not currently held
                   AND lifecycle_action in {BUY, ADD}
                   AND proven current-session edge_score is strong
@@ -519,6 +522,23 @@ def _load_lifecycle_effective_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]
 # -----------------------------------------------------------
 # Per-row reasoning
 # -----------------------------------------------------------
+def _positive_position(pos: Optional[Dict[str, Any]]) -> bool:
+    """True only for a currently evaluated quantity above zero.
+
+    A position mapping that omits quantity stays held, matching callers that
+    already filtered to open positions and did not repeat the quantity.
+    """
+    if not pos:
+        return False
+    raw = pos.get("qty", pos.get("quantity")) if isinstance(pos, dict) else None
+    if raw is None and isinstance(pos, dict) and "qty" not in pos and "quantity" not in pos:
+        return True
+    try:
+        return float(raw) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _risk_components(risk_flag: str) -> List[str]:
     """Split a pipe-joined risk_flag string into normalized components."""
     if not risk_flag:
@@ -639,43 +659,66 @@ def _decide_action(
     signal: str,
     confidence: Optional[float],
     delta_pct: Optional[float],
+    add_confidence_min: Optional[float] = None,
 ) -> Tuple[str, str]:
     """
     Apply spec precedence A..G and return (action, reason).
 
-    The reason is a short machine-greppable string surfacing which rule
-    fired and the inputs that drove it.
+    FORCE_EXIT, TRIM, and BLOCK_NEW_BUY apply only when the symbol is held.
+    A flat historical-loss flag remains a soft caution and does not veto.
+    The reason is a short machine-greppable string.
     """
-    # A
-    if RISK_FLAG_FORCE_EXIT in risk_components:
+    position_flags = list(risk_components) if is_held else []
+    flat_loss = [flag for flag in risk_components if not is_held]
+    caution = "soft_caution:historical_loss;" if flat_loss else ""
+
+    def _reason(text: str) -> str:
+        if caution and not text.startswith("soft_caution:"):
+            return caution + text
+        return text
+
+    # A–C are position actions. A flat book has nothing to exit or block.
+    if RISK_FLAG_FORCE_EXIT in position_flags:
         return ACTION_EXIT, f"risk_flag_contains={RISK_FLAG_FORCE_EXIT}"
-    # B
-    if RISK_FLAG_TRIM_PRIORITY in risk_components:
+    if RISK_FLAG_TRIM_PRIORITY in position_flags:
         return ACTION_TRIM, f"risk_flag_contains={RISK_FLAG_TRIM_PRIORITY}"
-    # C
-    if RISK_FLAG_BLOCK_NEW_BUY in risk_components:
+    if RISK_FLAG_BLOCK_NEW_BUY in position_flags:
         return ACTION_BLOCK, f"risk_flag_contains={RISK_FLAG_BLOCK_NEW_BUY}"
 
-    risk_ok = len(risk_components) == 0
+    risk_ok = len(position_flags) == 0
     strong_edge = _is_strong_edge(edge_score, sizing_tier)
     eff_stance_u = (effective_stance or "").strip().upper()
     lc_action_u = (lifecycle_action or "").strip().upper()
     signal_u = (signal or "").strip().upper()
-    _ = delta_pct  # RF residual is shadow-only; never gates OPEN_NEW.
+    _ = delta_pct  # RF residual is shadow-only; never gates OPEN_NEW or ADD.
+    if add_confidence_min is None:
+        from services.signal_lifecycle import load_lifecycle_logic_config
+
+        add_floor = float(load_lifecycle_logic_config().add_confidence_min)
+    else:
+        add_floor = float(add_confidence_min)
 
     # D
     if is_held and eff_stance_u in EFFECTIVE_STANCE_ADD_OK and strong_edge and risk_ok:
         return (
             ACTION_ADD,
-            f"held_and_effective_stance={eff_stance_u}_and_strong_edge",
+            _reason(f"held_and_effective_stance={eff_stance_u}_and_strong_edge"),
         )
+    if (
+        is_held
+        and signal_u == "BUY"
+        and risk_ok
+        and confidence is not None
+        and float(confidence) >= add_floor
+    ):
+        return ACTION_ADD, _reason(f"ADD:held_buy_conf>={add_floor}")
 
     # E — OPEN_NEW does not require Random Forest residual > 0.
     conf_ok = (confidence is not None) and (confidence >= MIN_OPEN_NEW_CONFIDENCE)
     if (not is_held) and lc_action_u in LIFECYCLE_ACTION_OPEN_OK and strong_edge and conf_ok:
         return (
             ACTION_OPEN_NEW,
-            (
+            _reason(
                 f"new_and_lifecycle_action={lc_action_u}_and_strong_edge_"
                 f"conf>={MIN_OPEN_NEW_CONFIDENCE}"
             ),
@@ -692,9 +735,13 @@ def _decide_action(
                 why.append("edge_weak")
             if confidence is None or confidence < MIN_OPEN_NEW_CONFIDENCE:
                 why.append(f"conf<{MIN_OPEN_NEW_CONFIDENCE}")
-            return ACTION_WATCH, "positive_signal_but_" + (",".join(why) or "below_threshold")
+            return ACTION_WATCH, _reason(
+                "positive_signal_but_" + (",".join(why) or "below_threshold")
+            )
 
     # G
+    if caution:
+        return ACTION_HOLD, _reason("historical_loss_not_a_position_action")
     return ACTION_HOLD, "no_actionable_rule_matched"
 
 
@@ -738,8 +785,8 @@ def build_recommendations(
         sig = signals.get(sym, {})
         lc = lifecycle_eff.get(sym, {})
 
-        is_held = pos is not None
-        cur_value = float(pos["market_value"]) if pos else 0.0
+        is_held = _positive_position(pos)
+        cur_value = float(pos["market_value"]) if pos and is_held else 0.0
         weight_pct = (cur_value / total_position_value) * 100.0 if total_position_value > 0 else 0.0
 
         # risk_flag precedence: overlay (canonical) > edge (mirrored) > OK.
