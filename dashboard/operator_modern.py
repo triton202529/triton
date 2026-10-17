@@ -18,7 +18,6 @@ from dashboard import operator_ui as oui
 from dashboard.display_labels import (
     display_label,
     display_status,
-    is_raw_identifier,
     money_text,
     quantity_text,
     signed_text,
@@ -445,13 +444,10 @@ def render_overview_page() -> None:
     st.markdown("#### Recent activity")
     try:
         payload = merge_activity_payload(collect_activity_events(root=_root(), since_hours=24.0))
-        events = list(payload.get("events") or [])[:8]
+        events = list(payload.get("events") or [])
     except Exception:
         events = []
-    if events:
-        _render_activity_timeline(events, limit=8, show_evidence=False)
-    else:
-        st.caption("No evidenced events in the last 24 hours.")
+    _render_activity_timeline(events, limit=8, show_evidence=False)
 
     with st.expander("Technical details", expanded=False):
         st.json(
@@ -1032,16 +1028,16 @@ def render_orders_page() -> None:
         )
 
 
-def _activity_tone(event: Mapping[str, Any]) -> str:
+def _activity_tone(line: str, event: Mapping[str, Any]) -> str:
+    text = line.lower()
     sev = str(event.get("severity") or "").upper()
-    title = str(event.get("title") or "").lower()
-    if sev in ("CRITICAL", "ERROR", "FAILED") or "fail" in title or "block" in title:
+    if sev in {"CRITICAL", "BLOCK", "ACTION_REQUIRED"} or "rejected" in text or "fail" in text:
         return "crit"
-    if "fill" in title or sev == "SUCCESS":
+    if "shares filled" in text or text.endswith(" filled"):
         return "ok"
-    if "skip" in title or sev in ("WARN", "WARNING"):
+    if "pending" in text or sev in {"WARN", "WARNING"}:
         return "warn"
-    if "submit" in title:
+    if "submitted" in text:
         return "info"
     return "muted"
 
@@ -1049,47 +1045,86 @@ def _activity_tone(event: Mapping[str, Any]) -> str:
 def _render_activity_timeline(
     events: Sequence[Mapping[str, Any]],
     *,
-    limit: int = 40,
+    limit: Optional[int] = None,
     show_evidence: bool = True,
 ) -> None:
-    grouped: Dict[str, List[Mapping[str, Any]]] = {}
-    for ev in events[:limit]:
-        key = str(
-            ev.get("order_id") or ev.get("cycle_number") or ev.get("occurred_date") or "other"
-        )
-        grouped.setdefault(key, []).append(ev)
-    st.markdown('<div class="triton-timeline">', unsafe_allow_html=True)
-    for group_key, items in grouped.items():
-        label = group_key
-        if is_raw_identifier(group_key):
-            label = f"Group {group_key[:12]}"
-        st.caption(f"{label} · {len(items)}")
-        for ev in items:
-            tone = _activity_tone(ev)
-            title = display_label(ev.get("title") or "Event")
-            when = oui.format_timestamp(ev.get("occurred_at") or ev.get("occurred_date"))
+    from dashboard.activity_clarity import (
+        NO_SYSTEM_ACTIVITY,
+        NO_TRADE_ACTIVITY,
+        activity_technical_details,
+        attach_ledger_structure,
+        format_activity_market_time,
+        operator_line,
+        partition_activity_events,
+    )
+    from dashboard.time_presentation import UNAVAILABLE_LABEL
+    from services.paper_order_ledger import ledger_path, load_events
+
+    try:
+        ledger_rows = load_events(ledger_path(_root()))
+    except Exception:
+        ledger_rows = []
+    views = attach_ledger_structure(events, ledger_rows)
+    trade, system = partition_activity_events(views)
+    if limit is not None:
+        trade = trade[:limit]
+        system = system[:limit]
+
+    def _section(title: str, caption: str, rows: Sequence[Mapping[str, Any]], empty: str) -> None:
+        st.subheader(title)
+        st.caption(caption)
+        if not rows:
+            st.info(empty)
+            return
+        st.markdown('<div class="triton-timeline">', unsafe_allow_html=True)
+        for index, ev in enumerate(rows):
+            section = "trade" if title.startswith("Trade") else "system"
+            body = operator_line(ev, section=section)
+            when = format_activity_market_time(ev.get("occurred_at"))
+            tone = _activity_tone(body, ev)
+            time_html = ""
+            if when != UNAVAILABLE_LABEL:
+                time_html = f'<div class="triton-attention-body">{oui.escape(when)}</div>'
             st.markdown(
                 f'<div class="triton-timeline-item {tone}">'
-                f'<div><strong>{oui.escape(title)}</strong> · {oui.escape(display_status(ev.get("severity")))}</div>'
-                f'<div class="triton-attention-body">{oui.escape(ev.get("message") or "")}</div>'
-                f'<div class="triton-attention-body">{oui.escape(when)}'
-                f' · {oui.escape(display_label(ev.get("category") or ""))}'
-                f' · {oui.escape(str(ev.get("symbol") or ""))}</div>'
+                f"{time_html}"
+                f"<div><strong>{oui.escape(body)}</strong></div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
-        if show_evidence:
-            with st.expander(f"Evidence · {label}", expanded=False):
-                for ev in items:
-                    st.caption(f"Source: {ev.get('source')}")
-                    evidence_path = str(ev.get("evidence_path") or "")
-                    if evidence_path and ":" not in evidence_path[:3] and "\\" not in evidence_path:
-                        st.caption(f"Artifact: {evidence_path}")
-                    st.code(str(ev.get("raw_reference") or ""), language="text")
-    st.markdown("</div>", unsafe_allow_html=True)
+            if show_evidence:
+                details = activity_technical_details(ev)
+                symbol = str(ev.get("symbol") or "").strip().upper()
+                symbol_bit = f" · {symbol}" if symbol else ""
+                evidence_label = f"Technical evidence · {section.title()}{symbol_bit} · {index + 1}"
+                with st.expander(evidence_label, expanded=False):
+                    st.caption(f"UTC: {details.get('occurred_at_utc')}")
+                    st.caption(f"Source: {details.get('source')}")
+                    evidence_path = str(details.get("evidence_path") or "")
+                    if evidence_path:
+                        st.caption(f"Evidence path: {evidence_path}")
+                    st.code(str(details.get("raw_reference") or ""), language="text")
+                    st.json(details)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    _section(
+        "Trade activity",
+        "Orders and trade lifecycle: submitted, pending, filled, cancelled, rejected, "
+        "reconciled, entry, add, trim, exit, and manual exit.",
+        trade,
+        NO_TRADE_ACTIVITY,
+    )
+    _section(
+        "System activity",
+        "Watchdog cycles, continuous-loop starts and completions, heartbeats, freshness "
+        "checks, entry-gate evaluations, governance alerts, and runtime control.",
+        system,
+        NO_SYSTEM_ACTIVITY,
+    )
 
 
 def render_activity_page() -> None:
+    from dashboard.activity_clarity import FILTER_SCOPE_NOTE
     from services.operator_activity_feed import (
         CATEGORIES,
         SEVERITIES,
@@ -1100,7 +1135,11 @@ def render_activity_page() -> None:
 
     oui.inject_operator_theme()
     _isolation_banner()
-    oui.render_page_intro("Activity", "Chronological events from logs and the paper-order ledger.")
+    oui.render_page_intro(
+        "Activity",
+        "Trade activity and system activity, listed separately. "
+        "Logs and the ledger are not rewritten.",
+    )
     cols = st.columns(4)
     with cols[0]:
         hours = st.selectbox("Hours", [6, 24, 72, 168, 720], index=1, key="ui_a_act_hours")
@@ -1126,15 +1165,11 @@ def render_activity_page() -> None:
     events = filter_activity_events(
         payload, category=category, severity=severity, source="ALL", query=query
     )
+    st.caption(FILTER_SCOPE_NOTE)
     st.caption(f"{len(events)} of {payload.get('event_count', 0)} evidenced events.")
-    if not events:
-        oui.render_empty_state(
-            "No events", "Nothing matched these filters. Sources were not invented."
-        )
-        with st.expander("Data sources", expanded=False):
-            st.write(payload.get("sources_used") or [])
-        return
-    _render_activity_timeline(events, limit=60)
+    for warn in payload.get("stale_source_warnings") or []:
+        st.warning(f"Stale source: {warn}")
+    _render_activity_timeline(events, show_evidence=True)
     with st.expander("Data sources", expanded=False):
         st.write(payload.get("sources_used") or [])
 
