@@ -17,6 +17,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from services.exit_source_reporting import ExitSourceIndex, is_exit_side
 from services.market_calendar import NY_TZ
 
 REPORTING_TZ = NY_TZ
@@ -774,6 +775,7 @@ def _build_activity(
                 linked_ids.add(oid)
 
     rows_out: List[Dict[str, Any]] = []
+    exit_sources = ExitSourceIndex.load(root)
     counts = {
         "orders_in_period": 0,
         "filled": 0,
@@ -823,27 +825,33 @@ def _build_activity(
         if is_trade:
             counts["trades"] += 1
 
-        rows_out.append(
-            {
-                "symbol": row.get("symbol") or "UNKNOWN",
-                "side": row.get("side") or "UNKNOWN",
-                "status": status or "UNKNOWN",
-                "requested_qty": None if qty is None else str(qty),
-                "filled_qty": str(filled_qty),
-                "remaining_qty": None if remaining is None else str(remaining),
-                "filled_avg_price": (
-                    None
-                    if _d(row.get("filled_avg_price")) is None
-                    else str(_d(row.get("filled_avg_price")))
-                ),
-                "submitted_at": row.get("submitted_at"),
-                "filled_at": row.get("filled_at"),
-                "order_id": oid or None,
-                "attribution": attribution,
-                "is_trade": is_trade,
-                "sources": [str(orders_path)],
-            }
-        )
+        activity_row: Dict[str, Any] = {
+            "symbol": row.get("symbol") or "UNKNOWN",
+            "side": row.get("side") or "UNKNOWN",
+            "status": status or "UNKNOWN",
+            "requested_qty": None if qty is None else str(qty),
+            "filled_qty": str(filled_qty),
+            "remaining_qty": None if remaining is None else str(remaining),
+            "filled_avg_price": (
+                None
+                if _d(row.get("filled_avg_price")) is None
+                else str(_d(row.get("filled_avg_price")))
+            ),
+            "submitted_at": row.get("submitted_at"),
+            "filled_at": row.get("filled_at"),
+            "order_id": oid or None,
+            "attribution": attribution,
+            "is_trade": is_trade,
+            "sources": [str(orders_path)],
+        }
+        if is_exit_side(activity_row["side"]):
+            activity_row["exit_source"] = exit_sources.classify(
+                broker_order_id=oid,
+                client_order_id=client_id,
+                symbol=str(activity_row["symbol"]),
+                filled_qty=filled_qty,
+            )
+        rows_out.append(activity_row)
 
     # Decision activity (TRITON) — separate category; not counted as trades.
     decisions: List[Dict[str, Any]] = []

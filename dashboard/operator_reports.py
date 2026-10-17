@@ -14,7 +14,7 @@ from typing import Any, Dict, Mapping, Optional
 import streamlit as st
 
 from dashboard.display_labels import display_label, display_status
-from dashboard.operator_table import render_operator_table
+from dashboard.operator_table import prepare_display_rows, render_operator_table
 from services.reconciled_portfolio_reporting import (
     DEFAULT_PERIOD,
     PERIOD_TYPES,
@@ -24,6 +24,29 @@ from services.reconciled_portfolio_reporting import (
     format_money,
     tone_for_report_status,
 )
+
+
+def broker_activity_display_rows(rows: Any) -> list:
+    """Broker-activity grid with an Exit source column. Buys stay unlabeled."""
+    prepared = []
+    for row in rows or []:
+        item = dict(row)
+        if not item.get("exit_source"):
+            item["exit_source"] = "\u2014"
+        keys = [key for key in item if key != "exit_source"]
+        if "attribution" in keys:
+            keys.insert(keys.index("attribution") + 1, "exit_source")
+        else:
+            keys.append("exit_source")
+        prepared.append({key: item[key] for key in keys})
+    displayed = prepare_display_rows(prepared, format_headers=True)
+    renamed = []
+    for row in displayed:
+        item = {}
+        for key, value in row.items():
+            item["Exit source" if key in {"Exit Source", "EXIT Source"} else key] = value
+        renamed.append(item)
+    return renamed
 
 
 def _metric_caption(metric: Mapping[str, Any]) -> str:
@@ -412,7 +435,10 @@ def render_operator_reports_page() -> None:
         st.markdown("**Broker execution activity (recorded under partial coverage)**")
         broker_rows = activity.get("broker_orders") or []
         if broker_rows:
-            render_operator_table(broker_rows, format_headers=True)
+            render_operator_table(
+                broker_activity_display_rows(broker_rows),
+                format_headers=False,
+            )
         else:
             st.caption(
                 activity.get("empty_state_broker")
