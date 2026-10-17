@@ -251,8 +251,11 @@ class AlpacaBroker:
         If neither `whitelist` nor (`cutoff` or `older_than_days`) is provided, does nothing.
 
         Logic:
-          - Cancel if NOT in whitelist, OR submitted BEFORE cutoff/start-of-day-window.
+          - Age filter only: cancel orders submitted before the cutoff. Newer orders stay.
+          - Whitelist only: cancel orders whose symbol is not in the whitelist.
+          - Both: cancel if the symbol is not whitelisted OR the order is older than the cutoff.
           - `older_than_days=0` uses today's 00:00 US/Eastern as cutoff; 1 ⇒ yesterday 00:00 ET, etc.
+          - Orders with an unparseable timestamp are not treated as stale.
 
         Returns a summary list of affected orders (normalized). If dry_run=True, adds {"dry_run": True}.
         """
@@ -310,8 +313,14 @@ class AlpacaBroker:
             keep_by_wl = wl is not None and sym in wl
             too_old = cutoff_dt is not None and ts_naive is not None and ts_naive < cutoff_dt
 
-            # Cancel if not whitelisted OR too old
-            cancel = (wl is None or not keep_by_wl) or too_old
+            # Age-only (no whitelist): cancel only orders submitted before the cutoff.
+            # Treating `wl is None` as "not whitelisted" cancelled every open order,
+            # including ones newer than --older-than-days / --cutoff.
+            if wl is None:
+                cancel = too_old
+            else:
+                # Cancel if not whitelisted OR too old (fresh whitelist names are kept).
+                cancel = (not keep_by_wl) or too_old
             if cancel:
                 victims.append(o)
 
