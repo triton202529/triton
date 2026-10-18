@@ -616,6 +616,14 @@ def _render_start_controls(status_snapshot: dict | None = None) -> None:
     with st.expander("Cooperative shutdown details", expanded=False):
         _render_cooperative_shutdown_status()
 
+    from dashboard.operator_closeout import render_closeout_control
+
+    render_closeout_control(
+        start_busy=start_busy,
+        stop_busy=stop_busy,
+        restart_busy=restart_busy,
+    )
+
     with st.expander("Control acknowledgement evidence", expanded=False):
         stop_ack = st.session_state.get("stop_last_result") or {}
         restart_ack = st.session_state.get("restart_last_result") or {}
