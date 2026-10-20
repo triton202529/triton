@@ -26,7 +26,8 @@ from services.performance_accounting import (
 )
 
 NY_TZ = ZoneInfo("America/New_York")
-CERTIFIED_HEADING = "Latest certified close"
+CERTIFIED_HEADING = "Latest Certified Close"
+PROVISIONAL_HEADING = "Current Provisional Paper Snapshot"
 UNAVAILABLE = "Unavailable"
 DRAWDOWN_UNAVAILABLE = "Unavailable — certified equity history baseline not yet available"
 NON_SESSION_LABEL = "Non-session carry-forward — not a certified close"
@@ -153,7 +154,8 @@ def load_latest_certified_close(
         empty["evidence"] = f"no proven certified close: {detail}"
         return empty
     chosen = max(
-        proven, key=lambda ev: (str(ev.get("session_date")), str(ev.get("event_timestamp")))
+        proven,
+        key=lambda ev: (str(ev.get("session_date")), str(ev.get("event_timestamp"))),
     )
     body = chosen["body"]
     session_date = str(chosen["session_date"])
@@ -173,6 +175,11 @@ def load_latest_certified_close(
         "evidence": f"{ledger.name} session_close:{session_date}",
         "source": ledger.name,
         "close_kind": str(body.get("close_kind") or ""),
+        "as_of_et": (
+            format_et(parsed_close)
+            if (parsed_close := parse_aware_timestamp(str(chosen.get("event_timestamp") or "")))
+            else UNAVAILABLE
+        ),
         "uses_portfolio_history": False,
         "uses_enhanced_portfolio_history": False,
     }
@@ -387,6 +394,7 @@ def render_portfolio_history(view: Mapping[str, Any], st: Any) -> None:
         "inspection only and are not certified performance."
     )
     st.markdown(f"#### {certified['heading']}")
+    st.caption(f"Certified close as of {certified.get('as_of_et') or UNAVAILABLE} ET")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Session date", certified["session_date"])
     c2.metric("Certified cash", certified["cash_display"])
@@ -396,9 +404,11 @@ def render_portfolio_history(view: Mapping[str, Any], st: Any) -> None:
     st.markdown("**Drawdown**")
     st.write(view["drawdown"])
 
-    st.markdown("#### Local snapshot")
+    st.markdown(f"#### {PROVISIONAL_HEADING}")
     st.caption(
-        "Position and open-order counts are from the local snapshot. "
+        f"Provisional snapshot as of {snapshot['timestamp_et']} ET. "
+        "Current cash, market value, equity, holdings, and unrealized P/L stay provisional "
+        "until this session has its own certified close. "
         "They are not combined with the certified close."
     )
     s1, s2 = st.columns(2)

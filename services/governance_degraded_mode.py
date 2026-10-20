@@ -11,7 +11,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,6 +47,21 @@ SAFETY_STATEMENT = (
     "approval. It only preserves visibility and controlled eligibility for paper-only "
     "risk-reducing actions."
 )
+
+
+def _parse_iso(value: str) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _iso_utc() -> str:
@@ -194,7 +209,9 @@ def classify_governance_mode(
         mode = GOVERNANCE_MODE_RED_BLOCKED if not governance_authorized else GOVERNANCE_MODE_GREEN
         top_reason = escalation or awareness or "UNKNOWN"
 
-    risk_increasing_blocked = mode in (GOVERNANCE_MODE_ORANGE_DEGRADED, GOVERNANCE_MODE_RED_BLOCKED)
+    risk_increasing_blocked = (
+        mode in (GOVERNANCE_MODE_ORANGE_DEGRADED, GOVERNANCE_MODE_RED_BLOCKED) or drawdown_detected
+    )
     risk_reducing_paper_allowed = mode == GOVERNANCE_MODE_ORANGE_DEGRADED
 
     return {
@@ -326,6 +343,28 @@ def enrich_execution_readiness(
     return out
 
 
+def entry_blocked_by_active_drawdown(
+    alerts: Sequence[Mapping[str, Any]],
+    decision_time: datetime,
+) -> bool:
+    """Block a risk-increasing entry only when an active drawdown already existed."""
+    if decision_time.tzinfo is None:
+        decision_time = decision_time.replace(tzinfo=timezone.utc)
+    for alert in alerts:
+        if not isinstance(alert, Mapping):
+            continue
+        if str(alert.get("alert_type") or "") != "EXCESS_POSITION_DRAWDOWN":
+            continue
+        if str(alert.get("status") or "ACTIVE").upper() == "RESOLVED":
+            continue
+        first_seen = _parse_iso(str(alert.get("first_seen") or ""))
+        if first_seen is None:
+            continue
+        if first_seen <= decision_time:
+            return True
+    return False
+
+
 def describe_active_entry_blocker(
     readiness_doc: Optional[Mapping[str, Any]] = None,
     decision: Optional[Mapping[str, Any]] = None,
@@ -397,7 +436,13 @@ def classify_paper_entry_readiness_outcome(
     readiness_status = str(readiness_doc.get("readiness_status") or "")
     governance_mode = str(readiness_doc.get("governance_mode") or "")
 
-    operational_blockers = {"data_freshness", "watchdog", "broker", "lifecycle", "signals"}
+    operational_blockers = {
+        "data_freshness",
+        "watchdog",
+        "broker",
+        "lifecycle",
+        "signals",
+    }
     if any(x in failed for x in operational_blockers):
         stale_hint = ""
         if "lifecycle" in failed or "signals" in failed:
@@ -412,7 +457,11 @@ def classify_paper_entry_readiness_outcome(
         "governance" in failed and governance_mode != GOVERNANCE_MODE_ORANGE_DEGRADED
     ):
         if failed == ["governance"]:
-            return "FAIL", f"execution_readiness={readiness_status} (critical governance)", False
+            return (
+                "FAIL",
+                f"execution_readiness={readiness_status} (critical governance)",
+                False,
+            )
         return "FAIL", f"execution_readiness={readiness_status}", False
 
     if governance_mode == GOVERNANCE_MODE_ORANGE_DEGRADED and failed == ["governance"]:

@@ -289,7 +289,12 @@ def _sync_signal_state_with_broker_snapshot(
     }
 
 
-def _normalize_pair(pos_in: str, act_in: str) -> Tuple[str, str, List[Tuple[str, str, str, str]]]:
+def _normalize_pair(
+    pos_in: str,
+    act_in: str,
+    *,
+    broker_held: bool = False,
+) -> Tuple[str, str, List[Tuple[str, str, str, str]]]:
     """
     Normalize a single (position_state, action) pair to a valid pair.
 
@@ -309,6 +314,18 @@ def _normalize_pair(pos_in: str, act_in: str) -> Tuple[str, str, List[Tuple[str,
         changes.append(("lifecycle_action", act_in, "WAIT", "unknown_action"))
         act = "WAIT"
 
+    if broker_held:
+        if pos != "LONG":
+            changes.append(("position_state", pos, "LONG", "broker_held_position"))
+            pos = "LONG"
+        if act in ("", "WAIT"):
+            changes.append(("lifecycle_action", act or act_in, "HOLD", "broker_held_not_wait"))
+            act = "HOLD"
+        elif (pos, act) not in _VALID_PAIRS:
+            changes.append(("lifecycle_action", act, "HOLD", "broker_held_valid_pair"))
+            act = "HOLD"
+        return pos, act, changes
+
     if (pos, act) in _VALID_PAIRS:
         return pos, act, changes
 
@@ -325,7 +342,12 @@ def _normalize_pair(pos_in: str, act_in: str) -> Tuple[str, str, List[Tuple[str,
     return pos, act, changes
 
 
-def _normalize_lifecycle_dataframe(df: pd.DataFrame) -> Tuple[int, int, int]:
+def _normalize_lifecycle_dataframe(
+    df: pd.DataFrame,
+    *,
+    broker_long: Optional[Set[str]] = None,
+    broker_evidence: str = "snapshot",
+) -> Tuple[int, int, int]:
     """
     In-place row-by-row normalization of `df` so every row carries a valid
     (position_state, lifecycle_action) pair. Mirrors `lifecycle_action`
@@ -393,7 +415,18 @@ def _normalize_lifecycle_dataframe(df: pd.DataFrame) -> Tuple[int, int, int]:
             )
             pos_in = "FLAT"
 
-        new_pos, new_act, changes = _normalize_pair(pos_in, act_in)
+        held = broker_long is not None and ticker in broker_long
+        if broker_evidence == "unproven" and pos_in == "FLAT" and act_in in ("ADD", "TRIM", "EXIT"):
+            print(
+                f"[LIFECYCLE_ROW_NORMALIZED] ticker={ticker} field=lifecycle_action "
+                f"old={act_in} new={act_in} reason=fresh_broker_position_required",
+                flush=True,
+            )
+            continue
+        if broker_evidence == "fresh" and held:
+            new_pos, new_act, changes = _normalize_pair(pos_in, act_in, broker_held=True)
+        else:
+            new_pos, new_act, changes = _normalize_pair(pos_in, act_in)
         if pre_changes:
             changes = pre_changes + changes
 
@@ -582,10 +615,37 @@ def _lifecycle_is_stale(signals_path: Path) -> Tuple[bool, str]:
     return False, ""
 
 
+def _lifecycle_position_evidence() -> Tuple[str, Optional[Set[str]]]:
+    """Fresh broker positions outside tests. A failed read does not trust the snapshot."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return "snapshot", None
+    try:
+        from services.broker_alpaca import AlpacaBroker
+
+        broker = AlpacaBroker(mode="paper")
+        rows = broker.get_positions() or []
+    except Exception:
+        return "unproven", None
+    held: Set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = _norm_ticker(row.get("symbol"))
+        try:
+            qty = float(row.get("qty") or row.get("qty_available") or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        if symbol and qty > 0:
+            held.add(symbol)
+    return "fresh", held
+
+
 def _preserve_entry_buys_against_broker_snapshot(
     df: pd.DataFrame,
     *,
     positions_snapshot: Path = POSITIONS_SNAPSHOT,
+    broker_long: Optional[Set[str]] = None,
+    allow_snapshot_flat: bool = True,
 ) -> int:
     """
     Preserve BUY intent for broker-flat symbols before row-pair normalization.
@@ -601,8 +661,14 @@ def _preserve_entry_buys_against_broker_snapshot(
     """
     if df is None or df.empty or "ticker" not in df.columns:
         return 0
+    if not allow_snapshot_flat:
+        return 0
 
-    broker_long = _load_broker_long_tickers(positions_snapshot)
+    broker_long = (
+        set(broker_long)
+        if broker_long is not None
+        else _load_broker_long_tickers(positions_snapshot)
+    )
     action_col = (
         "lifecycle_action"
         if "lifecycle_action" in df.columns
@@ -749,12 +815,18 @@ def _rebuild_lifecycle(src: Path) -> int:
     # Without this, apply_lifecycle() may output LONG + BUY for a fresh
     # entry transition, and the normalizer converts it to HOLD. Broker
     # snapshot truth determines whether the symbol is actually pre-trade FLAT.
+    evidence, fresh_long = _lifecycle_position_evidence()
     _preserve_entry_buys_against_broker_snapshot(
         out_df,
         positions_snapshot=POSITIONS_SNAPSHOT,
+        broker_long=fresh_long,
+        allow_snapshot_flat=evidence == "snapshot",
     )
-
-    rows_norm, fields_changed, remaining_invalid = _normalize_lifecycle_dataframe(out_df)
+    rows_norm, fields_changed, remaining_invalid = _normalize_lifecycle_dataframe(
+        out_df,
+        broker_long=fresh_long,
+        broker_evidence=evidence,
+    )
     if rows_norm or fields_changed:
         print(
             f"[LIFECYCLE_NORMALIZE_SUMMARY] rows_normalized={rows_norm} "

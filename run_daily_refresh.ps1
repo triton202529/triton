@@ -277,6 +277,7 @@ function Bind-FetchArtifact {
         throw "FETCH_ARTIFACT_SESSION_MISSING"
     }
     $session = [string]$sessionProp.Value
+    $script:TargetSession = $session
     $activeSession = (
         & $py -c "from services.market_calendar import last_completed_nyse_session; print(last_completed_nyse_session().isoformat())"
     )
@@ -362,11 +363,14 @@ function Run-PyStep {
     $ended = ConvertTo-UtcRoundTripText (Get-Date)
     Log ("EXIT: " + $Name + " code=" + $code)
     $script:StageReceipts += [ordered]@{
-        name       = $Name
-        started_at = $started
-        ended_at   = $ended
-        exit_code  = [int]$code
-        outcome    = $(if ([int]$code -eq 0) { "ok" } else { "failed" })
+        name            = $Name
+        run_id          = $runId
+        target_session  = [string]$script:TargetSession
+        started_at      = $started
+        ended_at        = $ended
+        exit_code       = [int]$code
+        outcome         = $(if ([int]$code -eq 0) { "ok" } else { "failed" })
+        status          = $(if ([int]$code -eq 0) { "COMPLETE" } else { "FAILED" })
     }
     Write-StageReceipts
     if ([int]$code -ne 0) {

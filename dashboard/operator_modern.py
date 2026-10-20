@@ -137,7 +137,10 @@ def _market_session_card() -> Dict[str, Any]:
 
 def _certified_totals():
     from dashboard.operator_read_cache import load_cached_certified_totals
-    from dashboard.preview_data import expected_accounting_ledger_sha256, isolation_active
+    from dashboard.preview_data import (
+        expected_accounting_ledger_sha256,
+        isolation_active,
+    )
 
     expected = None
     if isolation_active(_repo_root()):
@@ -307,15 +310,32 @@ def _portfolio_metrics(
     from dashboard.performance_presentation import SECOND_CLOSE_NOTE, UNAVAILABLE_LABEL
 
     if certified and certified.get("available"):
+        st.markdown("#### Latest Certified Close")
+        st.caption(f"Certified close as of {certified.get('as_of_et') or UNAVAILABLE_LABEL} ET")
         c1, c2, c3 = st.columns(3)
-        c1.metric("Portfolio value", certified.get("portfolio_value"))
-        c2.metric("Period change", UNAVAILABLE_LABEL)
-        c3.metric("Cash", certified.get("cash"))
+        c1.metric("Certified portfolio value", certified.get("portfolio_value"))
+        c2.metric("Certified period change", UNAVAILABLE_LABEL)
+        c3.metric("Certified cash", certified.get("cash"))
         c4, c5 = st.columns(2)
-        c4.metric("Invested value", certified.get("market_value"))
-        c5.metric("Unrealized P/L", certified.get("unrealized_pl"))
+        c4.metric("Certified market value", certified.get("market_value"))
+        c5.metric("Certified unrealized P/L", UNAVAILABLE_LABEL)
         if certified.get("period_change_note"):
             st.caption(certified["period_change_note"])
+        st.markdown("#### Current Provisional Paper Snapshot")
+        st.caption(
+            "Provisional until this session is certified. "
+            f"Snapshot as of {summary.get('as_of_et') or summary.get('timestamp_et') or UNAVAILABLE_LABEL} ET."
+        )
+        p1, p2, p3 = st.columns(3)
+        p1.metric(
+            "Provisional portfolio value",
+            money_text(summary.get("total_portfolio_value")),
+        )
+        p2.metric("Provisional period change", UNAVAILABLE_LABEL)
+        p3.metric("Provisional cash", money_text(summary.get("cash")))
+        p4, p5 = st.columns(2)
+        p4.metric("Provisional market value", money_text(summary.get("market_value")))
+        p5.metric("Provisional unrealized P/L", signed_text(summary.get("unrealized_pnl")))
         return
     change = period_change(history_rows)
     c1, c2, c3 = st.columns(3)
@@ -384,12 +404,19 @@ def _holdings_table(summary: Mapping[str, Any]) -> None:
     render_operator_table(
         display,
         signed_columns=("Gain / loss",),
-        caption="Gain / loss uses + or − in addition to color. Company names are shown only when the snapshot includes them.",
+        caption=(
+            "Provisional holdings and unrealized P/L. "
+            "Gain / loss uses + or − in addition to color. "
+            "Company names are shown only when the snapshot includes them."
+        ),
     )
 
 
 def render_overview_page() -> None:
-    from services.operator_console_status import build_operator_status, build_portfolio_summary
+    from services.operator_console_status import (
+        build_operator_status,
+        build_portfolio_summary,
+    )
     from services.operator_activity_feed import collect_activity_events
     from services.paper_order_ledger import merge_activity_payload
 
@@ -617,7 +644,11 @@ def _legacy_portfolio_history_section(summary: Mapping[str, Any]) -> None:
             return
         default_idx = periods.index("1M") if "1M" in periods else len(periods) - 1
         period = st.radio(
-            "Period", periods, index=default_idx, horizontal=True, key="ui_a_port_period"
+            "Period",
+            periods,
+            index=default_idx,
+            horizontal=True,
+            key="ui_a_port_period",
         )
         filtered = filter_period(rows, period)
         state = chart_state(filtered)
@@ -627,7 +658,7 @@ def _legacy_portfolio_history_section(summary: Mapping[str, Any]) -> None:
         except Exception:
             st.caption("Interactive chart unavailable — values below remain evidenced.")
             st.line_chart(
-                {str(p["date"]): p["total_value"] for p in filtered} if filtered else {},
+                ({str(p["date"]): p["total_value"] for p in filtered} if filtered else {}),
                 height=280,
             )
         tone = str(state.get("tone") or "unavailable")
@@ -763,7 +794,7 @@ def render_portfolio_page() -> None:
     _isolation_banner()
     oui.render_page_intro(
         "Portfolio",
-        "Current totals from the latest certified accounting close.",
+        "Latest Certified Close is separate from the Current Provisional Paper Snapshot.",
     )
     page_data = load_portfolio_page_data(_root())
     certified = _certified_totals()
@@ -861,7 +892,11 @@ def render_orders_page() -> None:
         isolation_active,
     )
     from services.operator_console_status import build_orders_summary
-    from services.paper_order_ledger import LEDGER_RELATIVE, filter_unified_rows, ledger_path
+    from services.paper_order_ledger import (
+        LEDGER_RELATIVE,
+        filter_unified_rows,
+        ledger_path,
+    )
 
     oui.inject_operator_theme()
     _isolation_banner()
@@ -908,7 +943,16 @@ def render_orders_page() -> None:
     with f4:
         status_f = st.selectbox(
             "Status",
-            ["ALL", "SUBMITTED", "OPEN", "PARTIAL", "FILLED", "REJECTED", "CANCELLED", "EXPIRED"],
+            [
+                "ALL",
+                "SUBMITTED",
+                "OPEN",
+                "PARTIAL",
+                "FILLED",
+                "REJECTED",
+                "CANCELLED",
+                "EXPIRED",
+            ],
             format_func=lambda v: "All" if v == "ALL" else display_status(v),
             key="ui_a_pol_status",
         )
@@ -1228,7 +1272,10 @@ def render_risk_alerts_page() -> None:
         "Risk & Alerts", "Read-only risk posture. Alerts cannot be dismissed here."
     )
     summary = build_risk_alerts_summary(root=_root())
-    st.metric("Capital preservation", display_status(summary.get("capital_preservation_posture")))
+    st.metric(
+        "Capital preservation",
+        display_status(summary.get("capital_preservation_posture")),
+    )
     if summary.get("recommended_operator_response"):
         st.caption(summary["recommended_operator_response"])
     active = summary.get("active_conditions") or []

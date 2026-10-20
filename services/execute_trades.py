@@ -840,7 +840,9 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _parse_operational_composite_score(raw: Any) -> Tuple[Optional[float], Optional[str]]:
+def _parse_operational_composite_score(
+    raw: Any,
+) -> Tuple[Optional[float], Optional[str]]:
     """Parse generate_signals composite `score`.
 
     That score is the current non-RF operational quality: a documented [0, 1]
@@ -876,7 +878,9 @@ def _parse_operational_composite_score(raw: Any) -> Tuple[Optional[float], Optio
     return float(value), None
 
 
-def _operational_quality_binding(lifecycle_path: Optional[Path] = None) -> Dict[str, Any]:
+def _operational_quality_binding(
+    lifecycle_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     path = (
         Path(lifecycle_path)
         if lifecycle_path is not None
@@ -2638,7 +2642,15 @@ def build_execution_plan(
             if not sym:
                 lines.append(
                     PlanLine(
-                        "", "skip", "skipped", "NON_ACTIONABLE_STANCE", "", None, ot, conf, d_pct
+                        "",
+                        "skip",
+                        "skipped",
+                        "NON_ACTIONABLE_STANCE",
+                        "",
+                        None,
+                        ot,
+                        conf,
+                        d_pct,
                     )
                 )
                 bump("NON_ACTIONABLE_STANCE")
@@ -2682,7 +2694,15 @@ def build_execution_plan(
             if conf < min_conf:
                 lines.append(
                     PlanLine(
-                        sym, "skip", "skipped", "LOW_CONFIDENCE", stance, None, ot, conf, d_pct
+                        sym,
+                        "skip",
+                        "skipped",
+                        "LOW_CONFIDENCE",
+                        stance,
+                        None,
+                        ot,
+                        conf,
+                        d_pct,
                     )
                 )
                 bump("LOW_CONFIDENCE")
@@ -2695,7 +2715,15 @@ def build_execution_plan(
             if len(planned) >= max_orders:
                 lines.append(
                     PlanLine(
-                        sym, "skip", "skipped", "MAX_ORDERS_REACHED", stance, None, ot, conf, d_pct
+                        sym,
+                        "skip",
+                        "skipped",
+                        "MAX_ORDERS_REACHED",
+                        stance,
+                        None,
+                        ot,
+                        conf,
+                        d_pct,
                     )
                 )
                 bump("MAX_ORDERS_REACHED")
@@ -2705,7 +2733,13 @@ def build_execution_plan(
             already_long = is_long_broker or is_long_csv
             effective_stance: Optional[str] = stance
             if stance == "BUY" and already_long:
-                print("[DEBUG_ALREADY_LONG_PATH] ticker=", sym, "confidence=", conf, flush=True)
+                print(
+                    "[DEBUG_ALREADY_LONG_PATH] ticker=",
+                    sym,
+                    "confidence=",
+                    conf,
+                    flush=True,
+                )
                 med = batch_entry_conf_median
                 add_threshold = max(0.5, float(med)) if med is not None else 0.5
                 if conf < add_threshold:
@@ -2999,7 +3033,17 @@ def build_execution_plan(
                 skip_q = _quality_skip_reason(sym, row)
                 if skip_q:
                     lines.append(
-                        PlanLine(sym, "skip", "skipped", skip_q, stance, None, ot, conf, d_pct)
+                        PlanLine(
+                            sym,
+                            "skip",
+                            "skipped",
+                            skip_q,
+                            stance,
+                            None,
+                            ot,
+                            conf,
+                            d_pct,
+                        )
                     )
                     bump(skip_q)
                     continue
@@ -3010,7 +3054,17 @@ def build_execution_plan(
                 nq, sz_err = _apply_score_sizing_qty(sym, row, qty, lim, is_buy=True)
                 if sz_err:
                     lines.append(
-                        PlanLine(sym, "skip", "skipped", sz_err, stance, None, ot, conf, d_pct)
+                        PlanLine(
+                            sym,
+                            "skip",
+                            "skipped",
+                            sz_err,
+                            stance,
+                            None,
+                            ot,
+                            conf,
+                            d_pct,
+                        )
                     )
                     bump(sz_err)
                     continue
@@ -3022,7 +3076,7 @@ def build_execution_plan(
                     symbol=sym,
                     side="buy",
                     qty=qty,
-                    order_type="limit" if cfg.get("prefer_limit_orders", True) else "market",
+                    order_type=("limit" if cfg.get("prefer_limit_orders", True) else "market"),
                     time_in_force="day",
                     limit_price=lim if cfg.get("prefer_limit_orders", True) else None,
                     stance=stance,
@@ -3373,7 +3427,7 @@ def build_execution_plan(
                     symbol=sym,
                     side="buy",
                     qty=qty,
-                    order_type="limit" if cfg.get("prefer_limit_orders", True) else "market",
+                    order_type=("limit" if cfg.get("prefer_limit_orders", True) else "market"),
                     time_in_force="day",
                     limit_price=lim if cfg.get("prefer_limit_orders", True) else None,
                     stance=effective_stance,
@@ -3467,7 +3521,17 @@ def build_execution_plan(
                 skip_q = _quality_skip_reason(sym, row)
                 if skip_q:
                     lines.append(
-                        PlanLine(sym, "skip", "skipped", skip_q, stance, None, ot, conf, d_pct)
+                        PlanLine(
+                            sym,
+                            "skip",
+                            "skipped",
+                            skip_q,
+                            stance,
+                            None,
+                            ot,
+                            conf,
+                            d_pct,
+                        )
                     )
                     bump(skip_q)
                     continue
@@ -3478,7 +3542,17 @@ def build_execution_plan(
                 nq, sz_err = _apply_score_sizing_qty(sym, row, q, lim, is_buy=False)
                 if sz_err:
                     lines.append(
-                        PlanLine(sym, "skip", "skipped", sz_err, stance, None, ot, conf, d_pct)
+                        PlanLine(
+                            sym,
+                            "skip",
+                            "skipped",
+                            sz_err,
+                            stance,
+                            None,
+                            ot,
+                            conf,
+                            d_pct,
+                        )
                     )
                     bump(sz_err)
                     continue
@@ -3489,7 +3563,7 @@ def build_execution_plan(
                     symbol=sym,
                     side="sell",
                     qty=q,
-                    order_type="limit" if cfg.get("prefer_limit_orders", True) else "market",
+                    order_type=("limit" if cfg.get("prefer_limit_orders", True) else "market"),
                     time_in_force="day",
                     limit_price=lim if cfg.get("prefer_limit_orders", True) else None,
                     stance=stance,
@@ -3562,7 +3636,17 @@ def build_execution_plan(
                 skip_q = _quality_skip_reason(sym, row)
                 if skip_q:
                     lines.append(
-                        PlanLine(sym, "skip", "skipped", skip_q, stance, None, ot, conf, d_pct)
+                        PlanLine(
+                            sym,
+                            "skip",
+                            "skipped",
+                            skip_q,
+                            stance,
+                            None,
+                            ot,
+                            conf,
+                            d_pct,
+                        )
                     )
                     bump(skip_q)
                     continue
@@ -3573,7 +3657,17 @@ def build_execution_plan(
                 nq, sz_err = _apply_score_sizing_qty(sym, row, q, lim, is_buy=False)
                 if sz_err:
                     lines.append(
-                        PlanLine(sym, "skip", "skipped", sz_err, stance, None, ot, conf, d_pct)
+                        PlanLine(
+                            sym,
+                            "skip",
+                            "skipped",
+                            sz_err,
+                            stance,
+                            None,
+                            ot,
+                            conf,
+                            d_pct,
+                        )
                     )
                     bump(sz_err)
                     continue
@@ -3584,7 +3678,7 @@ def build_execution_plan(
                     symbol=sym,
                     side="sell",
                     qty=q,
-                    order_type="limit" if cfg.get("prefer_limit_orders", True) else "market",
+                    order_type=("limit" if cfg.get("prefer_limit_orders", True) else "market"),
                     time_in_force="day",
                     limit_price=lim if cfg.get("prefer_limit_orders", True) else None,
                     stance=stance,
@@ -3761,7 +3855,11 @@ def _sum_broker_open_qty_for_side(broker: Any, sym: str, side: str) -> Optional[
     if broker is None:
         return None
     try:
-        from services.place_live_orders import build_open_index, list_open_orders, safe_int
+        from services.place_live_orders import (
+            build_open_index,
+            list_open_orders,
+            safe_int,
+        )
 
         idx = build_open_index(list_open_orders(broker) or [])
         total = 0
@@ -3993,7 +4091,7 @@ def write_execution_plan(
                 order_notional=(
                     getattr(pl.planned, "planned_notional", None) if pl.planned else None
                 ),
-                intended_price=getattr(pl.planned, "limit_price", None) if pl.planned else None,
+                intended_price=(getattr(pl.planned, "limit_price", None) if pl.planned else None),
                 submitted_limit_price=(
                     getattr(pl.planned, "limit_price", None) if pl.planned else None
                 ),
@@ -4885,6 +4983,42 @@ def maybe_execute_plan(
         except Exception:
             pass
 
+    from services.market_calendar import regular_session_state
+    from services.session_entry_budget import reserve_entries
+
+    session_state = regular_session_state()
+    budget_session = str(session_state.get("session_date") or "")
+    budget_entries = []
+    for order in eligible:
+        if str(getattr(order, "side", "") or "").lower() != "buy":
+            continue
+        stance = str(getattr(order, "stance", "") or "").upper()
+        action = (
+            "ADD"
+            if stance == "ADD" or "ADD" in str(getattr(order, "decision_tag", "") or "").upper()
+            else "OPEN_NEW"
+        )
+        held_qty = float(getattr(order, "current_position_qty", 0) or 0)
+        budget_entries.append(
+            {
+                "symbol": getattr(order, "symbol", ""),
+                "action": action,
+                "held_at_open": held_qty > 0 and action == "ADD",
+            }
+        )
+    reservation = reserve_entries(
+        ROOT,
+        budget_session,
+        budget_entries,
+        invocation_tag=sess,
+    )
+    if reservation.get("ok") is not True:
+        print(
+            f"[SESSION_ENTRY_BUDGET] status=REFUSED reason={reservation.get('reason')}",
+            flush=True,
+        )
+        return 2, 0, [str(reservation.get("reason") or "session_entry_budget")]
+
     try:
         env = os.environ.copy()
         env["TRITON_EXEC_TRADES_RUN_ID"] = run_id
@@ -5021,7 +5155,10 @@ def preview_planned_buy_symbols(
         session=session_tag,
     )
 
-    entry_eq_stats: Dict[str, int] = {"delayed_penalized": 0, "delayed_entry_skipped": 0}
+    entry_eq_stats: Dict[str, int] = {
+        "delayed_penalized": 0,
+        "delayed_entry_skipped": 0,
+    }
     try:
         from services.execution_quality import (
             apply_execution_quality_filters,
@@ -5113,7 +5250,9 @@ def preview_planned_buy_symbols(
         }
     )
     try:
-        from services.paper_entry_candidate_contract import enrich_planner_preview_metadata
+        from services.paper_entry_candidate_contract import (
+            enrich_planner_preview_metadata,
+        )
 
         enrich_planner_preview_metadata(symbols, meta)
     except Exception:
@@ -5418,7 +5557,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         session=session_tag,
     )
 
-    entry_eq_stats: Dict[str, int] = {"delayed_penalized": 0, "delayed_entry_skipped": 0}
+    entry_eq_stats: Dict[str, int] = {
+        "delayed_penalized": 0,
+        "delayed_entry_skipped": 0,
+    }
     try:
         from services.execution_quality import (
             apply_execution_quality_filters,

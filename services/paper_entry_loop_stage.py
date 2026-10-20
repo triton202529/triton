@@ -368,7 +368,10 @@ def _load_settled_paper_cash(
     now: Optional[datetime] = None,
 ) -> Tuple[Optional[float], Dict[str, Any]]:
     """Settled paper cash. Missing evidence is never returned as zero."""
-    from services.entry_allocation_policy import read_paper_account_readonly, resolve_settled_cash
+    from services.entry_allocation_policy import (
+        read_paper_account_readonly,
+        resolve_settled_cash,
+    )
 
     reader = account_reader if account_reader is not None else read_paper_account_readonly
     return resolve_settled_cash(
@@ -611,6 +614,30 @@ def _evaluate_allocation_entry_row(
     except Exception:
         pass
 
+    try:
+        from services.market_calendar import regular_session_state
+        from services.session_entry_budget import preview_entries
+
+        budget_session = str(regular_session_state().get("session_date") or "")
+        if not budget_session:
+            blocked_reasons.append("SESSION_BUDGET_UNAVAILABLE")
+        else:
+            preview = preview_entries(
+                ROOT,
+                budget_session,
+                [
+                    {
+                        "symbol": sym,
+                        "action": "ADD" if action == "ADD" else "OPEN_NEW",
+                        "held_at_open": action == "ADD" and sym in held,
+                    }
+                ],
+            )
+            if preview.get("ok") is not True:
+                blocked_reasons.append(f"SESSION_BUDGET:{preview.get('reason')}")
+    except Exception:
+        blocked_reasons.append("SESSION_BUDGET_UNREADABLE")
+
     return len(blocked_reasons) == 0, blocked_reasons, risk_flag
 
 
@@ -739,7 +766,9 @@ def _check_allocation_planner_contract(
     final_symbols: List[str],
     preview_meta: Dict[str, Any],
 ) -> Tuple[bool, str, Dict[str, Any]]:
-    from services.paper_entry_candidate_contract import evaluate_allocation_planner_contract
+    from services.paper_entry_candidate_contract import (
+        evaluate_allocation_planner_contract,
+    )
 
     return evaluate_allocation_planner_contract(eligible_symbols, final_symbols, preview_meta)
 
@@ -789,7 +818,9 @@ def _flatten_audit_fields(
             "rejected_entry_symbols": handoff.get("rejected_entry_symbols") or {},
             "source_file_used": handoff.get("source_file_used"),
             "source_file_mtime": handoff.get("source_file_mtime"),
-            "paper_arm_status": "VALID" if paper_arm_valid else classify_paper_arm_confirm_status(),
+            "paper_arm_status": (
+                "VALID" if paper_arm_valid else classify_paper_arm_confirm_status()
+            ),
             "execution_readiness_status": checks.get("execution_readiness_status"),
             "market_open": checks.get("market_open"),
             "open_orders_count": len(open_buy),
@@ -1057,7 +1088,11 @@ def _verify_final_selection_before_execute(
     blocked = _risk_blocked_in_selection(final_symbols)
     if blocked:
         sync_details["risk_blocked_in_final_selection"] = blocked
-        return False, f"FINAL_SELECTION_RISK_OVERLAY_BLOCK:{','.join(blocked)}", sync_details
+        return (
+            False,
+            f"FINAL_SELECTION_RISK_OVERLAY_BLOCK:{','.join(blocked)}",
+            sync_details,
+        )
 
     expected_set = set(sync_details["expected_symbols"])
     final_set = set(final_symbols)
@@ -1271,7 +1306,9 @@ def evaluate_paper_entry_gates(
                     )
             except Exception:
                 pass
-        from services.governance_degraded_mode import classify_paper_entry_readiness_outcome
+        from services.governance_degraded_mode import (
+            classify_paper_entry_readiness_outcome,
+        )
 
         gate_label, gate_reason, gate_safe = classify_paper_entry_readiness_outcome(
             readiness, failed_checks
@@ -1297,6 +1334,43 @@ def evaluate_paper_entry_gates(
         return block("live_execution_permitted must be false", "live_block")
     if not paper_permitted:
         return block("paper_execution_permitted must be true", "paper_authorization")
+
+    from services.governance_degraded_mode import entry_blocked_by_active_drawdown
+    from services.risk_watchdog import (
+        classify_watchdog_liveness,
+        watchdog_liveness_blocks_entries,
+    )
+
+    alert_doc = _load_json(RESULTS / "watchdog_alerts.json")
+    if entry_blocked_by_active_drawdown(
+        list((alert_doc or {}).get("active_alerts") or []),
+        now_utc,
+    ):
+        return block("EXCESS_POSITION_DRAWDOWN", "excess_position_drawdown")
+    watchdog_state = _load_json(LIVE / "watchdog_alert_state.json") or {}
+    lock_path = LIVE / "watchdog_loop.lock"
+    lock_owner_alive = None
+    if lock_path.is_file():
+        import re
+
+        from services.risk_watchdog import _pid_is_alive
+
+        try:
+            lock_text = lock_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            lock_text = ""
+        lock_match = re.search(r"pid=(\d+)", lock_text)
+        lock_owner_alive = _pid_is_alive(lock_match.group(1)) if lock_match else False
+    liveness = classify_watchdog_liveness(
+        cycle_started_at=watchdog_state.get("cycle_started_at"),
+        last_completed_at=watchdog_state.get("last_completed_at"),
+        owner_pid_alive=lock_owner_alive,
+        lock_present=lock_path.is_file(),
+        lock_owner_alive=lock_owner_alive,
+        now=now_utc,
+    )
+    if watchdog_liveness_blocks_entries(liveness):
+        return block(f"watchdog_liveness={liveness}", "watchdog_liveness")
 
     running, cmd_lines = _find_execute_trades_running()
     details["checks"]["execute_trades_execute_running"] = running
@@ -1391,7 +1465,10 @@ def evaluate_paper_entry_gates(
         details["checks"]["entry_rows_eligible_after_pending_sell_filter"] = len(eligible)
 
     if cash is not None and eligible:
-        from services.entry_allocation_policy import entry_limits, select_bounded_entries
+        from services.entry_allocation_policy import (
+            entry_limits,
+            select_bounded_entries,
+        )
 
         limits = entry_limits(CONFIG)
         slots = max(0, int(limits["max_positions"]) - len(_load_held_symbols()))
@@ -1678,9 +1755,15 @@ def run_paper_entry_stage(
         if reason == "market is closed":
             print("[PAPER_ENTRY_EXECUTION_BLOCKED] reason=MARKET_CLOSED", flush=True)
         elif safe:
-            print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_BLOCK)", flush=True)
+            print(
+                f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_BLOCK)",
+                flush=True,
+            )
         elif details.get("degraded_block"):
-            print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_DEGRADED)", flush=True)
+            print(
+                f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason} (SAFE_DEGRADED)",
+                flush=True,
+            )
         else:
             print(f"[PAPER_ENTRY_EXECUTION_BLOCKED] reason={reason}", flush=True)
         _write_stage_audit(audit, market_open=market_open)
@@ -1696,7 +1779,10 @@ def run_paper_entry_stage(
         return 0
 
     if _EXECUTE_INVOKED:
-        print("[PAPER_ENTRY_EXECUTION_BLOCKED] reason=already_invoked_this_process", flush=True)
+        print(
+            "[PAPER_ENTRY_EXECUTION_BLOCKED] reason=already_invoked_this_process",
+            flush=True,
+        )
         return 0
 
     expected = list(details.get("checks", {}).get("eligible_entry_symbols") or [])
@@ -1737,7 +1823,10 @@ def run_paper_entry_stage(
         "--dispatch-contract",
         str(DISPATCH_CONTRACT_PATH),
     ]
-    print("[PAPER_ENTRY_EXECUTION] starting execute_trades paper --execute (dispatch)", flush=True)
+    print(
+        "[PAPER_ENTRY_EXECUTION] starting execute_trades paper --execute (dispatch)",
+        flush=True,
+    )
     if verbose:
         print(f"[PAPER_ENTRY_EXECUTION] CMD: {' '.join(cmd)}", flush=True)
 
@@ -1757,7 +1846,10 @@ def run_paper_entry_stage(
     if not block_reason and rc == 2:
         block_reason = "execute_trades_blocked"
 
-    print(f"[PAPER_ENTRY_EXECUTION] completed exit_code={rc} duration_sec={dur:.1f}", flush=True)
+    print(
+        f"[PAPER_ENTRY_EXECUTION] completed exit_code={rc} duration_sec={dur:.1f}",
+        flush=True,
+    )
     audit["executed"] = True
     audit["execute_exit_code"] = rc
     audit["duration_sec"] = round(dur, 3)
@@ -1773,7 +1865,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Controlled paper entry stage for continuous loop")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument(
-        "--dry-run", action="store_true", help="Evaluate gates only; never call execute_trades"
+        "--dry-run",
+        action="store_true",
+        help="Evaluate gates only; never call execute_trades",
     )
     ap.add_argument("--evaluate-only", action="store_true", help="Alias for --dry-run")
     ap.add_argument(

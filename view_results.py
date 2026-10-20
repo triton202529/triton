@@ -24691,6 +24691,18 @@ def _render_cc_orders_broker_order_evidence() -> None:
 
 
 def main() -> None:
+    from pathlib import Path
+
+    from services.dashboard_cooperative_shutdown import poll_dashboard_shutdown
+    from services.operator_closeout_control import current_process_command, exit_current_dashboard
+
+    command = current_process_command() or "streamlit run view_results.py"
+    poll_dashboard_shutdown(
+        root=Path(__file__).resolve().parent,
+        pid=os.getpid(),
+        command=command,
+        exit_fn=lambda _code: exit_current_dashboard(command=command),
+    )
     from services.runtime_process_detector import open_process_scan_scope
 
     scope = open_process_scan_scope()

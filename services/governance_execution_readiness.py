@@ -129,9 +129,15 @@ def _evaluate_governance_gate(
     if awareness in GOVERNANCE_BLOCK_LEVELS:
         return False, f"Governance awareness blocks action ({awareness})"
     if requires_green and escalation not in GOVERNANCE_PERMIT_ESCALATION:
-        return False, f"Escalation {escalation} does not meet green-governance requirement"
+        return (
+            False,
+            f"Escalation {escalation} does not meet green-governance requirement",
+        )
     if escalation in ("RED", "CRITICAL"):
-        return False, f"Escalation state {escalation} requires review before authorization"
+        return (
+            False,
+            f"Escalation state {escalation} requires review before authorization",
+        )
     return True, "Governance posture permits evaluation"
 
 
@@ -173,7 +179,10 @@ def _evaluate_execution_gate(policy_doc: Dict[str, Any]) -> Tuple[bool, str]:
         return False, "Live execution blocked — live mode not permitted"
 
     if policy_doc.get("automated_trading_permitted") is True and mode != "paper":
-        _log("EXECUTION_GATE_BLOCK", "automated_trading_permitted=true outside paper mode")
+        _log(
+            "EXECUTION_GATE_BLOCK",
+            "automated_trading_permitted=true outside paper mode",
+        )
         return False, "Automated live trading not permitted"
 
     paper_ok = policy_doc.get("paper_execution_enabled") is True
@@ -310,7 +319,13 @@ def _check_data_freshness(
     return True, "Core risk artifacts are fresh"
 
 
-def _check_watchdog_health(watchdog_status: str, active_alerts: List[Any]) -> Tuple[bool, str]:
+def _check_watchdog_health(
+    watchdog_status: str,
+    active_alerts: List[Any],
+    liveness: Optional[str] = None,
+) -> Tuple[bool, str]:
+    if liveness in {"DEAD", "HUNG", "STALE_LOCK"}:
+        return False, f"Watchdog liveness {liveness}"
     stale_types = {str(a.get("alert_type")) for a in active_alerts if isinstance(a, dict)}
     if "STALE_HEARTBEAT" in stale_types:
         return False, "Stale heartbeat alert active"
@@ -470,7 +485,7 @@ def compute_execution_readiness(
     }
     check_details = {
         "governance": auth_doc.get("gate_reasons", {}).get("governance", ""),
-        "approval": "Approved requests present" if approval_ok else "No approved requests",
+        "approval": ("Approved requests present" if approval_ok else "No approved requests"),
         "policy": (
             auth_doc.get("gate_reasons", {}).get("policy", "")
             + (
@@ -519,7 +534,9 @@ def compute_execution_readiness(
             "and all operational checks. Live execution remains blocked."
         ),
     }
-    from services.execution_readiness import finalize_readiness_with_lifecycle_diagnostics
+    from services.execution_readiness import (
+        finalize_readiness_with_lifecycle_diagnostics,
+    )
     from services.governance_degraded_mode import enrich_execution_readiness
 
     doc = finalize_readiness_with_lifecycle_diagnostics(doc, results_dir)

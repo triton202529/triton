@@ -48,7 +48,14 @@ CLOSE = "2026-10-16T20:00:00+00:00"
 
 class Broker:
     def __init__(
-        self, *, orders=None, cash="100.00", equity="150.00", mv="50.00", qty="1", boom=False
+        self,
+        *,
+        orders=None,
+        cash="100.00",
+        equity="150.00",
+        mv="50.00",
+        qty="1",
+        boom=False,
     ):
         self.mode = "paper"
         self.base = "https://paper-api.alpaca.markets"
@@ -123,7 +130,12 @@ def _bars(date="2026-10-16"):
 
 
 def _git():
-    return {"git_identity_valid": True, "index_empty": True, "failure_reason": None, "head": "abc"}
+    return {
+        "git_identity_valid": True,
+        "index_empty": True,
+        "failure_reason": None,
+        "head": "abc",
+    }
 
 
 def _classes(state="NOT_RUNNING"):
@@ -131,7 +143,35 @@ def _classes(state="NOT_RUNNING"):
 
 
 def _refresh(date="2026-10-16"):
-    return {"target_session": date, "passed": True}
+    run_id = f"daily_prediction_refresh_{date.replace('-', '')}_test"
+    stages = [
+        {
+            "name": name,
+            "run_id": run_id,
+            "target_session": date,
+            "exit_code": 0,
+            "outcome": "ok",
+            "status": "COMPLETE",
+        }
+        for name in (
+            "fetch_raw_data",
+            "stale_data_gate",
+            "preprocess",
+            "train_model",
+            "daily_prediction_refresh_validate",
+        )
+    ]
+    return {
+        "schema": "DAILY-REFRESH-COMPLETION-1",
+        "run_id": run_id,
+        "target_session": date,
+        "wrapper_exit_code": 0,
+        "terminal_success": True,
+        "baseline_run_id": run_id,
+        "summary_run_id": run_id,
+        "summary_target_session": date,
+        "stages": stages,
+    }
 
 
 def _run(root, broker, publisher, killer, **overrides):
@@ -156,11 +196,20 @@ def _run(root, broker, publisher, killer, **overrides):
             killer=killer,
             publisher=publisher,
             own_pid=999,
+            daily_refresh_status={
+                "ok": True,
+                "detail": "daily_refresh_complete",
+                "classification": "FULL_DAILYREFRESH_COMPLETE",
+            },
         )
 
     def default_publisher(_root, receipt):
         published.append(receipt["session_date"])
-        return {"writes_performed": True, "payload_hash": "hash-1", "blocked_reason": None}
+        return {
+            "writes_performed": True,
+            "payload_hash": "hash-1",
+            "blocked_reason": None,
+        }
 
     kwargs = dict(
         confirmation_phrase=CONFIRMATION_PHRASE,
@@ -190,7 +239,11 @@ def _run(root, broker, publisher, killer, **overrides):
 def _publisher_box(calls):
     def publisher(_root, receipt):
         calls.append("publish")
-        return {"writes_performed": True, "payload_hash": "hash-1", "blocked_reason": None}
+        return {
+            "writes_performed": True,
+            "payload_hash": "hash-1",
+            "blocked_reason": None,
+        }
 
     return publisher
 
@@ -205,9 +258,12 @@ def test_read_only_broker_has_no_callable_mutation_method():
 
 
 def test_dashboard_stop_is_not_a_force_kill_and_worker_is_not_streamlit():
-    argv = dashboard_stop_argv(15)
-    assert argv == ["taskkill", "/PID", "15"]
-    assert "/F" not in argv
+    try:
+        dashboard_stop_argv(15)
+    except Exception as exc:
+        assert getattr(exc, "reason", "") == "taskkill_success_path_removed"
+    else:
+        raise AssertionError("taskkill success path still callable")
     launched = {}
 
     def popen(argv, **kwargs):
@@ -268,7 +324,7 @@ def test_regular_and_early_close_visit_every_state_and_retry_is_idempotent():
             assert result["orders_replaced"] is False
             assert result["orders_modified"] is False
             assert result["forced_termination_used"] is False
-            assert killed == [42]
+            assert killed == []
             assert calls == ["publish"]
             assert stopped
             assert not any(name in ORDER_MUTATION_METHODS for name in broker_calls)
@@ -382,7 +438,12 @@ def test_broker_read_identity_snapshot_refresh_manual_and_benchmark_failures():
             "manual_exit_gate",
         ),
         (
-            {"benchmarks": {"SPY": {"close": "1", "session_date": "2026-10-16"}, "QQQ": {}}},
+            {
+                "benchmarks": {
+                    "SPY": {"close": "1", "session_date": "2026-10-16"},
+                    "QQQ": {},
+                }
+            },
             STATE_REFUSED,
             "missing_benchmark",
         ),
@@ -496,7 +557,11 @@ def test_duplicate_session_close_never_publishes_a_second_close():
         assert stopped == []
         assert not any(name in ORDER_MUTATION_METHODS for name in broker_calls)
         again, _, _, _ = _run(
-            root, Broker(), _publisher_box(calls), lambda pid: None, duplicate_close=True
+            root,
+            Broker(),
+            _publisher_box(calls),
+            lambda pid: None,
+            duplicate_close=True,
         )
         assert again["replayed"] is True
         assert calls == []
@@ -614,7 +679,11 @@ def test_phrase_mismatch_does_not_write_or_mutate():
         root = Path(tmp)
         broker = Broker()
         result, stopped, _, broker_calls = _run(
-            root, broker, lambda *_args: None, lambda pid: None, confirmation_phrase="stop"
+            root,
+            broker,
+            lambda *_args: None,
+            lambda pid: None,
+            confirmation_phrase="stop",
         )
         assert result["state"] == STATE_REFUSED
         assert result["reason"] == "phrase_mismatch"
@@ -627,7 +696,11 @@ def test_phrase_mismatch_does_not_write_or_mutate():
 def test_live_execution_and_non_paper_broker_are_refused():
     with TemporaryDirectory() as tmp:
         result, stopped, _, _ = _run(
-            Path(tmp), Broker(), lambda *_a: None, lambda pid: None, live_execution_blocked=False
+            Path(tmp),
+            Broker(),
+            lambda *_a: None,
+            lambda pid: None,
+            live_execution_blocked=False,
         )
         assert result["state"] == STATE_REFUSED
         assert result["reason"] == "live_execution_not_blocked"
@@ -650,7 +723,8 @@ def test_console_exposes_the_closeout_control():
     module = (ROOT / "services" / "operator_closeout_control.py").read_text(encoding="utf-8")
     for name in ORDER_MUTATION_METHODS:
         assert f".{name}(" not in module
-    assert "taskkill" in module
+    assert "taskkill_success_path_removed" in module
+    assert '["taskkill"' not in module
     assert "CREATE_NO_WINDOW" in module or "DETACHED_PROCESS" in module
 
 
@@ -674,7 +748,7 @@ def test_worker_skips_publisher_when_ledger_already_has_the_close():
         assert result["state"] == STATE_ALREADY_CERTIFIED
         assert result["writes_performed"] is False
         assert calls == []
-        assert killed == [42]
+        assert killed == []
 
 
 def test_receipt_json_has_no_secret_fields():

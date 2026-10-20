@@ -238,6 +238,8 @@ DEFAULT_DRAWDOWN_PCT = -10.0
 DEFAULT_CONCENTRATION_PCT = 25.0
 DEFAULT_ORDER_AGE_MINUTES = 60
 DEFAULT_STALE_HEARTBEAT_MULTIPLIER = 2.0
+HANG_BUDGET_MINUTES = 15.0
+WATCHDOG_LIVENESS_BLOCK = frozenset({"DEAD", "HUNG", "STALE_LOCK"})
 DEFAULT_HEARTBEAT_GRACE_MINUTES = 55.0
 BROKER_DISCONNECT_CYCLES = 2
 INCIDENT_WINDOW_HOURS = 24
@@ -1257,6 +1259,79 @@ def _overall_watchdog_status(
     return "OK"
 
 
+def _pid_is_alive(pid: Any) -> bool:
+    try:
+        number = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if number <= 0:
+        return False
+    if number == os.getpid():
+        return True
+    if os.name == "nt":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, number)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(number, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _watchdog_lock_liveness(lock_path: Path) -> Tuple[bool, Optional[bool]]:
+    if not lock_path.is_file():
+        return False, None
+    try:
+        text = lock_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True, False
+    import re
+
+    match = re.search(r"pid=(\d+)", text)
+    if not match:
+        return True, False
+    return True, _pid_is_alive(int(match.group(1)))
+
+
+def classify_watchdog_liveness(
+    *,
+    cycle_started_at: Optional[str],
+    last_completed_at: Optional[str],
+    owner_pid_alive: Optional[bool],
+    lock_present: bool,
+    lock_owner_alive: Optional[bool],
+    now: datetime,
+    hang_budget_minutes: float = HANG_BUDGET_MINUTES,
+) -> str:
+    """Separate a completed long pass from a dead, hung, or ownerless lock."""
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if lock_present and lock_owner_alive is False:
+        return "STALE_LOCK"
+    started = _parse_iso(cycle_started_at)
+    completed = _parse_iso(last_completed_at)
+    incomplete = started is not None and (completed is None or completed < started)
+    if incomplete and started is not None:
+        age_min = _minutes_between(started, now)
+        if owner_pid_alive is False:
+            return "DEAD"
+        if age_min > hang_budget_minutes:
+            return "HUNG"
+        return "IN_PROGRESS"
+    if lock_present and owner_pid_alive is False:
+        return "DEAD"
+    return "OK"
+
+
+def watchdog_liveness_blocks_entries(classification: str) -> bool:
+    return str(classification or "") in WATCHDOG_LIVENESS_BLOCK
+
+
 def _load_previous_heartbeat_ts() -> Optional[str]:
     prev = _read_json(STATUS_PATH)
     hb = prev.get("heartbeat") if isinstance(prev.get("heartbeat"), dict) else {}
@@ -1443,13 +1518,34 @@ class WatchdogAlertEngine:
         self._sync_type("BROKER_DISCONNECTED", {aid: alert})
         self.state["broker_disconnect_first_seen"] = first_seen
 
-    def evaluate_stale_heartbeat(self, previous_hb_ts: Optional[str]) -> None:
+    def evaluate_stale_heartbeat(
+        self,
+        previous_hb_ts: Optional[str],
+        *,
+        liveness: Optional[str] = None,
+    ) -> None:
         grace_until = _parse_iso(self.state.get("heartbeat_grace_until"))
         if grace_until is not None and self.now < grace_until:
             self._sync_type("STALE_HEARTBEAT", {})
             return
+        if liveness is not None:
+            desired: Dict[str, Dict[str, Any]] = {}
+            if liveness in WATCHDOG_LIVENESS_BLOCK:
+                aid = _alert_key("STALE_HEARTBEAT")
+                first_seen = self.active.get(aid, {}).get("first_seen", self.ts)
+                desired[aid] = _new_alert(
+                    "STALE_HEARTBEAT",
+                    "HIGH",
+                    first_seen,
+                    details={
+                        "liveness": liveness,
+                        "threshold_minutes": HANG_BUDGET_MINUTES,
+                    },
+                )
+            self._sync_type("STALE_HEARTBEAT", desired)
+            return
 
-        desired: Dict[str, Dict[str, Any]] = {}
+        desired = {}
         prev_dt = _parse_iso(previous_hb_ts)
         if prev_dt is None:
             self._sync_type("STALE_HEARTBEAT", {})
@@ -1621,12 +1717,30 @@ def run_watchdog(
         stale_heartbeat_minutes=stale_minutes,
     )
     engine.evaluate_broker_disconnect(broker_connected)
-    engine.evaluate_stale_heartbeat(previous_hb_ts)
+    previous_state = _read_json(STATE_PATH)
+    lock_present, lock_owner_alive = _watchdog_lock_liveness(LIVE_DIR / "watchdog_loop.lock")
+    owner_pid = previous_state.get("cycle_owner_pid")
+    owner_alive = True if owner_pid in (None, os.getpid()) else _pid_is_alive(owner_pid)
+    liveness = classify_watchdog_liveness(
+        cycle_started_at=previous_state.get("cycle_started_at"),
+        last_completed_at=previous_state.get("last_completed_at"),
+        owner_pid_alive=owner_alive,
+        lock_present=lock_present,
+        lock_owner_alive=lock_owner_alive,
+        now=_utc_now(),
+    )
+    started_state = dict(previous_state)
+    started_state["cycle_started_at"] = ts
+    started_state["cycle_owner_pid"] = os.getpid()
+    _atomic_write_json(started_state, STATE_PATH)
+    engine.evaluate_stale_heartbeat(previous_hb_ts, liveness=liveness)
     if broker_connected and not positions_error:
         engine.evaluate_drawdown(positions)
         engine.evaluate_concentration(positions)
     if broker_connected and not orders_error:
         engine.evaluate_order_aging(open_orders)
+    engine.state["cycle_started_at"] = ts
+    engine.state["cycle_owner_pid"] = os.getpid()
     alerts_doc = engine.persist()
     active_alerts = list(alerts_doc.get("active_alerts") or [])
     incident_intel = alerts_doc.get("incident_intelligence") or {}
@@ -1688,7 +1802,9 @@ def run_watchdog(
     queue_doc = activation["human_approval_queue"]
     policy_doc = activation["protective_action_policy"]
 
-    from services.governance_execution_readiness import persist_governance_execution_readiness
+    from services.governance_execution_readiness import (
+        persist_governance_execution_readiness,
+    )
 
     governance_exec = persist_governance_execution_readiness(
         results_dir=RESULTS_DIR,
@@ -1713,7 +1829,9 @@ def run_watchdog(
     )
     trials_doc = governance_exec["protective_action_trials"]
 
-    from services.capital_preservation_evaluation import persist_capital_preservation_evaluation
+    from services.capital_preservation_evaluation import (
+        persist_capital_preservation_evaluation,
+    )
 
     preservation_eval = persist_capital_preservation_evaluation(
         results_dir=RESULTS_DIR,
@@ -2262,6 +2380,11 @@ def run_watchdog(
     }
 
     _atomic_write_json(summary, STATUS_PATH)
+    completed_state = _read_json(STATE_PATH)
+    completed_state["cycle_started_at"] = ts
+    completed_state["cycle_owner_pid"] = os.getpid()
+    completed_state["last_completed_at"] = _iso_utc()
+    _atomic_write_json(completed_state, STATE_PATH)
 
     broker_log = "OK" if broker_connected else "FAIL"
     log_lines = [

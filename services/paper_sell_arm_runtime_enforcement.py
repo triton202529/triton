@@ -185,7 +185,11 @@ def validate_runtime_sell_authority(
                 consumption=consumption if isinstance(consumption, dict) else None,
             )
             if kind != "ok":
-                return False, mismatch_reason, {**details, "sqlite_json_consistency": kind}
+                return (
+                    False,
+                    mismatch_reason,
+                    {**details, "sqlite_json_consistency": kind},
+                )
             ok, reason, hdetails = validate_paper_sell_arm_authority(
                 sqlite_doc, now=now, consumption=None
             )
@@ -1546,47 +1550,13 @@ def build_pre_plan_planned_orders(
         stored_n = item.get("max_notional")
         runtime_qty, clip_reason = _downward_runtime_qty(max_qty, stored_n, price)
         if runtime_qty <= 0:
-            client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
-            planned.append(
-                PlannedOrder(
-                    symbol=sym,
-                    side="sell",
-                    qty=0,
-                    order_type="limit",
-                    time_in_force="day",
-                    limit_price=price,
-                    ref_price=price,
-                    client_order_id=client_order_id,
-                    discipline_allowed=True,
-                )
-            )
-            setattr(planned[-1], "management_action", action)
-            setattr(planned[-1], "authorized_qty", max_qty)
-            setattr(planned[-1], "clip_reason", clip_reason)
-            continue
+            return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
         notional = money_round(float(runtime_qty) * price)
         cap_n = per_notional_cap.get(sym)
         if cap_n is not None and notional > money_round(cap_n) + 1e-9:
             runtime_qty, clip_reason = _downward_runtime_qty(runtime_qty, cap_n, price)
             if runtime_qty <= 0:
-                client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
-                planned.append(
-                    PlannedOrder(
-                        symbol=sym,
-                        side="sell",
-                        qty=0,
-                        order_type="limit",
-                        time_in_force="day",
-                        limit_price=price,
-                        ref_price=price,
-                        client_order_id=client_order_id,
-                        discipline_allowed=True,
-                    )
-                )
-                setattr(planned[-1], "management_action", action)
-                setattr(planned[-1], "authorized_qty", max_qty)
-                setattr(planned[-1], "clip_reason", clip_reason)
-                continue
+                return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
             notional = money_round(float(runtime_qty) * price)
         remaining = money_round(float(batch_ceiling) - float(total_notional))
         if remaining < 0:
@@ -1596,25 +1566,7 @@ def build_pre_plan_planned_orders(
             if qty_vs_rem < runtime_qty:
                 runtime_qty = qty_vs_rem
                 if runtime_qty <= 0:
-                    clip_reason = "clipped_to_zero_vs_remaining_batch_cap"
-                    client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
-                    planned.append(
-                        PlannedOrder(
-                            symbol=sym,
-                            side="sell",
-                            qty=0,
-                            order_type="limit",
-                            time_in_force="day",
-                            limit_price=price,
-                            ref_price=price,
-                            client_order_id=client_order_id,
-                            discipline_allowed=True,
-                        )
-                    )
-                    setattr(planned[-1], "management_action", action)
-                    setattr(planned[-1], "authorized_qty", max_qty)
-                    setattr(planned[-1], "clip_reason", clip_reason)
-                    continue
+                    return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
                 clip_reason = "downward_clip_vs_remaining_batch_cap"
                 notional = money_round(float(runtime_qty) * price)
         if notional > APPROVAL_CLI_CAP + 1e-6:
@@ -1639,7 +1591,7 @@ def build_pre_plan_planned_orders(
         total_notional = money_round(total_notional + notional)
 
     if not any(float(getattr(p, "qty", 0) or 0) > 0 for p in planned):
-        return False, "no_executable_authorized_quantity", ()
+        return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
     stored_total = authority.get("total_batch_max_notional")
     if stored_total is not None and total_notional > money_round(float(stored_total)) + 1e-9:
         return False, "notional_expansion_vs_authorized_slice_total", ()
@@ -2093,7 +2045,7 @@ def begin_paper_sell_dispatch(
                         "backend": "sqlite",
                         "plan_hash": authority.get("plan_hash"),
                         "symbols": intent["symbols"],
-                        "clip_audit": list(clip_audit) if clip_audit is not None else None,
+                        "clip_audit": (list(clip_audit) if clip_audit is not None else None),
                         "preserve_historical_intent": preserve_historical_intent,
                     },
                 )
@@ -2155,7 +2107,7 @@ def begin_paper_sell_dispatch(
                         "dispatch_intent_id": intent_id,
                         "plan_hash": authority.get("plan_hash"),
                         "symbols": intent["symbols"],
-                        "clip_audit": list(clip_audit) if clip_audit is not None else None,
+                        "clip_audit": (list(clip_audit) if clip_audit is not None else None),
                         "preserve_historical_intent": preserve_historical_intent,
                     },
                 )

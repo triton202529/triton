@@ -25,7 +25,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo
 
-from services.operator_cooperative_shutdown import atomic_write_json, is_guard_active, read_json
+from services.operator_cooperative_shutdown import (
+    atomic_write_json,
+    is_guard_active,
+    read_json,
+)
 from services.operator_runtime_classifier import UNSAFE_STATES
 from services.performance_evidence_collector import (
     CONFIRM_SESSION_CLOSE,
@@ -277,8 +281,8 @@ def active_closeout(
 
 
 def dashboard_stop_argv(pid: int) -> List[str]:
-    """Graceful stop of one reviewed dashboard PID. No /F flag."""
-    return ["taskkill", "/PID", str(int(pid))]
+    """Taskkill is not a closeout success path."""
+    raise CloseoutError("taskkill_success_path_removed", {"pid": int(pid)})
 
 
 def classify_dashboard_processes(
@@ -416,26 +420,14 @@ def _daily_refresh_status(
     receipt_doc: Optional[Mapping[str, Any]] = None,
     refresh_running: bool = False,
 ) -> Dict[str, Any]:
-    if receipt_doc is None:
-        path = Path(root) / "data" / "results" / "daily_refresh_fetch_receipt.json"
-        receipt_doc = read_json(path) if path.is_file() else {}
-    lock_present = (Path(root) / "data" / "live" / "daily_refresh.lock").is_file() or (
-        Path(root) / "data" / "daily_refresh.lock"
-    ).is_file()
-    target = str((receipt_doc or {}).get("target_session") or "")
-    passed = (receipt_doc or {}).get("passed") is True and not (receipt_doc or {}).get("failure")
-    ok = passed and target == session_date and not lock_present and not refresh_running
-    if refresh_running or lock_present:
-        detail = "daily_refresh_still_running"
-    elif not receipt_doc:
-        detail = "daily_refresh_receipt_missing"
-    elif target != session_date:
-        detail = "daily_refresh_session_mismatch"
-    elif not passed:
-        detail = "daily_refresh_not_passed"
-    else:
-        detail = "daily_refresh_complete"
-    return {"ok": ok, "detail": detail, "target_session": target}
+    from services.daily_refresh_completion import evaluate_daily_refresh_completion
+
+    return evaluate_daily_refresh_completion(
+        root,
+        session_date,
+        receipt_doc=receipt_doc,
+        refresh_running=refresh_running,
+    )
 
 
 def _git_rejection_is_only_deferred_store(git_identity: Mapping[str, Any]) -> bool:
@@ -444,7 +436,10 @@ def _git_rejection_is_only_deferred_store(git_identity: Mapping[str, Any]) -> bo
         return False
     if git_identity.get("tracked_worktree_safe") is False:
         return False
-    if git_identity.get("failure_reason") not in (None, "git_worktree_artifact_unexplained"):
+    if git_identity.get("failure_reason") not in (
+        None,
+        "git_worktree_artifact_unexplained",
+    ):
         return False
     rejected = list(git_identity.get("rejected_paths") or [])
     if len(rejected) != 1:
@@ -480,7 +475,10 @@ def manual_exit_database_holders(db_path: Path) -> List[Dict[str, Any]]:
         raise CloseoutError("manual_exit_sidecar_handle_unreadable") from exc
 
     class _FileTime(ctypes.Structure):
-        _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+        _fields_ = [
+            ("dwLowDateTime", wintypes.DWORD),
+            ("dwHighDateTime", wintypes.DWORD),
+        ]
 
     class _Process(ctypes.Structure):
         _fields_ = [("dwProcessId", wintypes.DWORD), ("ProcessStartTime", _FileTime)]
@@ -532,7 +530,11 @@ def manual_exit_database_holders(db_path: Path) -> List[Dict[str, Any]]:
         get_list.restype = wintypes.DWORD
         error_more_data = 234
         first = get_list(
-            session, ctypes.byref(needed), ctypes.byref(count), None, ctypes.byref(reason)
+            session,
+            ctypes.byref(needed),
+            ctypes.byref(count),
+            None,
+            ctypes.byref(reason),
         )
         if first not in (0, error_more_data):
             raise CloseoutError("manual_exit_sidecar_handle_unreadable")
@@ -541,12 +543,19 @@ def manual_exit_database_holders(db_path: Path) -> List[Dict[str, Any]]:
         info = (_Info * needed.value)()
         count = wintypes.UINT(needed.value)
         second = get_list(
-            session, ctypes.byref(needed), ctypes.byref(count), info, ctypes.byref(reason)
+            session,
+            ctypes.byref(needed),
+            ctypes.byref(count),
+            info,
+            ctypes.byref(reason),
         )
         if second != 0:
             raise CloseoutError("manual_exit_sidecar_handle_unreadable")
         return [
-            {"pid": int(info[index].Process.dwProcessId), "app": str(info[index].strAppName)}
+            {
+                "pid": int(info[index].Process.dwProcessId),
+                "app": str(info[index].strAppName),
+            }
             for index in range(count.value)
         ]
     finally:
@@ -664,7 +673,7 @@ def evaluate_eligibility(
         _condition(
             "no_active_closeout",
             not other_active and not same_active,
-            "clear" if not other_active and not same_active else "closeout_already_active",
+            ("clear" if not other_active and not same_active else "closeout_already_active"),
         )
     )
     conditions.append(
@@ -786,7 +795,9 @@ def evaluate_eligibility(
     if manual_gate is None:
         store = Path(root) / MANUAL_EXIT_STORE_RELATIVE
         if store.is_dir():
-            from services.manual_portfolio_exit import classify_manual_exit_close_preflight
+            from services.manual_portfolio_exit import (
+                classify_manual_exit_close_preflight,
+            )
 
             manual_gate = classify_manual_exit_close_preflight(store)
         else:
@@ -803,7 +814,9 @@ def evaluate_eligibility(
     manual_ok = manual_gate.get("ok") is True
     conditions.append(
         _condition(
-            "manual_exit_gate", manual_ok, str(manual_gate.get("reason") or "manual_exit_gate")
+            "manual_exit_gate",
+            manual_ok,
+            str(manual_gate.get("reason") or "manual_exit_gate"),
         )
     )
     if terminal is None and not manual_ok:
@@ -836,7 +849,11 @@ def evaluate_eligibility(
 
     fresh_ok = freshness_idle and not freshness_lock_present
     conditions.append(
-        _condition("freshness_idle", fresh_ok, "idle" if fresh_ok else "freshness_writer_active")
+        _condition(
+            "freshness_idle",
+            fresh_ok,
+            "idle" if fresh_ok else "freshness_writer_active",
+        )
     )
     if terminal is None and not fresh_ok:
         terminal, terminal_reason = STATE_REFUSED, "freshness_writer_active"
@@ -1125,7 +1142,12 @@ def launch_detached_worker(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    return {"ok": True, "pid": getattr(proc, "pid", None), "argv": argv, "creationflags": flags}
+    return {
+        "ok": True,
+        "pid": getattr(proc, "pid", None),
+        "argv": argv,
+        "creationflags": flags,
+    }
 
 
 def stop_dashboard_last(
@@ -1133,20 +1155,33 @@ def stop_dashboard_last(
     *,
     killer: Callable[[int], None],
     own_pid: Optional[int] = None,
+    root: Optional[Path] = None,
+    session_date: str = "",
 ) -> Dict[str, Any]:
+    """Request a dashboard-owned shutdown. ``killer`` is ignored and must not force-stop."""
+    del killer
     plan = classify_dashboard_processes(processes, own_pid=own_pid)
     if not plan["ok"]:
         return {"ok": False, "reason": "unsafe_dashboard_target", "plan": plan}
-    for pid in plan["dashboard_pids"]:
-        argv = dashboard_stop_argv(int(pid))
-        if "/F" in argv or "/f" in argv:
-            return {"ok": False, "reason": "force_flag_refused", "plan": plan}
-        killer(int(pid))
+    request = None
+    if root is not None and plan["dashboard_pids"]:
+        from services.dashboard_cooperative_shutdown import request_dashboard_shutdown
+
+        request = request_dashboard_shutdown(
+            root,
+            expected_pid=int(plan["dashboard_pids"][0]),
+            port=8501,
+            session_date=session_date,
+        )
+        if request.get("ok") is not True:
+            return {"ok": False, "reason": str(request.get("reason")), "plan": plan}
     return {
         "ok": True,
-        "reason": "dashboard_stop_requested",
+        "reason": "dashboard_shutdown_requested",
         "plan": plan,
         "pids": plan["dashboard_pids"],
+        "request": request,
+        "force_flag_used": False,
     }
 
 
@@ -1163,7 +1198,10 @@ def _finalize_manual_exit_sidecars(
     store = Path(root) / MANUAL_EXIT_STORE_RELATIVE
     if not store.is_dir():
         return None
-    from services.manual_portfolio_exit import STORE_DB_NAME, evaluate_manual_exit_close_gate
+    from services.manual_portfolio_exit import (
+        STORE_DB_NAME,
+        evaluate_manual_exit_close_gate,
+    )
 
     db_path = store / STORE_DB_NAME
     wal = Path(str(db_path) + "-wal")
@@ -1179,7 +1217,10 @@ def _finalize_manual_exit_sidecars(
         if holders:
             receipt["sidecar_holders"] = holders
             return "manual_exit_sidecar_handle_held"
-        from services.paper_sell_arm_store import PaperSellArmStoreError, close_manual_exit_sqlite
+        from services.paper_sell_arm_store import (
+            PaperSellArmStoreError,
+            close_manual_exit_sqlite,
+        )
 
         try:
             closed = dict(close_manual_exit_sqlite(db_path))
@@ -1202,7 +1243,10 @@ def _finalize_manual_exit_sidecars(
     elif wal.exists() or shm.exists():
         return "manual_exit_sidecar_unexplained"
     gate = evaluate_manual_exit_close_gate(store)
-    receipt["manual_exit_recheck"] = {"ok": gate.get("ok"), "reason": gate.get("reason")}
+    receipt["manual_exit_recheck"] = {
+        "ok": gate.get("ok"),
+        "reason": gate.get("reason"),
+    }
     if gate.get("ok") is not True or gate.get("reason") != "manual_exit_store_consistent":
         return "manual_exit_gate"
     return None
@@ -1219,6 +1263,7 @@ def run_publishing_worker(
     publisher: Callable[[Path, Mapping[str, Any]], Mapping[str, Any]],
     own_pid: Optional[int] = None,
     holder_probe: Optional[Callable[[Path], Sequence[Mapping[str, Any]]]] = None,
+    daily_refresh_status: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     receipt = load_receipt(receipt_path)
     if receipt.get("state") in COMPLETED_STATES:
@@ -1231,10 +1276,36 @@ def run_publishing_worker(
             STATE_PUBLICATION_FAILED,
             "not_publishing",
         )
-    stopped = stop_dashboard_last(processes, killer=killer, own_pid=own_pid)
-    if not stopped.get("ok"):
-        return _fail(receipt_path, receipt, STATE_STREAMLIT_STOP_FAILED, str(stopped.get("reason")))
     runtime = dict(runtime_inspector(root))
+    dashboard_up = (
+        runtime.get("streamlit_stopped") is not True or runtime.get("ports_closed") is not True
+    )
+    if dashboard_up:
+        stopped = stop_dashboard_last(
+            processes,
+            killer=killer,
+            own_pid=own_pid,
+            root=root,
+            session_date=str(receipt.get("session_date") or ""),
+        )
+        if not stopped.get("ok"):
+            return _fail(
+                receipt_path,
+                receipt,
+                STATE_STREAMLIT_STOP_FAILED,
+                str(stopped.get("reason")),
+            )
+        if stopped.get("pids"):
+            from services.dashboard_cooperative_shutdown import ack_matches_request
+
+            if not ack_matches_request(root):
+                return _fail(
+                    receipt_path,
+                    receipt,
+                    STATE_STREAMLIT_STOP_FAILED,
+                    "dashboard_shutdown_unacknowledged",
+                )
+        runtime = dict(runtime_inspector(root))
     ports_closed = runtime.get("ports_closed") is True
     dashboard_gone = runtime.get("streamlit_stopped") is True
     loops_gone = runtime.get("runtime_stopped") is True and runtime.get("watchdog_stopped") is True
@@ -1246,7 +1317,10 @@ def run_publishing_worker(
         and not runtime.get("freshness_lock_present")
     ):
         return _fail(
-            receipt_path, receipt, STATE_STREAMLIT_STOP_FAILED, "dashboard_or_ports_still_present"
+            receipt_path,
+            receipt,
+            STATE_STREAMLIT_STOP_FAILED,
+            "dashboard_or_ports_still_present",
         )
     probe = holder_probe or manual_exit_database_holders
     sidecar_reason = _finalize_manual_exit_sidecars(root, receipt, probe)
@@ -1258,6 +1332,19 @@ def run_publishing_worker(
         or git_identity.get("index_empty") is not True
     ):
         return _fail(receipt_path, receipt, STATE_PUBLICATION_FAILED, "git_identity")
+    if daily_refresh_status is None:
+        from services.daily_refresh_completion import evaluate_daily_refresh_completion
+
+        daily_refresh_status = evaluate_daily_refresh_completion(
+            root, str(receipt.get("session_date") or "")
+        )
+    if daily_refresh_status.get("ok") is not True:
+        return _fail(
+            receipt_path,
+            receipt,
+            STATE_PUBLICATION_FAILED,
+            str(daily_refresh_status.get("detail") or "FETCH_ONLY_INCOMPLETE"),
+        )
     events_path = Path(root) / "data" / "results" / "performance_accounting_events.jsonl"
     if ledger_has_session_close(events_path, str(receipt.get("session_date"))):
         _advance(receipt, STATE_ALREADY_CERTIFIED, reason="duplicate_session_close")
@@ -1390,7 +1477,7 @@ def _cli(argv: Sequence[str]) -> int:
         return rows
 
     def _killer(pid: int) -> None:
-        subprocess.run(dashboard_stop_argv(pid), check=False, timeout=15)
+        raise CloseoutError("taskkill_success_path_removed", {"pid": int(pid)})
 
     run_publishing_worker(
         root=root,
