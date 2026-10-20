@@ -6,7 +6,9 @@ worker to stop the dashboard and call the certified-close publisher.
 
 This module never submits, cancels, replaces, or otherwise modifies a broker
 order. It does not delete or repair runtime locks and it does not force-kill
-a TRITON loop.
+a TRITON loop. The detached worker may checkpoint the manual-exit database
+through ``close_manual_exit_sqlite`` only after Streamlit has stopped, and
+only when preflight deferred that database's residual WAL and SHM.
 """
 
 from __future__ import annotations
@@ -101,6 +103,7 @@ LOOP_MARKERS = (
     "run_data_freshness_refresh.ps1",
 )
 READ_ONLY_BROKER_METHODS = ("get_account", "get_positions", "get_open_orders")
+MANUAL_EXIT_STORE_RELATIVE = "data/governance/manual_portfolio_exit"
 
 
 class CloseoutError(Exception):
@@ -435,6 +438,124 @@ def _daily_refresh_status(
     return {"ok": ok, "detail": detail, "target_session": target}
 
 
+def _git_rejection_is_only_deferred_store(git_identity: Mapping[str, Any]) -> bool:
+    """True when publication identity failed only on the manual-exit directory."""
+    if git_identity.get("index_empty") is not True:
+        return False
+    if git_identity.get("tracked_worktree_safe") is False:
+        return False
+    if git_identity.get("failure_reason") not in (None, "git_worktree_artifact_unexplained"):
+        return False
+    rejected = list(git_identity.get("rejected_paths") or [])
+    if len(rejected) != 1:
+        return False
+    row = rejected[0]
+    path = str(row.get("path") or "").replace("\\", "/").rstrip("/")
+    if path != MANUAL_EXIT_STORE_RELATIVE:
+        return False
+    reason = str(row.get("reason") or "git_worktree_artifact_unexplained")
+    return reason == "git_worktree_artifact_unexplained"
+
+
+def manual_exit_database_holders(db_path: Path) -> List[Dict[str, Any]]:
+    """Return processes holding this database, its WAL, or its SHM.
+
+    An unreadable handle check fails closed. This function does not stop a
+    process or delete a file.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    candidates = [
+        Path(db_path),
+        Path(str(db_path) + "-wal"),
+        Path(str(db_path) + "-shm"),
+    ]
+    existing = [str(path) for path in candidates if path.exists()]
+    if not existing:
+        return []
+    try:
+        library = ctypes.WinDLL("RstrtMgr")
+    except OSError as exc:
+        raise CloseoutError("manual_exit_sidecar_handle_unreadable") from exc
+
+    class _FileTime(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+    class _Process(ctypes.Structure):
+        _fields_ = [("dwProcessId", wintypes.DWORD), ("ProcessStartTime", _FileTime)]
+
+    class _Info(ctypes.Structure):
+        _fields_ = [
+            ("Process", _Process),
+            ("strAppName", wintypes.WCHAR * 256),
+            ("strServiceShortName", wintypes.WCHAR * 64),
+            ("ApplicationType", wintypes.DWORD),
+            ("AppStatus", wintypes.ULONG),
+            ("TSSessionId", wintypes.DWORD),
+            ("bRestartable", wintypes.BOOL),
+        ]
+
+    session = wintypes.DWORD()
+    key = ctypes.create_unicode_buffer(33)
+    start = library.RmStartSession
+    start.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD, ctypes.c_wchar_p]
+    start.restype = wintypes.DWORD
+    if start(ctypes.byref(session), 0, key) != 0:
+        raise CloseoutError("manual_exit_sidecar_handle_unreadable")
+    try:
+        array = (ctypes.c_wchar_p * len(existing))(*existing)
+        register = library.RmRegisterResources
+        register.argtypes = [
+            wintypes.DWORD,
+            wintypes.UINT,
+            ctypes.POINTER(ctypes.c_wchar_p),
+            wintypes.UINT,
+            ctypes.c_void_p,
+            wintypes.UINT,
+            ctypes.c_void_p,
+        ]
+        register.restype = wintypes.DWORD
+        if register(session, len(existing), array, 0, None, 0, None) != 0:
+            raise CloseoutError("manual_exit_sidecar_handle_unreadable")
+        needed = wintypes.UINT(0)
+        count = wintypes.UINT(0)
+        reason = wintypes.DWORD()
+        get_list = library.RmGetList
+        get_list.argtypes = [
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.UINT),
+            ctypes.POINTER(wintypes.UINT),
+            ctypes.POINTER(_Info),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        get_list.restype = wintypes.DWORD
+        error_more_data = 234
+        first = get_list(
+            session, ctypes.byref(needed), ctypes.byref(count), None, ctypes.byref(reason)
+        )
+        if first not in (0, error_more_data):
+            raise CloseoutError("manual_exit_sidecar_handle_unreadable")
+        if needed.value == 0:
+            return []
+        info = (_Info * needed.value)()
+        count = wintypes.UINT(needed.value)
+        second = get_list(
+            session, ctypes.byref(needed), ctypes.byref(count), info, ctypes.byref(reason)
+        )
+        if second != 0:
+            raise CloseoutError("manual_exit_sidecar_handle_unreadable")
+        return [
+            {"pid": int(info[index].Process.dwProcessId), "app": str(info[index].strAppName)}
+            for index in range(count.value)
+        ]
+    finally:
+        end = library.RmEndSession
+        end.argtypes = [wintypes.DWORD]
+        end.restype = wintypes.DWORD
+        end(session)
+
+
 def _benchmark_ok(bars: Mapping[str, Any], symbol: str, session_date: str) -> bool:
     row = bars.get(symbol) or bars.get(f"{symbol}:{session_date}") or {}
     if str(row.get("session_date") or session_date) != session_date:
@@ -663,13 +784,22 @@ def evaluate_eligibility(
         terminal, terminal_reason = STATE_REFUSED, "missing_benchmark"
 
     if manual_gate is None:
-        store = Path(root) / "data" / "governance" / "manual_portfolio_exit"
+        store = Path(root) / MANUAL_EXIT_STORE_RELATIVE
         if store.is_dir():
-            from services.manual_portfolio_exit import evaluate_manual_exit_close_gate
+            from services.manual_portfolio_exit import classify_manual_exit_close_preflight
 
-            manual_gate = evaluate_manual_exit_close_gate(store)
+            manual_gate = classify_manual_exit_close_preflight(store)
         else:
-            manual_gate = {"ok": True, "reason": "store_absent"}
+            manual_gate = {
+                "ok": True,
+                "reason": "store_absent",
+                "deferred_sidecar_cleanup": False,
+                "deferred_sidecar_paths": [],
+            }
+    else:
+        manual_gate = dict(manual_gate)
+    deferred = manual_gate.get("ok") is True and manual_gate.get("deferred_sidecar_cleanup") is True
+    deferred_paths = [str(path) for path in (manual_gate.get("deferred_sidecar_paths") or [])]
     manual_ok = manual_gate.get("ok") is True
     conditions.append(
         _condition(
@@ -688,21 +818,19 @@ def evaluate_eligibility(
         )
     )
 
+    git_deferred = bool(deferred) and _git_rejection_is_only_deferred_store(git_identity or {})
     git_ok = (
         bool(git_identity)
-        and git_identity.get("git_identity_valid") is True
         and git_identity.get("index_empty") is True
+        and (git_identity.get("git_identity_valid") is True or git_deferred)
     )
-    conditions.append(
-        _condition(
-            "git_identity",
-            git_ok,
-            str(
-                (git_identity or {}).get("failure_reason")
-                or ("valid" if git_ok else "git_identity_unavailable")
-            ),
-        )
-    )
+    if git_deferred:
+        git_detail = "manual_exit_sidecars_deferred"
+    elif git_ok:
+        git_detail = "valid"
+    else:
+        git_detail = str((git_identity or {}).get("failure_reason") or "git_identity_unavailable")
+    conditions.append(_condition("git_identity", git_ok, git_detail))
     if terminal is None and not git_ok:
         terminal, terminal_reason = STATE_REFUSED, "git_identity"
 
@@ -734,6 +862,8 @@ def evaluate_eligibility(
             "buying_power": broker_view.get("buying_power"),
         },
         "as_of_utc": _iso(as_of),
+        "deferred_sidecar_cleanup": bool(deferred),
+        "deferred_sidecar_paths": deferred_paths if deferred else [],
         **_order_flags(),
     }
 
@@ -880,6 +1010,8 @@ def execute_closeout(
     receipt["session_close_display"] = review.get("session_close_display")
     receipt["close_kind"] = review.get("close_kind")
     receipt["blockers"] = review.get("blockers")
+    receipt["deferred_sidecar_cleanup"] = review.get("deferred_sidecar_cleanup") is True
+    receipt["deferred_sidecar_paths"] = list(review.get("deferred_sidecar_paths") or [])
     if review.get("terminal"):
         _advance(receipt, str(review["terminal"]), reason=str(review.get("terminal_reason")))
         if review.get("broker"):
@@ -1018,6 +1150,64 @@ def stop_dashboard_last(
     }
 
 
+def _finalize_manual_exit_sidecars(
+    root: Path,
+    receipt: Dict[str, Any],
+    holder_probe: Callable[[Path], Sequence[Mapping[str, Any]]],
+) -> Optional[str]:
+    """Checkpoint deferred residual sidecars. Return a failure reason, or None.
+
+    Cleanup runs only when this closeout receipt deferred those exact files.
+    Files are removed only by ``close_manual_exit_sqlite``.
+    """
+    store = Path(root) / MANUAL_EXIT_STORE_RELATIVE
+    if not store.is_dir():
+        return None
+    from services.manual_portfolio_exit import STORE_DB_NAME, evaluate_manual_exit_close_gate
+
+    db_path = store / STORE_DB_NAME
+    wal = Path(str(db_path) + "-wal")
+    shm = Path(str(db_path) + "-shm")
+    deferred = receipt.get("deferred_sidecar_cleanup") is True
+    if deferred:
+        try:
+            holders = [dict(row) for row in holder_probe(db_path)]
+        except CloseoutError as exc:
+            return exc.reason
+        except (OSError, TypeError, ValueError):
+            return "manual_exit_sidecar_handle_unreadable"
+        if holders:
+            receipt["sidecar_holders"] = holders
+            return "manual_exit_sidecar_handle_held"
+        from services.paper_sell_arm_store import PaperSellArmStoreError, close_manual_exit_sqlite
+
+        try:
+            closed = dict(close_manual_exit_sqlite(db_path))
+        except PaperSellArmStoreError as exc:
+            receipt["sidecar_cleanup"] = {"ok": False, "reason": exc.reason}
+            return str(exc.reason or "manual_exit_sidecar_cleanup_failed")
+        except OSError as exc:
+            receipt["sidecar_cleanup"] = {"ok": False, "reason": type(exc).__name__}
+            return "manual_exit_sidecar_cleanup_failed"
+        receipt["sidecar_cleanup"] = {
+            "ok": closed.get("ok"),
+            "reason": closed.get("reason"),
+            "removed": list(closed.get("removed") or []),
+            "busy": closed.get("busy"),
+        }
+        if closed.get("ok") is not True:
+            return str(closed.get("reason") or "sqlite_checkpoint_busy")
+        if wal.exists() or shm.exists():
+            return "manual_exit_sidecar_remains"
+    elif wal.exists() or shm.exists():
+        return "manual_exit_sidecar_unexplained"
+    gate = evaluate_manual_exit_close_gate(store)
+    receipt["manual_exit_recheck"] = {"ok": gate.get("ok"), "reason": gate.get("reason")}
+    if gate.get("ok") is not True or gate.get("reason") != "manual_exit_store_consistent":
+        return "manual_exit_gate"
+    return None
+
+
 def run_publishing_worker(
     *,
     root: Path,
@@ -1028,6 +1218,7 @@ def run_publishing_worker(
     killer: Callable[[int], None],
     publisher: Callable[[Path, Mapping[str, Any]], Mapping[str, Any]],
     own_pid: Optional[int] = None,
+    holder_probe: Optional[Callable[[Path], Sequence[Mapping[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     receipt = load_receipt(receipt_path)
     if receipt.get("state") in COMPLETED_STATES:
@@ -1057,6 +1248,10 @@ def run_publishing_worker(
         return _fail(
             receipt_path, receipt, STATE_STREAMLIT_STOP_FAILED, "dashboard_or_ports_still_present"
         )
+    probe = holder_probe or manual_exit_database_holders
+    sidecar_reason = _finalize_manual_exit_sidecars(root, receipt, probe)
+    if sidecar_reason:
+        return _fail(receipt_path, receipt, STATE_PUBLICATION_FAILED, sidecar_reason)
     git_identity = dict(git_inspector(root))
     if (
         git_identity.get("git_identity_valid") is not True

@@ -502,7 +502,13 @@ def test_duplicate_session_close_never_publishes_a_second_close():
         assert calls == []
 
 
-def test_real_publisher_duplicate_appends_nothing_further():
+def test_real_publisher_duplicate_appends_nothing_further(monkeypatch):
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+
+    monkeypatch.setattr("services.performance_evidence_collector.datetime", Frozen)
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
         events = root / "events.jsonl"

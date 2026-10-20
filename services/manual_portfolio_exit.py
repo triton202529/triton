@@ -437,9 +437,14 @@ def _release_manual_exit_store(store_root: Path) -> Dict[str, Any]:
         return {"ok": False, "removed": [], "reason": reason}
 
 
-def _immutable_connection(db_path: Path) -> sqlite3.Connection:
+def immutable_readonly_sqlite_uri(db_path: Path) -> str:
+    """URI used by the integrity gate. It does not create WAL or SHM files."""
     uri = Path(db_path).resolve().as_posix()
-    conn = sqlite3.connect(f"file:{uri}?mode=ro&immutable=1", uri=True)
+    return f"file:{uri}?mode=ro&immutable=1"
+
+
+def _immutable_connection(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(immutable_readonly_sqlite_uri(db_path), uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -885,6 +890,73 @@ def evaluate_manual_exit_close_gate(store_root: Path) -> Dict[str, Any]:
         "reason": "manual_exit_store_consistent" if ok else failures[0]["reason"],
         "failures": failures,
         "verified_broker_order_ids": verified,
+    }
+
+
+RESIDUAL_SIDECAR_NAMES = frozenset(
+    {
+        "manual_portfolio_exit.sqlite3-wal",
+        "manual_portfolio_exit.sqlite3-shm",
+    }
+)
+
+
+def _residual_sidecar_candidate(store: Path, failure: Mapping[str, Any]) -> bool:
+    """True only for the empty WAL or the exact SHM left by a checkpoint."""
+    if str(failure.get("reason") or "") != "sqlite_sidecar_unexplained":
+        return False
+    rel = str(failure.get("path") or "")
+    if rel not in RESIDUAL_SIDECAR_NAMES:
+        return False
+    path = store / rel
+    if not path.is_file():
+        return False
+    if rel.endswith(".sqlite3-wal") and path.stat().st_size != 0:
+        return False
+    return True
+
+
+def classify_manual_exit_close_preflight(store_root: Path) -> Dict[str, Any]:
+    """Run the full close gate, then defer only residual WAL/SHM filenames.
+
+    Publication still uses ``evaluate_manual_exit_close_gate`` unchanged.
+    A zero-byte ``manual_portfolio_exit.sqlite3-wal`` and the exact SHM beside
+    it can be deferred. Any other child, a nonzero WAL, stale identity, an
+    OPEN challenge, a pre-submit permit, or a failed content check stays
+    ineligible. This function does not checkpoint or delete anything.
+    """
+    gate = evaluate_manual_exit_close_gate(store_root)
+    failures = list(gate.get("failures") or [])
+    verified = list(gate.get("verified_broker_order_ids") or [])
+    if gate.get("ok") is True:
+        return {
+            **gate,
+            "deferred_sidecar_cleanup": False,
+            "deferred_sidecar_paths": [],
+            "content_ok": True,
+        }
+    store = Path(store_root)
+    deferred = [item for item in failures if _residual_sidecar_candidate(store, item)]
+    blocking = [item for item in failures if item not in deferred]
+    if blocking or not deferred or not verified:
+        reason = str((blocking or failures or [{"reason": gate.get("reason")}])[0].get("reason"))
+        return {
+            "ok": False,
+            "reason": reason,
+            "failures": failures,
+            "verified_broker_order_ids": verified,
+            "deferred_sidecar_cleanup": False,
+            "deferred_sidecar_paths": [],
+            "content_ok": not blocking and bool(verified),
+        }
+    return {
+        "ok": True,
+        "reason": "manual_exit_sidecars_deferred",
+        "failures": deferred,
+        "verified_broker_order_ids": verified,
+        "deferred_sidecar_cleanup": True,
+        "deferred_sidecar_paths": [str(item.get("path") or "") for item in deferred],
+        "content_ok": True,
     }
 
 

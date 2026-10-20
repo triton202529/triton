@@ -92,9 +92,10 @@ def _json_list(value: Any) -> List[Any]:
 def _readonly_rows(path: Path, sql: str) -> List[Dict[str, Any]]:
     if not path.is_file():
         return []
-    uri = path.resolve().as_uri() + "?mode=ro"
+    from services.manual_portfolio_exit import immutable_readonly_sqlite_uri
+
     try:
-        conn = sqlite3.connect(uri, uri=True, timeout=5.0)
+        conn = sqlite3.connect(immutable_readonly_sqlite_uri(path), uri=True, timeout=5.0)
     except sqlite3.Error:
         return []
     conn.row_factory = sqlite3.Row
