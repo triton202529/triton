@@ -562,26 +562,10 @@ try {
     # Compare explicitly to $true so a polluted multi-value return can never
     # be treated as success (see Run-RefreshStep capture contract).
     if ($refreshOk) {
-        $stepOk = Run-RefreshStep -Label "D1a. GENERATE SIGNALS" -PyArgs @("-m","services.generate_signals")
+        $stepOk = Run-RefreshStep -Label "D1. STAGE COHERENT SIGNAL BUNDLE" -PyArgs @("-m","services.coherent_signal_bundle","stage")
         if ($stepOk -ne $true) {
             $refreshOk = $false
-            $refreshFailReason = "generate_signals_failed"
-            $refreshFailRc = [int]$script:LastRefreshStepExitCode
-        }
-    }
-    if ($refreshOk) {
-        $stepOk = Run-RefreshStep -Label "D1b. APPLY SIGNAL LIFECYCLE" -PyArgs @("-m","services.apply_signal_lifecycle")
-        if ($stepOk -ne $true) {
-            $refreshOk = $false
-            $refreshFailReason = "apply_signal_lifecycle_failed"
-            $refreshFailRc = [int]$script:LastRefreshStepExitCode
-        }
-    }
-    if ($refreshOk) {
-        $stepOk = Run-RefreshStep -Label "D1c. BUILD EFFECTIVE LIFECYCLE" -PyArgs @("-m","services.build_effective_lifecycle")
-        if ($stepOk -ne $true) {
-            $refreshOk = $false
-            $refreshFailReason = "build_effective_lifecycle_failed"
+            $refreshFailReason = "coherent_signal_bundle_stage_failed"
             $refreshFailRc = [int]$script:LastRefreshStepExitCode
         }
     }
@@ -674,8 +658,8 @@ try {
         }
     }
 
-    Run-Step -Label "E5. PORTFOLIO ALLOCATION ENGINE" `
-             -PyArgs @("-m","services.portfolio_allocation_engine")
+    Run-Step -Label "E5. COMMIT COHERENT SIGNAL BUNDLE" `
+             -PyArgs @("-m","services.coherent_signal_bundle","commit")
 
     # ── F. Position management (exits / trims / rotation) ────────────────
     Run-Step -Label "F. POSITION MANAGEMENT" `

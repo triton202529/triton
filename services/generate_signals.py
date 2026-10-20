@@ -11,7 +11,7 @@ Phase 1.5:
 - Windows import bootstrap
 
 AS_OF Discipline (fail-closed session contract):
-- session_as_of_date = NYSE last completed session date (ET, calendar-aware via pandas_market_calendars)
+- session_as_of_date = latest completed XNYS session (exchange calendar; never calendar yesterday)
 - Premarket and open-session evaluation use the latest completed XNYS session.
 - After regular or early close, that newly completed session is used only when the full daily bar exists.
 - Holidays and weekends use the preceding completed XNYS session. No weekday fallback.
@@ -21,7 +21,7 @@ AS_OF Discipline (fail-closed session contract):
 - A missing or older bar never emits BUY/ADD/HOLD/TRIM/EXIT/WAIT; it is an explicit skip.
 
 Env controls:
-- TRITON_STRICT_ASOF=1/0             (default 1) : if 1, raise after publishing empty rows when coverage fails
+- TRITON_STRICT_ASOF=1/0             (default 1) : if 1, raise when coverage fails without replacing signal files
 - TRITON_ASOF_COVERAGE=0.90          (default 0.90) : fraction of tradable tickers that must have the expected session bar
 - TRITON_ASOF_MAX_LAG_SESSIONS=1     (default 1) : retained for diagnostics; no weekday/data-supported fallback
 """
@@ -265,34 +265,15 @@ def _now_utc_ts() -> pd.Timestamp:
 
 
 def _nyse_last_completed_session_date(now_utc: Optional[pd.Timestamp] = None) -> date_type:
-    """
-    Calendar-aware NYSE last completed session date using pandas_market_calendars.
-    Uses market_close <= now_utc as "completed".
-    """
-    import pandas_market_calendars as mcal
+    """Latest completed XNYS session. Calendar-yesterday is not a session date."""
+    from services.nyse_signal_session import required_signal_session
 
-    now_utc = now_utc or _now_utc_ts()
-    nyse = mcal.get_calendar("NYSE")
-
-    # Wide enough window to include holidays/weekends.
-    start = (now_utc - pd.Timedelta(days=15)).date()
-    end = (now_utc + pd.Timedelta(days=3)).date()
-
-    sched = nyse.schedule(start_date=start, end_date=end)
-    if sched is None or sched.empty:
-        raise RuntimeError(
-            "NYSE calendar returned no sessions in window; weekday fallback is forbidden."
-        )
-
-    closes = pd.to_datetime(sched["market_close"], utc=True)
-    completed = sched[closes <= now_utc]
-    if completed.empty:
-        raise RuntimeError(
-            "No completed NYSE session in calendar window; weekday fallback is forbidden."
-        )
-
-    last = completed.iloc[-1]
-    return last.name.date()
+    if now_utc is None:
+        return required_signal_session()
+    stamp = pd.Timestamp(now_utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.tz_localize("UTC")
+    return required_signal_session(stamp.to_pydatetime())
 
 
 def _next_session_date(d: date_type) -> date_type:
@@ -1585,13 +1566,27 @@ def main() -> None:
         )
 
     def _publish_empty_and_maybe_fail(message: str) -> None:
-        empty = _empty_operational_frame()
-        publish_operational_signal_csvs(empty)
+        # A failed candidate must not replace signals, rationale, lifecycle,
+        # allocation, or readiness. Diagnostics and the failure receipt are
+        # the only artifacts this path writes.
+        from services.coherent_signal_bundle import write_failure_receipt
+
         _persist_diag(
             {
                 "operational_rows": 0,
                 "batch_actionable": False,
+                "published_signal_artifacts": False,
             }
+        )
+        write_failure_receipt(
+            os.path.dirname(ASOF_DIAG_PATH) or RESULTS_DIR,
+            {
+                "reason": "signal_candidate_rejected",
+                "session_as_of_date": str(session_asof),
+                "effective_as_of_date": str(effective_asof),
+                "coverage": diag.get("coverage"),
+                "batch_actionable": False,
+            },
         )
         _emit_signal_universe_block(
             attempted_tickers=attempted_tickers,

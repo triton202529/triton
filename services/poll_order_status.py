@@ -1756,16 +1756,11 @@ def main() -> int:
         if recon_degraded:
             rstats["degraded"] = 1
 
-        print("[RECON] refreshing signal lifecycle after status changes...")
-        r2 = _run_module_checked(
-            "services.apply_signal_lifecycle", "apply_signal_lifecycle", allow_fail=True
+        print(
+            "[RECON] order status changed; signal lifecycle is unchanged. "
+            "Lifecycle, effective lifecycle, allocation, and readiness publish "
+            "only with a coherent signal bundle."
         )
-        if r2:
-            print("[RECON] apply_signal_lifecycle complete")
-        if not r2:
-            rstats["degraded"] = 1
-        if not _refresh_effective_lifecycle(allow_fail=True):
-            rstats["degraded"] = 1
 
     try:
         df_all = _read_log_df(repair=True)
