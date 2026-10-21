@@ -12,7 +12,9 @@ import pytest
 from services.apply_signal_lifecycle import _normalize_pair
 from services.coherent_signal_bundle import (
     BUNDLE_FILES,
+    PUBLIC_DIAGNOSTIC,
     assert_held_positions_stay_long,
+    bind_staged_diagnostic,
     publish_coherent_bundle,
 )
 from services.governance_degraded_mode import entry_blocked_by_active_drawdown
@@ -132,6 +134,26 @@ def _candidate(staged, *, header_only: bool = False, omit: str | None = None) ->
         if name == omit:
             continue
         (staged / name).write_text(body, encoding="utf-8")
+    if header_only:
+        (staged / PUBLIC_DIAGNOSTIC).write_text("{}\n", encoding="utf-8")
+        return
+    signals = pd.read_csv(staged / "signals.csv")
+    symbols = sorted(signals["ticker"].astype(str).str.upper())
+    document = {
+        "generated_at_utc": GENERATED,
+        "session_asof_date": SESSION,
+        "effective_asof_date": SESSION,
+        "tradable_tickers": len(symbols),
+        "have_session": len(symbols),
+        "coverage": 1.0,
+        "asof_coverage_threshold": 0.9,
+        "batch_actionable": True,
+        "fail": False,
+        "current_tradable_symbols": symbols,
+        "per_symbol_skips": [],
+    }
+    (staged / PUBLIC_DIAGNOSTIC).write_text(json.dumps(document), encoding="utf-8")
+    bind_staged_diagnostic(staged, staged / "signals.csv")
 
 
 def test_incomplete_candidate_does_not_replace_bundle(tmp_path):

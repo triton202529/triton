@@ -7,6 +7,7 @@ Atomic write + minimum row validation + timestamped backups + recovery.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -14,7 +15,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -38,6 +39,7 @@ EFFECTIVE_REQUIRED_COLUMNS = ("ticker", "effective_position_state", "effective_s
 COMMITTED_ASOF_COVERAGE = 0.90
 SKIP_INVALID_PROCESSED_SESSION_BAR = "INVALID_PROCESSED_SESSION_BAR"
 SKIP_INDEX_ONLY_EXCLUDED = "INDEX_ONLY_EXCLUDED"
+CANDIDATE_PROVENANCE_SCHEMA = "SIGNAL-BUNDLE-DIAGNOSTIC-PROVENANCE-1"
 _SHA256_HEX_LEN = 64
 
 
@@ -348,14 +350,277 @@ def deferred_skipped_held_tickers(
     return sorted((held_set & skip_set) - source_set)
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def candidate_bundle_id(session: str, generated_at: str, expected_symbols: Sequence[str]) -> str:
+    """Identity of one staged candidate. It does not include the mutable signal bytes."""
+    body = {
+        "expected_symbols": sorted(_symbol_set(expected_symbols)),
+        "generated_at_utc": str(generated_at or ""),
+        "session_as_of_date": str(session or ""),
+    }
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _symbol_set(values: Sequence[Any]) -> List[str]:
+    return sorted({_norm_symbol(value) for value in values if _norm_symbol(value)})
+
+
+def validate_candidate_diagnostic(
+    doc: Mapping[str, Any],
+    *,
+    candidate: Mapping[str, Any],
+    signals_sha256: str,
+) -> Optional[str]:
+    """Reject diagnostics that are not this candidate's staged evidence."""
+    if not isinstance(doc, dict):
+        return "staged_diagnostic_malformed"
+    provenance = doc.get("candidate_provenance")
+    if not isinstance(provenance, dict) or provenance.get("schema") != CANDIDATE_PROVENANCE_SCHEMA:
+        return "staged_diagnostic_unbound"
+    session = str(candidate.get("session_as_of_date") or "")
+    generated_at = str(candidate.get("generated_at_utc") or "")
+    bundle_id = str(candidate.get("bundle_id") or "")
+    expected = _symbol_set(candidate.get("expected_symbols") or [])
+    declared_hash = str(candidate.get("signals_sha256") or "").strip().lower()
+    diagnostic_session = _parse_session_date(doc.get("session_asof_date"))
+    if str(provenance.get("session_as_of_date") or "") != session or diagnostic_session != session:
+        return "staged_diagnostic_session_mismatch"
+    if (
+        str(provenance.get("generated_at_utc") or "") != generated_at
+        or str(doc.get("generated_at_utc") or "") != generated_at
+    ):
+        return "staged_diagnostic_timestamp_mismatch"
+    provenance_symbols = _symbol_set(provenance.get("expected_symbols") or [])
+    if provenance_symbols != expected:
+        return "staged_diagnostic_universe_mismatch"
+    provenance_hash = str(provenance.get("signals_sha256") or "").strip().lower()
+    actual_hash = str(signals_sha256 or "").strip().lower()
+    if (
+        not _is_sha256_hex(provenance_hash)
+        or not _is_sha256_hex(declared_hash)
+        or not _is_sha256_hex(actual_hash)
+        or provenance_hash != declared_hash
+        or provenance_hash != actual_hash
+    ):
+        return "staged_diagnostic_signals_hash_mismatch"
+    expected_id = candidate_bundle_id(session, generated_at, expected)
+    if str(provenance.get("bundle_id") or "") != bundle_id or bundle_id != expected_id:
+        return "staged_diagnostic_bundle_mismatch"
+    return None
+
+
+def candidate_skip_reason(doc: Mapping[str, Any]) -> Optional[str]:
+    """Index exclusions may stand. Every other skip fails the staged candidate."""
+    skips = doc.get("per_symbol_skips")
+    if not isinstance(skips, list):
+        return "staged_diagnostic_malformed"
+    for record in skips:
+        if not isinstance(record, dict):
+            return "staged_diagnostic_malformed"
+        reason = str(record.get("reason") or "").strip()
+        symbol_class = str(record.get("class") or "").strip().lower()
+        if reason == SKIP_INDEX_ONLY_EXCLUDED and symbol_class == "index":
+            continue
+        if reason == SKIP_INVALID_PROCESSED_SESSION_BAR and symbol_class != "index":
+            return "tradable_skip"
+        return "unexplained_skip"
+    return None
+
+
+def _candidate_rejection(
+    *,
+    src_rows: int,
+    min_rows: int,
+    reason: str,
+    details: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "ok": False,
+        "min_rows": min_rows,
+        "accepted_rows": src_rows,
+        "reason": reason,
+        "details": details,
+    }
+
+
+def _evaluate_staged_candidate_gate(
+    df: pd.DataFrame,
+    *,
+    src_rows: int,
+    diagnostics_path: Optional[Path],
+    candidate: Mapping[str, Any],
+    signals_artifact: Optional[Path],
+    positions_path: Optional[Path],
+) -> Dict[str, Any]:
+    """Validate one staged diagnostic. The public production diagnostic is not read."""
+    expected = _symbol_set(candidate.get("expected_symbols") or [])
+    min_rows = len(expected)
+    details: Dict[str, Any] = {
+        "src_rows": src_rows,
+        "duplicate_tickers": [],
+        "deferred_skipped_held": [],
+        "coverage": None,
+        "candidate_bound": True,
+    }
+    if diagnostics_path is None:
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="staged_diagnostic_missing",
+            details=details,
+        )
+    path = Path(diagnostics_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="staged_diagnostic_missing",
+            details=details,
+        )
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="staged_diagnostic_malformed",
+            details=details,
+        )
+    if not isinstance(document, dict):
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="staged_diagnostic_malformed",
+            details=details,
+        )
+    artifact_hash = ""
+    if signals_artifact is not None and Path(signals_artifact).is_file():
+        artifact_hash = file_sha256(Path(signals_artifact))
+    provenance_reason = validate_candidate_diagnostic(
+        document,
+        candidate=candidate,
+        signals_sha256=artifact_hash,
+    )
+    if provenance_reason:
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason=provenance_reason,
+            details=details,
+        )
+    skip_reason = candidate_skip_reason(document)
+    if skip_reason:
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason=skip_reason,
+            details=details,
+        )
+
+    tickers = _source_tickers(df)
+    duplicates = sorted({ticker for ticker in tickers if tickers.count(ticker) > 1})
+    details["duplicate_tickers"] = duplicates
+    if duplicates:
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="duplicate_symbols",
+            details=details,
+        )
+    if _symbol_set(tickers) != expected:
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="staged_diagnostic_universe_mismatch",
+            details=details,
+        )
+
+    coverage = evaluate_coverage_skip_acceptance(diagnostics_path=path)
+    details["coverage"] = coverage
+    session = str(candidate.get("session_as_of_date") or "")
+    source_dates = set(_source_session_dates(df))
+    if coverage.get("reason") == "unknown_session":
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="unknown_session",
+            details=details,
+        )
+    if session and source_dates and source_dates != {session}:
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="stale_lifecycle_inputs",
+            details=details,
+        )
+    verified = [
+        str(record.get("symbol")) for record in (coverage.get("verified_invalid_bar_skips") or [])
+    ]
+    if sorted(set(tickers) & set(verified)):
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason="forged_skip_evidence",
+            details=details,
+        )
+    held = _held_tickers_from_snapshot(positions_path)
+    details["deferred_skipped_held"] = deferred_skipped_held_tickers(
+        source_tickers=tickers,
+        held_tickers=held,
+        verified_skip_symbols=verified,
+    )
+    if not coverage.get("ok"):
+        return _candidate_rejection(
+            src_rows=src_rows,
+            min_rows=min_rows,
+            reason=str(coverage.get("reason") or "forged_skip_evidence"),
+            details=details,
+        )
+    accepted = int(coverage["accepted_rows"])
+    if src_rows != accepted:
+        return {
+            "ok": False,
+            "min_rows": accepted,
+            "accepted_rows": src_rows,
+            "reason": "signal_row_count_mismatch",
+            "details": details,
+        }
+    return {
+        "ok": True,
+        "min_rows": accepted,
+        "accepted_rows": src_rows,
+        "reason": coverage.get("reason") or "coverage_ok_verified_skips",
+        "details": details,
+    }
+
+
 def evaluate_lifecycle_source_gate(
     df: pd.DataFrame,
     *,
     diagnostics_path: Optional[Path] = None,
     positions_path: Optional[Path] = None,
+    candidate: Optional[Mapping[str, Any]] = None,
+    signals_artifact: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """D1b source gate: coverage-verified current-session rows, else configured min."""
     src_rows = count_dataframe_rows(df)
+    if candidate is not None:
+        return _evaluate_staged_candidate_gate(
+            df,
+            src_rows=src_rows,
+            diagnostics_path=diagnostics_path,
+            candidate=candidate,
+            signals_artifact=signals_artifact,
+            positions_path=positions_path,
+        )
     configured_min = _configured_minimum_rows()
     details: Dict[str, Any] = {
         "src_rows": src_rows,
@@ -551,10 +816,12 @@ def _backup_path_for(production: Path) -> Path:
     return BACKUPS_DIR / f"{stem}_{_utc_stamp()}.csv"
 
 
-def backup_lifecycle_artifact(production: Path) -> Optional[Path]:
+def backup_lifecycle_artifact(
+    production: Path, *, min_rows: Optional[int] = None
+) -> Optional[Path]:
     if not production.is_file() or production.stat().st_size == 0:
         return None
-    if not is_lifecycle_authoritative(production):
+    if not is_lifecycle_authoritative(production, min_rows=min_rows):
         return None
     BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     dest = _backup_path_for(production)
@@ -692,7 +959,7 @@ def write_lifecycle_csv_protected(
             return result
 
         if is_lifecycle_authoritative(production, min_rows=threshold):
-            backup_path = backup_lifecycle_artifact(production)
+            backup_path = backup_lifecycle_artifact(production, min_rows=threshold)
 
         os.replace(tmp_path, production)
         result.ok = True

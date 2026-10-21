@@ -710,11 +710,20 @@ def _preserve_entry_buys_against_broker_snapshot(
     return changed
 
 
-def _rebuild_lifecycle(src: Path) -> int:
+def _rebuild_lifecycle(
+    src: Path,
+    *,
+    diagnostics_path: Optional[Path] = None,
+    candidate: Optional[Dict[str, Any]] = None,
+    signals_artifact: Optional[Path] = None,
+) -> int:
     """
     Core rebuild path shared between main() and ensure_lifecycle_fresh().
     Reads `src`, applies lifecycle, writes signal_lifecycle.csv. Returns 0
     on success and any non-zero code from underlying machinery on failure.
+
+    A staged candidate supplies its own diagnostic. That path does not read
+    the public production diagnostic.
     """
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -728,7 +737,13 @@ def _rebuild_lifecycle(src: Path) -> int:
     )
 
     src_rows = count_dataframe_rows(df)
-    gate = evaluate_lifecycle_source_gate(df)
+    gate = evaluate_lifecycle_source_gate(
+        df,
+        diagnostics_path=diagnostics_path,
+        candidate=candidate,
+        signals_artifact=signals_artifact,
+        positions_path=POSITIONS_SNAPSHOT,
+    )
     if not gate.get("ok") and not allow_partial_lifecycle_writes():
         print(
             f"[LIFECYCLE_SOURCE_REJECT] source={src.name} rows={src_rows} "
@@ -834,7 +849,12 @@ def _rebuild_lifecycle(src: Path) -> int:
             flush=True,
         )
 
-    write_result = write_lifecycle_csv_protected(out_df, OUT_LIFECYCLE, artifact="raw")
+    write_result = write_lifecycle_csv_protected(
+        out_df,
+        OUT_LIFECYCLE,
+        artifact="raw",
+        min_rows=int(gate.get("min_rows") or 0),
+    )
     if not write_result.ok:
         print(
             f"[LIFECYCLE_WRITE_BLOCKED] path={OUT_LIFECYCLE.name} "
@@ -932,6 +952,13 @@ def main(argv: Optional[list] = None) -> int:
             "want a freshness guarantee without forcing a rebuild."
         ),
     )
+    ap.add_argument("--diagnostics", default=None)
+    ap.add_argument("--signals-artifact", default=None)
+    ap.add_argument("--bundle-id", default=None)
+    ap.add_argument("--candidate-session", default=None)
+    ap.add_argument("--generated-at", default=None)
+    ap.add_argument("--signals-sha256", default=None)
+    ap.add_argument("--expected-symbols", default=None)
     args = ap.parse_args(argv)
 
     src = _resolve_signals_source()
@@ -961,7 +988,45 @@ def main(argv: Optional[list] = None) -> int:
             flush=True,
         )
 
-    return _rebuild_lifecycle(src)
+    identity = (
+        args.diagnostics,
+        args.signals_artifact,
+        args.bundle_id,
+        args.candidate_session,
+        args.generated_at,
+        args.signals_sha256,
+        args.expected_symbols,
+    )
+    if any(identity) and not all(identity):
+        print(
+            "[LIFECYCLE_SOURCE_REJECT] reason=staged_diagnostic_missing",
+            flush=True,
+        )
+        return 3
+    candidate = None
+    diagnostics_path = None
+    signals_artifact = None
+    if all(identity):
+        expected = [
+            symbol.strip().upper()
+            for symbol in str(args.expected_symbols).split(",")
+            if symbol.strip()
+        ]
+        candidate = {
+            "bundle_id": str(args.bundle_id),
+            "session_as_of_date": str(args.candidate_session),
+            "generated_at_utc": str(args.generated_at),
+            "signals_sha256": str(args.signals_sha256),
+            "expected_symbols": expected,
+        }
+        diagnostics_path = Path(args.diagnostics)
+        signals_artifact = Path(args.signals_artifact)
+    return _rebuild_lifecycle(
+        src,
+        diagnostics_path=diagnostics_path,
+        candidate=candidate,
+        signals_artifact=signals_artifact,
+    )
 
 
 if __name__ == "__main__":

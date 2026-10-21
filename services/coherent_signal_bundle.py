@@ -29,6 +29,8 @@ BUNDLE_FILES = (
     "portfolio_allocation_recommendations.csv",
     "execution_readiness.json",
 )
+PUBLIC_DIAGNOSTIC = "signals_asof_diagnostics.json"
+PUBLISHED_ARTIFACTS = BUNDLE_FILES + (PUBLIC_DIAGNOSTIC,)
 FAILURE_RECEIPT = "signal_bundle_failure_receipt.json"
 STAGE_MARKER = "signal_bundle_stage.json"
 SCHEMA_FAILURE = "SIGNAL-BUNDLE-FAILURE-1"
@@ -123,13 +125,152 @@ def _stamp_csv(path: Path, generated_at: str, session: str) -> None:
     path.write_text(frame.to_csv(index=False), encoding="utf-8", newline="")
 
 
+def _frame_identity(frame: pd.DataFrame) -> tuple[str, str]:
+    session = ""
+    generated_at = ""
+    if "session_as_of_date" in frame.columns and not frame.empty:
+        session = str(frame["session_as_of_date"].iloc[0])[:10]
+    elif "bundle_session_as_of_date" in frame.columns and not frame.empty:
+        session = str(frame["bundle_session_as_of_date"].iloc[0])[:10]
+    if "generated_at_utc" in frame.columns and not frame.empty:
+        generated_at = str(frame["generated_at_utc"].iloc[0])
+    elif "bundle_generated_at_utc" in frame.columns and not frame.empty:
+        generated_at = str(frame["bundle_generated_at_utc"].iloc[0])
+    return session, generated_at
+
+
+def bind_staged_diagnostic(staging: Path, signals_path: Path) -> dict:
+    """Bind the staged diagnostic to this candidate. Production files are not written."""
+    from services.lifecycle_artifact_guard import (
+        CANDIDATE_PROVENANCE_SCHEMA,
+        candidate_bundle_id,
+        file_sha256,
+    )
+
+    diagnostic_path = staging / PUBLIC_DIAGNOSTIC
+    if not diagnostic_path.is_file() or diagnostic_path.stat().st_size == 0:
+        raise ValueError("staged_diagnostic_missing")
+    try:
+        document = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("staged_diagnostic_malformed") from exc
+    if not isinstance(document, dict):
+        raise ValueError("staged_diagnostic_malformed")
+    frame = pd.read_csv(signals_path)
+    if frame.empty or "ticker" not in frame.columns:
+        raise ValueError("staged_diagnostic_malformed")
+    session, generated_at = _frame_identity(frame)
+    diagnostic_session = str(
+        document.get("session_asof_date") or document.get("effective_asof_date") or ""
+    )[:10]
+    if not session or session != diagnostic_session:
+        raise ValueError("staged_diagnostic_session_mismatch")
+    if not generated_at or str(document.get("generated_at_utc") or "") != generated_at:
+        raise ValueError("staged_diagnostic_timestamp_mismatch")
+    raw_symbols = document.get("current_tradable_symbols")
+    if not isinstance(raw_symbols, list) or not raw_symbols:
+        raise ValueError("staged_diagnostic_malformed")
+    expected = sorted(
+        {str(symbol).strip().upper() for symbol in raw_symbols if str(symbol).strip()}
+    )
+    actual = sorted(
+        {str(symbol).strip().upper() for symbol in frame["ticker"].tolist() if str(symbol).strip()}
+    )
+    if expected != actual:
+        raise ValueError("staged_diagnostic_universe_mismatch")
+    provenance = {
+        "schema": CANDIDATE_PROVENANCE_SCHEMA,
+        "bundle_id": candidate_bundle_id(session, generated_at, expected),
+        "session_as_of_date": session,
+        "signals_sha256": file_sha256(signals_path),
+        "expected_symbols": expected,
+        "generated_at_utc": generated_at,
+    }
+    document["candidate_provenance"] = provenance
+    _atomic_bytes(
+        diagnostic_path,
+        (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
+    return provenance
+
+
+def refresh_staged_signals_hash(staging: Path) -> str:
+    """Record the post-stamp signals bytes without changing the candidate identity."""
+    from services.lifecycle_artifact_guard import file_sha256
+
+    diagnostic_path = staging / PUBLIC_DIAGNOSTIC
+    document = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    provenance = document.get("candidate_provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("staged_diagnostic_unbound")
+    digest = file_sha256(staging / "signals.csv")
+    provenance["signals_sha256"] = digest
+    document["candidate_provenance"] = provenance
+    _atomic_bytes(
+        diagnostic_path,
+        (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
+    return digest
+
+
+def _require_bound_diagnostic(staged: Path, generated_at: str, session: str) -> None:
+    from services.lifecycle_artifact_guard import CANDIDATE_PROVENANCE_SCHEMA, file_sha256
+
+    document = json.loads((staged / PUBLIC_DIAGNOSTIC).read_text(encoding="utf-8"))
+    provenance = document.get("candidate_provenance") if isinstance(document, dict) else None
+    if not isinstance(provenance, dict) or provenance.get("schema") != CANDIDATE_PROVENANCE_SCHEMA:
+        raise RuntimeError("staged diagnostic is not bound to this candidate")
+    if str(provenance.get("session_as_of_date") or "") != session:
+        raise RuntimeError("staged diagnostic session does not match the candidate")
+    if str(provenance.get("generated_at_utc") or "") != generated_at:
+        raise RuntimeError("staged diagnostic timestamp does not match the candidate")
+    if str(provenance.get("signals_sha256") or "") != file_sha256(staged / "signals.csv"):
+        raise RuntimeError("staged diagnostic signals hash does not match")
+    if not str(provenance.get("bundle_id") or "").strip():
+        raise RuntimeError("staged diagnostic is missing bundle identity")
+
+
+def _require_staged_provenance(staging: Path, marker: Mapping[str, object]) -> None:
+    from services.lifecycle_artifact_guard import file_sha256
+
+    document = json.loads((staging / PUBLIC_DIAGNOSTIC).read_text(encoding="utf-8"))
+    provenance = document.get("candidate_provenance") if isinstance(document, dict) else None
+    if not isinstance(provenance, dict):
+        raise RuntimeError("staged_diagnostic_unbound")
+    if str(provenance.get("bundle_id") or "") != str(marker.get("bundle_id") or ""):
+        raise RuntimeError("staged_diagnostic_bundle_mismatch")
+    if str(provenance.get("session_as_of_date") or "") != str(
+        marker.get("session_as_of_date") or ""
+    ):
+        raise RuntimeError("staged_diagnostic_session_mismatch")
+    if str(provenance.get("generated_at_utc") or "") != str(marker.get("generated_at_utc") or ""):
+        raise RuntimeError("staged_diagnostic_timestamp_mismatch")
+    if str(provenance.get("signals_sha256") or "") != file_sha256(staging / "signals.csv"):
+        raise RuntimeError("staged_diagnostic_signals_hash_mismatch")
+
+
+def _candidate_diagnostic_excerpt(document: Mapping[str, object]) -> dict:
+    skips = document.get("per_symbol_skips")
+    return {
+        "generated_at_utc": document.get("generated_at_utc"),
+        "session_asof_date": document.get("session_asof_date"),
+        "have_session": document.get("have_session"),
+        "tradable_tickers": document.get("tradable_tickers"),
+        "coverage": document.get("coverage"),
+        "candidate_provenance": document.get("candidate_provenance"),
+        "per_symbol_skips": skips if isinstance(skips, list) else [],
+        "candidate_diagnostic_path": f"data/results/signal_bundle_stage/{PUBLIC_DIAGNOSTIC}",
+    }
+
+
 def _validate_staged(staged: Path, generated_at: str, session: str) -> None:
-    missing = [name for name in BUNDLE_FILES if not (staged / name).is_file()]
+    missing = [name for name in PUBLISHED_ARTIFACTS if not (staged / name).is_file()]
     if missing:
         raise RuntimeError(f"candidate bundle incomplete: {missing}")
     signals = pd.read_csv(staged / "signals.csv")
     if signals.empty or "ticker" not in signals.columns or signals.dropna(how="all").empty:
         raise RuntimeError("refusing to publish a header-only signal file")
+    _require_bound_diagnostic(staged, generated_at, session)
     rationale = pd.read_csv(staged / "signals_with_rationale.csv")
     if set(signals["ticker"].astype(str)) != set(rationale["ticker"].astype(str)):
         raise RuntimeError("signals and rationale ticker sets differ")
@@ -159,15 +300,15 @@ def _validate_staged(staged: Path, generated_at: str, session: str) -> None:
 def publish_coherent_bundle(
     production: Path, staged: Path, *, generated_at: str, session: str
 ) -> None:
-    """Replace the six production artifacts, or restore them if a replace fails."""
+    """Replace the seven production artifacts, or restore them if a replace fails."""
     _validate_staged(staged, generated_at, session)
     prior: Dict[str, Optional[bytes]] = {}
-    for name in BUNDLE_FILES:
+    for name in PUBLISHED_ARTIFACTS:
         path = production / name
         prior[name] = path.read_bytes() if path.is_file() else None
     replaced: list[str] = []
     try:
-        for name in BUNDLE_FILES:
+        for name in PUBLISHED_ARTIFACTS:
             _atomic_bytes(production / name, (staged / name).read_bytes())
             replaced.append(name)
     except Exception:
@@ -201,7 +342,7 @@ def tradable_invalid_ohlc_skips(diag: Mapping[str, object]) -> list:
 
 
 def _staged_ohlc_block(staging: Path) -> list:
-    path = staging / "signals_asof_diagnostics.json"
+    path = staging / PUBLIC_DIAGNOSTIC
     if not path.is_file():
         return []
     try:
@@ -230,7 +371,7 @@ def stage_signal_bundle() -> int:
     generate.RESULTS_DIR = str(staging)
     generate.OUT_WITH_RATIONALE = str(staging / "signals_with_rationale.csv")
     generate.OUT_SIGNALS = str(staging / "signals.csv")
-    generate.ASOF_DIAG_PATH = str(staging / "signals_asof_diagnostics.json")
+    generate.ASOF_DIAG_PATH = str(staging / PUBLIC_DIAGNOSTIC)
 
     try:
         generate.main()
@@ -256,13 +397,36 @@ def stage_signal_bundle() -> int:
         )
         return 1
 
+    try:
+        provenance = bind_staged_diagnostic(staging, signals_path)
+    except ValueError as exc:
+        _fail_stage(production, staging, reason=str(exc))
+        return 1
+
     lifecycle.RESULTS_DIR = staging
     lifecycle.SIGNALS_RATIONALE = staging / "signals_with_rationale.csv"
     lifecycle.SIGNALS_FALLBACK = staging / "signals.csv"
     lifecycle.OUT_LIFECYCLE = staging / "signal_lifecycle.csv"
     lifecycle.STATE_PATH = staging / "signal_state.json"
     lifecycle.POSITIONS_SNAPSHOT = production / "positions_snapshot.csv"
-    rc = lifecycle.main([])
+    rc = lifecycle.main(
+        [
+            "--diagnostics",
+            str(staging / PUBLIC_DIAGNOSTIC),
+            "--signals-artifact",
+            str(signals_path),
+            "--bundle-id",
+            str(provenance["bundle_id"]),
+            "--candidate-session",
+            str(provenance["session_as_of_date"]),
+            "--generated-at",
+            str(provenance["generated_at_utc"]),
+            "--signals-sha256",
+            str(provenance["signals_sha256"]),
+            "--expected-symbols",
+            ",".join(provenance["expected_symbols"]),
+        ]
+    )
     if rc != 0:
         _fail_stage(production, staging, reason="apply_signal_lifecycle_failed", exit_code=rc)
         return int(rc or 1)
@@ -297,22 +461,15 @@ def stage_signal_bundle() -> int:
         _fail_stage(production, staging, reason="held_position_guard", detail=str(exc))
         return 1
 
-    diag_path = staging / "signals_asof_diagnostics.json"
-    session = ""
-    generated_at = utc_now_z()
-    if diag_path.is_file():
-        diag = json.loads(diag_path.read_text(encoding="utf-8"))
-        session = str(diag.get("session_as_of_date") or diag.get("effective_as_of_date") or "")
-    frame = pd.read_csv(signals_path)
-    if "generated_at_utc" in frame.columns and not frame.empty:
-        generated_at = str(frame["generated_at_utc"].iloc[0])
-    if "session_as_of_date" in frame.columns and not frame.empty:
-        session = str(frame["session_as_of_date"].iloc[0])[:10]
+    session = str(provenance["session_as_of_date"])
+    generated_at = str(provenance["generated_at_utc"])
     marker = {
         "schema": SCHEMA_STAGE,
         "status": "STAGED",
+        "bundle_id": provenance["bundle_id"],
         "session_as_of_date": session,
         "generated_at_utc": generated_at,
+        "signals_sha256": provenance["signals_sha256"],
         "published_signal_artifacts": False,
     }
     (staging / STAGE_MARKER).write_text(
@@ -324,14 +481,17 @@ def stage_signal_bundle() -> int:
 
 
 def _fail_stage(production: Path, staging: Path, **payload: object) -> None:
-    diag = staging / "signals_asof_diagnostics.json"
-    if diag.is_file():
-        _atomic_bytes(production / diag.name, diag.read_bytes())
-    receipt = staging / FAILURE_RECEIPT
-    if receipt.is_file():
-        _atomic_bytes(production / FAILURE_RECEIPT, receipt.read_bytes())
-    else:
-        write_failure_receipt(production, payload)
+    """Record the candidate failure without replacing any published artifact."""
+    body = dict(payload)
+    diagnostic = staging / PUBLIC_DIAGNOSTIC
+    if diagnostic.is_file():
+        try:
+            document = json.loads(diagnostic.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            document = None
+        if isinstance(document, dict):
+            body["candidate_diagnostic"] = _candidate_diagnostic_excerpt(document)
+    write_failure_receipt(production, body)
     print("[SIGNAL_BUNDLE_STAGE_FAILED] production bundle preserved")
 
 
@@ -362,6 +522,15 @@ def commit_signal_bundle() -> int:
             },
         )
         print("[SIGNAL_BUNDLE_COMMIT_FAILED] invalid session OHLC")
+        return 1
+    try:
+        _require_staged_provenance(staging, marker)
+    except (OSError, UnicodeError, json.JSONDecodeError, RuntimeError, ValueError) as exc:
+        write_failure_receipt(
+            RESULTS_DIR,
+            {"reason": "staged_diagnostic_rejected", "detail": str(exc)},
+        )
+        print(f"[SIGNAL_BUNDLE_COMMIT_FAILED] {exc}")
         return 1
 
     import services.portfolio_allocation_engine as allocation
@@ -417,6 +586,7 @@ def commit_signal_bundle() -> int:
             "portfolio_allocation_recommendations.csv",
         ):
             _stamp_csv(staging / name, generated_at, session)
+        refresh_staged_signals_hash(staging)
         held = held_symbols_from_snapshot(RESULTS_DIR / "positions_snapshot.csv")
         assert_held_positions_stay_long(pd.read_csv(staging / "signal_lifecycle.csv"), held)
         publish_coherent_bundle(RESULTS_DIR, staging, generated_at=generated_at, session=session)
@@ -427,7 +597,7 @@ def commit_signal_bundle() -> int:
 
     print(
         f"[SIGNAL_BUNDLE_PUBLISHED] session={session} generated_at={generated_at} "
-        "artifacts=signals,rationale,lifecycle,effective,allocation,readiness"
+        "artifacts=signals,rationale,lifecycle,effective,allocation,readiness,diagnostic"
     )
     return 0
 
