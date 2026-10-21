@@ -22,7 +22,7 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional, Set
+from typing import Any, Mapping, Optional, Sequence, Set
 
 import pandas as pd
 
@@ -46,6 +46,7 @@ DEFAULT_LIFECYCLE = RESULTS_DIR / "signal_lifecycle.csv"
 DEFAULT_RECON = RESULTS_DIR / "lifecycle_reconciliation.csv"
 DEFAULT_OUT = RESULTS_DIR / "signal_lifecycle_effective.csv"
 DEFAULT_OPEN_ORDERS = RESULTS_DIR / "open_orders_snapshot.csv"
+EFFECTIVE_BINDING_SCHEMA = "SIGNAL-BUNDLE-EFFECTIVE-LIFECYCLE-1"
 
 # Status values meaning the order is still working (not fully filled / terminal).
 _TERMINAL_ORDER_STATUSES = frozenset(
@@ -391,6 +392,274 @@ def build_effective(
     return out
 
 
+def _snapshot_symbol_column(frame: pd.DataFrame) -> str:
+    for name in ("ticker", "symbol"):
+        if name in frame.columns:
+            return name
+    raise ValueError("positions_snapshot_malformed")
+
+
+def read_positions_snapshot_evidence(path: Path) -> dict:
+    """Hash and timestamp of a local positions snapshot. Does not call the broker."""
+    from services.lifecycle_artifact_guard import file_sha256
+
+    path = Path(path)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise ValueError("positions_snapshot_missing")
+    try:
+        frame = pd.read_csv(path)
+    except Exception as exc:
+        raise ValueError("positions_snapshot_malformed") from exc
+    if (
+        frame is None
+        or frame.empty
+        or "snapshot_ts" not in frame.columns
+        or "qty" not in frame.columns
+    ):
+        raise ValueError("positions_snapshot_malformed")
+    try:
+        _snapshot_symbol_column(frame)
+    except ValueError as exc:
+        raise ValueError("positions_snapshot_malformed") from exc
+    stamps = {
+        str(value).strip()
+        for value in frame["snapshot_ts"].tolist()
+        if str(value).strip() and str(value).strip().lower() != "nan"
+    }
+    if len(stamps) != 1:
+        raise ValueError("positions_snapshot_malformed")
+    return {
+        "sha256": file_sha256(path),
+        "snapshot_ts": next(iter(stamps)),
+        "rows": int(len(frame.index)),
+    }
+
+
+def _require_snapshot_evidence(path: Path, evidence: Mapping[str, Any]) -> dict:
+    if not isinstance(evidence, Mapping):
+        raise ValueError("positions_snapshot_malformed")
+    current = read_positions_snapshot_evidence(path)
+    expected_hash = str(evidence.get("sha256") or "").strip().lower()
+    expected_ts = str(evidence.get("snapshot_ts") or "").strip()
+    if not expected_hash or expected_hash != current["sha256"]:
+        raise ValueError("positions_snapshot_hash_mismatch")
+    if not expected_ts or expected_ts != current["snapshot_ts"]:
+        raise ValueError("positions_snapshot_timestamp_mismatch")
+    return current
+
+
+def _snapshot_held_symbols(path: Path) -> Set[str]:
+    frame = pd.read_csv(path)
+    symbol_col = _snapshot_symbol_column(frame)
+    held: Set[str] = set()
+    for _, row in frame.iterrows():
+        symbol = _norm_symbol(str(row.get(symbol_col) or ""))
+        try:
+            qty = float(row.get("qty") or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        if symbol and qty > 0:
+            held.add(symbol)
+    return held
+
+
+def _candidate_action(row: Mapping[str, Any]) -> str:
+    for key in ("lifecycle_action", "stance"):
+        value = str(row.get(key) or "").strip().upper()
+        if value and value != "NAN":
+            return value
+    return ""
+
+
+def _preserve_snapshot_held_state(
+    frame: pd.DataFrame,
+    *,
+    candidate_actions: Mapping[str, str],
+    held: Set[str],
+    basis_blocked: Set[str],
+    basis_classification: str,
+) -> pd.DataFrame:
+    """Keep snapshot-held names LONG. A candidate HOLD is not rewritten to EXIT."""
+    out = frame.copy()
+    if "basis_classification" not in out.columns:
+        out["basis_classification"] = ""
+    for index, row in out.iterrows():
+        ticker = _norm_symbol(str(row.get("ticker") or ""))
+        if ticker not in held:
+            continue
+        out.at[index, "effective_position_state"] = "LONG"
+        if "position_state" in out.columns:
+            out.at[index, "position_state"] = "LONG"
+        action = candidate_actions.get(ticker, "")
+        if action == "HOLD" or ticker in basis_blocked:
+            out.at[index, "effective_stance"] = "HOLD"
+        if ticker in basis_blocked:
+            out.at[index, "basis_classification"] = basis_classification
+    return out
+
+
+def write_effective_lifecycle(
+    *,
+    lifecycle_path: Path,
+    reconciliation_path: Path,
+    open_orders_path: Path,
+    output_path: Path,
+    frame: Optional[pd.DataFrame] = None,
+    min_rows: Optional[int] = None,
+) -> int:
+    """Write effective lifecycle to an explicit path. Callers do not use sys.argv."""
+    if frame is None:
+        try:
+            lc = load_lifecycle(lifecycle_path)
+        except Exception as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            return 2
+        try:
+            recon = load_reconciliation(reconciliation_path)
+        except Exception as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            return 2
+        lc_cfg = load_lifecycle_config()
+        print("[LIFECYCLE CONFIG]", lc_cfg)
+        lifecycle_logic = lifecycle_logic_from_dict(lc_cfg)
+        if lc.empty:
+            print("[WARN] signal_lifecycle.csv is empty; skipping effective overwrite.")
+            frame = lc.copy()
+            frame["effective_position_state"] = pd.Series(dtype=object)
+            frame["effective_stance"] = pd.Series(dtype=object)
+            frame["healed"] = pd.Series(dtype=bool)
+            frame["heal_reason"] = pd.Series(dtype=object)
+            frame["effective_in_flight"] = pd.Series(dtype=bool)
+            frame["lifecycle_authoritative_source"] = pd.Series(dtype=object)
+            frame["reconciled_with_broker"] = pd.Series(dtype=bool)
+            frame["reconciled_reason"] = pd.Series(dtype=object)
+            frame["stance_adjustment"] = pd.Series(dtype=object)
+            frame["lifecycle_consistency"] = pd.Series(dtype=object)
+        else:
+            frame = build_effective(
+                lc,
+                recon,
+                open_orders_path=open_orders_path,
+                lifecycle_logic=lifecycle_logic,
+            )
+    write_result = write_lifecycle_csv_protected(
+        frame,
+        output_path,
+        artifact="effective",
+        min_rows=min_rows,
+    )
+    if not write_result.ok:
+        print(
+            f"[build_effective_lifecycle] effective write blocked: rows={write_result.rows} "
+            f"min_rows={write_result.min_rows} action={write_result.action}",
+            file=sys.stderr,
+        )
+        return 3
+    healed = int(frame["healed"].sum()) if "healed" in frame.columns else 0
+    in_flight = (
+        int(frame["effective_in_flight"].sum()) if "effective_in_flight" in frame.columns else 0
+    )
+    print(f"[build_effective_lifecycle] wrote {output_path}")
+    print(
+        f"[build_effective_lifecycle] total_rows={len(frame)} healed_count={healed} "
+        f"open_buy_in_flight_preserved={in_flight}"
+    )
+    return 0
+
+
+def build_staged_effective_lifecycle(
+    *,
+    lifecycle_path: Path,
+    reconciliation_path: Path,
+    open_orders_path: Path,
+    output_path: Path,
+    positions_snapshot: Path,
+    snapshot_evidence: Mapping[str, Any],
+    bundle_id: str,
+    session_as_of_date: str,
+    lifecycle_sha256: str,
+    expected_symbols: Sequence[str],
+    min_rows: Optional[int] = None,
+) -> dict:
+    """Build one candidate's effective lifecycle from explicit staged paths."""
+    from services.basis_unproven_hold import (
+        CLASSIFICATION,
+        evaluate_basis_unproven_hold_for_packet,
+    )
+    from services.lifecycle_artifact_guard import file_sha256
+
+    lifecycle_path = Path(lifecycle_path)
+    positions_snapshot = Path(positions_snapshot)
+    evidence = _require_snapshot_evidence(positions_snapshot, snapshot_evidence)
+    actual_hash = file_sha256(lifecycle_path)
+    if actual_hash != str(lifecycle_sha256 or "").strip().lower():
+        raise ValueError("lifecycle_hash_mismatch")
+    expected = sorted({_norm_symbol(symbol) for symbol in expected_symbols if _norm_symbol(symbol)})
+    if (
+        not expected
+        or not str(bundle_id or "").strip()
+        or not str(session_as_of_date or "").strip()
+    ):
+        raise ValueError("effective_lifecycle_unbound")
+    try:
+        lifecycle = load_lifecycle(lifecycle_path)
+        reconciliation = load_reconciliation(reconciliation_path)
+    except Exception as exc:
+        raise ValueError("effective_lifecycle_input_unreadable") from exc
+    if "stance" not in lifecycle.columns:
+        source = lifecycle["lifecycle_action"] if "lifecycle_action" in lifecycle.columns else ""
+        lifecycle = lifecycle.copy()
+        lifecycle["stance"] = source
+    candidate_actions = {
+        _norm_symbol(str(row.get("ticker") or "")): _candidate_action(row)
+        for _, row in lifecycle.iterrows()
+    }
+    built = build_effective(
+        lifecycle,
+        reconciliation,
+        open_orders_path=Path(open_orders_path),
+    )
+    basis = evaluate_basis_unproven_hold_for_packet()
+    blocked = {_norm_symbol(symbol) for symbol in basis.get("blocked_symbols") or []}
+    built = _preserve_snapshot_held_state(
+        built,
+        candidate_actions=candidate_actions,
+        held=_snapshot_held_symbols(positions_snapshot),
+        basis_blocked=blocked,
+        basis_classification=CLASSIFICATION,
+    )
+    actual = sorted({_norm_symbol(str(symbol)) for symbol in built["ticker"].tolist()})
+    if actual != expected:
+        raise ValueError("effective_lifecycle_symbol_mismatch")
+    built["candidate_effective_schema"] = EFFECTIVE_BINDING_SCHEMA
+    built["candidate_bundle_id"] = str(bundle_id)
+    built["candidate_session_as_of_date"] = str(session_as_of_date)
+    built["candidate_lifecycle_sha256"] = actual_hash
+    built["positions_snapshot_sha256"] = evidence["sha256"]
+    built["positions_snapshot_ts"] = evidence["snapshot_ts"]
+    threshold = len(expected) if min_rows is None else int(min_rows)
+    rc = write_effective_lifecycle(
+        lifecycle_path=lifecycle_path,
+        reconciliation_path=Path(reconciliation_path),
+        open_orders_path=Path(open_orders_path),
+        output_path=Path(output_path),
+        frame=built,
+        min_rows=threshold,
+    )
+    if rc != 0:
+        raise RuntimeError(f"effective_lifecycle_write_failed:{rc}")
+    return {
+        "ok": True,
+        "rows": int(len(built.index)),
+        "bundle_id": str(bundle_id),
+        "session_as_of_date": str(session_as_of_date),
+        "lifecycle_sha256": actual_hash,
+        "positions_snapshot_sha256": evidence["sha256"],
+        "positions_snapshot_ts": evidence["snapshot_ts"],
+        "output_path": str(output_path),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Build signal_lifecycle_effective.csv from lifecycle + reconciliation"
@@ -405,71 +674,12 @@ def main() -> int:
         help="Snapshot CSV for open orders (default data/results/open_orders_snapshot.csv)",
     )
     args = ap.parse_args()
-
-    try:
-        lc = load_lifecycle(args.lifecycle)
-    except Exception as e:
-        print(f"[ERROR] {e}", file=sys.stderr)
-        return 2
-
-    try:
-        recon = load_reconciliation(args.recon)
-    except Exception as e:
-        print(f"[ERROR] {e}", file=sys.stderr)
-        return 2
-
-    lc_cfg = load_lifecycle_config()
-    print("[LIFECYCLE CONFIG]", lc_cfg)
-    lifecycle_logic = lifecycle_logic_from_dict(lc_cfg)
-
-    if lc.empty:
-        print("[WARN] signal_lifecycle.csv is empty; skipping effective overwrite.")
-        out = lc.copy()
-        out["effective_position_state"] = pd.Series(dtype=object)
-        out["effective_stance"] = pd.Series(dtype=object)
-        out["healed"] = pd.Series(dtype=bool)
-        out["heal_reason"] = pd.Series(dtype=object)
-        out["effective_in_flight"] = pd.Series(dtype=bool)
-        out["lifecycle_authoritative_source"] = pd.Series(dtype=object)
-        out["reconciled_with_broker"] = pd.Series(dtype=bool)
-        out["reconciled_reason"] = pd.Series(dtype=object)
-        out["stance_adjustment"] = pd.Series(dtype=object)
-        out["lifecycle_consistency"] = pd.Series(dtype=object)
-        write_result = write_lifecycle_csv_protected(out, args.out, artifact="effective")
-        if not write_result.ok:
-            print(
-                f"[build_effective_lifecycle] effective write blocked: {write_result.action}",
-                file=sys.stderr,
-            )
-            return 3
-        print(f"[build_effective_lifecycle] wrote {args.out} total_rows=0 healed_count=0")
-        return 0
-
-    out = build_effective(
-        lc,
-        recon,
+    return write_effective_lifecycle(
+        lifecycle_path=args.lifecycle,
+        reconciliation_path=args.recon,
         open_orders_path=args.open_orders,
-        lifecycle_logic=lifecycle_logic,
+        output_path=args.out,
     )
-    write_result = write_lifecycle_csv_protected(out, args.out, artifact="effective")
-    if not write_result.ok:
-        print(
-            f"[build_effective_lifecycle] effective write blocked: rows={write_result.rows} "
-            f"min_rows={write_result.min_rows} action={write_result.action}",
-            file=sys.stderr,
-        )
-        return 3
-
-    n = len(out)
-    n_healed = int(out["healed"].sum()) if "healed" in out.columns else 0
-    n_inflight = (
-        int(out["effective_in_flight"].sum()) if "effective_in_flight" in out.columns else 0
-    )
-    print(f"[build_effective_lifecycle] wrote {args.out}")
-    print(
-        f"[build_effective_lifecycle] total_rows={n} healed_count={n_healed} open_buy_in_flight_preserved={n_inflight}"
-    )
-    return 0
 
 
 if __name__ == "__main__":

@@ -354,10 +354,144 @@ def _staged_ohlc_block(staging: Path) -> list:
     return tradable_invalid_ohlc_skips(diag)
 
 
+def stage_effective_from_candidate(
+    production: Path, staging: Path, provenance: Mapping[str, object]
+) -> int:
+    """Write the candidate effective lifecycle. Does not call the CLI main()."""
+    from services.build_effective_lifecycle import (
+        build_staged_effective_lifecycle,
+        read_positions_snapshot_evidence,
+    )
+    from services.lifecycle_artifact_guard import file_sha256
+
+    snapshot = production / "positions_snapshot.csv"
+    lifecycle_path = staging / "signal_lifecycle.csv"
+    expected = list(provenance.get("expected_symbols") or [])
+    try:
+        evidence = read_positions_snapshot_evidence(snapshot)
+        build_staged_effective_lifecycle(
+            lifecycle_path=lifecycle_path,
+            reconciliation_path=production / "lifecycle_reconciliation.csv",
+            open_orders_path=production / "open_orders_snapshot.csv",
+            output_path=staging / "signal_lifecycle_effective.csv",
+            positions_snapshot=snapshot,
+            snapshot_evidence=evidence,
+            bundle_id=str(provenance.get("bundle_id") or ""),
+            session_as_of_date=str(provenance.get("session_as_of_date") or ""),
+            lifecycle_sha256=file_sha256(lifecycle_path),
+            expected_symbols=expected,
+            min_rows=len(expected),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail_stage(
+            production,
+            staging,
+            reason="build_effective_lifecycle_failed",
+            detail=str(exc),
+        )
+        return 1
+    return 0
+
+
+def run_staged_allocation(results_dir: Path, staging: Path) -> int:
+    """Allocate from the staged effective lifecycle into the staging directory."""
+    import services.portfolio_allocation_engine as allocation
+
+    return allocation.main(
+        [
+            "--signals",
+            str(staging / "signals_with_rationale.csv"),
+            "--lifecycle-effective",
+            str(staging / "signal_lifecycle_effective.csv"),
+            "--positions",
+            str(results_dir / "positions_snapshot.csv"),
+            "--edge-sizing",
+            str(results_dir / "edge_sizing_recommendations.csv"),
+            "--risk-overlay",
+            str(results_dir / "performance_risk_overlay.csv"),
+            "--perf-by-symbol",
+            str(results_dir / "performance_intelligence_by_symbol.csv"),
+            "--opportunities",
+            str(results_dir / "trade_opportunities.csv"),
+            "--out-csv",
+            str(staging / "portfolio_allocation_recommendations.csv"),
+            "--out-json",
+            str(staging / "portfolio_allocation_summary.json"),
+        ]
+    )
+
+
+def write_staged_readiness(
+    results_dir: Path, staging: Path, *, generated_at: str, session: str
+) -> None:
+    readiness_path = results_dir / "execution_readiness.json"
+    if not readiness_path.is_file():
+        raise RuntimeError("readiness_missing")
+    readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
+    readiness["bundle_generated_at_utc"] = generated_at
+    readiness["bundle_session_as_of_date"] = session
+    readiness["live_execution_permitted"] = False
+    (staging / "execution_readiness.json").write_text(
+        json.dumps(readiness, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _symbol_set(frame: pd.DataFrame) -> set[str]:
+    column = "ticker" if "ticker" in frame.columns else "symbol"
+    return {str(value).strip().upper() for value in frame[column].tolist() if str(value).strip()}
+
+
+def _require_effective_snapshot(staging: Path, marker: Mapping[str, object]) -> None:
+    """Reject a staged candidate whose local snapshot or effective binding moved."""
+    if "positions_snapshot_sha256" not in marker:
+        return
+    from services.build_effective_lifecycle import read_positions_snapshot_evidence
+    from services.lifecycle_artifact_guard import file_sha256
+
+    try:
+        current = read_positions_snapshot_evidence(RESULTS_DIR / "positions_snapshot.csv")
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if current["sha256"] != str(marker.get("positions_snapshot_sha256") or ""):
+        raise RuntimeError("positions_snapshot_changed")
+    if current["snapshot_ts"] != str(marker.get("positions_snapshot_ts") or ""):
+        raise RuntimeError("positions_snapshot_timestamp_mismatch")
+    frame = pd.read_csv(staging / "signal_lifecycle_effective.csv")
+    binding = {
+        "candidate_bundle_id": "bundle_id",
+        "candidate_session_as_of_date": "session_as_of_date",
+        "candidate_lifecycle_sha256": "lifecycle_sha256",
+        "positions_snapshot_sha256": "positions_snapshot_sha256",
+        "positions_snapshot_ts": "positions_snapshot_ts",
+    }
+    for column, key in binding.items():
+        if column not in frame.columns:
+            raise RuntimeError("effective_lifecycle_unbound")
+        if set(frame[column].astype(str)) != {str(marker.get(key) or "")}:
+            raise RuntimeError("effective_lifecycle_binding_mismatch")
+    if file_sha256(staging / "signal_lifecycle.csv") != str(marker.get("lifecycle_sha256") or ""):
+        raise RuntimeError("lifecycle_hash_mismatch")
+    expected = marker.get("expected_symbols")
+    if isinstance(expected, list) and expected:
+        wanted = {str(symbol).strip().upper() for symbol in expected if str(symbol).strip()}
+        if _symbol_set(frame) != wanted:
+            raise RuntimeError("effective_lifecycle_symbol_mismatch")
+
+
+def _require_allocation_symbols(staging: Path, marker: Mapping[str, object]) -> None:
+    expected = marker.get("expected_symbols")
+    if not isinstance(expected, list) or not expected:
+        return
+    frame = pd.read_csv(staging / "portfolio_allocation_recommendations.csv")
+    wanted = {str(symbol).strip().upper() for symbol in expected if str(symbol).strip()}
+    if _symbol_set(frame) != wanted:
+        raise RuntimeError("allocation_symbol_mismatch")
+
+
 def stage_signal_bundle() -> int:
     """Build the candidate in staging. Production bundle files stay in place."""
     import services.apply_signal_lifecycle as lifecycle
-    import services.build_effective_lifecycle as effective
     import services.generate_signals as generate
 
     production = Path(generate.RESULTS_DIR)
@@ -431,25 +565,9 @@ def stage_signal_bundle() -> int:
         _fail_stage(production, staging, reason="apply_signal_lifecycle_failed", exit_code=rc)
         return int(rc or 1)
 
-    recon = production / "lifecycle_reconciliation.csv"
-    orders = production / "open_orders_snapshot.csv"
-    eff_rc = effective.main(
-        [
-            "--lifecycle",
-            str(staging / "signal_lifecycle.csv"),
-            "--recon",
-            str(recon),
-            "--open-orders",
-            str(orders),
-            "--out",
-            str(staging / "signal_lifecycle_effective.csv"),
-        ]
-    )
+    eff_rc = stage_effective_from_candidate(production, staging, provenance)
     if eff_rc != 0:
-        _fail_stage(
-            production, staging, reason="build_effective_lifecycle_failed", exit_code=eff_rc
-        )
-        return int(eff_rc or 1)
+        return int(eff_rc)
 
     try:
         held = held_symbols_from_snapshot(production / "positions_snapshot.csv")
@@ -463,15 +581,24 @@ def stage_signal_bundle() -> int:
 
     session = str(provenance["session_as_of_date"])
     generated_at = str(provenance["generated_at_utc"])
-    marker = {
-        "schema": SCHEMA_STAGE,
-        "status": "STAGED",
-        "bundle_id": provenance["bundle_id"],
-        "session_as_of_date": session,
-        "generated_at_utc": generated_at,
-        "signals_sha256": provenance["signals_sha256"],
-        "published_signal_artifacts": False,
-    }
+    try:
+        effective_frame = pd.read_csv(staging / "signal_lifecycle_effective.csv")
+        marker = {
+            "schema": SCHEMA_STAGE,
+            "status": "STAGED",
+            "bundle_id": provenance["bundle_id"],
+            "session_as_of_date": session,
+            "generated_at_utc": generated_at,
+            "signals_sha256": provenance["signals_sha256"],
+            "lifecycle_sha256": str(effective_frame["candidate_lifecycle_sha256"].iloc[0]),
+            "positions_snapshot_sha256": str(effective_frame["positions_snapshot_sha256"].iloc[0]),
+            "positions_snapshot_ts": str(effective_frame["positions_snapshot_ts"].iloc[0]),
+            "expected_symbols": list(provenance["expected_symbols"]),
+            "published_signal_artifacts": False,
+        }
+    except (OSError, IndexError, KeyError, ValueError) as exc:
+        _fail_stage(production, staging, reason="effective_lifecycle_unbound", detail=str(exc))
+        return 1
     (staging / STAGE_MARKER).write_text(
         json.dumps(marker, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -532,50 +659,33 @@ def commit_signal_bundle() -> int:
         )
         print(f"[SIGNAL_BUNDLE_COMMIT_FAILED] {exc}")
         return 1
+    try:
+        _require_effective_snapshot(staging, marker)
+    except (OSError, RuntimeError, ValueError) as exc:
+        write_failure_receipt(
+            RESULTS_DIR,
+            {"reason": "effective_lifecycle_rejected", "detail": str(exc)},
+        )
+        print(f"[SIGNAL_BUNDLE_COMMIT_FAILED] {exc}")
+        return 1
 
-    import services.portfolio_allocation_engine as allocation
-
-    alloc_rc = allocation.main(
-        [
-            "--signals",
-            str(staging / "signals_with_rationale.csv"),
-            "--lifecycle-effective",
-            str(staging / "signal_lifecycle_effective.csv"),
-            "--positions",
-            str(RESULTS_DIR / "positions_snapshot.csv"),
-            "--edge-sizing",
-            str(RESULTS_DIR / "edge_sizing_recommendations.csv"),
-            "--risk-overlay",
-            str(RESULTS_DIR / "performance_risk_overlay.csv"),
-            "--perf-by-symbol",
-            str(RESULTS_DIR / "performance_intelligence_by_symbol.csv"),
-            "--opportunities",
-            str(RESULTS_DIR / "trade_opportunities.csv"),
-            "--out-csv",
-            str(staging / "portfolio_allocation_recommendations.csv"),
-            "--out-json",
-            str(staging / "portfolio_allocation_summary.json"),
-        ]
-    )
+    alloc_rc = run_staged_allocation(RESULTS_DIR, staging)
     if alloc_rc != 0:
         write_failure_receipt(
             RESULTS_DIR, {"reason": "allocation_failed", "exit_code": int(alloc_rc)}
         )
         print("[SIGNAL_BUNDLE_COMMIT_FAILED] allocation candidate refused")
         return int(alloc_rc or 1)
-
-    readiness_path = RESULTS_DIR / "execution_readiness.json"
-    if not readiness_path.is_file():
-        write_failure_receipt(RESULTS_DIR, {"reason": "readiness_missing"})
+    try:
+        _require_allocation_symbols(staging, marker)
+        write_staged_readiness(RESULTS_DIR, staging, generated_at=generated_at, session=session)
+    except (OSError, RuntimeError, ValueError) as exc:
+        reason = str(exc) if str(exc) == "readiness_missing" else "allocation_symbol_mismatch"
+        if str(exc) not in {"readiness_missing", "allocation_symbol_mismatch"}:
+            reason = "staged_downstream_failed"
+        write_failure_receipt(RESULTS_DIR, {"reason": reason, "detail": str(exc)})
+        print(f"[SIGNAL_BUNDLE_COMMIT_FAILED] {exc}")
         return 1
-    readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
-    readiness["bundle_generated_at_utc"] = generated_at
-    readiness["bundle_session_as_of_date"] = session
-    readiness["live_execution_permitted"] = False
-    (staging / "execution_readiness.json").write_text(
-        json.dumps(readiness, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
 
     try:
         for name in (
