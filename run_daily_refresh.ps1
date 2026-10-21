@@ -73,46 +73,114 @@ function Log([string]$msg) {
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
 }
 
+function Get-StageReceiptSetting {
+    param([string] $Name)
+    for ($scope = 1; $scope -le 8; $scope++) {
+        try {
+            $found = Get-Variable -Name $Name -Scope $scope -ErrorAction Stop
+        } catch {
+            $message = [string]$_.Exception.Message
+            if ($message -match 'out of range|beyond the') { break }
+            continue
+        }
+        if ($null -eq $found) { continue }
+        $text = [string]$found.Value
+        if (-not [string]::IsNullOrWhiteSpace($text)) { return $text }
+    }
+    return ""
+}
+
 function Write-StageReceipts {
-    param([string] $Destination = $receiptsPath)
-    if ([string]::IsNullOrWhiteSpace($Destination)) { throw "STAGE_RECEIPT_DESTINATION_EMPTY" }
-    $dest = [System.IO.Path]::GetFullPath($Destination)
-    $parent = [System.IO.Path]::GetDirectoryName($dest)
-    if ([string]::IsNullOrWhiteSpace($parent)) { throw "STAGE_RECEIPT_PARENT_MISSING" }
+    param(
+        [string] $ResultsDirectory = "",
+        [string] $RunId = ""
+    )
+    if ([string]::IsNullOrWhiteSpace($ResultsDirectory)) {
+        $ResultsDirectory = Get-StageReceiptSetting "resultsDir"
+    }
+    if ([string]::IsNullOrWhiteSpace($RunId)) {
+        $RunId = Get-StageReceiptSetting "runId"
+    }
+    if ([string]::IsNullOrWhiteSpace($ResultsDirectory)) { throw "STAGE_RECEIPT_DESTINATION_EMPTY" }
+    if ([string]::IsNullOrWhiteSpace($RunId)) { throw "STAGE_RECEIPT_RUN_ID_EMPTY" }
+    if ($RunId.IndexOfAny([char[]]@('\', '/', ':')) -ge 0 -or $RunId.Contains('..')) {
+        throw "STAGE_RECEIPT_RUN_ID_UNSAFE"
+    }
+    $rows = @($script:StageReceipts | Where-Object { $null -ne $_ })
+    if ($rows.Count -eq 0) { return }
+
+    $parent = [System.IO.Path]::GetFullPath($ResultsDirectory)
     [void][System.IO.Directory]::CreateDirectory($parent)
-    $payload = foreach ($row in @($script:StageReceipts)) { $row }
+    $payload = foreach ($row in $rows) { $row }
     $json = @($payload) | ConvertTo-Json -Depth 8
     if ([string]::IsNullOrWhiteSpace($json)) { $json = "[]" }
     elseif (-not $json.TrimStart().StartsWith("[")) { $json = "[`r`n" + $json + "`r`n]" }
     $text = $json + "`r`n"
-    $tmp = Join-Path $parent ("." + [System.IO.Path]::GetFileName($dest) + "." + [guid]::NewGuid().ToString("N") + ".tmp")
-    $utf8 = New-Object System.Text.UTF8Encoding $false
-    $stream = New-Object System.IO.FileStream($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-    try {
-        $writer = New-Object System.IO.StreamWriter($stream, $utf8)
-        try {
-            $writer.Write($text)
-            $writer.Flush()
-            $stream.Flush($true)
-        } finally {
-            $writer.Dispose()
-            $stream = $null
+
+    $prefix = "daily_prediction_refresh_stage_receipts_" + $RunId + ".gen."
+    $next = [int64]1
+    foreach ($file in @([System.IO.Directory]::GetFiles($parent))) {
+        $name = [System.IO.Path]::GetFileName($file)
+        if (-not $name.StartsWith($prefix) -or -not $name.EndsWith(".json")) { continue }
+        $token = $name.Substring($prefix.Length, $name.Length - $prefix.Length - 5)
+        if ($token -match '^[0-9]+$') {
+            $value = [int64]$token
+            if (($value + 1) -gt $next) { $next = $value + 1 }
         }
-        if ([System.IO.File]::Exists($dest)) {
+    }
+
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    $published = $false
+    for ($attempt = 0; $attempt -lt 32; $attempt++) {
+        $genName = $prefix + $next.ToString() + ".json"
+        $final = Join-Path $parent $genName
+        if ([System.IO.File]::Exists($final)) {
+            $next = $next + 1
+            continue
+        }
+        $tmp = Join-Path $parent ("." + $genName + "." + [guid]::NewGuid().ToString("N") + ".tmp")
+        $stream = $null
+        try {
+            $stream = New-Object System.IO.FileStream(
+                $tmp,
+                [System.IO.FileMode]::CreateNew,
+                [System.IO.FileAccess]::Write,
+                [System.IO.FileShare]::None
+            )
+            $writer = New-Object System.IO.StreamWriter($stream, $utf8)
             try {
-                [System.IO.File]::Replace($tmp, $dest, [NullString]::Value)
+                $writer.Write($text)
+                $writer.Flush()
+                $stream.Flush($true)
+            } finally {
+                $writer.Dispose()
+                $stream = $null
+            }
+            try {
+                [System.IO.File]::Move($tmp, $final)
             } catch {
-                if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+                if (Test-Path -LiteralPath $tmp) {
+                    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                }
+                if ([System.IO.File]::Exists($final)) {
+                    $next = $next + 1
+                    continue
+                }
                 throw
             }
-        } else {
-            [System.IO.File]::Move($tmp, $dest)
+            $script:LatestStageReceiptPath = $final
+            $published = $true
+            break
+        } catch {
+            if ($null -ne $stream) { $stream.Dispose() }
+            if (Test-Path -LiteralPath $tmp) {
+                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            }
+            throw
         }
-    } catch {
-        if ($null -ne $stream) { $stream.Dispose() }
-        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-        throw
     }
+    if (-not $published) { throw "STAGE_RECEIPT_GENERATION_EXHAUSTED" }
+    return $script:LatestStageReceiptPath
 }
 
 function Get-Sha256Hex {
@@ -372,11 +440,11 @@ function Run-PyStep {
         outcome         = $(if ([int]$code -eq 0) { "ok" } else { "failed" })
         status          = $(if ([int]$code -eq 0) { "COMPLETE" } else { "FAILED" })
     }
-    Write-StageReceipts
     if ([int]$code -ne 0) {
         Log ("FAILED: " + $Name + " (exit=" + $code + "). See log: " + $logPath)
         throw ("STEP_FAILED:" + $Name + ":" + $code)
     }
+    Write-StageReceipts
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
@@ -427,13 +495,16 @@ try {
         "--run-id", $runId,
         "--completed-session", $completedSession
     )
+    if ([string]::IsNullOrWhiteSpace($script:LatestStageReceiptPath)) {
+        throw "STAGE_RECEIPT_GENERATION_MISSING"
+    }
     Run-PyStep -Name "daily_prediction_refresh_validate" -PyArgs @(
         "-m", "services.daily_prediction_refresh_validate",
         "--repo-root", $repoRoot,
         "--run-id", $runId,
         "--run-started-at", $runStartedAt,
         "--baseline-in", $baselinePath,
-        "--stage-receipts", $receiptsPath,
+        "--stage-receipts", $script:LatestStageReceiptPath,
         "--summary-out", $summaryPath,
         "--json"
     )

@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "run_daily_refresh.ps1"
+RUN_ID = "daily_prediction_refresh_20260925_183007"
 HISTORICAL = Path(
     r"C:\Users\akimw\triton\data\results"
     r"\daily_prediction_refresh_stage_receipts_daily_prediction_refresh_20260925_183007.json"
@@ -31,69 +32,79 @@ def _run(tmp: Path, body: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _publish(tmp: Path, dest: Path, stages: list[dict]) -> None:
+def _generation(results: Path, generation: int) -> Path:
+    return results / ("daily_prediction_refresh_stage_receipts_" f"{RUN_ID}.gen.{generation}.json")
+
+
+def _publish(tmp: Path, results: Path, stages: list[dict]) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
+    results.mkdir(parents=True, exist_ok=True)
     spec = tmp / "stages.json"
     spec.write_text(json.dumps(stages), encoding="utf-8")
     body = f"""
 $ErrorActionPreference = 'Stop'
 . '{SCRIPT}'
 $script:StageReceipts = @(Get-Content -LiteralPath '{spec}' -Raw | ConvertFrom-Json)
-Write-StageReceipts -Destination '{dest}'
+Write-StageReceipts -ResultsDirectory '{results}' -RunId '{RUN_ID}'
 """
     proc = _run(tmp, body)
     assert proc.returncode == 0, proc.stdout
 
 
 def test_first_publish_and_replace_and_spaces(tmp_path: Path) -> None:
-    dest = tmp_path / "dir with spaces" / "stage receipt.json"
-    _publish(tmp_path, dest, [{"name": "capture_baseline", "exit_code": 0, "outcome": "ok"}])
-    raw = dest.read_bytes()
+    results = tmp_path / "dir with spaces"
+    legacy = results / f"daily_prediction_refresh_stage_receipts_{RUN_ID}.json"
+    _publish(tmp_path, results, [{"name": "capture_baseline", "exit_code": 0, "outcome": "ok"}])
+    assert not legacy.exists()
+    first_path = _generation(results, 1)
+    raw = first_path.read_bytes()
     assert not raw.startswith(b"\xef\xbb\xbf")
     first = json.loads(raw.decode("utf-8"))
     assert first[0]["name"] == "capture_baseline"
+    before = first_path.read_bytes()
     _publish(
         tmp_path,
-        dest,
+        results,
         [
             {"name": "capture_baseline", "exit_code": 0, "outcome": "ok", "status": "COMPLETE"},
             {"name": "fetch_raw_data", "exit_code": 0, "outcome": "ok", "status": "COMPLETE"},
         ],
     )
-    second = json.loads(dest.read_text(encoding="utf-8"))
+    assert first_path.read_bytes() == before
+    second = json.loads(_generation(results, 2).read_text(encoding="utf-8"))
     assert [row["name"] for row in second] == ["capture_baseline", "fetch_raw_data"]
-    assert list(dest.parent.glob("*.tmp")) == []
+    assert list(results.glob("*.tmp")) == []
 
 
 def test_replace_failure_preserves_bytes_and_cleans_temp(tmp_path: Path) -> None:
-    dest = tmp_path / "receipt.json"
-    _publish(tmp_path, dest, [{"name": "capture_baseline", "exit_code": 0}])
-    before = dest.read_bytes()
+    results = tmp_path / "results"
+    results.mkdir()
+    legacy = results / f"daily_prediction_refresh_stage_receipts_{RUN_ID}.json"
+    legacy.write_text('[{"name":"legacy"}]\n', encoding="utf-8")
+    before = legacy.read_bytes()
     body = f"""
 $ErrorActionPreference = 'Stop'
 . '{SCRIPT}'
 $script:StageReceipts = @([pscustomobject]@{{ name = 'fetch_raw_data'; exit_code = 0 }})
-$fs = [System.IO.File]::Open('{dest}', 'Open', 'Read', 'None')
-$failed = $false
+$fs = [System.IO.File]::Open('{legacy}', 'Open', 'Read', 'Read')
 try {{
-    Write-StageReceipts -Destination '{dest}'
-}} catch {{
-    $failed = $true
+    Write-StageReceipts -ResultsDirectory '{results}' -RunId '{RUN_ID}'
 }} finally {{
     $fs.Dispose()
 }}
-if (-not $failed) {{ throw 'replacement was not rejected' }}
-$left = @(Get-ChildItem -LiteralPath '{tmp_path}' -Force -Filter '*.tmp')
+$left = @(Get-ChildItem -LiteralPath '{results}' -Force -Filter '*.tmp')
 if ($left.Count -ne 0) {{ throw 'temporary file remains' }}
 """
     proc = _run(tmp_path, body)
     assert proc.returncode == 0, proc.stdout
-    assert dest.read_bytes() == before
+    assert legacy.read_bytes() == before
+    published = json.loads(_generation(results, 1).read_text(encoding="utf-8"))
+    assert published[0]["name"] == "fetch_raw_data"
 
 
 def test_two_runs_are_deterministic(tmp_path: Path) -> None:
-    one = tmp_path / "a" / "receipt.json"
-    two = tmp_path / "b" / "receipt.json"
+    one = tmp_path / "a"
+    two = tmp_path / "b"
     stages = [
         {"name": "capture_baseline", "exit_code": 0, "outcome": "ok", "status": "COMPLETE"},
         {
@@ -107,8 +118,8 @@ def test_two_runs_are_deterministic(tmp_path: Path) -> None:
     ]
     _publish(tmp_path / "run1", one, stages)
     _publish(tmp_path / "run2", two, stages)
-    assert json.loads(one.read_text(encoding="utf-8")) == json.loads(
-        two.read_text(encoding="utf-8")
+    assert json.loads(_generation(one, 1).read_text(encoding="utf-8")) == json.loads(
+        _generation(two, 1).read_text(encoding="utf-8")
     )
 
 

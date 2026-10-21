@@ -9,6 +9,11 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
+from services.daily_refresh_stage_receipts import (
+    resolve_stage_receipts,
+    run_id_from_stage_receipt_filename,
+)
+
 SCHEMA = "DAILY-REFRESH-COMPLETION-1"
 CLASS_COMPLETE = "FULL_DAILYREFRESH_COMPLETE"
 CLASS_FETCH_ONLY = "FETCH_ONLY_INCOMPLETE"
@@ -149,7 +154,12 @@ def _evaluate_run(root: Path, run_id: str, session_date: str) -> Dict[str, Any]:
     results = root / "data" / "results"
     logs = root / "logs"
     baseline = _read_json(results / f"daily_prediction_refresh_baseline_{run_id}.json")
-    stages_doc = _read_json(results / f"daily_prediction_refresh_stage_receipts_{run_id}.json")
+    resolved = resolve_stage_receipts(results, run_id)
+    if resolved.status in {"ambiguous", "malformed"} or (
+        resolved.status == "missing" and resolved.generation is not None
+    ):
+        return _result(False, resolved.detail, CLASS_FETCH_ONLY, session_date, run_id=run_id)
+    stages_doc = resolved.document
     summary = _read_json(results / "daily_prediction_refresh_summary.json")
     stamp = run_id.replace("daily_prediction_refresh_", "")
     log_path = logs / f"daily_refresh_{stamp}.log"
@@ -187,9 +197,7 @@ def _candidate_run_ids(root: Path, session_date: str) -> List[str]:
         for path in sorted(
             results.glob(f"daily_prediction_refresh_stage_receipts_*{compact}*.json")
         ):
-            run_id = path.name.replace("daily_prediction_refresh_stage_receipts_", "").replace(
-                ".json", ""
-            )
+            run_id = run_id_from_stage_receipt_filename(path.name)
             if run_id and run_id not in found:
                 found.append(run_id)
     logs = root / "logs"
@@ -225,10 +233,15 @@ def evaluate_daily_refresh_completion(
     )
     if not session_date:
         return _result(False, "daily_refresh_receipt_missing", CLASS_FETCH_ONLY, "")
+    blocked = None
     for run_id in _candidate_run_ids(root, session_date):
         verdict = _evaluate_run(root, run_id, session_date)
         if verdict["ok"]:
             return verdict
+        if str(verdict.get("detail") or "").startswith("stage_receipt_generation_"):
+            blocked = verdict
+    if blocked is not None:
+        return blocked
     if fetch_passed and fetch_target == session_date:
         return _result(False, CLASS_FETCH_ONLY, CLASS_FETCH_ONLY, session_date)
     if isinstance(fetch, dict) and fetch_target and fetch_target != session_date:

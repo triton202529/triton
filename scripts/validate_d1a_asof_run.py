@@ -22,6 +22,7 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from services.daily_refresh_stage_receipts import resolve_stage_receipts  # noqa: E402
 from services.generate_signals import compute_asof_policy  # noqa: E402
 from services.lifecycle_artifact_guard import parse_universe_ticker_identities  # noqa: E402
 
@@ -138,23 +139,27 @@ def validate_d1a(
         / "results"
         / f"daily_prediction_refresh_baseline_{source_run_id}.json",
         "fetch": root / "data" / "results" / "daily_refresh_fetch_receipt.json",
-        "stage": root
-        / "data"
-        / "results"
-        / f"daily_prediction_refresh_stage_receipts_{source_run_id}.json",
         "summary": root / "data" / "results" / "daily_prediction_refresh_summary.json",
         "tickers": root / "data" / "config" / "tickers.txt",
     }
+    resolved = resolve_stage_receipts(root / "data" / "results", source_run_id)
     missing = [name for name, path in required.items() if not path.is_file()]
+    if resolved.status == "missing":
+        missing.append("stage")
     if missing:
         return _fail("missing source artifacts: " + ",".join(missing))
+    if resolved.status not in {"generation", "legacy"} or not isinstance(resolved.document, list):
+        return _fail(f"stage receipts {resolved.status}")
+    if resolved.path is None:
+        return _fail("stage receipts missing")
+    required["stage"] = resolved.path
     log_text = required["log"].read_text(encoding="utf-8", errors="replace")
     if source_run_id not in log_text:
         return _fail("log is not bound to the source run")
 
     try:
         baseline = _load_json(required["baseline"])
-        stage_rows = _load_json(required["stage"])
+        stage_rows = resolved.document
         summary = _load_json(required["summary"])
         fetch = _load_json(required["fetch"])
         symbols = parse_universe_ticker_identities(required["tickers"])

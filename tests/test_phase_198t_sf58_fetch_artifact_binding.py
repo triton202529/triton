@@ -35,6 +35,7 @@ HIST_TMP = PROD / (
 )
 SUMMARY = PROD / "data/results/daily_prediction_refresh_summary.json"
 SUMMARY_SHA = "eec5099c5c386d0d0a94c840e92e3837dabe6acb8d1071bd93f6dfb0a10d8b76"
+SYNTHETIC_RUN_ID = "daily_prediction_refresh_synthetic_sf58"
 
 
 def _sha(path: Path) -> str:
@@ -84,6 +85,12 @@ def _receipt(session: str, **overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def _generation(results: Path, generation: int = 1) -> Path:
+    return results / (
+        "daily_prediction_refresh_stage_receipts_" f"{SYNTHETIC_RUN_ID}.gen.{generation}.json"
+    )
 
 
 def _stamp(moment: datetime) -> str:
@@ -174,7 +181,7 @@ def test_production_schema_binds_and_large_document_parses(tmp_path: Path) -> No
     )
     assert "BIND_OK" in proc.stdout, proc.stdout
     assert "ATTEMPTS=1" in proc.stdout
-    receipt = json.loads((tmp_path / "data" / "results" / "stage.json").read_text(encoding="utf-8"))
+    receipt = json.loads(_generation(tmp_path / "data" / "results").read_text(encoding="utf-8"))
     assert [row["name"] for row in receipt] == ["fetch_raw_data"]
     row = receipt[0]
     assert row["run_id"] == "daily_prediction_refresh_synthetic_sf58"
@@ -374,8 +381,13 @@ $script:StageReceipts = @([ordered]@{{
     outcome = 'ok'
 }})
 Write-StageReceipts
-$before = [System.IO.File]::ReadAllBytes('{receipt}')
-$fs = [System.IO.File]::Open('{receipt}', 'Open', 'Read', 'None')
+$legacy = '{receipt}'
+$gen1 = Join-Path '{results}' 'daily_prediction_refresh_stage_receipts_{SYNTHETIC_RUN_ID}.gen.1.json'
+Set-Content -LiteralPath $legacy -Value 'legacy' -Encoding ascii
+$beforeLegacy = [System.IO.File]::ReadAllBytes($legacy)
+$beforeGen = [System.IO.File]::ReadAllBytes($gen1)
+$fs = [System.IO.File]::Open($legacy, 'Open', 'Read', 'Read')
+$held = [System.IO.File]::Open($gen1, 'Open', 'Read', 'Read')
 try {{
     Bind-FetchArtifact
     Write-Output 'BIND_OK'
@@ -383,24 +395,19 @@ try {{
     Write-Output ('BIND_FAIL ' + $_.Exception.Message)
 }} finally {{
     $fs.Dispose()
+    $held.Dispose()
 }}
 Write-Output ('ATTEMPTS=' + $script:FetchBindingPublishAttempts)
-$after = [System.IO.File]::ReadAllBytes('{receipt}')
-$same = $true
-if ($before.Length -ne $after.Length) {{ $same = $false }}
-else {{
-    for ($i = 0; $i -lt $before.Length; $i++) {{
-        if ($before[$i] -ne $after[$i]) {{ $same = $false; break }}
-    }}
-}}
-Write-Output ('UNCHANGED=' + $same)
 """
     proc = _run(tmp_path, body)
-    assert "BIND_FAIL" in proc.stdout, proc.stdout
+    assert "BIND_OK" in proc.stdout, proc.stdout
+    assert "BIND_FAIL" not in proc.stdout
     assert "ATTEMPTS=1" in proc.stdout
-    assert "UNCHANGED=True" in proc.stdout
-    saved = json.loads(receipt.read_text(encoding="utf-8"))
+    assert receipt.read_bytes().startswith(b"legacy")
+    saved = json.loads(_generation(results, 1).read_text(encoding="utf-8"))
     assert "artifact_sha256" not in saved[0]
+    bound = json.loads(_generation(results, 2).read_text(encoding="utf-8"))
+    assert bound[0]["artifact_sha256"]
 
 
 def test_frozen_artifact_validator_and_failures(tmp_path: Path) -> None:
@@ -454,7 +461,7 @@ Write-Output 'BIND_OK'
     proc = _run(direct, body)
     assert "BIND_OK" in proc.stdout, proc.stdout
     assert direct_artifact.read_bytes() == FROZEN.read_bytes()
-    stage = json.loads(receipt_path.read_text(encoding="utf-8"))
+    stage = json.loads(_generation(direct_results).read_text(encoding="utf-8"))
     assert stage[0]["artifact_sha256"] == FETCH_SHA
     assert stage[0]["artifact_size_bytes"] == 1222054
     assert stage[0]["target_session"] == session
