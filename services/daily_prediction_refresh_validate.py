@@ -606,6 +606,46 @@ def _bound_fetch_receipt(
     return {}, parsed
 
 
+def _keep_decision_error(decision: Mapping[str, Any], target: date) -> Optional[str]:
+    """Return a rejection for a keep decision, or None when the local file may count."""
+    if not decision:
+        return "missing_fetch_decision"
+    action = str(decision.get("action") or "")
+    reason = str(decision.get("reason") or "")
+    if action != "keep":
+        return reason or "not_already_current"
+    if reason == "local_already_current":
+        if str(decision.get("local_max") or "") != target.isoformat():
+            return "stale_local_max"
+        return None
+    if reason != "provider_older_than_local":
+        return reason or "not_already_current"
+    if decision.get("operationally_eligible") is not True:
+        return "not_operationally_eligible"
+    local_max = str(decision.get("local_max") or "")
+    if local_max != target.isoformat():
+        return "stale_local_max"
+    provider_max = decision.get("provider_max")
+    if provider_max is None or str(provider_max).strip() == "":
+        return "missing_provider_evidence"
+    provider_max = str(provider_max)
+    if provider_max > local_max:
+        return "provider_newer_than_local"
+    if provider_max >= local_max:
+        return "provider_not_older_than_local"
+    problems = decision.get("problems")
+    if problems is None:
+        problems = []
+    if not isinstance(problems, list) or problems:
+        return "fetch_problems"
+    conflicts = decision.get("overlap_conflicts")
+    if conflicts is None:
+        conflicts = []
+    if not isinstance(conflicts, list) or conflicts:
+        return "overlap_conflict"
+    return None
+
+
 def _apply_already_current_raw(
     *,
     raw: Dict[str, Any],
@@ -617,7 +657,7 @@ def _apply_already_current_raw(
     baseline: Dict[str, Any],
     run_started_at: datetime,
 ) -> Dict[str, Any]:
-    """Accept unchanged raw files only when this run's stage receipt binds the fetch artifact."""
+    """Accept unchanged raw files when this run's fetch receipt proves they are current."""
     rejected, receipt = _bound_fetch_receipt(
         repo_root=repo_root,
         target=target,
@@ -629,6 +669,7 @@ def _apply_already_current_raw(
     if rejected:
         return _reject_fetch_binding(raw, str(rejected["receipt"]))
     accepted: List[str] = []
+    existing_local: List[str] = []
     decisions = {
         str(row.get("symbol") or "").upper(): row
         for row in receipt.get("decisions") or []
@@ -660,12 +701,9 @@ def _apply_already_current_raw(
             still_blocked.append(symbol)
             continue
         decision = decisions.get(symbol) or {}
-        if decision.get("action") != "keep" or decision.get("reason") != "local_already_current":
-            rejected[symbol] = str(decision.get("reason") or "not_already_current")
-            still_blocked.append(symbol)
-            continue
-        if str(decision.get("local_max") or "") != target.isoformat():
-            rejected[symbol] = "stale_local_max"
+        decision_error = _keep_decision_error(decision, target)
+        if decision_error:
+            rejected[symbol] = decision_error
             still_blocked.append(symbol)
             continue
         bound = decision.get("raw_sha256")
@@ -680,14 +718,22 @@ def _apply_already_current_raw(
             rejected[symbol] = structure[0]
             still_blocked.append(symbol)
             continue
-        accepted.append(symbol)
+        prior = dict(advancement.get(symbol) or {})
+        prior["advanced"] = False
+        if str(decision.get("reason") or "") == "provider_older_than_local":
+            existing_local.append(symbol)
+            prior["accepted_existing_local_evidence"] = True
+        else:
+            accepted.append(symbol)
+            prior["current_without_rewrite"] = True
         ok.append(symbol)
-        advancement[symbol] = {**(advancement.get(symbol) or {}), "current_without_rewrite": True}
+        advancement[symbol] = prior
 
     changed_blocked: List[str] = []
     kept_ok: List[str] = []
+    accepted_without_rewrite = set(accepted) | set(existing_local)
     for symbol in ok:
-        if symbol in accepted:
+        if symbol in accepted_without_rewrite:
             kept_ok.append(symbol)
             continue
         before = pre_sha(symbol)
@@ -705,6 +751,7 @@ def _apply_already_current_raw(
     raw["not_advanced_symbols"] = not_advanced
     raw["advancement"] = advancement
     raw["already_current"] = {"accepted": accepted, "rejected": rejected}
+    raw["accepted_existing_local_evidence"] = existing_local
     raw["passed"] = (
         set(kept_ok) == required
         and not raw.get("missing_required_symbols")

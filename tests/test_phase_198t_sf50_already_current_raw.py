@@ -336,7 +336,8 @@ def test_lagging_low_coverage_and_unpromoted_change(tmp_path):
         json.dumps(body), encoding="utf-8"
     )
     lagging = _validate(root)
-    assert lagging["raw"]["already_current"]["rejected"]["PLTR"] == "provider_older_than_local"
+    assert lagging["raw"]["already_current"]["rejected"]["PLTR"] == "missing_provider_evidence"
+    assert "PLTR" not in lagging["raw"].get("accepted_existing_local_evidence", [])
     _fetch(
         root,
         ["PLTR", "SPCX"],
