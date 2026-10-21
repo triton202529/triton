@@ -10,7 +10,9 @@
 # - A provider frame that lags the completed session, or is older than the local file,
 #   is diagnostic only. It must not replace, truncate, or create a raw file.
 # - A provider frame may append only validated rows strictly later than the local maximum.
-#   Omitting an older prefix, or disagreeing on overlap, is not permission to rewrite history.
+#   Omitting an older prefix, or disagreeing on an older overlap, is not permission to rewrite history.
+# - A same-session provider bar may replace that one local row only when it is an attributable,
+#   unadjusted, complete revision that passes the shared OHLC predicate. Prices are not merged.
 #   Every required XNYS session between the local maximum and the completed session is required.
 # - ALLOW_DATA_LAG_DAYS remains a diagnostic tolerance. It does not authorize a write.
 #
@@ -26,13 +28,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import time
 import uuid
 from pathlib import Path
 from datetime import datetime, timedelta, timezone, date
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -77,6 +80,12 @@ CANON_MAP = {
 }
 
 NEEDED = ["date", "open", "high", "low", "close", "adj_close", "volume"]
+
+# Same-session agreement. Prices use the shared absolute tolerance. Volume is exact.
+# Values that differ are kept as returned; this comparison does not round or rewrite them.
+SAME_SESSION_COMPARISON_FIELDS = ("open", "high", "low", "close", "adj_close", "volume")
+_SAME_SESSION_PRICE_FIELDS = ("open", "high", "low", "close", "adj_close")
+_FAIL_CLOSED_COVERAGE = False
 
 
 # ─────────────────────────────────────────────────────────────
@@ -281,6 +290,11 @@ def _download_one(
             return False, msg, None, 0, None
 
         last = str(norm["date"].max()) if "date" in norm.columns else None
+        norm.attrs["provider"] = "yfinance"
+        norm.attrs["adjustment"] = "unadjusted"
+        norm.attrs["interval"] = "1d"
+        norm.attrs["auto_adjust"] = False
+        norm.attrs["symbol"] = ticker.strip().upper()
         msg = f"rows={len(norm)} max={last}" if verbose else "OK"
         return True, msg, last, int(len(norm)), norm
 
@@ -378,7 +392,7 @@ def _same_cell(left: object, right: object) -> bool:
 def _overlap_conflicts(
     existing: pd.DataFrame, frame: pd.DataFrame, shared_dates: Sequence[str]
 ) -> List[str]:
-    """Dates whose provider OHLCV differs. Diagnostic only; local rows stay."""
+    """Dates whose provider OHLCV differs. Older dates stay diagnostic."""
     local_rows = _rows_by_date(existing)
     provider_rows = _rows_by_date(frame)
     columns = [
@@ -541,6 +555,323 @@ def _payload_problems(
     return problems
 
 
+def _json_number(value: object, field: str) -> object:
+    number = float(value)  # type: ignore[arg-type]
+    if field == "volume" and math.isfinite(number) and number.is_integer():
+        return int(number)
+    return number
+
+
+def session_correction_row_sha256(values: Mapping[str, object]) -> str:
+    """Hash exact correction values. The encoding does not round prices."""
+    payload = {key: values[key] for key in sorted(values)}
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _comparison_value(row: pd.Series, field: str) -> object:
+    if field not in row.index or pd.isna(row[field]):
+        return None
+    return _json_number(row[field], field)
+
+
+def _session_values(row: pd.Series) -> Dict[str, object]:
+    return {field: _comparison_value(row, field) for field in SAME_SESSION_COMPARISON_FIELDS}
+
+
+def _fields_agree(local: pd.Series, provider: pd.Series) -> bool:
+    from services.session_ohlc import OHLC_ABSOLUTE_TOLERANCE
+
+    for field in SAME_SESSION_COMPARISON_FIELDS:
+        left = _comparison_value(local, field)
+        right = _comparison_value(provider, field)
+        if left is None and right is None:
+            continue
+        if left is None or right is None:
+            return False
+        if field == "volume":
+            if left != right:
+                return False
+            continue
+        if abs(float(left) - float(right)) > OHLC_ABSOLUTE_TOLERANCE:
+            return False
+    return True
+
+
+def _one_session_row(frame: pd.DataFrame, target: str) -> Optional[pd.Series]:
+    rows = _rows_by_date(frame)
+    if _date_list(frame).count(target) != 1 or target not in rows:
+        return None
+    return rows[target]
+
+
+def _provider_response_error(frame: pd.DataFrame, symbol: str) -> Optional[str]:
+    attrs = dict(getattr(frame, "attrs", {}) or {})
+    identity = ("provider", "adjustment", "interval", "auto_adjust", "symbol")
+    if all(attrs.get(key) is None for key in identity):
+        return "missing_provider_provenance"
+    if (
+        attrs.get("provider") != "yfinance"
+        or attrs.get("symbol") != symbol.upper()
+        or attrs.get("interval") != "1d"
+    ):
+        return "missing_provider_provenance"
+    if attrs.get("auto_adjust") is not False or attrs.get("adjustment") != "unadjusted":
+        return "incompatible_provider_convention"
+    return None
+
+
+def _csv_cell(value: object) -> Optional[str]:
+    if isinstance(value, str):
+        if "," in value or "\n" in value or "\r" in value:
+            return None
+        return value
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    if number.is_integer() and abs(number) < 10**15:
+        return str(int(number))
+    text = format(number, ".17g")
+    if float(text) != number:
+        text = repr(number)
+        if float(text) != number:
+            return None
+    return text
+
+
+def _splice_session_row(
+    existing_path: Path, target: str, provider_row: pd.Series
+) -> Optional[bytes]:
+    raw = existing_path.read_bytes()
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    text = raw.decode("utf-8-sig")
+    ends_nl = text.endswith("\n")
+    lines = text.splitlines()
+    if len(lines) < 2:
+        return None
+    header = lines[0].split(",")
+    matches = [
+        index for index, line in enumerate(lines[1:], start=1) if line.split(",")[0] == target
+    ]
+    if len(matches) != 1:
+        return None
+    cells: List[str] = []
+    for column in header:
+        if column == "date":
+            cells.append(target)
+            continue
+        if column not in provider_row.index:
+            return None
+        cell = _csv_cell(provider_row[column])
+        if cell is None:
+            return None
+        cells.append(cell)
+    lines[matches[0]] = ",".join(cells)
+    body = newline.join(lines)
+    if ends_nl:
+        body += newline
+    return body.encode("utf-8")
+
+
+def _correction_record(
+    *,
+    target: str,
+    local_row: pd.Series,
+    provider_row: pd.Series,
+    existing_path: Path,
+    violation: Optional[dict],
+    candidate: Optional[bytes],
+    provider: Optional[str],
+    adjustment: Optional[str],
+) -> Dict[str, object]:
+    before = _session_values(local_row)
+    after = _session_values(provider_row)
+    record: Dict[str, object] = {
+        "session_date": target,
+        "comparison_fields": list(SAME_SESSION_COMPARISON_FIELDS),
+        "price_tolerance": 1e-6,
+        "volume_comparison": "exact",
+        "before": before,
+        "after": after,
+        "before_row_sha256": session_correction_row_sha256(before),
+        "after_row_sha256": session_correction_row_sha256(after),
+        "before_raw_sha256": hashlib.sha256(existing_path.read_bytes()).hexdigest(),
+        "provider": provider,
+        "adjustment": adjustment,
+        "ohlc_violation": violation,
+    }
+    if candidate is not None:
+        record["after_raw_sha256"] = hashlib.sha256(candidate).hexdigest()
+    return record
+
+
+def _fail_closed_revision(
+    reason: str,
+    *,
+    target: str,
+    local_row: pd.Series,
+    provider_row: Optional[pd.Series],
+    existing_path: Path,
+    violation: Optional[dict] = None,
+    provider: Optional[str] = None,
+    adjustment: Optional[str] = None,
+) -> Dict[str, object]:
+    decision: Dict[str, object] = {
+        "action": "keep",
+        "reason": reason,
+        "operationally_eligible": False,
+        "counts_toward_coverage": _FAIL_CLOSED_COVERAGE,
+    }
+    if provider_row is not None:
+        decision["same_session_correction"] = _correction_record(
+            target=target,
+            local_row=local_row,
+            provider_row=provider_row,
+            existing_path=existing_path,
+            violation=violation,
+            candidate=None,
+            provider=provider,
+            adjustment=adjustment,
+        )
+    elif violation is not None:
+        decision["ohlc_violation"] = violation
+    return decision
+
+
+def _classify_same_session_revision(
+    existing: pd.DataFrame,
+    frame: pd.DataFrame,
+    symbol: str,
+    asof: date,
+    existing_path: Path,
+) -> Dict[str, object]:
+    """Classify one target session. This function does not write."""
+    from services.session_ohlc import session_ohlc_violation
+
+    target = asof.isoformat()
+    local_row = _one_session_row(existing, target)
+    provider_row = _one_session_row(frame, target)
+    if local_row is None or provider_row is None:
+        return {
+            "action": "keep",
+            "reason": "ambiguous_provider_session",
+            "operationally_eligible": False,
+            "counts_toward_coverage": _FAIL_CLOSED_COVERAGE,
+        }
+    local_violation = session_ohlc_violation(
+        open=local_row.get("open"),
+        high=local_row.get("high"),
+        low=local_row.get("low"),
+        close=local_row.get("close"),
+        symbol=symbol,
+        session_date=target,
+        source_layer="raw",
+    )
+    if _fields_agree(local_row, provider_row):
+        if local_violation is not None:
+            return _fail_closed_revision(
+                "invalid_local_session_ohlc",
+                target=target,
+                local_row=local_row,
+                provider_row=provider_row,
+                existing_path=existing_path,
+                violation=local_violation,
+            )
+        return {
+            "action": "keep",
+            "reason": "local_already_current",
+            "operationally_eligible": True,
+        }
+    provenance_error = _provider_response_error(frame, symbol)
+    attrs = dict(getattr(frame, "attrs", {}) or {})
+    if provenance_error == "missing_provider_provenance":
+        return _fail_closed_revision(
+            "missing_provider_provenance",
+            target=target,
+            local_row=local_row,
+            provider_row=provider_row,
+            existing_path=existing_path,
+            provider=attrs.get("provider"),
+            adjustment=attrs.get("adjustment"),
+        )
+    if provenance_error == "incompatible_provider_convention":
+        return _fail_closed_revision(
+            "incompatible_provider_convention",
+            target=target,
+            local_row=local_row,
+            provider_row=provider_row,
+            existing_path=existing_path,
+            provider=attrs.get("provider"),
+            adjustment=attrs.get("adjustment"),
+        )
+    required = ("open", "high", "low", "close", "adj_close", "volume")
+    if any(field not in frame.columns or field not in existing.columns for field in required):
+        return _fail_closed_revision(
+            "incompatible_provider_convention",
+            target=target,
+            local_row=local_row,
+            provider_row=provider_row,
+            existing_path=existing_path,
+            provider=attrs.get("provider"),
+            adjustment=attrs.get("adjustment"),
+        )
+    provider_violation = session_ohlc_violation(
+        open=provider_row.get("open"),
+        high=provider_row.get("high"),
+        low=provider_row.get("low"),
+        close=provider_row.get("close"),
+        symbol=symbol,
+        session_date=target,
+        source_layer="provider",
+    )
+    if provider_violation is not None:
+        return _fail_closed_revision(
+            "invalid_provider_session_ohlc",
+            target=target,
+            local_row=local_row,
+            provider_row=provider_row,
+            existing_path=existing_path,
+            violation=provider_violation,
+            provider=str(attrs.get("provider")),
+            adjustment=str(attrs.get("adjustment")),
+        )
+    candidate = _splice_session_row(existing_path, target, provider_row)
+    if (
+        candidate is None
+        or hashlib.sha256(candidate).hexdigest()
+        == hashlib.sha256(existing_path.read_bytes()).hexdigest()
+    ):
+        return _fail_closed_revision(
+            "incomplete_provider_session",
+            target=target,
+            local_row=local_row,
+            provider_row=provider_row,
+            existing_path=existing_path,
+            provider=str(attrs.get("provider")),
+            adjustment=str(attrs.get("adjustment")),
+        )
+    record = _correction_record(
+        target=target,
+        local_row=local_row,
+        provider_row=provider_row,
+        existing_path=existing_path,
+        violation=None,
+        candidate=candidate,
+        provider="yfinance",
+        adjustment="unadjusted",
+    )
+    return {
+        "action": "promote",
+        "reason": "same_session_provider_correction",
+        "operationally_eligible": True,
+        "same_session_correction": record,
+        "candidate_bytes": candidate,
+    }
+
+
 def classify_provider_payload(
     frame: Optional[pd.DataFrame],
     symbol: str,
@@ -574,6 +905,9 @@ def classify_provider_payload(
             if decision["action"] == "skip":
                 decision["reason"] = MISSING_EXPECTED_SESSION_BAR
         decision["operationally_eligible"] = bool(local_exact)
+        if local_exact and frame is not None and target in _date_list(frame):
+            decision["operationally_eligible"] = False
+            decision["counts_toward_coverage"] = _FAIL_CLOSED_COVERAGE
         return decision
     if staged_max is None or staged_max < target:
         decision["action"] = "skip" if not local_exact else "keep"
@@ -647,9 +981,14 @@ def classify_provider_payload(
     missing = [day for day in required if day not in staged_set]
     extra = [day for day in newer if day not in set(required)]
     if not required and not newer:
+        if local_exact:
+            decision.update(
+                _classify_same_session_revision(existing, frame, symbol, asof, existing_path)
+            )
+            return decision
         decision["action"] = "keep"
-        decision["reason"] = "local_already_current" if local_exact else "unchanged"
-        decision["operationally_eligible"] = bool(local_exact)
+        decision["reason"] = "unchanged"
+        decision["operationally_eligible"] = False
         return decision
     if target_rows != 1 or missing:
         decision["action"] = "keep"
@@ -727,8 +1066,11 @@ def apply_provider_fetch(
         frame = frames.get(symbol)
         decision = classify_provider_payload(frame, symbol, asof, path)
         candidate = decision.pop("candidate_frame", None)
+        candidate_bytes = decision.pop("candidate_bytes", None)
         decisions.append(decision)
-        if decision["action"] == "promote" and isinstance(candidate, pd.DataFrame):
+        if decision["action"] == "promote" and isinstance(candidate_bytes, bytes):
+            staged[symbol] = candidate_bytes
+        elif decision["action"] == "promote" and isinstance(candidate, pd.DataFrame):
             if decision["reason"] == "monotonic_append":
                 staged[symbol] = _append_csv_bytes(
                     path, candidate, len(decision.get("appended_dates") or [])
@@ -742,7 +1084,8 @@ def apply_provider_fetch(
     for symbol in tradables:
         decision = by_symbol[symbol]
         local_exact = decision.get("local_max") == asof.isoformat()
-        if decision["action"] == "promote" or local_exact:
+        counts = decision.get("counts_toward_coverage", True) is not False
+        if decision["action"] == "promote" or (local_exact and counts):
             valid.append(symbol)
     denominator = len(tradables)
     ratio = (len(valid) / denominator) if denominator else 0.0
