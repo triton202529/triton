@@ -303,6 +303,7 @@ def assess_required_layer(
     not_advanced: List[str] = []
     dist: Counter[str] = Counter()
     advancement: Dict[str, Any] = {}
+    ohlc_violations: List[Dict[str, Any]] = []
 
     for sym in required:
         path = _layer_paths(repo_root, sym, layer)
@@ -342,6 +343,12 @@ def assess_required_layer(
         if max_date != target.isoformat():
             stale.append(sym)
             continue
+        if layer == "raw":
+            violation = _raw_session_ohlc_violation(path, sym, target)
+            if violation and violation.get("relationship") != "non_finite_ohlc":
+                schema_invalid.append(sym)
+                ohlc_violations.append(violation)
+                continue
         if require_advancement and not adv.get("advanced"):
             not_advanced.append(sym)
             continue
@@ -385,6 +392,7 @@ def assess_required_layer(
         "expected_excluded_symbols": sorted(excluded),
         "max_date_distribution": dict(dist),
         "advancement": advancement,
+        "ohlc_violations": ohlc_violations,
         "passed": passed,
     }
 
@@ -510,7 +518,51 @@ def _raw_exact_session_errors(path: Path, symbol: str, target: date) -> List[str
         errors.append("future_row")
     if dates.empty or dates.max().date() != target:
         errors.append("stale_session")
+    if session_rows == 1 and "malformed_ohlcv" not in errors:
+        violation = _frame_session_ohlc_violation(numeric, dates, symbol, target)
+        if violation:
+            errors.append("invalid_session_ohlc")
     return errors
+
+
+def _frame_session_ohlc_violation(
+    numeric: Any,
+    dates: Any,
+    symbol: str,
+    target: date,
+) -> Optional[Dict[str, Any]]:
+    from services.session_ohlc import session_ohlc_violation
+
+    mask = dates.dt.date == target
+    if int(mask.sum()) != 1:
+        return None
+    row = numeric.loc[mask].iloc[0]
+    return session_ohlc_violation(
+        open=row.get("open"),
+        high=row.get("high"),
+        low=row.get("low"),
+        close=row.get("close"),
+        symbol=symbol,
+        session_date=target.isoformat(),
+        source_layer="raw",
+    )
+
+
+def _raw_session_ohlc_violation(path: Path, symbol: str, target: date) -> Optional[Dict[str, Any]]:
+    import pandas as pd
+
+    try:
+        frame = pd.read_csv(path)
+    except Exception:
+        return None
+    required = ["open", "high", "low", "close", "date"]
+    if any(column not in frame.columns for column in required):
+        return None
+    numeric = frame[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
+    dates = pd.to_datetime(frame["date"], errors="coerce")
+    if bool(dates.isna().any()):
+        return None
+    return _frame_session_ohlc_violation(numeric, dates, symbol, target)
 
 
 FETCH_RECEIPT_REL = "data/results/daily_refresh_fetch_receipt.json"

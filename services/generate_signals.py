@@ -361,7 +361,7 @@ def _processed_path_for_ticker(ticker: str) -> Optional[str]:
 class _ProcessedSessionView:
     """Single validity decision for coverage counting and operational emission."""
 
-    __slots__ = ("ok", "path", "close", "hist", "reason", "actual")
+    __slots__ = ("ok", "path", "close", "hist", "reason", "actual", "ohlc_violation")
 
     def __init__(
         self,
@@ -372,6 +372,7 @@ class _ProcessedSessionView:
         hist: Optional[pd.DataFrame],
         reason: Optional[str],
         actual: str,
+        ohlc_violation: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.ok = ok
         self.path = path
@@ -379,6 +380,7 @@ class _ProcessedSessionView:
         self.hist = hist
         self.reason = reason
         self.actual = actual
+        self.ohlc_violation = ohlc_violation
 
 
 def _session_ohlcv_skip_reason(row: pd.Series) -> Optional[str]:
@@ -395,7 +397,17 @@ def _session_ohlcv_skip_reason(row: pd.Series) -> Optional[str]:
         return SKIP_INVALID_PROCESSED_SESSION_BAR
     if open_v <= 0.0 or high_v <= 0.0 or low_v <= 0.0 or close_v <= 0.0 or volume_v < 0.0:
         return SKIP_INVALID_PROCESSED_SESSION_BAR
-    if high_v < open_v or high_v < close_v or low_v > open_v or low_v > close_v or high_v < low_v:
+    from services.session_ohlc import session_ohlc_violation
+
+    if session_ohlc_violation(
+        open=open_v,
+        high=high_v,
+        low=low_v,
+        close=close_v,
+        symbol="",
+        session_date="",
+        source_layer="processed",
+    ):
         return SKIP_INVALID_PROCESSED_SESSION_BAR
     return None
 
@@ -496,6 +508,14 @@ def _inspect_processed_session(ticker: str, session_asof: date_type) -> _Process
             reason=SKIP_MISSING_EXPECTED_SESSION_BAR,
             actual=str(session_asof),
         )
+    from services.session_ohlc import violation_from_mapping
+
+    ohlc_violation = violation_from_mapping(
+        row,
+        symbol=ticker,
+        session_date=str(session_asof),
+        source_layer="processed",
+    )
     shape_reason = _session_ohlcv_skip_reason(row)
     if shape_reason:
         return _ProcessedSessionView(
@@ -505,6 +525,7 @@ def _inspect_processed_session(ticker: str, session_asof: date_type) -> _Process
             hist=None,
             reason=shape_reason,
             actual=str(session_asof),
+            ohlc_violation=ohlc_violation,
         )
     feature_hist = clipped.dropna(subset=["close"]).copy()
     if "high" not in feature_hist.columns:
@@ -1218,6 +1239,7 @@ def main() -> None:
         source_path: Optional[str] = None,
         source_sha256: Optional[str] = None,
         symbol_class: Optional[str] = None,
+        ohlc_violation: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not label:
             label = "<unknown>"
@@ -1237,6 +1259,8 @@ def main() -> None:
             "evidence_timestamp": generated_at,
             "class": symbol_class or ("index" if _is_index_ticker(label) else "tradable"),
         }
+        if ohlc_violation:
+            rec["ohlc_violation"] = ohlc_violation
         skip_records.append(rec)
         print(
             f"[SIGNAL_SKIP] ticker={label} reason={reason} "
@@ -1563,6 +1587,7 @@ def main() -> None:
             actual=actual,
             source_path=view.path,
             source_sha256=_file_hash(view.path) if view.path else "",
+            ohlc_violation=view.ohlc_violation,
         )
 
     def _publish_empty_and_maybe_fail(message: str) -> None:

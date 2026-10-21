@@ -186,6 +186,33 @@ def _production_results() -> Path:
     return RESULTS_DIR
 
 
+def tradable_invalid_ohlc_skips(diag: Mapping[str, object]) -> list:
+    """Required tradable bars rejected by the shared OHLC contract."""
+    found = []
+    for rec in diag.get("per_symbol_skips") or []:
+        if not isinstance(rec, Mapping):
+            continue
+        if str(rec.get("reason") or "") != "INVALID_PROCESSED_SESSION_BAR":
+            continue
+        if str(rec.get("class") or "tradable") == "index":
+            continue
+        found.append(dict(rec))
+    return found
+
+
+def _staged_ohlc_block(staging: Path) -> list:
+    path = staging / "signals_asof_diagnostics.json"
+    if not path.is_file():
+        return []
+    try:
+        diag = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(diag, dict):
+        return []
+    return tradable_invalid_ohlc_skips(diag)
+
+
 def stage_signal_bundle() -> int:
     """Build the candidate in staging. Production bundle files stay in place."""
     import services.apply_signal_lifecycle as lifecycle
@@ -218,6 +245,15 @@ def stage_signal_bundle() -> int:
     signals_path = staging / "signals.csv"
     if not signals_path.is_file() or pd.read_csv(signals_path).empty:
         _fail_stage(production, staging, reason="empty_signal_candidate")
+        return 1
+    blocked = _staged_ohlc_block(staging)
+    if blocked:
+        _fail_stage(
+            production,
+            staging,
+            reason="invalid_session_ohlc",
+            ohlc_violations=[row.get("ohlc_violation") or row for row in blocked],
+        )
         return 1
 
     lifecycle.RESULTS_DIR = staging
@@ -315,6 +351,17 @@ def commit_signal_bundle() -> int:
     generated_at = str(marker.get("generated_at_utc") or "")
     if not session or not generated_at:
         write_failure_receipt(RESULTS_DIR, {"reason": "stage_missing_generation"})
+        return 1
+    blocked = _staged_ohlc_block(staging)
+    if blocked:
+        write_failure_receipt(
+            RESULTS_DIR,
+            {
+                "reason": "invalid_session_ohlc",
+                "ohlc_violations": [row.get("ohlc_violation") or row for row in blocked],
+            },
+        )
+        print("[SIGNAL_BUNDLE_COMMIT_FAILED] invalid session OHLC")
         return 1
 
     import services.portfolio_allocation_engine as allocation
