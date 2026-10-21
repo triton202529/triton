@@ -20,6 +20,7 @@ from services.manage_open_orders import (
     _norm_status,
     _not_filled,
     _order_ts,
+    _unfilled_order_qty,
     load_open_orders_snapshot_or_broker,
 )
 from services.order_discipline import (
@@ -397,10 +398,7 @@ def run(
 
         oid = str(r.get("order_id") or r.get("id") or "").strip()
         sym = str(r.get("symbol") or r.get("ticker") or "").strip().upper()
-        try:
-            qty = int(float(r.get("qty") or r.get("quantity") or 0))
-        except Exception:
-            qty = 0
+        qty = _unfilled_order_qty(dict(r))
         if qty < 1:
             run_rows.append(
                 _result_row(
@@ -695,10 +693,7 @@ def _result_row(
     ts = _order_ts(r)
     age = _age_minutes(ts, now)
     st = _norm_status(r.get("status"))
-    try:
-        qty = int(float(r.get("qty") or r.get("quantity") or 0))
-    except Exception:
-        qty = 0
+    qty = _unfilled_order_qty(dict(r))
     sess = session_map.get(oid, str(r.get("session") or ""))
     return {
         "timestamp": _utc_iso(),

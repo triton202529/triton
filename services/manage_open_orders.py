@@ -502,6 +502,44 @@ def _remaining_qty_raw(o: Dict[str, Any]) -> int:
         return 0
 
 
+def _share_count(v: Any) -> float:
+    """Non-negative share count. Blank and NaN count as zero."""
+    if v is None or v == "":
+        return 0.0
+    try:
+        if pd.isna(v):
+            return 0.0
+    except Exception:
+        pass
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    if n != n or n < 0:
+        return 0.0
+    return n
+
+
+def _unfilled_order_qty(o: Dict[str, Any]) -> int:
+    """Shares still resting.
+
+    Alpaca ``qty`` is the original order size. Cancel-replacing a partial
+    fill with that original size buys the filled shares a second time.
+    """
+    q = _share_count(o.get("qty"))
+    if q <= 0:
+        q = _share_count(o.get("quantity"))
+    fq = _share_count(o.get("filled_qty"))
+    if fq <= 0:
+        fq = _share_count(o.get("filled_quantity"))
+    if q <= 0:
+        return 0
+    rem = q - fq
+    if rem <= 1e-9:
+        return 0
+    return int(rem)
+
+
 def _order_age_seconds(o: Dict[str, Any], now: datetime) -> Optional[float]:
     for k in ("submitted_at", "created_at", "updated_at"):
         dt = _parse_ts(o.get(k))

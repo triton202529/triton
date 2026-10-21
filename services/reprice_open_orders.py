@@ -19,6 +19,7 @@ from services.manage_open_orders import (
     _norm_status,
     _not_filled,
     _order_ts,
+    _unfilled_order_qty,
     load_open_orders_snapshot_or_broker,
 )
 from services.place_live_orders import DEFAULT_LOG_CSV, append_log_row, utc_now_iso
@@ -135,10 +136,7 @@ def _iter_eligible_stale_buys(
             continue
         oid = str(r.get("order_id") or r.get("id") or "").strip()
         sym = str(r.get("symbol") or r.get("ticker") or "").strip().upper()
-        try:
-            qty = int(float(r.get("qty") or r.get("quantity") or 0))
-        except Exception:
-            qty = 0
+        qty = _unfilled_order_qty(dict(r))
         if qty < 1:
             continue
         old_lp = _safe_float(r.get("limit_price") or r.get("price"))
