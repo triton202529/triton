@@ -82,6 +82,9 @@ def held_symbols_from_snapshot(path: Path) -> Set[str]:
     return held
 
 
+_RISK_REDUCING_ACTIONS = frozenset({"EXIT", "TRIM"})
+
+
 def assert_held_positions_stay_long(lifecycle: pd.DataFrame, held: Iterable[str]) -> None:
     """Broker-held names stay LONG. EXIT is preserved; WAIT is refused."""
     if lifecycle is None or lifecycle.empty:
@@ -98,6 +101,123 @@ def assert_held_positions_stay_long(lifecycle: pd.DataFrame, held: Iterable[str]
             raise RuntimeError(f"held symbol {symbol} position_state={position}")
         if action in {"", "WAIT"}:
             raise RuntimeError(f"held symbol {symbol} action={action}")
+
+
+def _frame_symbol_column(frame: pd.DataFrame) -> str:
+    if "ticker" in frame.columns:
+        return "ticker"
+    if "symbol" in frame.columns:
+        return "symbol"
+    raise RuntimeError("effective lifecycle is missing ticker")
+
+
+def _raw_action_map(raw: pd.DataFrame) -> dict[str, str]:
+    if raw is None or raw.empty:
+        return {}
+    if "ticker" not in raw.columns and "symbol" not in raw.columns:
+        return {}
+    symbol_col = _frame_symbol_column(raw)
+    action_col = "lifecycle_action" if "lifecycle_action" in raw.columns else "stance"
+    actions: dict[str, str] = {}
+    for _, row in raw.iterrows():
+        symbol = str(row.get(symbol_col) or "").strip().upper()
+        if symbol:
+            actions[symbol] = str(row.get(action_col) or "").strip().upper()
+    return actions
+
+
+def apply_snapshot_held_effective_state(
+    effective: pd.DataFrame,
+    raw: pd.DataFrame,
+    held: Iterable[str],
+) -> pd.DataFrame:
+    """Operational held state for the effective lifecycle. The raw frame is not written."""
+    out = effective.copy()
+    if out.empty:
+        return out
+    symbol_col = _frame_symbol_column(out)
+    actions = _raw_action_map(raw)
+    for symbol in {str(item).strip().upper() for item in held if str(item).strip()}:
+        mask = out[symbol_col].astype(str).str.upper() == symbol
+        if not mask.any():
+            continue
+        index = out.index[mask][0]
+        action = actions.get(symbol, "")
+        out.at[index, "effective_position_state"] = "LONG"
+        if action in _RISK_REDUCING_ACTIONS:
+            out.at[index, "effective_stance"] = action
+        elif action in {"", "WAIT", "FLAT", "HOLD"}:
+            out.at[index, "effective_stance"] = "HOLD"
+    return out
+
+
+def assert_effective_held_positions(
+    effective: pd.DataFrame,
+    held: Iterable[str],
+    snapshot_evidence: Mapping[str, object],
+) -> None:
+    """Fail closed unless snapshot-held names are LONG on the bound effective lifecycle."""
+    if effective is None or effective.empty:
+        raise RuntimeError("effective lifecycle candidate is empty")
+    for column in ("positions_snapshot_sha256", "positions_snapshot_ts"):
+        if column not in effective.columns:
+            raise RuntimeError("effective_lifecycle_unbound")
+    expected_hash = str(snapshot_evidence.get("sha256") or "")
+    expected_ts = str(snapshot_evidence.get("snapshot_ts") or "")
+    if set(effective["positions_snapshot_sha256"].astype(str)) != {expected_hash}:
+        raise RuntimeError("positions_snapshot_hash_mismatch")
+    if set(effective["positions_snapshot_ts"].astype(str)) != {expected_ts}:
+        raise RuntimeError("positions_snapshot_timestamp_mismatch")
+    symbol_col = _frame_symbol_column(effective)
+    for symbol in sorted({str(item).strip().upper() for item in held if str(item).strip()}):
+        rows = effective[effective[symbol_col].astype(str).str.upper() == symbol]
+        if rows.empty:
+            raise RuntimeError(f"held symbol {symbol} missing from effective lifecycle")
+        position = str(rows.iloc[0].get("effective_position_state") or "").strip().upper()
+        action = str(rows.iloc[0].get("effective_stance") or "").strip().upper()
+        if position != "LONG":
+            raise RuntimeError(
+                f"held symbol {symbol} effective_position_state={position or 'FLAT'} "
+                "terminal_flat_unproven"
+            )
+        if action in {"", "WAIT", "FLAT"}:
+            raise RuntimeError(f"held symbol {symbol} effective_stance={action or 'WAIT'}")
+
+
+def guard_staged_held_positions(production: Path, staging: Path) -> None:
+    """Apply snapshot-held operational state, then validate the staged effective lifecycle."""
+    from services.build_effective_lifecycle import read_positions_snapshot_evidence
+
+    raw_path = staging / "signal_lifecycle.csv"
+    effective_path = staging / "signal_lifecycle_effective.csv"
+    if not effective_path.is_file():
+        raise RuntimeError("effective lifecycle missing")
+    raw_bytes = raw_path.read_bytes() if raw_path.is_file() else b""
+    evidence = read_positions_snapshot_evidence(production / "positions_snapshot.csv")
+    effective = pd.read_csv(effective_path)
+    raw = pd.read_csv(raw_path) if raw_path.is_file() else pd.DataFrame()
+    for column, key in (
+        ("positions_snapshot_sha256", "sha256"),
+        ("positions_snapshot_ts", "snapshot_ts"),
+    ):
+        if column not in effective.columns or set(effective[column].astype(str)) != {
+            str(evidence.get(key) or "")
+        }:
+            raise RuntimeError(
+                "positions_snapshot_hash_mismatch"
+                if key == "sha256"
+                else "positions_snapshot_timestamp_mismatch"
+            )
+    held = held_symbols_from_snapshot(production / "positions_snapshot.csv")
+    updated = apply_snapshot_held_effective_state(effective, raw, held)
+    if not updated.equals(effective):
+        _atomic_bytes(
+            effective_path,
+            updated.to_csv(index=False, lineterminator="\n").encode("utf-8"),
+        )
+    if raw_path.is_file() and raw_path.read_bytes() != raw_bytes:
+        raise RuntimeError("raw_lifecycle_mutated")
+    assert_effective_held_positions(updated, held, evidence)
 
 
 def _atomic_bytes(target: Path, payload: bytes) -> None:
@@ -570,11 +690,7 @@ def stage_signal_bundle() -> int:
         return int(eff_rc)
 
     try:
-        held = held_symbols_from_snapshot(production / "positions_snapshot.csv")
-        assert_held_positions_stay_long(
-            pd.read_csv(staging / "signal_lifecycle.csv"),
-            held,
-        )
+        guard_staged_held_positions(production, staging)
     except Exception as exc:
         _fail_stage(production, staging, reason="held_position_guard", detail=str(exc))
         return 1
@@ -669,6 +785,18 @@ def commit_signal_bundle() -> int:
         print(f"[SIGNAL_BUNDLE_COMMIT_FAILED] {exc}")
         return 1
 
+    snapshot_bound = "positions_snapshot_sha256" in marker
+    if snapshot_bound:
+        try:
+            guard_staged_held_positions(RESULTS_DIR, staging)
+        except (OSError, RuntimeError, ValueError) as exc:
+            write_failure_receipt(
+                RESULTS_DIR,
+                {"reason": "held_position_guard", "detail": str(exc)},
+            )
+            print(f"[SIGNAL_BUNDLE_COMMIT_FAILED] {exc}")
+            return 1
+
     alloc_rc = run_staged_allocation(RESULTS_DIR, staging)
     if alloc_rc != 0:
         write_failure_receipt(
@@ -697,8 +825,18 @@ def commit_signal_bundle() -> int:
         ):
             _stamp_csv(staging / name, generated_at, session)
         refresh_staged_signals_hash(staging)
-        held = held_symbols_from_snapshot(RESULTS_DIR / "positions_snapshot.csv")
-        assert_held_positions_stay_long(pd.read_csv(staging / "signal_lifecycle.csv"), held)
+        if snapshot_bound:
+            evidence_path = RESULTS_DIR / "positions_snapshot.csv"
+            from services.build_effective_lifecycle import read_positions_snapshot_evidence
+
+            assert_effective_held_positions(
+                pd.read_csv(staging / "signal_lifecycle_effective.csv"),
+                held_symbols_from_snapshot(evidence_path),
+                read_positions_snapshot_evidence(evidence_path),
+            )
+        else:
+            held = held_symbols_from_snapshot(RESULTS_DIR / "positions_snapshot.csv")
+            assert_held_positions_stay_long(pd.read_csv(staging / "signal_lifecycle.csv"), held)
         publish_coherent_bundle(RESULTS_DIR, staging, generated_at=generated_at, session=session)
     except Exception as exc:
         write_failure_receipt(RESULTS_DIR, {"reason": "publish_refused", "detail": str(exc)})
