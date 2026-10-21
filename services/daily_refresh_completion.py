@@ -165,6 +165,11 @@ def _evaluate_run(root: Path, run_id: str, session_date: str) -> Dict[str, Any]:
     log_path = logs / f"daily_refresh_{stamp}.log"
     if not isinstance(baseline, dict) or str(baseline.get("run_id") or "") != run_id:
         return _result(False, CLASS_FETCH_ONLY, CLASS_FETCH_ONLY, session_date, run_id=run_id)
+    baseline_session = str(baseline.get("target_session") or "")
+    if baseline_session and baseline_session != session_date:
+        return _result(
+            False, "daily_refresh_session_mismatch", CLASS_FETCH_ONLY, session_date, run_id=run_id
+        )
     if not isinstance(stages_doc, list):
         return _result(False, CLASS_FETCH_ONLY, CLASS_FETCH_ONLY, session_date, run_id=run_id)
     names = [str(stage.get("name") or "") for stage in stages_doc if isinstance(stage, dict)]
@@ -186,27 +191,103 @@ def _evaluate_run(root: Path, run_id: str, session_date: str) -> Dict[str, Any]:
         return _result(False, CLASS_FETCH_ONLY, CLASS_FETCH_ONLY, session_date, run_id=run_id)
     if not _log_is_successful(log_text, run_id):
         return _result(False, CLASS_FETCH_ONLY, CLASS_FETCH_ONLY, session_date, run_id=run_id)
+    declared_sessions = _declared_log_sessions(log_text)
+    if declared_sessions and any(item != session_date for item in declared_sessions):
+        return _result(
+            False, "daily_refresh_session_mismatch", CLASS_FETCH_ONLY, session_date, run_id=run_id
+        )
     return _result(True, "daily_refresh_complete", CLASS_COMPLETE, session_date, run_id=run_id)
 
 
+_BASELINE_PREFIX = "daily_prediction_refresh_baseline_"
+_LOG_SESSION_MARKERS = ("asof=", "target_session=", "--completed-session ")
+
+
+def _run_id_from_baseline_name(name: str) -> str:
+    if not name.startswith(_BASELINE_PREFIX) or not name.endswith(".json"):
+        return ""
+    run_id = name[len(_BASELINE_PREFIX) : -len(".json")]
+    if not run_id.startswith("daily_prediction_refresh_"):
+        return ""
+    if run_id != Path(run_id).name or any(char in run_id for char in "\\/:"):
+        return ""
+    return run_id
+
+
+def _receipt_declares_session(path: Path, run_id: str, session_date: str) -> bool:
+    if run_id_from_stage_receipt_filename(path.name) != run_id:
+        return False
+    payload = _read_json(path)
+    if not isinstance(payload, list):
+        return False
+    return any(
+        isinstance(stage, dict) and str(stage.get("target_session") or "") == session_date
+        for stage in payload
+    )
+
+
 def _candidate_run_ids(root: Path, session_date: str) -> List[str]:
+    """Run ids whose receipt content declares ``session_date``.
+
+    The calendar date inside a run id is the execution stamp. It is not the
+    target session. A next-day recovery of the prior completed session still
+    qualifies when its baseline, receipts, summary, and success log agree.
+    """
     found: List[str] = []
     results = root / "data" / "results"
-    compact = session_date.replace("-", "")
-    if results.is_dir():
-        for path in sorted(
-            results.glob(f"daily_prediction_refresh_stage_receipts_*{compact}*.json")
-        ):
-            run_id = run_id_from_stage_receipt_filename(path.name)
-            if run_id and run_id not in found:
-                found.append(run_id)
+    if not results.is_dir():
+        return found
+    names = sorted(path.name for path in results.iterdir() if path.is_file())
+    discovered: List[str] = []
+    for name in names:
+        run_id = ""
+        if name.startswith("daily_prediction_refresh_stage_receipts_"):
+            run_id = run_id_from_stage_receipt_filename(name)
+        elif name.startswith(_BASELINE_PREFIX):
+            run_id = _run_id_from_baseline_name(name)
+        if run_id and run_id not in discovered:
+            discovered.append(run_id)
     logs = root / "logs"
     if logs.is_dir():
-        for path in sorted(logs.glob(f"daily_refresh_*{compact}*.log")):
+        for path in sorted(logs.glob("daily_refresh_*.log")):
             run_id = _run_id_from_log(path)
-            if run_id and run_id not in found:
-                found.append(run_id)
+            if run_id and run_id not in discovered:
+                discovered.append(run_id)
+    for run_id in discovered:
+        prefix = f"daily_prediction_refresh_stage_receipts_{run_id}"
+        declared = False
+        for name in names:
+            if not name.startswith(prefix) or not name.endswith(".json"):
+                continue
+            if _receipt_declares_session(results / name, run_id, session_date):
+                declared = True
+                break
+        if declared:
+            found.append(run_id)
     return found
+
+
+def _declared_log_sessions(text: str) -> List[str]:
+    found: List[str] = []
+    for line in text.splitlines():
+        for marker in _LOG_SESSION_MARKERS:
+            if marker not in line:
+                continue
+            token = line.split(marker, 1)[1].strip().split()[0]
+            if len(token) >= 10:
+                found.append(token[:10])
+    return found
+
+
+def _select_valid_run(verdicts: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Pick one fully valid run. Later execution stamps sort after earlier ones."""
+    ordered = sorted(verdicts, key=lambda item: str(item.get("run_id") or ""))
+    chosen = dict(ordered[-1])
+    if len(ordered) == 1:
+        chosen["selection_reason"] = "only_fully_valid_run"
+    else:
+        chosen["selection_reason"] = "latest_run_id_among_fully_valid"
+    return chosen
 
 
 def evaluate_daily_refresh_completion(
@@ -234,14 +315,23 @@ def evaluate_daily_refresh_completion(
     if not session_date:
         return _result(False, "daily_refresh_receipt_missing", CLASS_FETCH_ONLY, "")
     blocked = None
+    incomplete = None
+    valid: List[Dict[str, Any]] = []
     for run_id in _candidate_run_ids(root, session_date):
         verdict = _evaluate_run(root, run_id, session_date)
         if verdict["ok"]:
-            return verdict
+            valid.append(verdict)
+            continue
         if str(verdict.get("detail") or "").startswith("stage_receipt_generation_"):
             blocked = verdict
+        else:
+            incomplete = verdict
+    if valid:
+        return _select_valid_run(valid)
     if blocked is not None:
         return blocked
+    if incomplete is not None:
+        return incomplete
     if fetch_passed and fetch_target == session_date:
         return _result(False, CLASS_FETCH_ONLY, CLASS_FETCH_ONLY, session_date)
     if isinstance(fetch, dict) and fetch_target and fetch_target != session_date:
