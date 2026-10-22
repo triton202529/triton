@@ -1603,7 +1603,14 @@ def build_execution_plan(
             "passed_entry_filter": 0,
         }
 
-        def _quality_skip_reason(sym_q: str, row_q: pd.Series) -> Optional[str]:
+        def _quality_skip_reason(
+            sym_q: str, row_q: pd.Series, stance_q: str = ""
+        ) -> Optional[str]:
+            # Entry gate uses confidence * signed delta, then a percentile rank.
+            # Deterioration TRIM/EXIT rows are negative on that scale, so they
+            # rank below buys and are dropped by min_final_score (0.65).
+            if str(stance_q or "").strip().upper() in ("TRIM", "EXIT"):
+                return None
             fs = _row_execution_final_score(row_q)
             if bool(cfg.get("block_negative_final_score", True)) and fs < 0:
                 print(f"[QUALITY_BLOCK] symbol={sym_q} final_score={fs:.4f}")
@@ -1666,6 +1673,10 @@ def build_execution_plan(
             *,
             is_buy: bool,
         ) -> Tuple[int, Optional[str]]:
+            # Score sizing scales entries. Applying it to trims/exits shrinks
+            # or skips the sell when the entry score is low.
+            if not is_buy:
+                return base_qty, None
             fs = _row_execution_final_score(row_q)
             if not score_sizing_enabled:
                 print(
@@ -2633,7 +2644,7 @@ def build_execution_plan(
                 lim = _limit_from_ref(ref, "sell", buy_bps, sell_bps)
                 lim = _round_price(lim)
                 notional = q * lim
-                skip_q = _quality_skip_reason(sym, row)
+                skip_q = _quality_skip_reason(sym, row, effective_stance)
                 if skip_q:
                     lines.append(
                         PlanLine(sym, "skip", "skipped", skip_q, stance, None, ot, conf, d_pct)
@@ -2728,7 +2739,7 @@ def build_execution_plan(
                 lim = _limit_from_ref(ref, "sell", buy_bps, sell_bps)
                 lim = _round_price(lim)
                 notional = q * lim
-                skip_q = _quality_skip_reason(sym, row)
+                skip_q = _quality_skip_reason(sym, row, effective_stance)
                 if skip_q:
                     lines.append(
                         PlanLine(sym, "skip", "skipped", skip_q, stance, None, ot, conf, d_pct)
@@ -3396,6 +3407,7 @@ def _validate_guard_orders(
     failures: List[str] = []
     has_hard = False
     for p in planned:
+        stance = str(getattr(p, "stance", "") or "").strip().upper()
         payload = {
             "symbol": p.symbol,
             "side": p.side,
@@ -3404,6 +3416,9 @@ def _validate_guard_orders(
             "limit_price": p.limit_price,
             "time_in_force": p.time_in_force,
         }
+        if stance:
+            payload["stance"] = stance
+            payload["management_action"] = stance
         d = guard.validate(payload)
         if d.ok:
             eligible.append(p)
