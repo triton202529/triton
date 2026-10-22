@@ -238,7 +238,12 @@ DEFAULT_DRAWDOWN_PCT = -10.0
 DEFAULT_CONCENTRATION_PCT = 25.0
 DEFAULT_ORDER_AGE_MINUTES = 60
 DEFAULT_STALE_HEARTBEAT_MULTIPLIER = 2.0
-HANG_BUDGET_MINUTES = 15.0
+# October 22 healthy one-shot passes finished in well under a minute.
+# The budget must exceed that measured duration, stay above the old
+# two-minute stale multiplier, and stop at a fixed ceiling.
+MEASURED_HEALTHY_PASS_MINUTES = 1.0
+HANG_BUDGET_FLOOR_MINUTES = 2.0
+HANG_BUDGET_CEILING_MINUTES = 15.0
 WATCHDOG_LIVENESS_BLOCK = frozenset({"DEAD", "HUNG", "STALE_LOCK"})
 DEFAULT_HEARTBEAT_GRACE_MINUTES = 55.0
 BROKER_DISCONNECT_CYCLES = 2
@@ -1283,6 +1288,20 @@ def _pid_is_alive(pid: Any) -> bool:
     return True
 
 
+def bounded_hang_budget_minutes(
+    measured_healthy_minutes: float = MEASURED_HEALTHY_PASS_MINUTES,
+) -> float:
+    """Hang budget above a measured healthy pass, capped at a fixed ceiling."""
+    measured = max(0.0, float(measured_healthy_minutes))
+    budget = max(HANG_BUDGET_FLOOR_MINUTES, measured + HANG_BUDGET_FLOOR_MINUTES)
+    if budget > HANG_BUDGET_CEILING_MINUTES:
+        return HANG_BUDGET_CEILING_MINUTES
+    return budget
+
+
+HANG_BUDGET_MINUTES = bounded_hang_budget_minutes()
+
+
 def _watchdog_lock_liveness(lock_path: Path) -> Tuple[bool, Optional[bool]]:
     if not lock_path.is_file():
         return False, None
@@ -1308,24 +1327,71 @@ def classify_watchdog_liveness(
     now: datetime,
     hang_budget_minutes: float = HANG_BUDGET_MINUTES,
 ) -> str:
-    """Separate a completed long pass from a dead, hung, or ownerless lock."""
+    """Classify the parent loop and any in-progress one-shot child.
+
+    ``cycle_started_at`` is an in-progress pass and belongs to ``owner_pid_alive``
+    (the child). ``last_completed_at`` is a finished pass. A completed child may
+    exit while the parent lock owner is still alive; that is ``OK``, including
+    when the pass ran longer than the old two-minute threshold.
+
+    ``DEAD`` is an unfinished pass whose child is gone, a pass with no live
+    parent lock, or a lock whose owner process is dead. ``HUNG`` is a child
+    that is still alive after the hang budget. Both block entries.
+    """
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-    if lock_present and lock_owner_alive is False:
-        return "STALE_LOCK"
     started = _parse_iso(cycle_started_at)
     completed = _parse_iso(last_completed_at)
-    incomplete = started is not None and (completed is None or completed < started)
-    if incomplete and started is not None:
+    pass_completed = started is not None and completed is not None and completed >= started
+    in_progress = started is not None and not pass_completed
+    parent_live = bool(lock_present and lock_owner_alive is True)
+
+    if lock_present and lock_owner_alive is False:
+        return "DEAD"
+
+    if in_progress and started is not None:
         age_min = _minutes_between(started, now)
-        if owner_pid_alive is False:
+        if owner_pid_alive is not True:
             return "DEAD"
         if age_min > hang_budget_minutes:
             return "HUNG"
+        if not parent_live:
+            return "DEAD"
         return "IN_PROGRESS"
+
+    if pass_completed or completed is not None:
+        if parent_live:
+            return "OK"
+        return "DEAD"
+
     if lock_present and owner_pid_alive is False:
         return "DEAD"
     return "OK"
+
+
+def current_watchdog_liveness(*, now: Optional[datetime] = None) -> str:
+    """Parent-lock health plus the recorded in-progress child, if any."""
+    state = _read_json(STATE_PATH)
+    lock_present, lock_owner_alive = _watchdog_lock_liveness(LIVE_DIR / "watchdog_loop.lock")
+    owner_pid = state.get("cycle_owner_pid")
+    owner_alive: Optional[bool]
+    if owner_pid in (None, ""):
+        owner_alive = None
+    else:
+        try:
+            number = int(owner_pid)
+        except (TypeError, ValueError):
+            owner_alive = False
+        else:
+            owner_alive = True if number == os.getpid() else _pid_is_alive(number)
+    return classify_watchdog_liveness(
+        cycle_started_at=state.get("cycle_started_at"),
+        last_completed_at=state.get("last_completed_at"),
+        owner_pid_alive=owner_alive,
+        lock_present=lock_present,
+        lock_owner_alive=lock_owner_alive,
+        now=now or _utc_now(),
+    )
 
 
 def watchdog_liveness_blocks_entries(classification: str) -> bool:
@@ -1718,17 +1784,7 @@ def run_watchdog(
     )
     engine.evaluate_broker_disconnect(broker_connected)
     previous_state = _read_json(STATE_PATH)
-    lock_present, lock_owner_alive = _watchdog_lock_liveness(LIVE_DIR / "watchdog_loop.lock")
-    owner_pid = previous_state.get("cycle_owner_pid")
-    owner_alive = True if owner_pid in (None, os.getpid()) else _pid_is_alive(owner_pid)
-    liveness = classify_watchdog_liveness(
-        cycle_started_at=previous_state.get("cycle_started_at"),
-        last_completed_at=previous_state.get("last_completed_at"),
-        owner_pid_alive=owner_alive,
-        lock_present=lock_present,
-        lock_owner_alive=lock_owner_alive,
-        now=_utc_now(),
-    )
+    liveness = current_watchdog_liveness()
     started_state = dict(previous_state)
     started_state["cycle_started_at"] = ts
     started_state["cycle_owner_pid"] = os.getpid()
@@ -1821,6 +1877,7 @@ def run_watchdog(
         watchdog_ts=ts,
         broker_connected=broker_connected,
         broker_error=broker_error,
+        watchdog_liveness=liveness,
     )
     auth_doc = governance_exec["governance_authorization"]
     readiness_doc = governance_exec["execution_readiness"]
@@ -2381,8 +2438,8 @@ def run_watchdog(
 
     _atomic_write_json(summary, STATUS_PATH)
     completed_state = _read_json(STATE_PATH)
-    completed_state["cycle_started_at"] = ts
-    completed_state["cycle_owner_pid"] = os.getpid()
+    completed_state.pop("cycle_started_at", None)
+    completed_state.pop("cycle_owner_pid", None)
     completed_state["last_completed_at"] = _iso_utc()
     _atomic_write_json(completed_state, STATE_PATH)
 

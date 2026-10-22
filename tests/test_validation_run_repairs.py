@@ -282,7 +282,7 @@ def test_watchdog_long_pass_is_live_and_dead_or_hung_blocks():
     )
     assert dead == "DEAD"
     assert hung == "HUNG"
-    assert stale_lock == "STALE_LOCK"
+    assert stale_lock == "DEAD"
     for classification in (dead, hung, stale_lock):
         assert watchdog_liveness_blocks_entries(classification) is True
         ok, _reason = _check_watchdog_health("OK", [], liveness=classification)

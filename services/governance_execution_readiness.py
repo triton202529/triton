@@ -324,11 +324,15 @@ def _check_watchdog_health(
     active_alerts: List[Any],
     liveness: Optional[str] = None,
 ) -> Tuple[bool, str]:
-    if liveness in {"DEAD", "HUNG", "STALE_LOCK"}:
-        return False, f"Watchdog liveness {liveness}"
-    stale_types = {str(a.get("alert_type")) for a in active_alerts if isinstance(a, dict)}
-    if "STALE_HEARTBEAT" in stale_types:
-        return False, "Stale heartbeat alert active"
+    """Block paper entry on the corrected liveness class, not a residual alert.
+
+    ``active_alerts`` is retained for callers. A leftover ``STALE_HEARTBEAT``
+    row is not itself an entry block once liveness is ``OK`` or ``IN_PROGRESS``.
+    """
+    del active_alerts
+    classification = str(liveness or "").strip().upper()
+    if classification in {"DEAD", "HUNG", "STALE_LOCK"}:
+        return False, f"Watchdog liveness {classification}"
     if str(watchdog_status).upper() not in ("OK", "WARN", "WARNING"):
         return False, f"Watchdog status is {watchdog_status}"
     return True, "Watchdog monitoring healthy"
@@ -454,6 +458,7 @@ def compute_execution_readiness(
     broker_connected: bool,
     broker_error: Optional[str],
     active_alerts: List[Dict[str, Any]],
+    watchdog_liveness: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Phase 17: eligibility assessment for future protective actions."""
     ts = _iso_utc()
@@ -468,7 +473,13 @@ def compute_execution_readiness(
     data_ok, data_reason = _check_data_freshness(
         watchdog_ts=watchdog_ts, cpi_doc=cpi_doc, results_dir=results_dir
     )
-    wd_ok, wd_reason = _check_watchdog_health(watchdog_status, active_alerts)
+    if watchdog_liveness is None:
+        from services.risk_watchdog import current_watchdog_liveness
+
+        watchdog_liveness = current_watchdog_liveness()
+    wd_ok, wd_reason = _check_watchdog_health(
+        watchdog_status, active_alerts, liveness=watchdog_liveness
+    )
     broker_ok, broker_reason = _check_broker_health(broker_connected, broker_error)
     lifecycle_ok, lifecycle_reason = _check_lifecycle_integrity(results_dir)
     signals_ok, signals_reason = _check_signal_freshness(results_dir)
@@ -716,6 +727,7 @@ def persist_governance_execution_readiness(
     watchdog_ts: str,
     broker_connected: bool,
     broker_error: Optional[str],
+    watchdog_liveness: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run phases 16–18 and write JSON artifacts."""
     results_dir = Path(results_dir)
@@ -742,6 +754,7 @@ def persist_governance_execution_readiness(
         broker_connected=broker_connected,
         broker_error=broker_error,
         active_alerts=active_alerts,
+        watchdog_liveness=watchdog_liveness,
     )
     _atomic_write_json(readiness_doc, results_dir / "execution_readiness.json")
 

@@ -1337,7 +1337,7 @@ def evaluate_paper_entry_gates(
 
     from services.governance_degraded_mode import entry_blocked_by_active_drawdown
     from services.risk_watchdog import (
-        classify_watchdog_liveness,
+        current_watchdog_liveness,
         watchdog_liveness_blocks_entries,
     )
 
@@ -1347,28 +1347,7 @@ def evaluate_paper_entry_gates(
         now_utc,
     ):
         return block("EXCESS_POSITION_DRAWDOWN", "excess_position_drawdown")
-    watchdog_state = _load_json(LIVE / "watchdog_alert_state.json") or {}
-    lock_path = LIVE / "watchdog_loop.lock"
-    lock_owner_alive = None
-    if lock_path.is_file():
-        import re
-
-        from services.risk_watchdog import _pid_is_alive
-
-        try:
-            lock_text = lock_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            lock_text = ""
-        lock_match = re.search(r"pid=(\d+)", lock_text)
-        lock_owner_alive = _pid_is_alive(lock_match.group(1)) if lock_match else False
-    liveness = classify_watchdog_liveness(
-        cycle_started_at=watchdog_state.get("cycle_started_at"),
-        last_completed_at=watchdog_state.get("last_completed_at"),
-        owner_pid_alive=lock_owner_alive,
-        lock_present=lock_path.is_file(),
-        lock_owner_alive=lock_owner_alive,
-        now=now_utc,
-    )
+    liveness = current_watchdog_liveness(now=now_utc)
     if watchdog_liveness_blocks_entries(liveness):
         return block(f"watchdog_liveness={liveness}", "watchdog_liveness")
 
