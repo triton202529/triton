@@ -79,10 +79,34 @@ def held_symbols_from_snapshot(path: Path) -> Set[str]:
                 qty = 0.0
         if qty > 0:
             held.add(symbol)
+    from services.symbol_identity import SymbolIdentityCollision, assert_no_identity_collisions
+
+    try:
+        assert_no_identity_collisions(held, source="positions_snapshot")
+    except SymbolIdentityCollision as exc:
+        raise RuntimeError("symbol_identity_collision") from exc
     return held
 
 
 _RISK_REDUCING_ACTIONS = frozenset({"EXIT", "TRIM"})
+
+
+def _identity_indexes(frame: pd.DataFrame, column: str, symbol: str) -> list:
+    from services.symbol_identity import identity_key
+
+    target = identity_key(symbol)
+    if not target:
+        return []
+    return [idx for idx, value in frame[column].items() if identity_key(value) == target]
+
+
+def _reject_symbol_collisions(symbols: Iterable[object], *, source: str) -> None:
+    from services.symbol_identity import SymbolIdentityCollision, assert_unique_identities
+
+    try:
+        assert_unique_identities(symbols, source=source)
+    except SymbolIdentityCollision as exc:
+        raise RuntimeError("symbol_identity_collision") from exc
 
 
 def assert_held_positions_stay_long(lifecycle: pd.DataFrame, held: Iterable[str]) -> None:
@@ -91,12 +115,16 @@ def assert_held_positions_stay_long(lifecycle: pd.DataFrame, held: Iterable[str]
         raise RuntimeError("lifecycle candidate is empty")
     symbol_col = "ticker" if "ticker" in lifecycle.columns else "symbol"
     action_col = "lifecycle_action" if "lifecycle_action" in lifecycle.columns else "stance"
+    _reject_symbol_collisions(lifecycle[symbol_col].tolist(), source="lifecycle")
     for symbol in sorted({str(s).strip().upper() for s in held if str(s).strip()}):
-        rows = lifecycle[lifecycle[symbol_col].astype(str).str.upper() == symbol]
-        if rows.empty:
+        indexes = _identity_indexes(lifecycle, symbol_col, symbol)
+        if not indexes:
             raise RuntimeError(f"held symbol {symbol} missing from lifecycle candidate")
-        position = str(rows.iloc[0].get("position_state") or "").strip().upper()
-        action = str(rows.iloc[0].get(action_col) or "").strip().upper()
+        if len(indexes) > 1:
+            raise RuntimeError(f"duplicate symbol {symbol}")
+        row = lifecycle.loc[indexes[0]]
+        position = str(row.get("position_state") or "").strip().upper()
+        action = str(row.get(action_col) or "").strip().upper()
         if position != "LONG":
             raise RuntimeError(f"held symbol {symbol} position_state={position}")
         if action in {"", "WAIT"}:
@@ -112,15 +140,18 @@ def _frame_symbol_column(frame: pd.DataFrame) -> str:
 
 
 def _raw_action_map(raw: pd.DataFrame) -> dict[str, str]:
+    from services.symbol_identity import identity_key
+
     if raw is None or raw.empty:
         return {}
     if "ticker" not in raw.columns and "symbol" not in raw.columns:
         return {}
     symbol_col = _frame_symbol_column(raw)
     action_col = "lifecycle_action" if "lifecycle_action" in raw.columns else "stance"
+    _reject_symbol_collisions(raw[symbol_col].tolist(), source="lifecycle")
     actions: dict[str, str] = {}
     for _, row in raw.iterrows():
-        symbol = str(row.get(symbol_col) or "").strip().upper()
+        symbol = identity_key(row.get(symbol_col))
         if symbol:
             actions[symbol] = str(row.get(action_col) or "").strip().upper()
     return actions
@@ -132,22 +163,30 @@ def apply_snapshot_held_effective_state(
     held: Iterable[str],
 ) -> pd.DataFrame:
     """Operational held state for the effective lifecycle. The raw frame is not written."""
+    from services.symbol_identity import identity_key
+
     out = effective.copy()
     if out.empty:
         return out
     symbol_col = _frame_symbol_column(out)
+    original_tickers = out[symbol_col].astype(str).tolist()
+    _reject_symbol_collisions(original_tickers, source="effective_lifecycle")
     actions = _raw_action_map(raw)
     for symbol in {str(item).strip().upper() for item in held if str(item).strip()}:
-        mask = out[symbol_col].astype(str).str.upper() == symbol
-        if not mask.any():
+        indexes = _identity_indexes(out, symbol_col, symbol)
+        if not indexes:
             continue
-        index = out.index[mask][0]
-        action = actions.get(symbol, "")
+        if len(indexes) > 1:
+            raise RuntimeError(f"duplicate symbol {symbol}")
+        index = indexes[0]
+        action = actions.get(identity_key(symbol), "")
         out.at[index, "effective_position_state"] = "LONG"
         if action in _RISK_REDUCING_ACTIONS:
             out.at[index, "effective_stance"] = action
         elif action in {"", "WAIT", "FLAT", "HOLD"}:
             out.at[index, "effective_stance"] = "HOLD"
+    if out[symbol_col].astype(str).tolist() != original_tickers:
+        raise RuntimeError("candidate_spelling_not_preserved")
     return out
 
 
@@ -169,12 +208,16 @@ def assert_effective_held_positions(
     if set(effective["positions_snapshot_ts"].astype(str)) != {expected_ts}:
         raise RuntimeError("positions_snapshot_timestamp_mismatch")
     symbol_col = _frame_symbol_column(effective)
+    _reject_symbol_collisions(effective[symbol_col].tolist(), source="effective_lifecycle")
     for symbol in sorted({str(item).strip().upper() for item in held if str(item).strip()}):
-        rows = effective[effective[symbol_col].astype(str).str.upper() == symbol]
-        if rows.empty:
+        indexes = _identity_indexes(effective, symbol_col, symbol)
+        if not indexes:
             raise RuntimeError(f"held symbol {symbol} missing from effective lifecycle")
-        position = str(rows.iloc[0].get("effective_position_state") or "").strip().upper()
-        action = str(rows.iloc[0].get("effective_stance") or "").strip().upper()
+        if len(indexes) > 1:
+            raise RuntimeError(f"duplicate symbol {symbol}")
+        row = effective.loc[indexes[0]]
+        position = str(row.get("effective_position_state") or "").strip().upper()
+        action = str(row.get("effective_stance") or "").strip().upper()
         if position != "LONG":
             raise RuntimeError(
                 f"held symbol {symbol} effective_position_state={position or 'FLAT'} "
@@ -293,6 +336,12 @@ def bind_staged_diagnostic(staging: Path, signals_path: Path) -> dict:
     expected = sorted(
         {str(symbol).strip().upper() for symbol in raw_symbols if str(symbol).strip()}
     )
+    from services.symbol_identity import SymbolIdentityCollision, candidate_display_map
+
+    try:
+        candidate_display_map(expected)
+    except SymbolIdentityCollision as exc:
+        raise ValueError("symbol_identity_collision") from exc
     actual = sorted(
         {str(symbol).strip().upper() for symbol in frame["ticker"].tolist() if str(symbol).strip()}
     )
@@ -513,32 +562,87 @@ def stage_effective_from_candidate(
     return 0
 
 
+def _candidate_symbol_spellings(staging: Path) -> list[str]:
+    for name in (
+        "signals.csv",
+        "signals_with_rationale.csv",
+        "signal_lifecycle.csv",
+        "signal_lifecycle_effective.csv",
+    ):
+        path = staging / name
+        if not path.is_file():
+            continue
+        frame = pd.read_csv(path)
+        if frame.empty:
+            continue
+        column = "ticker" if "ticker" in frame.columns else "symbol"
+        if column not in frame.columns:
+            continue
+        symbols = _symbol_list(frame)
+        if symbols:
+            return symbols
+    return []
+
+
+def _restore_allocation_candidate_spellings(staging: Path) -> None:
+    from services.symbol_identity import SymbolIdentityCollision, restore_candidate_spellings
+
+    path = staging / "portfolio_allocation_recommendations.csv"
+    frame = pd.read_csv(path)
+    if frame.empty:
+        return
+    column = "ticker" if "ticker" in frame.columns else "symbol"
+    if column not in frame.columns:
+        raise RuntimeError("allocation_symbol_mismatch")
+    candidates = _candidate_symbol_spellings(staging)
+    if not candidates:
+        raise RuntimeError("candidate_symbols_missing")
+    try:
+        frame[column] = restore_candidate_spellings(frame[column].tolist(), candidates)
+    except SymbolIdentityCollision as exc:
+        raise RuntimeError("symbol_identity_collision") from exc
+    path.write_text(frame.to_csv(index=False), encoding="utf-8", newline="")
+
+
 def run_staged_allocation(results_dir: Path, staging: Path) -> int:
     """Allocate from the staged effective lifecycle into the staging directory."""
     import services.portfolio_allocation_engine as allocation
+    from services.symbol_identity import SymbolIdentityCollision
 
-    return allocation.main(
-        [
-            "--signals",
-            str(staging / "signals_with_rationale.csv"),
-            "--lifecycle-effective",
-            str(staging / "signal_lifecycle_effective.csv"),
-            "--positions",
-            str(results_dir / "positions_snapshot.csv"),
-            "--edge-sizing",
-            str(results_dir / "edge_sizing_recommendations.csv"),
-            "--risk-overlay",
-            str(results_dir / "performance_risk_overlay.csv"),
-            "--perf-by-symbol",
-            str(results_dir / "performance_intelligence_by_symbol.csv"),
-            "--opportunities",
-            str(results_dir / "trade_opportunities.csv"),
-            "--out-csv",
-            str(staging / "portfolio_allocation_recommendations.csv"),
-            "--out-json",
-            str(staging / "portfolio_allocation_summary.json"),
-        ]
-    )
+    try:
+        rc = allocation.main(
+            [
+                "--signals",
+                str(staging / "signals_with_rationale.csv"),
+                "--lifecycle-effective",
+                str(staging / "signal_lifecycle_effective.csv"),
+                "--positions",
+                str(results_dir / "positions_snapshot.csv"),
+                "--edge-sizing",
+                str(results_dir / "edge_sizing_recommendations.csv"),
+                "--risk-overlay",
+                str(results_dir / "performance_risk_overlay.csv"),
+                "--perf-by-symbol",
+                str(results_dir / "performance_intelligence_by_symbol.csv"),
+                "--opportunities",
+                str(results_dir / "trade_opportunities.csv"),
+                "--out-csv",
+                str(staging / "portfolio_allocation_recommendations.csv"),
+                "--out-json",
+                str(staging / "portfolio_allocation_summary.json"),
+            ]
+        )
+    except SymbolIdentityCollision as exc:
+        print(f"[PORTFOLIO_ALLOCATION] symbol_identity_collision {exc}", flush=True)
+        return 1
+    if rc != 0:
+        return int(rc)
+    try:
+        _restore_allocation_candidate_spellings(staging)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"[PORTFOLIO_ALLOCATION] candidate spelling refused: {exc}", flush=True)
+        return 1
+    return 0
 
 
 def write_staged_readiness(
@@ -557,9 +661,38 @@ def write_staged_readiness(
     )
 
 
-def _symbol_set(frame: pd.DataFrame) -> set[str]:
+def _symbol_list(frame: pd.DataFrame) -> list[str]:
     column = "ticker" if "ticker" in frame.columns else "symbol"
-    return {str(value).strip().upper() for value in frame[column].tolist() if str(value).strip()}
+    return [str(value).strip().upper() for value in frame[column].tolist() if str(value).strip()]
+
+
+def _symbol_set(frame: pd.DataFrame) -> set[str]:
+    return set(_symbol_list(frame))
+
+
+def _assert_candidate_symbol_set(
+    actual: Iterable[str],
+    expected: Iterable[str],
+    *,
+    mismatch: str,
+) -> None:
+    """Identity sets must match, and artifact rows must keep the candidate spelling."""
+    from services.symbol_identity import (
+        SymbolIdentityCollision,
+        candidate_display_map,
+        identity_key,
+    )
+
+    try:
+        display = candidate_display_map(expected)
+        _reject_symbol_collisions(actual, source="artifact")
+    except SymbolIdentityCollision as exc:
+        raise RuntimeError("symbol_identity_collision") from exc
+    actual_raw = {str(symbol).strip().upper() for symbol in actual if str(symbol).strip()}
+    if {identity_key(symbol) for symbol in actual_raw} != set(display):
+        raise RuntimeError(mismatch)
+    if actual_raw != set(display.values()):
+        raise RuntimeError("candidate_spelling_not_preserved")
 
 
 def _require_effective_snapshot(staging: Path, marker: Mapping[str, object]) -> None:
@@ -594,9 +727,11 @@ def _require_effective_snapshot(staging: Path, marker: Mapping[str, object]) -> 
         raise RuntimeError("lifecycle_hash_mismatch")
     expected = marker.get("expected_symbols")
     if isinstance(expected, list) and expected:
-        wanted = {str(symbol).strip().upper() for symbol in expected if str(symbol).strip()}
-        if _symbol_set(frame) != wanted:
-            raise RuntimeError("effective_lifecycle_symbol_mismatch")
+        _assert_candidate_symbol_set(
+            _symbol_list(frame),
+            expected,
+            mismatch="effective_lifecycle_symbol_mismatch",
+        )
 
 
 def _require_allocation_symbols(staging: Path, marker: Mapping[str, object]) -> None:
@@ -604,9 +739,11 @@ def _require_allocation_symbols(staging: Path, marker: Mapping[str, object]) -> 
     if not isinstance(expected, list) or not expected:
         return
     frame = pd.read_csv(staging / "portfolio_allocation_recommendations.csv")
-    wanted = {str(symbol).strip().upper() for symbol in expected if str(symbol).strip()}
-    if _symbol_set(frame) != wanted:
-        raise RuntimeError("allocation_symbol_mismatch")
+    _assert_candidate_symbol_set(
+        _symbol_list(frame),
+        expected,
+        mismatch="allocation_symbol_mismatch",
+    )
 
 
 def stage_signal_bundle() -> int:

@@ -127,6 +127,65 @@ def assert_no_identity_collisions(
         raise SymbolIdentityCollision(collisions, source=source)
 
 
+def assert_unique_identities(
+    raw_symbols: Iterable[Any],
+    *,
+    source: str = "",
+) -> List[str]:
+    """One row per identity. Distinct alias forms and repeated spellings fail closed."""
+    raws = [symbol for symbol in (_strip_upper(value) for value in raw_symbols) if symbol]
+    assert_no_identity_collisions(raws, source=source)
+    if len(raws) != len(set(raws)):
+        dupes = sorted({symbol for symbol in raws if raws.count(symbol) > 1})
+        raise SymbolIdentityCollision(
+            [
+                {
+                    "identity": identity_key(symbol),
+                    "raw_forms": [symbol],
+                    "reason_code": COLLISION_REASON,
+                }
+                for symbol in dupes
+            ],
+            source=source,
+        )
+    return raws
+
+
+def candidate_display_map(candidate_symbols: Iterable[Any]) -> Dict[str, str]:
+    """Map identity_key to the candidate's own spelling.
+
+    Joins use identity_key. Artifacts keep this spelling. Two candidate
+    spellings for one identity fail closed. Symbols outside the explicit
+    class-share allowlist are not folded.
+    """
+    raws = assert_unique_identities(candidate_symbols, source="candidate")
+    return {identity_key(symbol): symbol for symbol in raws}
+
+
+def candidate_display_symbol(symbol: Any, display: Mapping[str, str]) -> str:
+    """Return the candidate spelling when this symbol is an explicit alias of one."""
+    raw = _strip_upper(symbol)
+    if not raw:
+        return ""
+    chosen = display.get(identity_key(raw))
+    if chosen:
+        return str(chosen)
+    return raw
+
+
+def restore_candidate_spellings(
+    symbols: Iterable[Any],
+    candidate_symbols: Iterable[Any],
+) -> List[str]:
+    """Replace alias forms with the candidate spelling without adding rows."""
+    display = candidate_display_map(candidate_symbols)
+    raws = [_strip_upper(symbol) for symbol in symbols]
+    assert_unique_identities([symbol for symbol in raws if symbol], source="artifact")
+    restored = [candidate_display_symbol(symbol, display) if symbol else "" for symbol in raws]
+    assert_unique_identities([symbol for symbol in restored if symbol], source="artifact")
+    return restored
+
+
 def fold_qty_map(
     rows: Sequence[Tuple[Any, float]],
     *,

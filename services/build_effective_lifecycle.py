@@ -36,8 +36,11 @@ from services.signal_lifecycle import (
 )
 from services.symbol_identity import (
     SymbolIdentityCollision,
+    assert_no_identity_collisions,
+    candidate_display_map,
     collect_identity_collisions,
     identity_key,
+    restore_candidate_spellings,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -451,16 +454,17 @@ def _require_snapshot_evidence(path: Path, evidence: Mapping[str, Any]) -> dict:
 def _snapshot_held_symbols(path: Path) -> Set[str]:
     frame = pd.read_csv(path)
     symbol_col = _snapshot_symbol_column(frame)
-    held: Set[str] = set()
+    raw_held: list[str] = []
     for _, row in frame.iterrows():
-        symbol = _norm_symbol(str(row.get(symbol_col) or ""))
+        symbol = str(row.get(symbol_col) or "").strip().upper()
         try:
             qty = float(row.get("qty") or 0)
         except (TypeError, ValueError):
             qty = 0.0
-        if symbol and qty > 0:
-            held.add(symbol)
-    return held
+        if symbol and symbol not in {"NAN", "NONE", "NULL"} and qty > 0:
+            raw_held.append(symbol)
+    assert_no_identity_collisions(raw_held, source="positions_snapshot")
+    return {_norm_symbol(symbol) for symbol in raw_held}
 
 
 def _candidate_action(row: Mapping[str, Any]) -> str:
@@ -594,7 +598,8 @@ def build_staged_effective_lifecycle(
     actual_hash = file_sha256(lifecycle_path)
     if actual_hash != str(lifecycle_sha256 or "").strip().lower():
         raise ValueError("lifecycle_hash_mismatch")
-    expected = sorted({_norm_symbol(symbol) for symbol in expected_symbols if _norm_symbol(symbol)})
+    display = candidate_display_map(expected_symbols)
+    expected = sorted(display)
     if (
         not expected
         or not str(bundle_id or "").strip()
@@ -604,6 +609,8 @@ def build_staged_effective_lifecycle(
     try:
         lifecycle = load_lifecycle(lifecycle_path)
         reconciliation = load_reconciliation(reconciliation_path)
+    except SymbolIdentityCollision:
+        raise
     except Exception as exc:
         raise ValueError("effective_lifecycle_input_unreadable") from exc
     if "stance" not in lifecycle.columns:
@@ -631,6 +638,10 @@ def build_staged_effective_lifecycle(
     actual = sorted({_norm_symbol(str(symbol)) for symbol in built["ticker"].tolist()})
     if actual != expected:
         raise ValueError("effective_lifecycle_symbol_mismatch")
+    built = built.copy()
+    built["ticker"] = restore_candidate_spellings(built["ticker"].tolist(), expected_symbols)
+    if set(built["ticker"].astype(str)) != set(display.values()):
+        raise ValueError("candidate_spelling_not_preserved")
     built["candidate_effective_schema"] = EFFECTIVE_BINDING_SCHEMA
     built["candidate_bundle_id"] = str(bundle_id)
     built["candidate_session_as_of_date"] = str(session_as_of_date)

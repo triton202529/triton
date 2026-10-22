@@ -12,6 +12,12 @@ from services.build_effective_lifecycle import (
     build_staged_effective_lifecycle,
     read_positions_snapshot_evidence,
 )
+from services.portfolio_allocation_engine import (
+    _load_positions_map,
+    _load_signals_map,
+    _norm_symbol,
+)
+from services.symbol_identity import SymbolIdentityCollision, identity_key
 from services.coherent_signal_bundle import (
     PUBLISHED_ARTIFACTS,
     assert_effective_held_positions,
@@ -319,3 +325,217 @@ def test_stale_or_mismatched_snapshot_fails_closed(tmp_path: Path) -> None:
     assert not (staging / "portfolio_allocation_recommendations.csv").is_file()
     receipt = json.loads((production / bundle.FAILURE_RECEIPT).read_text(encoding="utf-8"))
     assert receipt["published_signal_artifacts"] is False
+
+
+def _held_snapshot(path: Path, held: dict[str, float]) -> None:
+    rows = [
+        {
+            "snapshot_ts": SNAPSHOT_TS,
+            "ticker": name,
+            "symbol": name,
+            "qty": qty,
+            "side": "long",
+            "market_value": float(qty),
+        }
+        for name, qty in held.items()
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+
+def _lifecycle_rows(names: list[str], flat_wait: set[str] | None = None) -> list[dict]:
+    waiting = flat_wait or set()
+    rows = []
+    for name in names:
+        if name in waiting:
+            position, action = "FLAT", "WAIT"
+        else:
+            position, action = "LONG", "HOLD"
+        rows.append(
+            {
+                "ticker": name,
+                "stance": action,
+                "lifecycle_action": action,
+                "position_state": position,
+                "delta_pct": 0.0,
+                "confidence": 0.9,
+            }
+        )
+    return rows
+
+
+def _stage_symbols(
+    root: Path,
+    names: list[str],
+    held: dict[str, float],
+    *,
+    flat_wait: set[str] | None = None,
+) -> tuple[Path, Path]:
+    staging = root / "stage"
+    production = root / "production"
+    _support(production)
+    _held_snapshot(production / "positions_snapshot.csv", held)
+    _write_raw(staging / "signal_lifecycle.csv", _lifecycle_rows(names, flat_wait))
+    evidence = read_positions_snapshot_evidence(production / "positions_snapshot.csv")
+    build_staged_effective_lifecycle(
+        lifecycle_path=staging / "signal_lifecycle.csv",
+        reconciliation_path=production / "lifecycle_reconciliation.csv",
+        open_orders_path=production / "open_orders_snapshot.csv",
+        output_path=staging / "signal_lifecycle_effective.csv",
+        positions_snapshot=production / "positions_snapshot.csv",
+        snapshot_evidence=evidence,
+        bundle_id=BUNDLE_ID,
+        session_as_of_date=SESSION,
+        lifecycle_sha256=file_sha256(staging / "signal_lifecycle.csv"),
+        expected_symbols=names,
+        min_rows=len(names),
+    )
+    return production, staging
+
+
+def test_brk_snapshot_alias_keeps_one_candidate_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import services.coherent_signal_bundle as bundle
+
+    names = ["ARKK", "BRK-B", "NVDA", "VOO", "XLK"]
+    held = {"ARKK": 32.0, "BRK.B": 2.0, "NVDA": 1.0, "VOO": 2.0, "XLK": 7.0}
+    production, staging = _stage_symbols(tmp_path, names, held, flat_wait={"BRK-B"})
+    snapshot = production / "positions_snapshot.csv"
+    snapshot_bytes = snapshot.read_bytes()
+    raw_bytes = (staging / "signal_lifecycle.csv").read_bytes()
+    effective = pd.read_csv(staging / "signal_lifecycle_effective.csv")
+    assert len(effective.index) == len(names)
+    assert set(effective["ticker"].astype(str)) == set(names)
+    assert list(effective["ticker"].astype(str)).count("BRK-B") == 1
+    assert "BRK.B" not in set(effective["ticker"].astype(str))
+    brk = _row(effective, "BRK-B")
+    assert brk["effective_position_state"] == "LONG"
+    for symbol in ("VOO", "XLK"):
+        row = _row(effective, symbol)
+        assert row["effective_position_state"] == "LONG"
+        assert row["effective_stance"] == "HOLD"
+        assert row["basis_classification"] == "BASIS_UNPROVEN_HOLD"
+
+    guard_staged_held_positions(production, staging)
+    assert snapshot.read_bytes() == snapshot_bytes
+    assert (staging / "signal_lifecycle.csv").read_bytes() == raw_bytes
+    guarded = pd.read_csv(staging / "signal_lifecycle_effective.csv")
+    assert list(guarded["ticker"].astype(str)).count("BRK-B") == 1
+    assert "BRK.B" not in set(guarded["ticker"].astype(str))
+    brk = _row(guarded, "BRK-B")
+    assert brk["effective_position_state"] == "LONG"
+    assert brk["effective_stance"] == "HOLD"
+    assert identity_key("BRK.B") == identity_key("BRK-B")
+
+    _signals(staging / "signals_with_rationale.csv", names)
+    assert run_staged_allocation(production, staging) == 0
+    allocation = pd.read_csv(staging / "portfolio_allocation_recommendations.csv")
+    assert set(allocation["ticker"].astype(str)) == set(names)
+    assert list(allocation["ticker"].astype(str)).count("BRK-B") == 1
+    assert "BRK.B" not in set(allocation["ticker"].astype(str))
+    marker = {
+        "positions_snapshot_sha256": str(guarded["positions_snapshot_sha256"].iloc[0]),
+        "positions_snapshot_ts": str(guarded["positions_snapshot_ts"].iloc[0]),
+        "bundle_id": str(guarded["candidate_bundle_id"].iloc[0]),
+        "session_as_of_date": str(guarded["candidate_session_as_of_date"].iloc[0]),
+        "lifecycle_sha256": str(guarded["candidate_lifecycle_sha256"].iloc[0]),
+        "expected_symbols": names,
+    }
+    monkeypatch.setattr(bundle, "RESULTS_DIR", production)
+    bundle._require_effective_snapshot(staging, marker)
+    bundle._require_allocation_symbols(staging, marker)
+    assert snapshot.read_bytes() == snapshot_bytes
+
+
+def test_conflicting_brk_candidate_spellings_fail_closed(tmp_path: Path) -> None:
+    names = ["BRK-B", "BRK.B", "VOO"]
+    staging = tmp_path / "stage"
+    production = tmp_path / "production"
+    _support(production)
+    snapshot = production / "positions_snapshot.csv"
+    _held_snapshot(snapshot, {"BRK.B": 2.0, "VOO": 2.0})
+    snapshot_bytes = snapshot.read_bytes()
+    _write_raw(staging / "signal_lifecycle.csv", _lifecycle_rows(names))
+    evidence = read_positions_snapshot_evidence(snapshot)
+    with pytest.raises(SymbolIdentityCollision):
+        build_staged_effective_lifecycle(
+            lifecycle_path=staging / "signal_lifecycle.csv",
+            reconciliation_path=production / "lifecycle_reconciliation.csv",
+            open_orders_path=production / "open_orders_snapshot.csv",
+            output_path=staging / "signal_lifecycle_effective.csv",
+            positions_snapshot=snapshot,
+            snapshot_evidence=evidence,
+            bundle_id=BUNDLE_ID,
+            session_as_of_date=SESSION,
+            lifecycle_sha256=file_sha256(staging / "signal_lifecycle.csv"),
+            expected_symbols=names,
+            min_rows=len(names),
+        )
+    assert snapshot.read_bytes() == snapshot_bytes
+    assert not (staging / "signal_lifecycle_effective.csv").is_file()
+
+
+def test_unsupported_alias_fails_closed_without_a_new_row(tmp_path: Path) -> None:
+    names = ["VOO", "XLK", "XYZ-B"]
+    held = {"VOO": 2.0, "XLK": 7.0, "XYZ.B": 1.0}
+    production, staging = _stage_symbols(tmp_path, names, held, flat_wait={"XYZ-B"})
+    snapshot = production / "positions_snapshot.csv"
+    snapshot_bytes = snapshot.read_bytes()
+    effective = pd.read_csv(staging / "signal_lifecycle_effective.csv")
+    assert set(effective["ticker"].astype(str)) == set(names)
+    assert "XYZ.B" not in set(effective["ticker"].astype(str))
+    assert identity_key("XYZ.B") != identity_key("XYZ-B")
+    for symbol in ("VOO", "XLK"):
+        row = _row(effective, symbol)
+        assert row["basis_classification"] == "BASIS_UNPROVEN_HOLD"
+    with pytest.raises(RuntimeError, match="held symbol XYZ.B missing from effective lifecycle"):
+        guard_staged_held_positions(production, staging)
+    assert snapshot.read_bytes() == snapshot_bytes
+    after = pd.read_csv(staging / "signal_lifecycle_effective.csv")
+    assert set(after["ticker"].astype(str)) == set(names)
+
+
+def test_duplicate_brk_effective_rows_fail_closed(tmp_path: Path) -> None:
+    production, staging = _stage(tmp_path)
+    snapshot_bytes = (production / "positions_snapshot.csv").read_bytes()
+    raw_bytes = (staging / "signal_lifecycle.csv").read_bytes()
+    frame = pd.read_csv(staging / "signal_lifecycle_effective.csv")
+    frame.loc[frame["ticker"].astype(str) == "ARKK", "ticker"] = "BRK-B"
+    extra = frame.iloc[0].copy()
+    extra["ticker"] = "BRK.B"
+    frame = pd.concat([frame, pd.DataFrame([extra])], ignore_index=True)
+    frame.to_csv(staging / "signal_lifecycle_effective.csv", index=False)
+    with pytest.raises(RuntimeError, match="symbol_identity_collision"):
+        guard_staged_held_positions(production, staging)
+    assert (production / "positions_snapshot.csv").read_bytes() == snapshot_bytes
+    assert (staging / "signal_lifecycle.csv").read_bytes() == raw_bytes
+
+
+def test_allocation_join_rejects_conflicting_alias_and_keeps_unknown_forms() -> None:
+    conflict = pd.DataFrame(
+        {
+            "ticker": ["BRK-B", "BRK.B"],
+            "qty": [2.0, 4.0],
+            "market_value": [10.0, 20.0],
+            "signal": ["HOLD", "HOLD"],
+        }
+    )
+    with pytest.raises(SymbolIdentityCollision):
+        _load_positions_map(conflict)
+    with pytest.raises(SymbolIdentityCollision):
+        _load_signals_map(conflict)
+    separate = pd.DataFrame(
+        {
+            "ticker": ["XYZ-B", "XYZ.B"],
+            "qty": [1.0, 3.0],
+            "market_value": [5.0, 9.0],
+        }
+    )
+    loaded = _load_positions_map(separate)
+    assert set(loaded) == {"XYZ-B", "XYZ.B"}
+    assert loaded["XYZ.B"]["qty"] == 3.0
+    assert loaded["XYZ-B"]["qty"] == 1.0
+    assert _norm_symbol("BRK-B") == identity_key("BRK-B") == "BRK.B"
+    assert _norm_symbol("VOO") == "VOO"
+    assert _norm_symbol("XLK") == "XLK"

@@ -76,6 +76,11 @@ from services.edge_sizing_engine import load_proven_edge_sizing_map
 from services.effective_lifecycle import load_exit_logic_config
 from services.governance_degraded_mode import classify_portfolio_action_risk
 from services.signal_lifecycle import resolve_row_confidence
+from services.symbol_identity import (
+    SymbolIdentityCollision,
+    assert_no_identity_collisions,
+    identity_key,
+)
 
 # -----------------------------------------------------------
 # Paths
@@ -262,10 +267,39 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def _norm_symbol(x: Any) -> str:
-    s = str(x or "").strip().upper()
-    if s == "BRK-B":
-        s = "BRK.B"
-    return s
+    """Join key. Explicit class-share aliases only; candidate spelling is restored later."""
+    return identity_key(x)
+
+
+def _reject_join_collisions(symbols: Iterable[Any], *, source: str) -> None:
+    assert_no_identity_collisions(symbols, source=source)
+
+
+def _join_identity_map(
+    mapping: Dict[str, Dict[str, Any]],
+    *,
+    source: str,
+) -> Dict[str, Dict[str, Any]]:
+    """Collapse one explicit alias to one join key. Distinct forms fail closed."""
+    _reject_join_collisions(mapping.keys(), source=source)
+    joined: Dict[str, Dict[str, Any]] = {}
+    for key, value in mapping.items():
+        ident = identity_key(key)
+        if not ident:
+            continue
+        if ident in joined:
+            raise SymbolIdentityCollision(
+                [
+                    {
+                        "identity": ident,
+                        "raw_forms": sorted({str(key), ident}),
+                        "reason_code": "SYMBOL_IDENTITY_COLLISION",
+                    }
+                ],
+                source=source,
+            )
+        joined[ident] = value
+    return joined
 
 
 def _pick_first_present(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
@@ -324,6 +358,7 @@ def _load_positions_map(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
     if not sym_col:
         _warn("positions_snapshot.csv missing ticker/symbol column")
         return out
+    _reject_join_collisions(df[sym_col].tolist(), source="allocation_positions")
 
     mv_col = _pick_first_present(df, ("market_value", "value"))
     qty_col = _pick_first_present(df, ("qty", "qty_available"))
@@ -377,6 +412,7 @@ def _load_edge_sizing_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     if not sym_col:
         _warn("edge_sizing_recommendations.csv missing ticker/symbol column")
         return out
+    _reject_join_collisions(df[sym_col].tolist(), source="allocation_edge")
 
     for _, r in df.iterrows():
         sym = _norm_symbol(r.get(sym_col))
@@ -406,6 +442,7 @@ def _load_risk_overlay_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     if not sym_col:
         _warn("performance_risk_overlay.csv missing ticker/symbol column")
         return out
+    _reject_join_collisions(df[sym_col].tolist(), source="allocation_risk")
 
     for _, r in df.iterrows():
         sym = _norm_symbol(r.get(sym_col))
@@ -435,6 +472,7 @@ def _load_perf_by_symbol_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     if not sym_col:
         _warn("performance_intelligence_by_symbol.csv missing symbol/ticker column")
         return out
+    _reject_join_collisions(df[sym_col].tolist(), source="allocation_performance")
 
     for _, r in df.iterrows():
         sym = _norm_symbol(r.get(sym_col))
@@ -464,6 +502,7 @@ def _load_signals_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
     if not sym_col:
         _warn("signals_with_rationale.csv missing ticker/symbol column")
         return out
+    _reject_join_collisions(df[sym_col].tolist(), source="allocation_signals")
 
     delta_col = _pick_first_present(df, ("delta_pct", "delta_pct_snapshot"))
 
@@ -497,6 +536,7 @@ def _load_lifecycle_effective_map(df: pd.DataFrame) -> Dict[str, Dict[str, Any]]
     if not sym_col:
         _warn("signal_lifecycle_effective.csv missing ticker/symbol column")
         return out
+    _reject_join_collisions(df[sym_col].tolist(), source="allocation_lifecycle")
 
     delta_col = _pick_first_present(df, ("delta_pct", "delta_pct_snapshot"))
 
@@ -1138,7 +1178,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         Path(args.lifecycle_effective), label="signal_lifecycle_effective.csv"
     )
 
-    positions = _load_positions_map(positions_df)
+    positions = _join_identity_map(
+        _load_positions_map(positions_df),
+        source="allocation_positions",
+    )
     edge_sizing, edge_provenance = load_proven_edge_sizing_map(
         Path(args.edge_sizing),
         lifecycle_path=Path(args.lifecycle_effective),
@@ -1149,10 +1192,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             "edge evidence unproven for OPEN_NEW/ADD "
             f"({edge_provenance.get('reason')}); treating as missing"
         )
-    risk_overlay = _load_risk_overlay_map(risk_df)
-    perf_by_symbol = _load_perf_by_symbol_map(perf_df)
-    signals = _load_signals_map(signals_df)
-    lifecycle_eff = _load_lifecycle_effective_map(lifecycle_df)
+    edge_sizing = _join_identity_map(edge_sizing, source="allocation_edge")
+    risk_overlay = _join_identity_map(
+        _load_risk_overlay_map(risk_df),
+        source="allocation_risk",
+    )
+    perf_by_symbol = _join_identity_map(
+        _load_perf_by_symbol_map(perf_df),
+        source="allocation_performance",
+    )
+    signals = _join_identity_map(_load_signals_map(signals_df), source="allocation_signals")
+    lifecycle_eff = _join_identity_map(
+        _load_lifecycle_effective_map(lifecycle_df),
+        source="allocation_lifecycle",
+    )
 
     max_positions, max_positions_source = _load_max_positions(Path(args.config))
 
