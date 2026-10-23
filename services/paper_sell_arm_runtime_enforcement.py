@@ -33,6 +33,7 @@ from typing import Any, Dict, Generator, List, Mapping, Optional, Sequence, Set,
 from services.paper_sell_arm_cap_slice import money_round
 from services.paper_sell_arm_authority import (
     APPROVAL_CLI_CAP,
+    RETAINED_WHOLE_SHARE_REASON,
     AUTHORITY_TYPE,
     DEPRECATED_SHARED_APPROVAL_FILENAME,
     HARDENED_AUTHORITY_FILENAME,
@@ -389,6 +390,91 @@ def _downward_runtime_qty(
     return qty, "authorized_quantity_fits_current_price"
 
 
+def _fit_qty_to_live_cli_budget(
+    qty: int, price: float, spent: float
+) -> Tuple[int, str, float, bool]:
+    """Fit whole shares into the unused portion of the $5,000 approval cap.
+
+    The cap is applied to current bid prices. A share whose own bid exceeds
+    the cap cannot be reduced into compliance. A line that does not fit the
+    remaining budget returns quantity zero so later lines can still be evaluated.
+    """
+    if money_round(price) > APPROVAL_CLI_CAP + 1e-9:
+        return 0, "batch_notional_exceeds_approval_cli_cap", 0.0, True
+    remaining = money_round(APPROVAL_CLI_CAP - float(spent))
+    if remaining < 0:
+        remaining = 0.0
+    fitted, why = _downward_runtime_qty(qty, remaining, price)
+    if fitted <= 0:
+        return 0, "clipped_to_zero_vs_remaining_batch_cap", 0.0, False
+    notional = money_round(float(fitted) * price)
+    if fitted < qty:
+        return fitted, "downward_clip_vs_remaining_batch_cap", notional, False
+    return fitted, why, notional, False
+
+
+def protective_sell_qty_vs_stale_notional(
+    authorized_qty: float,
+    stored_max_notional: Any,
+    price: float,
+) -> Tuple[int, str]:
+    """Paper SELL/EXIT/TRIM quantity against a stale notional estimate.
+
+    Authorized whole shares are the ceiling. The stale max_notional may reduce
+    that quantity only while at least one whole share still fits. A higher bid
+    must not reduce an already-authorized one-share exit to zero.
+    """
+    qty, reason = _downward_runtime_qty(authorized_qty, stored_max_notional, price)
+    if qty > 0 or reason != "clipped_to_zero_vs_authorized_max_notional":
+        return qty, reason
+    return 1, RETAINED_WHOLE_SHARE_REASON
+
+
+def retained_stale_notional_excess_allowed(
+    authority: Mapping[str, Any],
+    rows: Sequence[Any],
+) -> bool:
+    """True when notional above the stale batch total is only retained whole shares.
+
+    Every line whose proceeds exceed its stale max_notional must be exactly one
+    share, and that share must be inside the authorized quantity. Quantity
+    expansion is not an allowed excess.
+    """
+    scope = {
+        str(item.get("symbol") or "").upper(): item
+        for item in (authority.get("authorized_actions") or authority.get("authorized_scope") or [])
+    }
+    saw_retained = False
+    for row in rows:
+        if isinstance(row, Mapping):
+            symbol = str(row.get("symbol") or "").upper()
+            qty = float(row.get("qty") or 0)
+            price = float(row.get("price") or row.get("limit_price") or row.get("ref_price") or 0)
+        else:
+            symbol = str(getattr(row, "symbol", "") or "").upper()
+            qty = float(getattr(row, "qty", 0) or 0)
+            price = float(getattr(row, "limit_price", None) or getattr(row, "ref_price", None) or 0)
+        if qty <= 0:
+            continue
+        item = scope.get(symbol)
+        if not item:
+            return False
+        max_qty = float(item.get("max_qty") or 0)
+        if qty > max_qty + 1e-9:
+            return False
+        max_n = item.get("max_notional")
+        if max_n is None or price <= 0:
+            return False
+        notional = money_round(qty * price)
+        if notional <= money_round(max_n) + 1e-9:
+            continue
+        fitted, reason = _downward_runtime_qty(max_qty, max_n, price)
+        if fitted != 0 or qty != 1 or reason != "clipped_to_zero_vs_authorized_max_notional":
+            return False
+        saw_retained = True
+    return saw_retained
+
+
 def _authorized_clip_audit(
     authority: Mapping[str, Any], planned: Sequence[Any]
 ) -> List[Dict[str, Any]]:
@@ -461,6 +547,8 @@ def select_authorized_planned(
         by_sym.setdefault(sym, []).append(p)
         extra_syms.add(sym)
     selected: List[Any] = []
+    spent = 0.0
+    saw_share_above_cap = False
     for item in scope:
         symbol = str(item.get("symbol") or "").upper()
         action = str(item.get("action") or "").upper()
@@ -489,7 +577,7 @@ def select_authorized_planned(
         price = float(getattr(p, "limit_price", None) or getattr(p, "ref_price", None) or 0)
         if _price_unavailable(price):
             return False, f"price_unavailable:{symbol}", ()
-        derived_qty, clip_reason = _downward_runtime_qty(max_qty, max_n, price)
+        derived_qty, clip_reason = protective_sell_qty_vs_stale_notional(max_qty, max_n, price)
         pq = float(getattr(p, "qty", 0) or 0)
         planned_reason = str(getattr(p, "clip_reason", "") or "")
         remaining_cap_reasons = {
@@ -507,17 +595,30 @@ def select_authorized_planned(
             clip_reason = planned_reason
         else:
             use_qty = derived_qty
-        notional = money_round(float(use_qty) * price)
+        fitted_qty, budget_reason, notional, share_above_cap = _fit_qty_to_live_cli_budget(
+            int(use_qty), price, spent
+        )
+        if share_above_cap:
+            saw_share_above_cap = True
+            continue
+        if fitted_qty <= 0:
+            continue
+        if fitted_qty < int(use_qty):
+            use_qty = fitted_qty
+            clip_reason = budget_reason
         if notional > APPROVAL_CLI_CAP + 1e-6:
-            return False, f"notional_expansion_vs_authorized_slice:{symbol}", ()
+            return False, "batch_notional_exceeds_approval_cli_cap", ()
         if abs(float(use_qty) - float(getattr(p, "qty", 0) or 0)) > 1e-9:
             p = _clone_planned_qty(p, use_qty)
         setattr(p, "clip_reason", clip_reason)
         selected.append(p)
+        spent = money_round(spent + notional)
     if reject_unapproved_planned and extra_syms:
         extra = sorted(extra_syms)[0]
         return False, f"unauthorized_symbol_vs_authorized_slice:{extra}", ()
     if not selected:
+        if saw_share_above_cap:
+            return False, "batch_notional_exceeds_approval_cli_cap", ()
         return False, "no_executable_authorized_quantity", ()
     total_sel = money_round(
         sum(
@@ -528,7 +629,8 @@ def select_authorized_planned(
     )
     stored_total = authority.get("total_batch_max_notional")
     if stored_total is not None and total_sel > money_round(stored_total) + 1e-9:
-        return False, "notional_expansion_vs_authorized_slice_total", ()
+        if not retained_stale_notional_excess_allowed(authority, selected):
+            return False, "notional_expansion_vs_authorized_slice_total", ()
     if total_sel > APPROVAL_CLI_CAP + 1e-6:
         return False, "batch_notional_exceeds_approval_cli_cap", ()
     return True, "ok", tuple(selected)
@@ -1523,10 +1625,9 @@ def build_pre_plan_planned_orders(
 
     planned: List[Any] = []
     total_notional = 0.0
-    stored_total = authority.get("total_batch_max_notional")
-    batch_ceiling = APPROVAL_CLI_CAP
-    if stored_total is not None:
-        batch_ceiling = min(float(batch_ceiling), float(money_round(float(stored_total))))
+    saw_share_above_cap = False
+    # The $5,000 approval cap is the hard ceiling on the sum of live bids.
+    # Stale per-line and batch estimates do not authorize a total above it.
     for item in scope:
         sym = normalize_symbol(item.get("symbol"))
         if not sym:
@@ -1548,27 +1649,25 @@ def build_pre_plan_planned_orders(
         if qty_cap is not None and max_qty > float(qty_cap) + 1e-9:
             return False, f"quantity_expansion_vs_symbol_ceiling:{sym}", ()
         stored_n = item.get("max_notional")
-        runtime_qty, clip_reason = _downward_runtime_qty(max_qty, stored_n, price)
+        runtime_qty, clip_reason = protective_sell_qty_vs_stale_notional(max_qty, stored_n, price)
         if runtime_qty <= 0:
             return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
         notional = money_round(float(runtime_qty) * price)
         cap_n = per_notional_cap.get(sym)
         if cap_n is not None and notional > money_round(cap_n) + 1e-9:
-            runtime_qty, clip_reason = _downward_runtime_qty(runtime_qty, cap_n, price)
+            runtime_qty, clip_reason = protective_sell_qty_vs_stale_notional(max_qty, cap_n, price)
             if runtime_qty <= 0:
                 return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
             notional = money_round(float(runtime_qty) * price)
-        remaining = money_round(float(batch_ceiling) - float(total_notional))
-        if remaining < 0:
-            remaining = 0.0
-        if runtime_qty > 0:
-            qty_vs_rem, _rem_why = _downward_runtime_qty(runtime_qty, remaining, price)
-            if qty_vs_rem < runtime_qty:
-                runtime_qty = qty_vs_rem
-                if runtime_qty <= 0:
-                    return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
-                clip_reason = "downward_clip_vs_remaining_batch_cap"
-                notional = money_round(float(runtime_qty) * price)
+        fitted_qty, budget_reason, fitted_notional, share_above_cap = _fit_qty_to_live_cli_budget(
+            int(runtime_qty), price, total_notional
+        )
+        if share_above_cap:
+            saw_share_above_cap = True
+        if fitted_qty < int(runtime_qty):
+            runtime_qty = fitted_qty
+            clip_reason = budget_reason
+            notional = fitted_notional
         if notional > APPROVAL_CLI_CAP + 1e-6:
             return False, "batch_notional_exceeds_approval_cli_cap", ()
         client_order_id = f"triton-preplan-{sym}-{action}-{uuid.uuid4().hex[:10]}"
@@ -1591,10 +1690,13 @@ def build_pre_plan_planned_orders(
         total_notional = money_round(total_notional + notional)
 
     if not any(float(getattr(p, "qty", 0) or 0) > 0 for p in planned):
+        if saw_share_above_cap:
+            return False, "batch_notional_exceeds_approval_cli_cap", ()
         return False, "SELL_AUTHORITY_NOT_EXECUTABLE", ()
     stored_total = authority.get("total_batch_max_notional")
     if stored_total is not None and total_notional > money_round(float(stored_total)) + 1e-9:
-        return False, "notional_expansion_vs_authorized_slice_total", ()
+        if not retained_stale_notional_excess_allowed(authority, planned):
+            return False, "notional_expansion_vs_authorized_slice_total", ()
     if total_notional > APPROVAL_CLI_CAP + 1e-6:
         return False, "batch_notional_exceeds_approval_cli_cap", ()
     return True, "ok", tuple(planned)
@@ -1846,11 +1948,12 @@ def begin_paper_sell_dispatch(
             if is_dual_identity_record(authority):
                 stored_total = authority.get("total_batch_max_notional")
                 if stored_total is not None and total_n > money_round(stored_total) + 1e-9:
-                    return DispatchGuardResult(
-                        False,
-                        "notional_expansion_vs_authorized_slice_total",
-                        {"total_notional": total_n, "authorized_total": stored_total},
-                    )
+                    if not retained_stale_notional_excess_allowed(authority, req):
+                        return DispatchGuardResult(
+                            False,
+                            "notional_expansion_vs_authorized_slice_total",
+                            {"total_notional": total_n, "authorized_total": stored_total},
+                        )
             if total_n > APPROVAL_CLI_CAP + 1e-6:
                 return DispatchGuardResult(
                     False,
@@ -2347,12 +2450,38 @@ def build_broker_view_from_runtime_snapshots(
 ) -> BrokerSnapshotView:
     """
     Independent snapshot builder. `live_blocked` arg is non-authoritative diagnostic only.
+
+    Holdings and open-order evidence follow the caller’s store, then the caller’s
+    results root. The production snapshots are the fallback only when neither
+    designated root has the file. A production position must not replace an
+    isolated snapshot the caller already supplied.
     """
     root = store_root or LIVE_GOVERNANCE
+
+    def _snapshot_path(explicit: Optional[Path], filename: str, default: Path) -> Path:
+        if explicit is not None:
+            return explicit
+        designated = root / filename
+        if designated.is_file():
+            return designated
+        if results_root is not None:
+            from_results = results_root / filename
+            if from_results.is_file():
+                return from_results
+        return default
+
     positions: Dict[str, Dict[str, float]] = {}
     open_syms: set = set()
-    pos_path = positions_csv or (ROOT / "data" / "results" / "positions_snapshot.csv")
-    oo_path = open_orders_csv or (ROOT / "data" / "results" / "open_orders_snapshot.csv")
+    pos_path = _snapshot_path(
+        positions_csv,
+        "positions_snapshot.csv",
+        ROOT / "data" / "results" / "positions_snapshot.csv",
+    )
+    oo_path = _snapshot_path(
+        open_orders_csv,
+        "open_orders_snapshot.csv",
+        ROOT / "data" / "results" / "open_orders_snapshot.csv",
+    )
     if pos_path.is_file():
         for row in csv.DictReader(pos_path.read_text(encoding="utf-8").splitlines()):
             sym = str(row.get("symbol") or row.get("ticker") or "").upper()

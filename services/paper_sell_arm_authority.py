@@ -61,6 +61,9 @@ AUTHORITY_TTL_MINUTES = 60
 
 # Caps — lower applicable cap governs authority creation.
 APPROVAL_CLI_CAP = 5000.0
+# A reviewed whole-share sell stays executable when the live bid is above the
+# packet's stale max_notional. Quantity is not increased.
+RETAINED_WHOLE_SHARE_REASON = "authorized_whole_share_retained_above_stale_notional"
 RUNTIME_MANAGE_CAP = 50000.0
 
 SELL_ACTIONS = frozenset({"TRIM", "EXIT", "ROTATE_EXIT", "FORCE_EXIT"})
@@ -1715,6 +1718,8 @@ def recompute_allowed_runtime_qty(
         runtime = Decimal("0")
     while runtime > 0 and Decimal(str(money_round(float(runtime * px)))) > max_n:
         runtime -= 1
+    if int(runtime) <= 0 and auth >= 1:
+        return 1, RETAINED_WHOLE_SHARE_REASON
     return int(runtime), "ok"
 
 
@@ -1797,6 +1802,8 @@ def validate_runtime_clip_audit(
         req_by_sym[sym] = req
 
     derived_total = 0.0
+    saw_retained_excess = False
+    saw_unexplained_excess = False
     for item in scope:
         sym = str(item.get("symbol") or "").upper()
         action = str(item.get("action") or "").upper()
@@ -1837,7 +1844,10 @@ def validate_runtime_clip_audit(
             return False, f"clip_audit_runtime_quantity_out_of_range:{sym}", details
         if runtime_qty > int(auth_qty) + 1e-9:
             return False, f"quantity_expansion:{sym}", details
-        allowed_qty, _why = recompute_allowed_runtime_qty(auth_qty, max_n, price)
+        allowed_qty, allowed_why = recompute_allowed_runtime_qty(auth_qty, max_n, price)
+        retained_whole_share = (
+            allowed_why == RETAINED_WHOLE_SHARE_REASON and runtime_qty == 1 and auth_qty >= 1
+        )
         remaining_cap_reasons = {
             "clipped_to_zero_vs_remaining_batch_cap",
             "downward_clip_vs_remaining_batch_cap",
@@ -1860,7 +1870,11 @@ def validate_runtime_clip_audit(
         if abs(got_notional - expected_notional) > 1e-9:
             return False, f"clip_audit_runtime_notional_mismatch:{sym}", details
         if expected_notional > money_round(max_n) + 1e-9:
-            return False, f"notional_expansion_vs_authorized_slice:{sym}", details
+            if retained_whole_share:
+                saw_retained_excess = True
+            else:
+                saw_unexplained_excess = True
+                return False, f"notional_expansion_vs_authorized_slice:{sym}", details
         if runtime_qty == 0:
             expected_outcome = "SKIPPED_ZERO"
         elif runtime_qty + 1e-9 < auth_qty:
@@ -1884,7 +1898,7 @@ def validate_runtime_clip_audit(
                 if req_qty and req_px
                 else float(req.get("notional") or 0)
             )
-            if req_n > money_round(max_n) + 1e-9:
+            if req_n > money_round(max_n) + 1e-9 and not retained_whole_share:
                 return False, f"notional_expansion_vs_authorized_slice:{sym}", details
             derived_total = money_round(derived_total + req_n)
         else:
@@ -1896,7 +1910,7 @@ def validate_runtime_clip_audit(
     slice_total = money_round(sum(float(i.get("max_notional") or 0) for i in scope))
     stored_total = authority.get("total_batch_max_notional")
     cap_total = money_round(stored_total) if stored_total is not None else slice_total
-    if derived_total > cap_total + 1e-9:
+    if derived_total > cap_total + 1e-9 and (saw_unexplained_excess or not saw_retained_excess):
         return False, "notional_expansion_vs_authorized_slice_total", details
     if cap_total > APPROVAL_CLI_CAP + 1e-9 or slice_total > APPROVAL_CLI_CAP + 1e-9:
         return False, "batch_notional_exceeds_approval_cli_cap", details
@@ -2004,6 +2018,7 @@ def revalidate_before_dispatch(
             return False, clip_reason, details
 
     total_req_notional = 0.0
+    saw_retained_excess = False
     newer_orders = broker.newer_order_symbols or set()
     newer_fills = broker.newer_fill_symbols or set()
     lifecycle = broker.lifecycle_actions or {}
@@ -2057,18 +2072,23 @@ def revalidate_before_dispatch(
             return False, f"newer_fill_invalidates:{sym}", details
 
         max_n = allowed.get("max_notional")
+        _fitted_qty, fitted_why = recompute_allowed_runtime_qty(allowed.get("max_qty"), max_n, px)
+        retained_whole_share = fitted_why == RETAINED_WHOLE_SHARE_REASON and abs(qty - 1.0) < 1e-9
         if max_n is not None and notional > float(max_n) + 1e-6:
-            reason = (
-                f"notional_expansion_vs_authorized_slice:{sym}"
-                if is_dual_identity_record(authority)
-                else f"symbol_notional_cap:{sym}"
-            )
-            return False, reason, details
+            if retained_whole_share:
+                saw_retained_excess = True
+            else:
+                reason = (
+                    f"notional_expansion_vs_authorized_slice:{sym}"
+                    if is_dual_identity_record(authority)
+                    else f"symbol_notional_cap:{sym}"
+                )
+                return False, reason, details
         if notional > APPROVAL_CLI_CAP + 1e-6:
             return False, f"symbol_notional_cap:{sym}", details
 
     max_total = float(authority.get("total_batch_max_notional") or 0)
-    if total_req_notional > max_total + 1e-6:
+    if total_req_notional > max_total + 1e-6 and not saw_retained_excess:
         reason = (
             "notional_expansion_vs_authorized_slice_total"
             if is_dual_identity_record(authority)

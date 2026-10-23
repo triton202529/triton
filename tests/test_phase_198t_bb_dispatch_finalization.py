@@ -55,18 +55,20 @@ def test_dba_price_below_frozen_max_still_submits_one(tmp_path, monkeypatch):
     assert audit["DBA"]["runtime_quantity"] == 1.0
 
 
-def test_frozen_line_max_not_rescued_by_remaining_cap(tmp_path, monkeypatch):
+def test_one_share_above_stale_line_notional_stays_executable(tmp_path, monkeypatch):
     overlay = dict(SEP2_RUNTIME)
     overlay["DBA"] = 29.24
     _packet, _authority, fake, result = _dispatch(tmp_path, monkeypatch, None, overlay)
     assert result.get("dispatched") is True, result
-    assert _submitted(fake) == [("HD", 13), ("GLD", 1)]
+    assert _submitted(fake) == [("HD", 13), ("GLD", 1), ("DBA", 1)]
     remaining = money_round(APPROVAL_CLI_CAP - (13 * 318.72 + 1 * 400.79))
     assert remaining > 29.24
     intent, _ref, _state = _latest_dispatch(_db(tmp_path))
     audit = {r["symbol"]: r for r in intent.get("clip_audit") or []}
-    assert audit["DBA"]["outcome"] == "SKIPPED_ZERO"
-    assert audit["DBA"]["reason"] == "clipped_to_zero_vs_authorized_max_notional"
+    assert audit["DBA"]["outcome"] == "UNCHANGED"
+    assert audit["DBA"]["runtime_quantity"] == 1.0
+    assert audit["DBA"]["reason"] == "authorized_whole_share_retained_above_stale_notional"
+    assert audit["DBA"]["runtime_quantity"] <= audit["DBA"]["authorized_quantity"]
 
 
 def test_malformed_runtime_price_fails_closed(tmp_path, monkeypatch):

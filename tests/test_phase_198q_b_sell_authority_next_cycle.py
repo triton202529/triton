@@ -529,7 +529,7 @@ def test_14_price_expansion_fails_closed(tmp_path, monkeypatch):
         authority, fake, now=NOW + timedelta(minutes=1)
     )
     assert not ok
-    assert reason == "no_executable_authorized_quantity"
+    assert reason == "batch_notional_exceeds_approval_cli_cap"
     assert planned == ()
     snap2 = inspect_sqlite_arm_snapshot(_db(tmp_path), now=NOW + timedelta(minutes=1))
     assert snap2["latest_authority"]["state"] == "UNUSED"

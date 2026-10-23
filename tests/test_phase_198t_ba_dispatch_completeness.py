@@ -468,13 +468,13 @@ def test_zero_quantity_receives_explicit_disposition(tmp_path, monkeypatch):
     overlay["DBA"] = 29.24
     _packet, _authority, fake, result = _dispatch(tmp_path, monkeypatch, None, overlay)
     assert result.get("dispatched") is True, result
-    assert _submitted(fake) == [("HD", 13), ("GLD", 1)]
+    assert _submitted(fake) == [("HD", 13), ("GLD", 1), ("DBA", 1)]
     intent, _ref, _state = _latest_dispatch(_db(tmp_path))
     audit = {r["symbol"]: r for r in intent.get("clip_audit") or []}
-    assert audit["DBA"]["outcome"] == "SKIPPED_ZERO"
-    assert audit["DBA"]["runtime_quantity"] == 0.0
-    assert "clipped_to_zero" in str(audit["DBA"]["reason"])
-    assert "DBA" not in {r["symbol"] for r in intent["requested"]}
+    assert audit["DBA"]["outcome"] == "UNCHANGED"
+    assert audit["DBA"]["runtime_quantity"] == 1.0
+    assert audit["DBA"]["reason"] == "authorized_whole_share_retained_above_stale_notional"
+    assert "DBA" in {r["symbol"] for r in intent["requested"]}
     jsonl = (tmp_path / "paper_sell_arm_audit.jsonl").read_text(encoding="utf-8")
     assert "clip_audit" in jsonl
     assert "DBA" in jsonl
@@ -492,11 +492,12 @@ def test_foreign_historical_intent_still_persists_clip_audit(tmp_path, monkeypat
     assert leftover["authority_id"] == AUG26_INTENT["authority_id"]
     intent, broker_ref, _state = _latest_dispatch(_db(tmp_path))
     audit = {r["symbol"]: r for r in intent.get("clip_audit") or []}
-    assert audit["DBA"]["outcome"] == "SKIPPED_ZERO"
+    assert audit["DBA"]["outcome"] == "UNCHANGED"
+    assert audit["DBA"]["runtime_quantity"] == 1.0
     assert broker_ref
     aid = str(authority.get("authority_id") or authority.get("audit_id"))
     assert count_dispatches_for_authority(_db(tmp_path), aid) == 1
-    assert _submitted(fake) == [("HD", 13), ("GLD", 1)]
+    assert _submitted(fake) == [("HD", 13), ("GLD", 1), ("DBA", 1)]
 
 
 def test_partial_broker_success_plus_explicit_skip(tmp_path, monkeypatch):
@@ -506,10 +507,11 @@ def test_partial_broker_success_plus_explicit_skip(tmp_path, monkeypatch):
         tmp_path, monkeypatch, None, overlay, broker_cls=PartialFailBroker
     )
     assert result.get("consumed") is True
-    assert _submitted(fake) == [("HD", 13)]
+    assert _submitted(fake) == [("HD", 13), ("DBA", 1)]
     intent, broker_ref, state = _latest_dispatch(_db(tmp_path))
     audit = {r["symbol"]: r for r in intent.get("clip_audit") or []}
-    assert audit["DBA"]["outcome"] == "SKIPPED_ZERO"
+    assert audit["DBA"]["runtime_quantity"] == 1.0
+    assert audit["DBA"]["reason"] == "authorized_whole_share_retained_above_stale_notional"
     assert broker_ref
     assert state in {"SUBMITTED", "OUTCOME_UNKNOWN"}
     aid = str(authority.get("authority_id") or authority.get("audit_id"))
@@ -551,7 +553,7 @@ def test_single_use_replay_after_partial_success(tmp_path, monkeypatch):
     overlay["DBA"] = 29.24
     packet, authority, fake, result = _dispatch(tmp_path, monkeypatch, None, overlay)
     assert result.get("dispatched") is True
-    assert _submitted(fake) == [("HD", 13), ("GLD", 1)]
+    assert _submitted(fake) == [("HD", 13), ("GLD", 1), ("DBA", 1)]
     aid = str(authority.get("authority_id") or authority.get("audit_id"))
     replay_fake = OverlayQuoteBroker(packet, overlay, positions=_positions())
     replay = dispatch_unused_authorized_sell_slice_pre_plan(

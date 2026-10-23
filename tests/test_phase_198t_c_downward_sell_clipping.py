@@ -287,7 +287,7 @@ def test_03_downward_price_does_not_expand_qty(tmp_path, monkeypatch):
     assert int(arkk.qty) == 3
 
 
-def test_04_arkk_above_line_max_skipped_zero(tmp_path, monkeypatch):
+def test_04_arkk_above_line_max_retains_one_share(tmp_path, monkeypatch):
     isolate_sell_store(monkeypatch, tmp_path)
     packet = _write_aug24_artifacts(tmp_path)
     authority = _arm_aug24(tmp_path, packet)
@@ -299,15 +299,18 @@ def test_04_arkk_above_line_max_skipped_zero(tmp_path, monkeypatch):
     )
     assert ok, reason
     by_sym = {p.symbol: int(p.qty) for p in planned if int(p.qty) > 0}
-    assert by_sym == {"TSLA": 8, "BLK": 1, "HD": 2, "BITO": 6}
+    assert by_sym == {"TSLA": 8, "BLK": 1, "HD": 2, "ARKK": 1, "BITO": 6}
     arkk = next(p for p in planned if p.symbol == "ARKK")
-    assert int(arkk.qty) == 0
+    assert int(arkk.qty) == 1
+    assert int(arkk.qty) <= 3
     audit = {r["symbol"]: r for r in _authorized_clip_audit(authority, planned)}
-    assert audit["ARKK"]["outcome"] == "SKIPPED_ZERO"
-    assert audit["ARKK"]["deferred_quantity"] == 3.0
+    assert audit["ARKK"]["outcome"] == "CLIPPED_DOWN"
+    assert audit["ARKK"]["runtime_quantity"] == 1.0
+    assert audit["ARKK"]["deferred_quantity"] == 2.0
+    assert audit["ARKK"]["reason"] == "authorized_whole_share_retained_above_stale_notional"
 
 
-def test_05_all_lines_zero_does_not_consume(tmp_path, monkeypatch):
+def test_05_every_line_above_stale_notional_retains_one_share(tmp_path, monkeypatch):
     isolate_sell_store(monkeypatch, tmp_path)
     freeze_dispatch_clock(monkeypatch, NOW + timedelta(minutes=1))
     stub_unrelated_pre_gates(monkeypatch)
@@ -315,20 +318,22 @@ def test_05_all_lines_zero_does_not_consume(tmp_path, monkeypatch):
     authority = copy.deepcopy(_arm_aug24(tmp_path, packet))
     overlay = {a["symbol"]: float(a["est_notional"]) + 0.01 for a in AUG24_ACTIONS}
     fake = OverlayQuoteBroker(packet, overlay, positions=_positions())
-    guard = attempt_pre_plan_authorized_sell_dispatch(
-        authority=authority,
+    result = dispatch_unused_authorized_sell_slice_pre_plan(
         broker=fake,
         results_root=tmp_path,
-        now=NOW + timedelta(minutes=1),
+        store_root=tmp_path,
         db_path=_db(tmp_path),
+        now=NOW + timedelta(minutes=1),
     )
-    assert not guard.consumed
-    assert guard.reason == "no_executable_authorized_quantity"
-    assert fake.submit_payloads == []
-    snap = inspect_sqlite_arm_snapshot(_db(tmp_path), now=NOW + timedelta(minutes=1))
-    assert snap["latest_authority"]["state"] == "UNUSED"
-    assert snap["dispatch_count"] == 0
-    assert authority["authorized_actions"][3]["max_qty"] == 3.0
+    assert result.get("dispatched"), result
+    submitted = [
+        (str(p.get("symbol") or "").upper(), int(float(p.get("qty") or 0)))
+        for p in fake.submit_payloads
+    ]
+    assert submitted == [("TSLA", 1), ("BLK", 1), ("HD", 1), ("ARKK", 1), ("BITO", 1)]
+    for symbol, qty in submitted:
+        auth_qty = next(int(a["qty"]) for a in AUG24_ACTIONS if a["symbol"] == symbol)
+        assert 1 <= qty <= auth_qty
 
 
 def test_06_multiple_clips_preserve_source_order(tmp_path, monkeypatch):
@@ -619,11 +624,12 @@ def test_case_a_legitimate_zero_derived_omission(tmp_path, monkeypatch):
     assert ok, reason
     sel_ok, sel_reason, selected = select_authorized_planned(planned, authority)
     assert sel_ok, sel_reason
-    assert [p.symbol for p in selected] == ["TSLA", "BLK", "HD", "BITO"]
+    assert [p.symbol for p in selected] == ["TSLA", "BLK", "HD", "ARKK", "BITO"]
+    assert int(next(p.qty for p in selected if p.symbol == "ARKK")) == 1
     audit = {r["symbol"]: r for r in _authorized_clip_audit(authority, planned)}
-    assert audit["ARKK"]["outcome"] == "SKIPPED_ZERO"
-    assert audit["ARKK"]["runtime_quantity"] == 0
-    assert audit["ARKK"]["deferred_quantity"] == 3.0
+    assert audit["ARKK"]["outcome"] == "CLIPPED_DOWN"
+    assert audit["ARKK"]["runtime_quantity"] == 1
+    assert audit["ARKK"]["deferred_quantity"] == 2.0
     assert audit["ARKK"]["current_reference_price"] == 252.76
     result = dispatch_unused_authorized_sell_slice_pre_plan(
         broker=fake,
@@ -637,9 +643,13 @@ def test_case_a_legitimate_zero_derived_omission(tmp_path, monkeypatch):
         "TSLA",
         "BLK",
         "HD",
+        "ARKK",
         "BITO",
     ]
-    assert all(str(p.get("symbol") or "").upper() != "ARKK" for p in fake.submit_payloads)
+    assert ("ARKK", 1) in [
+        (str(p.get("symbol") or "").upper(), int(float(p.get("qty") or 0)))
+        for p in fake.submit_payloads
+    ]
 
 
 def test_case_b_unauthorized_positive_omission_rejected(tmp_path, monkeypatch):

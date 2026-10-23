@@ -433,6 +433,15 @@ def isolate_sell_store(monkeypatch, tmp_path: Path) -> None:
         monkeypatch.setenv("TRITON_MARKET_OPEN_INVOCATION_ID", "mo-isolated-test")
     monkeypatch.setattr(plo, "IDEMPOTENCY_STATE_PATH", tmp_path / "idempotency_state.json")
     monkeypatch.setattr(plo, "DEFAULT_LOG_CSV", tmp_path / "live_orders_log.csv")
+    import services.paper_order_ledger as order_ledger
+
+    real_record = order_ledger.safe_record_placement_submission
+
+    def _isolated_record(**kwargs):
+        kwargs.setdefault("root", tmp_path)
+        return real_record(**kwargs)
+
+    monkeypatch.setattr(order_ledger, "safe_record_placement_submission", _isolated_record)
     monkeypatch.setattr(plo, "SIGNAL_STATE_PATH", tmp_path / "signal_state.json")
     monkeypatch.setattr(plo, "EXECUTION_INTELLIGENCE_CSV", tmp_path / "execution_intelligence.csv")
     monkeypatch.setattr(
