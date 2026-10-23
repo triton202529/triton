@@ -252,17 +252,22 @@ class ExecutionGuard:
     @staticmethod
     def _is_manage_exposure_reduce(payload: Optional[Dict[str, Any]]) -> bool:
         """
-        True only for trim/exit sells from manage_positions (explicit markers).
-        Used to skip entry-style MAX_POSITIONS; does not apply to BUY/ADD or generic sells.
+        True for exposure-reducing sells (EXIT, TRIM, ROTATE_EXIT).
+
+        manage_positions sets management_action (including ROTATE_EXIT).
+        execute_trades sets stance to TRIM or EXIT. Entry-style MAX_POSITIONS
+        and MAX_NOTIONAL do not apply to those sells. Buys and other sells
+        stay on the entry caps.
         """
         if not payload or not isinstance(payload, dict):
             return False
         if str(payload.get("side", "")).lower().strip() != "sell":
             return False
-        if str(payload.get("order_source", "")).lower().strip() != "manage_positions":
-            return False
-        ma = str(payload.get("management_action", "")).upper().strip()
-        return ma in ("EXIT", "TRIM")
+        markers = {
+            str(payload.get("management_action") or "").upper().strip(),
+            str(payload.get("stance") or "").upper().strip(),
+        }
+        return bool(markers & {"EXIT", "TRIM", "ROTATE_EXIT"})
 
     def _check_open_counts(
         self, payload: Optional[Dict[str, Any]] = None
@@ -354,6 +359,10 @@ class ExecutionGuard:
 
     def _check_buying_power(self, payload: Dict[str, Any]) -> Optional[GuardDecision]:
         if not self.cfg.get("enforce_buying_power", True):
+            return None
+        # A sell does not spend buying power. Comparing it to leftover cash
+        # blocks exits on a fully invested account (notional > buying power).
+        if str(payload.get("side", "")).lower().strip() == "sell":
             return None
 
         est_notional = self._estimate_notional(payload)
