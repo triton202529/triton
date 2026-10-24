@@ -562,10 +562,41 @@ def _wait_postconditions(
     return {"ok": False, "reason": "postcondition_timeout", "snapshot": last}
 
 
+def _prior_session_coverage_report(
+    *,
+    root: Path,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Fail closed when the read-only coverage helper itself cannot finish."""
+    from services.prior_session_coverage import THRESHOLD, assess_prior_session_coverage
+
+    try:
+        return assess_prior_session_coverage(root=root, now=now)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "cause": "coverage_check_failed",
+            "detail": type(exc).__name__,
+            "expected_session": "",
+            "covered_count": 0,
+            "required_count": 0,
+            "minimum_covered": 0,
+            "threshold": THRESHOLD,
+            "coverage": 0.0,
+            "missing_symbols": [],
+            "unreadable_symbols": [],
+            "invalid_symbols": [],
+            "index_symbols": [],
+            "index_excluded_count": 0,
+            "symbol_reasons": {},
+        }
+
+
 def start_eligibility(
     *,
     root: Optional[Path] = None,
     process_snapshot: Optional[Callable[[], Dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Read-only Start eligibility for Operations/Diagnostics."""
     from services.operator_runtime_classifier import (
@@ -619,12 +650,13 @@ def start_eligibility(
 
     paper_canonical = "UNKNOWN"
     try:
-        paper_canonical = classify_paper_arm_for_start(root=root)
+        paper_canonical = classify_paper_arm_for_start(root=root, now=now)
         paper_status = map_paper_arm_display(paper_canonical)
     except Exception:
         paper_canonical = "UNKNOWN"
         paper_status = "UNKNOWN"
 
+    coverage_report = None
     if decision["decision"] in ("START_ALLOWED", "PARTIAL_START_ALLOWED"):
         arm_refusal = paper_arm_start_refusal(paper_canonical)
         if arm_refusal is not None:
@@ -636,6 +668,23 @@ def start_eligibility(
                 "safe_to_retry": True,
                 "error_code": arm_refusal["error_code"],
             }
+        else:
+            coverage_report = _prior_session_coverage_report(root=root, now=now)
+            if not coverage_report.get("ok"):
+                from services.prior_session_coverage import (
+                    REFUSAL_CODE,
+                    REFUSAL_DECISION,
+                    coverage_refusal_explanation,
+                )
+
+                decision = {
+                    **decision,
+                    "decision": REFUSAL_DECISION,
+                    "components_to_start": [],
+                    "explanation": coverage_refusal_explanation(coverage_report),
+                    "safe_to_retry": True,
+                    "error_code": REFUSAL_CODE,
+                }
 
     guard = _read_guard(root / "data" / "live" / "operator_start_action.guard.json")
     guard_active = False
@@ -666,6 +715,8 @@ def start_eligibility(
         "live_execution_blocked": not live_enabled,
         "paper_arm_status": paper_status,
         "paper_arm_canonical": paper_canonical,
+        "error_code": decision.get("error_code"),
+        "prior_session_coverage": coverage_report,
         "fixed_paths": paths,
         "guard_active": guard_active,
         "guard": guard if guard_active else {},
@@ -692,6 +743,7 @@ def execute_start_triton(
     audit_path: Optional[Path] = None,
     guard_path: Optional[Path] = None,
     skip_postcondition_wait: bool = False,
+    now: Optional[datetime] = None,
     # Explicitly rejected kwargs — frontend must not supply these
     command: Any = None,
     pid: Any = None,
@@ -919,7 +971,7 @@ def execute_start_triton(
 
         # Canonical paper-arm gate: same classifier as execution step 0.
         # Must run before audit START_BEGIN and before any process creation.
-        arm_status = classify_paper_arm_for_start(root=root)
+        arm_status = classify_paper_arm_for_start(root=root, now=now)
         arm_refusal = paper_arm_start_refusal(arm_status)
         if arm_refusal is not None:
             rec = _result(
@@ -939,6 +991,36 @@ def execute_start_triton(
                     "decision": decision,
                     "paper_arm_canonical": arm_status,
                     "paper_arm_gate": "pre_audit",
+                },
+            )
+            append_runtime_action_audit(rec, path=audit_path)
+            return rec
+
+        prior_session_coverage = _prior_session_coverage_report(root=root, now=now)
+        if not prior_session_coverage.get("ok"):
+            from services.prior_session_coverage import (
+                REFUSAL_CODE,
+                REFUSAL_DECISION,
+                coverage_refusal_explanation,
+            )
+
+            rec = _result(
+                result=REFUSAL_DECISION,
+                error_code=REFUSAL_CODE,
+                safe_message=coverage_refusal_explanation(prior_session_coverage),
+                safe_to_retry=True,
+                live_execution_blocked_before=True,
+                live_execution_blocked_after=True,
+                paper_arm_status=arm_status,
+                preflight_classification=pre,
+                requested_components=[],
+                preserved_components=[],
+                launched_components=[],
+                component_results={},
+                evidence={
+                    "decision": decision,
+                    "paper_arm_canonical": arm_status,
+                    "prior_session_coverage": prior_session_coverage,
                 },
             )
             append_runtime_action_audit(rec, path=audit_path)
@@ -979,7 +1061,7 @@ def execute_start_triton(
 
         # Re-validate immediately before process creation so a stale earlier
         # observation cannot authorize Start.
-        arm_status_launch = classify_paper_arm_for_start(root=root)
+        arm_status_launch = classify_paper_arm_for_start(root=root, now=now)
         arm_refusal_launch = paper_arm_start_refusal(arm_status_launch)
         if arm_refusal_launch is not None:
             rec = _result(
@@ -1163,7 +1245,7 @@ def execute_start_triton(
             msg = "Start did not meet verified process and lock postconditions."
 
         # Paper arm status (read-only; canonical classifier)
-        paper_arm_status = classify_paper_arm_for_start(root=root)
+        paper_arm_status = classify_paper_arm_for_start(root=root, now=now)
         try:
             from services.operator_console_status import map_paper_arm_display
 
@@ -1191,6 +1273,7 @@ def execute_start_triton(
                 "decision": decision,
                 "fixed_paths": paths,
                 "paper_arm_canonical": paper_arm_status,
+                "prior_session_coverage": prior_session_coverage,
             },
         )
         append_runtime_action_audit(rec, path=audit_path)

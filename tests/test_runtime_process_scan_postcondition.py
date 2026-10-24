@@ -56,6 +56,9 @@ def _arm(root: Path) -> None:
         ),
         encoding="utf-8",
     )
+    from tests.prior_session_coverage_support import seed_prior_session_coverage
+
+    seed_prior_session_coverage(root)
 
 
 def _root(tmp_path: Path) -> Path:

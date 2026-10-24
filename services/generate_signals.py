@@ -348,11 +348,12 @@ def _load_processed_history(ticker: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _processed_path_for_ticker(ticker: str) -> Optional[str]:
-    path = os.path.join(PROCESSED_DIR, f"{ticker}.parquet")
+def _processed_path_for_ticker(ticker: str, processed_dir: Optional[str] = None) -> Optional[str]:
+    base = PROCESSED_DIR if processed_dir is None else processed_dir
+    path = os.path.join(base, f"{ticker}.parquet")
     if os.path.isfile(path):
         return path
-    alt = os.path.join(PROCESSED_DIR, f"{ticker}.csv")
+    alt = os.path.join(base, f"{ticker}.csv")
     if os.path.isfile(alt):
         return alt
     return None
@@ -412,12 +413,18 @@ def _session_ohlcv_skip_reason(row: pd.Series) -> Optional[str]:
     return None
 
 
-def _inspect_processed_session(ticker: str, session_asof: date_type) -> _ProcessedSessionView:
+def _inspect_processed_session(
+    ticker: str,
+    session_asof: date_type,
+    *,
+    processed_dir: Optional[str] = None,
+) -> _ProcessedSessionView:
     """Shared first-pass / second-pass processed-bar contract.
 
     RF prediction files are never consulted. Invalid evidence is not repaired.
+    ``processed_dir`` selects the store. The default remains PROCESSED_DIR.
     """
-    path = _processed_path_for_ticker(ticker)
+    path = _processed_path_for_ticker(ticker, processed_dir=processed_dir)
     missing = _ProcessedSessionView(
         ok=False,
         path=path,

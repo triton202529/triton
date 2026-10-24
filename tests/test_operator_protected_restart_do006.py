@@ -107,6 +107,9 @@ def _write_fixture(
         ),
         encoding="utf-8",
     )
+    from tests.prior_session_coverage_support import seed_prior_session_coverage
+
+    seed_prior_session_coverage(root)
 
 
 def _set_pids(root: Path, *, cont_pids=None, wd_pids=None):

@@ -123,6 +123,10 @@ def _write_arm(root: Path, *, status: str = "valid", now: datetime | None = None
         ),
         encoding="utf-8",
     )
+    if status == "valid":
+        from tests.prior_session_coverage_support import seed_prior_session_coverage
+
+        seed_prior_session_coverage(root, now=clock)
     return path
 
 
