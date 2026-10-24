@@ -385,6 +385,8 @@ def build_portfolio_history_presentation(root: Optional[Path] = None) -> Dict[st
 
 def render_portfolio_history(view: Mapping[str, Any], st: Any) -> None:
     """Render the presentation view. Display only."""
+    from dashboard.status_provenance import certified_close_caption
+
     certified = view["certified"]
     snapshot = view["snapshot"]
     legacy = view["legacy"]
@@ -395,6 +397,7 @@ def render_portfolio_history(view: Mapping[str, Any], st: Any) -> None:
     )
     st.markdown(f"#### {certified['heading']}")
     st.caption(f"Certified close as of {certified.get('as_of_et') or UNAVAILABLE} ET")
+    st.caption(certified_close_caption(certified.get("session_date")))
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Session date", certified["session_date"])
     c2.metric("Certified cash", certified["cash_display"])

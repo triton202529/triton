@@ -132,9 +132,20 @@ def render_closeout_control(
     st.caption(
         "PAPER_ONLY post-close control. It does not submit, cancel, replace, or modify broker orders."
     )
+    from dashboard.status_provenance import (
+        applicable_trading_session,
+        classify_closeout_presentation,
+        render_closeout_provenance,
+    )
+
     receipts = list_closeout_receipts(root)
-    if receipts:
-        _show_receipt(receipts[-1])
+    render_closeout_provenance(
+        st,
+        classify_closeout_presentation(
+            receipts,
+            applicable_session=applicable_trading_session(),
+        ),
+    )
     if st.session_state.get("closeout_exit_pending"):
         st.warning(
             "The closeout worker is detached. This dashboard is stopping so publication can recheck "

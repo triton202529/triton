@@ -1008,6 +1008,29 @@ def _render_cooperative_shutdown_status() -> None:
         )
 
 
+def _render_status_provenance(status: Dict[str, Any]) -> None:
+    """Label runtime health, the market-hours cycle, and the certified close apart."""
+    from dashboard.portfolio_history_presentation import load_latest_certified_close
+    from dashboard.status_provenance import provenance_facts, render_status_provenance
+
+    trading = status.get("trading_pipeline") or {}
+    try:
+        certified = load_latest_certified_close(root=_OPERATOR_CONSOLE_ROOT)
+        certified_date = certified.get("session_date")
+    except Exception:
+        certified_date = None
+    render_status_provenance(
+        st,
+        provenance_facts(
+            runtime_status=status.get("process_overall_status") or status.get("overall_status"),
+            runtime_as_of=status.get("generated_at"),
+            market_hours_outcome=trading.get("last_market_hours_outcome"),
+            market_hours_at=trading.get("last_market_hours_at"),
+            certified_session_date=certified_date,
+        ),
+    )
+
+
 def render_operations_page() -> None:
     from dashboard import operator_ui as oui
     from services.operator_console_status import DATA_FRESH_MINUTES, build_operator_status
@@ -1242,6 +1265,8 @@ def render_operations_page() -> None:
                 },
             ],
         )
+
+    _render_status_provenance(status)
 
     # Protected controls immediately after summary — exact existing callbacks reused.
     _render_start_controls(status_snapshot=status)
