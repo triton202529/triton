@@ -4984,40 +4984,36 @@ def maybe_execute_plan(
             pass
 
     from services.market_calendar import regular_session_state
-    from services.session_entry_budget import reserve_entries
+    from services.session_entry_budget import select_orders_within_session_budget
 
     session_state = regular_session_state()
     budget_session = str(session_state.get("session_date") or "")
-    budget_entries = []
-    for order in eligible:
-        if str(getattr(order, "side", "") or "").lower() != "buy":
-            continue
-        stance = str(getattr(order, "stance", "") or "").upper()
-        action = (
-            "ADD"
-            if stance == "ADD" or "ADD" in str(getattr(order, "decision_tag", "") or "").upper()
-            else "OPEN_NEW"
-        )
-        held_qty = float(getattr(order, "current_position_qty", 0) or 0)
-        budget_entries.append(
-            {
-                "symbol": getattr(order, "symbol", ""),
-                "action": action,
-                "held_at_open": held_qty > 0 and action == "ADD",
-            }
-        )
-    reservation = reserve_entries(
+    # One extra name over the session cap must not discard the names that still
+    # fit, and must not discard a sell that shares this orders file.
+    budget = select_orders_within_session_budget(
+        eligible,
         ROOT,
         budget_session,
-        budget_entries,
-        invocation_tag=sess,
+        sess,
     )
-    if reservation.get("ok") is not True:
+    if budget.get("ok") is not True:
         print(
-            f"[SESSION_ENTRY_BUDGET] status=REFUSED reason={reservation.get('reason')}",
+            f"[SESSION_ENTRY_BUDGET] status=REFUSED reason={budget.get('reason')}",
             flush=True,
         )
-        return 2, 0, [str(reservation.get("reason") or "session_entry_budget")]
+        return 2, 0, [str(budget.get("reason") or "session_entry_budget")]
+    if budget.get("dropped"):
+        dropped_symbols = [
+            str(getattr(order, "symbol", "") or "") for order in budget["dropped"]
+        ]
+        print(
+            "[SESSION_ENTRY_BUDGET] status=PARTIAL "
+            f"reason={budget.get('reason')} dropped={','.join(dropped_symbols)} "
+            f"kept={len(budget['orders'])}",
+            flush=True,
+        )
+        eligible = list(budget["orders"])
+        emit_orders_today_csv(eligible, orders_path, cfg)
 
     try:
         env = os.environ.copy()
