@@ -141,6 +141,179 @@ def decide_entry(
     return {"ok": True, "reason": "reserved", "symbol": symbol, "reentry": reentry}
 
 
+def partition_entries(
+    root: Path,
+    session_date: str,
+    entries: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Split entries into the subset the current budget accepts. Does not write.
+
+    ``ok`` is False only when the budget document cannot be used. Cap and
+    per-symbol refusals leave ``ok`` True and list the entries that still fit
+    in ``accepted`` (original input objects, original relative order).
+    """
+    if not session_date:
+        return {
+            "ok": False,
+            "reason": "budget_session_missing",
+            "accepted": [],
+            "accepted_indexes": [],
+            "refusals": [],
+        }
+    path = budget_path(root, session_date)
+    try:
+        doc = _load(path, session_date)
+    except SessionBudgetError as exc:
+        return {
+            "ok": False,
+            "reason": exc.reason,
+            "accepted": [],
+            "accepted_indexes": [],
+            "refusals": [],
+        }
+    shadow = json.loads(json.dumps(doc))
+    accepted: List[Mapping[str, Any]] = []
+    accepted_indexes: List[int] = []
+    refusals: List[Dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        decision = decide_entry(
+            shadow,
+            symbol=str(entry.get("symbol") or ""),
+            action=str(entry.get("action") or ""),
+            held_at_open=bool(entry.get("held_at_open")),
+            terminal_sell_proven=bool(entry.get("terminal_sell_proven")),
+            broker_flat=bool(entry.get("broker_flat")),
+        )
+        if not decision["ok"]:
+            refusals.append(decision)
+            continue
+        accepted.append(entry)
+        accepted_indexes.append(index)
+        shadow["reservations"].append(
+            {
+                "symbol": decision["symbol"],
+                "action": str(entry.get("action") or "").upper(),
+            }
+        )
+    reason = refusals[0]["reason"] if refusals else "partitioned"
+    return {
+        "ok": True,
+        "reason": reason,
+        "accepted": accepted,
+        "accepted_indexes": accepted_indexes,
+        "refusals": refusals,
+    }
+
+
+def _budget_entry_from_order(order: Any) -> Optional[Dict[str, Any]]:
+    """Buy orders consume the session entry budget. Sells do not."""
+    if str(getattr(order, "side", "") or "").lower() != "buy":
+        return None
+    stance = str(getattr(order, "stance", "") or "").upper()
+    tag = str(getattr(order, "decision_tag", "") or "").upper()
+    action = "ADD" if stance == "ADD" or "ADD" in tag else "OPEN_NEW"
+    try:
+        held_qty = float(getattr(order, "current_position_qty", 0) or 0)
+    except (TypeError, ValueError):
+        held_qty = 0.0
+    return {
+        "symbol": getattr(order, "symbol", ""),
+        "action": action,
+        "held_at_open": held_qty > 0 and action == "ADD",
+        "terminal_sell_proven": bool(getattr(order, "terminal_sell_proven", False)),
+        "broker_flat": bool(getattr(order, "broker_flat", False)),
+    }
+
+
+def select_orders_within_session_budget(
+    orders: Sequence[Any],
+    root: Path,
+    session_date: str,
+    invocation_tag: str,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Reserve the buys that fit and return every order that may still be submitted.
+
+    A later name that exceeds the session cap is omitted. Earlier names that
+    still fit are reserved and kept. Sells are kept even when every buy is
+    refused or the budget document cannot be read. ``reserve_entries`` stays
+    all-or-nothing; this function never asks it to reserve a refused name.
+    """
+    ordered = list(orders)
+    buy_indexes: List[int] = []
+    entries: List[Dict[str, Any]] = []
+    for index, order in enumerate(ordered):
+        entry = _budget_entry_from_order(order)
+        if entry is None:
+            continue
+        buy_indexes.append(index)
+        entries.append(entry)
+    if not entries:
+        return {
+            "ok": True,
+            "reason": "no_entries",
+            "orders": ordered,
+            "dropped": [],
+            "reserved": [],
+        }
+
+    part = partition_entries(root, session_date, entries)
+    buy_index_set = set(buy_indexes)
+
+    def _without_buys(
+        reason: str,
+        *,
+        reserved: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        dropped = [ordered[index] for index in buy_indexes]
+        kept = [order for index, order in enumerate(ordered) if index not in buy_index_set]
+        if not kept:
+            return {
+                "ok": False,
+                "reason": reason,
+                "orders": [],
+                "dropped": dropped,
+                "reserved": reserved or [],
+            }
+        return {
+            "ok": True,
+            "reason": reason,
+            "orders": kept,
+            "dropped": dropped,
+            "reserved": reserved or [],
+        }
+
+    if not part["ok"]:
+        return _without_buys(str(part["reason"]))
+    if not part["accepted"]:
+        return _without_buys(str(part["reason"]))
+
+    reservation = reserve_entries(
+        root,
+        session_date,
+        part["accepted"],
+        invocation_tag=invocation_tag,
+        now=now,
+    )
+    if reservation.get("ok") is not True:
+        return _without_buys(str(reservation.get("reason") or part["reason"]))
+
+    kept_buy_indexes = {buy_indexes[index] for index in part["accepted_indexes"]}
+    kept = [
+        order
+        for index, order in enumerate(ordered)
+        if index not in buy_index_set or index in kept_buy_indexes
+    ]
+    dropped = [ordered[index] for index in buy_indexes if index not in kept_buy_indexes]
+    return {
+        "ok": True,
+        "reason": "reserved" if not dropped else str(part["reason"]),
+        "orders": kept,
+        "dropped": dropped,
+        "reserved": list(reservation.get("reserved") or []),
+    }
+
+
 def preview_entries(
     root: Path,
     session_date: str,
