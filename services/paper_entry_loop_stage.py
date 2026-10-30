@@ -270,7 +270,10 @@ def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
 
 
 def _norm(val: Any) -> str:
-    return str(val or "").strip().upper()
+    """Identity key for joins. BRK-B and the broker symbol BRK.B are one name."""
+    from services.symbol_identity import identity_key
+
+    return identity_key(val)
 
 
 def _normalize_session_date(value: Any) -> str:
