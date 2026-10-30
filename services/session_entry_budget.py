@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from services.symbol_identity import identity_key
+
 SCHEMA = "SESSION-ENTRY-BUDGET-1"
 DEFAULT_MAX_NEW_NAMES = 10
 DEFAULT_MAX_ADDS = 3
@@ -72,7 +74,8 @@ def _atomic_write(path: Path, doc: Mapping[str, Any]) -> None:
 
 
 def _symbol(value: Any) -> str:
-    return str(value or "").strip().upper()
+    """Session slot key. Class-share aliases share one reservation."""
+    return identity_key(value)
 
 
 def _reservations(doc: Mapping[str, Any]) -> List[Dict[str, Any]]:
